@@ -51,6 +51,7 @@ export type { GoalTimebox } from "./GoalTimebox";
 export type { HookSelector } from "./HookSelector";
 export type { ImageDetail } from "./ImageDetail";
 export type { ImageGenerationFailure } from "./ImageGenerationFailure";
+export type { ImageGenerationInputImage } from "./ImageGenerationInputImage";
 export type { ImageGenerationItem } from "./ImageGenerationItem";
 export type { InitializeCapabilities } from "./InitializeCapabilities";
 export type { InitializeParams } from "./InitializeParams";

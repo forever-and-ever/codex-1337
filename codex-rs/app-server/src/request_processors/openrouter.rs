@@ -163,18 +163,10 @@ pub(in crate::request_processors) fn catalog(
 }
 
 pub(in crate::request_processors) fn catalog_for_list(
-    config: Arc<Config>,
-    config_manager: ConfigManager,
-) -> Result<Option<Arc<crate::model_catalog::ModelCatalog>>, JSONRPCErrorError> {
+    config: &Config,
+) -> Result<Option<SharedModelsManager>, JSONRPCErrorError> {
     match config.model_provider.adapter {
-        ModelProviderAdapter::OpenRouter => {
-            let catalog = catalog(&config)?;
-            Ok(Some(Arc::new(crate::model_catalog::ModelCatalog::new(
-                config_manager,
-                config,
-                catalog,
-            ))))
-        }
+        ModelProviderAdapter::OpenRouter => catalog(config).map(Some),
         ModelProviderAdapter::ClaudeSubscription | ModelProviderAdapter::OpenaiCompatible => {
             Ok(None)
         }

@@ -6,7 +6,6 @@ use chrono::DateTime;
 use chrono::Local;
 use chrono::Utc;
 use codex_config::types::McpServerConfig;
-use codex_config::types::OtelExporterKind;
 use codex_core::SleepFuture;
 use codex_core::TimeFuture;
 use codex_core::TimeProvider;
@@ -68,6 +67,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::skip_if_no_network;
@@ -542,10 +542,14 @@ for (const phase of ["before", "after"]) {
     Ok(())
 }
 
-#[test_case(false; "without parent checkpoint")]
-#[test_case(true; "reuse parent checkpoint and newer authorization")]
+#[test_case(false, &[]; "without parent checkpoint")]
+#[test_case(true, &[]; "reuse parent checkpoint and newer authorization")]
+#[test_case(false, &["rate_limit_exceeded", "rate_limit_exceeded"]; "failed compaction preserves pending evidence")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool) -> Result<()> {
+async fn guardian_review_recovers_after_compaction(
+    with_parent_checkpoint: bool,
+    compaction_errors: &[&str],
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(
         Ok(()),
@@ -614,13 +618,15 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
         "cmd": "true",
         "sandbox_permissions": "require_escalated",
         "justification": "Read the internal samples the user authorized.",
-    })
-    .to_string();
+    });
+    let mut first_command = command.clone();
+    first_command["cmd"] = json!("printf POST_REVIEW_DIAGNOSTIC");
+    let command = command.to_string();
     let approval = r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#;
     let mut response_events = vec![
         sse(vec![
             ev_response_created("resp-parent-first"),
-            ev_function_call("exec-first", "exec_command", &command),
+            ev_function_call("exec-first", "exec_command", &first_command.to_string()),
             ev_completed("resp-parent-first"),
         ]),
         sse(vec![
@@ -635,6 +641,13 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
         ]),
     ];
     if !with_parent_checkpoint {
+        for error in compaction_errors {
+            response_events.push(sse_failed(
+                "failed-review-compaction",
+                error,
+                "temporary compaction failure before input admission",
+            ));
+        }
         response_events.push(sse(vec![
             json!({
                 "type": "response.output_item.done",
@@ -693,17 +706,20 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
     );
 
     assert_eq!(
-        requests[0].has_content_kinds(&["token_budget.context_window"]),
+        requests[0].has_content_kinds(&["token_budget.context_window"; 3]),
         !with_parent_checkpoint
     );
     for request in &guardian_requests {
-        assert!(!request.has_content_kinds(&["token_budget.context_window"]));
+        assert!(!request.has_content_kinds(&["token_budget.context_window"; 3]));
     }
     let compact_requests = requests
         .iter()
         .filter(|request| !request.inputs_of_type("compaction_trigger").is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(compact_requests.len(), usize::from(!with_parent_checkpoint));
+    assert_eq!(
+        compact_requests.len(),
+        usize::from(!with_parent_checkpoint) + compaction_errors.len(),
+    );
     if let Some(compact_request) = compact_requests.first() {
         assert!(
             compact_request
@@ -733,6 +749,10 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
         .pop()
         .expect("second review")
         .join("");
+    assert!(
+        latest_review.contains("POST_REVIEW_DIAGNOSTIC"),
+        "recovery must retain evidence not yet admitted to the reviewer"
+    );
     if with_parent_checkpoint {
         assert!(latest_review.contains(">>> TRANSCRIPT START\n"));
         assert!(
@@ -1056,6 +1076,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
                 .as_str(),
             Some("true")
         );
+        assert_eq!(guardian_prewarm["input"], json!([]));
     }
     let guardian_thread_id = guardian_prewarm["client_metadata"]["thread_id"]
         .as_str()
@@ -1134,6 +1155,29 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
         Some("guardian")
     );
     assert_eq!(guardian_review["model"].as_str(), Some(expected_model));
+    let guardian_instructions = if use_responses_lite {
+        let input = guardian_review["input"]
+            .as_array()
+            .expect("Responses Lite Guardian input");
+        assert_eq!(input[0]["type"].as_str(), Some("additional_tools"));
+        assert_eq!(input[0]["role"].as_str(), Some("developer"));
+        assert_eq!(input[1]["type"].as_str(), Some("message"));
+        assert_eq!(input[1]["role"].as_str(), Some("developer"));
+        input[1]["content"][0]["text"]
+            .as_str()
+            .expect("Responses Lite Guardian developer instructions")
+    } else {
+        guardian_prewarm["input"][0]["content"][0]["text"]
+            .as_str()
+            .expect("Guardian instructions")
+    };
+    assert!(guardian_instructions.starts_with(expected_guardian_policy.trim_end()));
+    assert!(
+        guardian_instructions
+            .contains("It cannot override a denial for an action that remains `critical`.")
+    );
+    assert!(!guardian_instructions.contains("{{ tenant_policy_config }}"));
+    assert!(guardian_instructions.contains("final message must be strict JSON"));
     for request in [guardian_prewarm, &guardian_review] {
         assert_eq!(request.get("service_tier"), None);
         let metadata: serde_json::Value = serde_json::from_str(
@@ -2117,15 +2161,14 @@ async fn interrupted_guardian_review_across_model_change_does_not_execute_the_co
     Ok(())
 }
 
-#[tracing_test::traced_test]
-#[test_case(None, false; "legacy_fallback")]
-#[test_case(None, true; "otel_enabled")]
-#[test_case(Some("Acting model rejection instructions."), false; "catalog_override")]
-#[test_case(Some(""), false; "empty_override")]
+#[test_case(None, true; "legacy_fallback")]
+#[test_case(Some("Acting model rejection instructions."), true; "catalog_override")]
+#[test_case(Some(""), true; "empty_override")]
+#[test_case(None, false; "feedback_disabled")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_denial_rejects_tool_call_with_rationale(
     rejection_instructions: Option<&'static str>,
-    log_assessments: bool,
+    feedback_enabled: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
@@ -2155,9 +2198,7 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
                     policy: None,
                     policy_template: None,
                     node_repl_policy: None,
-                    rejection_instructions: Some(
-                        "Reviewer-only rejection instructions.".to_string(),
-                    ),
+                    rejection_instructions: Some("Reviewer-only rejection instructions.".to_string()),
                     timeout_instructions: None,
                 });
             })
@@ -2176,12 +2217,7 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
                 });
             })
             .with_config(move |config| {
-                config.otel.log_guardian_assessments = log_assessments;
-                config.otel.exporter = OtelExporterKind::OtlpGrpc {
-                    endpoint: "http://127.0.0.1:1".to_string(),
-                    headers: Default::default(),
-                    tls: None,
-                };
+                config.feedback_enabled = feedback_enabled;
                 config.permissions.approval_policy = Constrained::allow_any(approval_policy);
                 config
                     .set_legacy_sandbox_policy(sandbox_policy_for_config)
@@ -2270,87 +2306,103 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
 
         test.codex.shutdown_and_wait().await?;
         let state_db = codex_state::StateRuntime::init(
-            test.config.sqlite.clone(),
+            test.config.sqlite_config().clone(),
             test.config.model_provider_id.clone(),
         )
         .await?;
         let durable = state_db.list_guardian_review_records().await?;
-        assert_eq!(
-            durable.len(),
-            1,
-            "the Guardian capture must persist, not just fall back to memory"
-        );
-        let feedback = codex_feedback::guardian_review_failures(
-            Some(&state_db),
-            &[test.session_configured.thread_id],
-        )
-        .await
-        .attachment
-        .expect("failed Guardian review");
-        let record: serde_json::Value = serde_json::from_slice(&feedback.buffer)?;
-        assert_eq!(
-            record,
-            serde_json::from_slice::<serde_json::Value>(&durable[0].record)?
-        );
-        assert_eq!(record["instructions"], guardian_request.instructions_text());
-        assert!(
-            guardian_request
-                .body_contains_text(record["action"].as_str().expect("reviewed action"))
-        );
-        let recorded_history: Vec<ResponseItem> =
-            serde_json::from_value(record["history"].clone())?;
-        let inspection_request = requests
-            .iter()
-            .find(|request| {
-                request
+        if feedback_enabled {
+            assert_eq!(
+                durable.len(),
+                1,
+                "the Guardian capture must persist, not just fall back to memory"
+            );
+            let feedback = codex_feedback::guardian_review_failures(
+                Some(&state_db),
+                &[test.session_configured.thread_id],
+            )
+            .await
+            .attachment
+            .expect("failed Guardian review");
+            let record: serde_json::Value = serde_json::from_slice(&feedback.buffer)?;
+            assert_eq!(
+                record,
+                serde_json::from_slice::<serde_json::Value>(&durable[0].record)?
+            );
+            assert_eq!(record["instructions"], guardian_request.instructions_text());
+            assert!(
+                guardian_request
+                    .body_contains_text(record["action"].as_str().expect("reviewed action"))
+            );
+            let recorded_history: Vec<ResponseItem> =
+                serde_json::from_value(record["history"].clone())?;
+            let inspection_request = requests
+                .iter()
+                .find(|request| {
+                    request
+                        .function_call_output_text("exec-guardian-inspect")
+                        .is_some()
+                })
+                .expect("Guardian request following its inspection tool");
+            assert!(
+                inspection_request
                     .function_call_output_text("exec-guardian-inspect")
-                    .is_some()
-            })
-            .expect("Guardian request following its inspection tool");
-        assert!(
-            inspection_request
-                .function_call_output_text("exec-guardian-inspect")
-                .expect("inspection output")
-                .contains("guardian-inspection-evidence")
-        );
-        let inspection_output = inspection_request
-            .input()
-            .into_iter()
-            .find(|item| {
-                item["type"] == "function_call_output" && item["call_id"] == "exec-guardian-inspect"
-            })
-            .expect("inspection response item");
-        assert!(recorded_history.contains(&serde_json::from_value(inspection_output)?));
-        assert!(recorded_history.iter().any(|item| {
-            matches!(item, ResponseItem::Message { role, content, .. }
-            if role == "assistant" && content.iter().any(|part| {
-                matches!(part, ContentItem::OutputText { text , .. }
-                    if Some(text.as_str()) == record["decision"].as_str())
-            }))
-        }));
-        assert_eq!(
-            json!({
-                "reviewed_thread_id": record["reviewed_thread_id"],
-                "reviewer_thread_id": record["reviewer_thread_id"],
-                "status": record["status"],
-                "decision": serde_json::from_str::<serde_json::Value>(
-                    record["decision"].as_str().expect("raw Guardian decision"),
-                )?,
-                "context_omitted": record["context_omitted"],
-            }),
-            json!({
-                "reviewed_thread_id": test.session_configured.thread_id,
-                "reviewer_thread_id": guardian_request.body_json()["client_metadata"]["thread_id"],
-                "status": "denied",
-                "decision": {
-                    "risk_level": "high",
-                    "user_authorization": "low",
-                    "outcome": "deny",
-                    "rationale": "The requested write has unacceptable test risk.",
-                },
-                "context_omitted": false,
-            })
-        );
+                    .expect("inspection output")
+                    .contains("guardian-inspection-evidence")
+            );
+            let inspection_output = inspection_request
+                .input()
+                .into_iter()
+                .find(|item| {
+                    item["type"] == "function_call_output" && item["call_id"] == "exec-guardian-inspect"
+                })
+                .expect("inspection response item");
+            assert!(recorded_history.contains(&serde_json::from_value(inspection_output)?));
+            assert!(recorded_history.iter().any(|item| {
+                matches!(item, ResponseItem::Message { role, content, .. }
+                if role == "assistant" && content.iter().any(|part| {
+                    matches!(part, ContentItem::OutputText { text , .. }
+                        if Some(text.as_str()) == record["decision"].as_str())
+                }))
+            }));
+            assert_eq!(
+                json!({
+                    "reviewed_thread_id": record["reviewed_thread_id"],
+                    "reviewer_thread_id": record["reviewer_thread_id"],
+                    "status": record["status"],
+                    "decision": serde_json::from_str::<serde_json::Value>(
+                        record["decision"].as_str().expect("raw Guardian decision"),
+                    )?,
+                    "context_omitted": record["context_omitted"],
+                }),
+                json!({
+                    "reviewed_thread_id": test.session_configured.thread_id,
+                    "reviewer_thread_id": guardian_request.body_json()["client_metadata"]["thread_id"],
+                    "status": "denied",
+                    "decision": {
+                        "risk_level": "high",
+                        "user_authorization": "low",
+                        "outcome": "deny",
+                        "rationale": "The requested write has unacceptable test risk.",
+                    },
+                    "context_omitted": false,
+                })
+            );
+        } else {
+            assert!(
+                durable.is_empty(),
+                "disabled feedback must not retain Guardian evidence"
+            );
+            assert!(
+                codex_feedback::guardian_review_failures(
+                    Some(&state_db),
+                    &[test.session_configured.thread_id]
+                )
+                .await
+                .attachment
+                .is_none()
+            );
+        }
 
         let tool_output = requests
             .iter()
@@ -2374,32 +2426,6 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
             "Guardian-denied command unexpectedly executed"
         );
 
-        // Approval workers do not inherit the test span, so select the conversation explicitly.
-        let thread_id = test.session_configured.thread_id;
-        let logs = String::from_utf8(
-            tracing_test::internal::global_buf()
-                .lock()
-                .expect("captured logs")
-                .clone(),
-        )?;
-        let assessments: Vec<_> = logs
-            .lines()
-            .filter(|line| {
-                line.contains("codex.guardian_assessment")
-                    && line.contains(&format!("conversation.id={thread_id}"))
-            })
-            .collect();
-        assert_eq!(assessments.len(), usize::from(log_assessments));
-        if let Some(log) = assessments.first() {
-            for field in [
-                "status=\"denied\"",
-                "outcome=\"deny\"",
-                "item.id=\"exec-call-denied\"",
-                "rationale=\"The requested write has unacceptable test risk.\"",
-            ] {
-                assert!(log.contains(field), "missing {field}: {log}");
-            }
-        }
         Ok(())
     })
     .await
@@ -2846,23 +2872,30 @@ async fn yielded_code_mode_denials_interrupt_the_servicing_turn() -> Result<()> 
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
 
-    let server = start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
-            model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
-        })
-        .with_config(|config| {
-            config.features.enable(Feature::CodeMode).unwrap();
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    let barrier = r#"await tools.test_sync_tool({barrier: {
+    let server = core_test_support::responses::start_mock_server().await;
+    core_test_support::mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
+                model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
+            })
+            .with_config(|config| {
+                config.features.enable(Feature::CodeMode).unwrap();
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            });
+        let mut test = builder.build_with_auto_env(&server).await?;
+        let mut options = test.start_thread_options().await;
+        options.history_mode = Some(codex_protocol::protocol::ThreadHistoryMode::Legacy);
+        let thread = test.thread_manager.start_thread(options).await?;
+        test.codex.shutdown_and_wait().await?;
+        test.codex = thread.thread;
+        let barrier = r#"await tools.test_sync_tool({barrier: {
         id: "guardian-origin", participants: 2, timeout_ms: 60000
     }});"#;
-    let code = format!(
-        r#"yield_control();
+        let code = format!(
+            r#"yield_control();
 {barrier}
 for (let index = 0; index < 6; index++) {{
     try {{
@@ -2876,130 +2909,263 @@ for (let index = 0; index < 6; index++) {{
     }}
 }}
 "#
-    );
-    core_test_support::responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("origin-a"),
-            core_test_support::responses::ev_custom_tool_call("cell-a", "exec", &code),
-            ev_completed("origin-a"),
-        ]),
-    )
-    .await;
-    let yielded = core_test_support::responses::mount_sse_once(
-        &server,
-        sse(vec![ev_completed("a-finished")]),
-    )
-    .await;
-    test.submit_text_turn("Start A and leave its cell running.")
-        .await?;
-    let output = yielded.single_request().custom_tool_call_output("cell-a");
-    let text = output["output"]
-        .as_str()
-        .or_else(|| output["output"][0]["text"].as_str())
-        .context("A should return text")?;
-    let cell_id = text
-        .strip_prefix("Script running with cell ID ")
-        .and_then(|text| text.lines().next())
-        .context("A should yield a running cell")?
-        .to_string();
+        );
+        core_test_support::responses::mount_sse_once(
+            &server,
+            sse(vec![
+                ev_response_created("origin-a"),
+                core_test_support::responses::ev_custom_tool_call("cell-a", "exec", &code),
+                ev_completed("origin-a"),
+            ]),
+        )
+        .await;
+        let yielded = core_test_support::responses::mount_sse_once(
+            &server,
+            sse(vec![ev_completed("a-finished")]),
+        )
+        .await;
+        test.submit_text_turn("Start A and leave its cell running.")
+            .await?;
+        let output = yielded.single_request().custom_tool_call_output("cell-a");
+        let text = output["output"]
+            .as_str()
+            .or_else(|| output["output"][0]["text"].as_str())
+            .context("A should return text")?;
+        let cell_id = text
+            .strip_prefix("Script running with cell ID ")
+            .and_then(|text| text.lines().next())
+            .context("A should yield a running cell")?
+            .to_string();
 
-    core_test_support::responses::mount_sse_once(
-        &server,
-        sse(vec![
-            core_test_support::responses::ev_custom_tool_call("cell-b", "exec", barrier),
-            ev_completed("b-started"),
-        ]),
-    )
-    .await;
-    let mut reviews = Vec::new();
-    // An approval resets B's consecutive count; only the final three denials interrupt it.
-    for outcome in ["deny", "deny", "allow", "deny", "deny", "deny"] {
-        reviews.push(
-            core_test_support::responses::mount_sse_once_match(
-                &server,
-                wiremock::matchers::body_partial_json(json!({
-                    "client_metadata": {"x-openai-subagent": "guardian"}
-                })),
-                sse(vec![
-                    ev_assistant_message(
-                        "review",
-                        &json!({
-                            "risk_level": if outcome == "allow" { "low" } else { "high" },
-                            "user_authorization": "high", "outcome": outcome,
-                            "rationale": "Test decision for the delayed cell.",
-                        })
-                        .to_string(),
-                    ),
-                    ev_completed("review-done"),
-                ]),
-            )
-            .await,
-        );
-    }
-    core_test_support::responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_function_call(
-                "wait-a",
-                "wait",
-                &json!({
-                    "cell_id": cell_id,
-                })
-                .to_string(),
-            ),
-            ev_completed("b-wait"),
-        ]),
-    )
-    .await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Run B and wait for A.".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let mut active_id = None;
-    let mut warning_id = None;
-    loop {
-        let event =
-            tokio::time::timeout(Duration::from_secs(60), test.codex.next_event()).await??;
-        match event.msg {
-            EventMsg::TurnStarted(_) => active_id = Some(event.id),
-            EventMsg::GuardianWarning(warning)
-                if warning.message.contains("too many approval requests") =>
-            {
-                assert!(
-                    warning
-                        .message
-                        .contains("3 consecutive, 5 in the last 50 reviews"),
-                    "{}",
-                    warning.message
-                );
-                warning_id = Some(event.id);
-            }
-            EventMsg::TurnAborted(aborted) => {
-                assert_eq!(aborted.reason, TurnAbortReason::Interrupted);
-                assert_eq!(Some(event.id), active_id);
-                break;
-            }
-            EventMsg::TurnComplete(_) => panic!("B must be interrupted by A's denials"),
-            _ => {}
-        }
-    }
-    assert!(active_id.is_some());
-    assert_eq!(warning_id, active_id);
-    for review in reviews {
-        assert_eq!(
-            review
-                .requests()
-                .iter()
-                .filter(
-                    |request| request.body_json()["client_metadata"]["x-openai-subagent"]
-                        == "guardian"
+        core_test_support::responses::mount_sse_once(
+            &server,
+            sse(vec![
+                core_test_support::responses::ev_custom_tool_call("cell-b", "exec", barrier),
+                ev_completed("b-started"),
+            ]),
+        )
+        .await;
+        let mut reviews = Vec::new();
+        // An approval resets B's consecutive count; only the final three denials interrupt it.
+        for outcome in ["deny", "deny", "allow", "deny", "deny", "deny"] {
+            reviews.push(
+                core_test_support::responses::mount_sse_once_match(
+                    &server,
+                    wiremock::matchers::body_partial_json(json!({
+                        "client_metadata": {"x-openai-subagent": "guardian"}
+                    })),
+                    sse(vec![
+                        ev_assistant_message(
+                            "review",
+                            &json!({
+                                "risk_level": if outcome == "allow" { "low" } else { "high" },
+                                "user_authorization": "high", "outcome": outcome,
+                                "rationale": "Test decision for the delayed cell.",
+                            })
+                            .to_string(),
+                        ),
+                        ev_completed("review-done"),
+                    ]),
                 )
-                .count(),
-            1
+                .await,
+            );
+        }
+        core_test_support::responses::mount_sse_once(
+            &server,
+            sse(vec![
+                ev_function_call(
+                    "wait-a",
+                    "wait",
+                    &json!({
+                        "cell_id": cell_id,
+                    })
+                    .to_string(),
+                ),
+                ev_completed("b-wait"),
+            ]),
+        )
+        .await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run B and wait for A.".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let mut active_id = None;
+        let mut warning_id = None;
+        loop {
+            let event =
+                tokio::time::timeout(Duration::from_secs(60), test.codex.next_event()).await??;
+            match event.msg {
+                EventMsg::TurnStarted(_) => active_id = Some(event.id),
+                EventMsg::GuardianWarning(warning)
+                    if warning.message.contains("too many approval requests") =>
+                {
+                    assert!(
+                        warning
+                            .message
+                            .contains("3 consecutive, 5 in the last 50 reviews"),
+                        "{}",
+                        warning.message
+                    );
+                    warning_id = Some(event.id);
+                }
+                EventMsg::TurnAborted(aborted) => {
+                    assert_eq!(aborted.reason, TurnAbortReason::Interrupted);
+                    assert_eq!(Some(event.id), active_id);
+                    break;
+                }
+                EventMsg::TurnComplete(_) => panic!("B must be interrupted by A's denials"),
+                _ => {}
+            }
+        }
+        assert!(active_id.is_some());
+        assert_eq!(warning_id, active_id);
+        for review in reviews {
+            assert_eq!(
+                review
+                    .requests()
+                    .iter()
+                    .filter(
+                        |request| request.body_json()["client_metadata"]["x-openai-subagent"]
+                            == "guardian"
+                    )
+                    .count(),
+                1
+            );
+        }
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_blocking_follows_a_pending_review_across_turns() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let code = r#"yield_control();
+text(await tools.exec_command({
+    cmd: "echo spanning-review",
+    sandbox_permissions: "require_escalated",
+    justification: "Keep a Guardian review pending across turns."
+}));"#;
+    let (finish_a, a_gate) = tokio::sync::oneshot::channel();
+    let (finish_review, review_gate) = tokio::sync::oneshot::channel();
+    let chunk = |gate, events| StreamingSseChunk {
+        gate,
+        body: sse(events),
+    };
+    let (streaming, _) = start_streaming_sse_server(vec![
+        vec![
+            chunk(
+                /*gate*/ None,
+                vec![
+                    ev_response_created("a"),
+                    ev_custom_tool_call("cell-a", "exec", code),
+                ],
+            ),
+            chunk(Some(a_gate), vec![ev_completed("a")]),
+        ],
+        vec![chunk(
+            Some(review_gate),
+            vec![
+                ev_response_created("review"),
+                ev_assistant_message("assessment", r#"{"outcome":"deny"}"#),
+                ev_completed("review"),
+            ],
+        )],
+        vec![chunk(/*gate*/ None, vec![ev_completed("a-finished")])],
+        vec![chunk(
+            /*gate*/ None,
+            vec![
+                ev_function_call("wait-a", "wait", r#"{"cell_id":"1","yield_time_ms":60000}"#),
+                ev_completed("b"),
+            ],
+        )],
+        vec![chunk(/*gate*/ None, vec![ev_completed("b-finished")])],
+    ])
+    .await;
+    let server = core_test_support::responses::start_mock_server().await;
+    core_test_support::mock_server::run(&[&server], async {
+        let base_url = format!("{}/v1", streaming.uri());
+        let mut builder = test_codex().with_config(move |config| {
+            config.features.enable(Feature::CodeMode).unwrap();
+            config
+                .features
+                .disable(Feature::EnableRequestCompression)
+                .unwrap();
+            config.model_provider.base_url = Some(base_url);
+            config.model_provider.supports_websockets = false;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+        });
+        for model in ["gpt-5.2", "gpt-5.4"] {
+            builder = builder.with_model_info_override(model, |info| {
+                info.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
+            });
+        }
+        let mut test = builder
+            .with_model("gpt-5.4")
+            .build_with_auto_env(&server)
+            .await?;
+        let mut options = test.start_thread_options().await;
+        options.history_mode = Some(codex_protocol::protocol::ThreadHistoryMode::Legacy);
+        let thread = test.thread_manager.start_thread(options).await?;
+        test.codex.shutdown_and_wait().await?;
+        test.codex = thread.thread;
+
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Start A and leave its cell running.".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        // The review has reached its backend before A is allowed to finish.
+        streaming.wait_for_request_count(/*count*/ 2).await;
+        finish_a.send(()).unwrap();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = streaming.requests().await;
+        let yielded: Value = serde_json::from_slice(&requests[2])?;
+        let output = yielded["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == "cell-a" && item["type"] == "custom_tool_call_output")
+            .unwrap();
+        assert!(
+            output["output"]
+                .to_string()
+                .contains("Script running with cell ID 1"),
+            "{output}"
         );
-    }
-    Ok(())
+
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "Wait for A's cell.".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some("gpt-5.2".into()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        // B is active while the same review is still blocked on its response gate.
+        streaming.wait_for_request_count(/*count*/ 4).await;
+        finish_review.send(()).unwrap();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.codex.shutdown_and_wait().await?;
+        streaming.shutdown().await;
+        Ok(())
+    })
+    .await
 }

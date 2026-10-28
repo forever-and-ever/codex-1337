@@ -15,6 +15,7 @@ pub enum SlashCommand {
     Model,
     Effort,
     Account,
+    Presets,
     Daybreak,
     Permissions,
     Keymap,
@@ -148,6 +149,7 @@ impl SlashCommand {
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::Presets => "run or save reusable prompts and slash commands",
             SlashCommand::Effort => "choose this model's reasoning effort",
             SlashCommand::Account => {
                 "choose this conversation's account; /account <alias> also works"
@@ -191,6 +193,10 @@ impl SlashCommand {
                 | SlashCommand::Comms
                 | SlashCommand::ContextRole
                 | SlashCommand::Account
+                | SlashCommand::Model
+                | SlashCommand::Permissions
+                | SlashCommand::Title
+                | SlashCommand::Statusline
                 | SlashCommand::Rename
                 | SlashCommand::New
                 | SlashCommand::Clear
@@ -291,6 +297,7 @@ impl SlashCommand {
             | SlashCommand::Resume
             | SlashCommand::Model
             | SlashCommand::Effort
+            | SlashCommand::Presets
             | SlashCommand::Daybreak
             | SlashCommand::Permissions
             | SlashCommand::Copy

@@ -190,12 +190,6 @@ impl ModelClientSession {
         let request =
             self.client
                 .build_anthropic_request(prompt, model, effort.as_ref(), operation)?;
-        if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
-            crate::guardian::observe_guardian_request(
-                telemetry,
-                TruncationPolicy::Bytes(request.body().get().len()).token_budget(),
-            );
-        }
         let provider = self.client.state.provider.api_provider().await?;
         let mut client_metadata = None;
         let interceptors = crate::model_request::prepare(
@@ -218,7 +212,8 @@ impl ModelClientSession {
                     auth.as_ref(),
                     /*agent_identity_telemetry*/ None,
                     PendingUnauthorizedRetry::default(),
-                ),
+                )
+                .map_err(|error| self.client.state.provider.map_api_error(error))?,
                 RequestRouteTelemetry::for_endpoint("/messages"),
                 self.client.state.auth_env_telemetry.clone(),
             );

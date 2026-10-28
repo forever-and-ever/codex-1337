@@ -145,8 +145,10 @@ impl NetworkProxyState {
     pub fn from_remote_launch_config(
         launch: crate::RemoteNetworkProxyLaunchConfig,
         executor_os: crate::Platform,
+        credential_brokers: &crate::RemoteCredentialBrokerCache,
+        environment: &std::collections::HashMap<String, String>,
     ) -> Result<Self> {
-        let _ = (launch, executor_os);
+        let _ = (launch, executor_os, credential_brokers, environment);
         Err(crate::unsupported_error().into())
     }
     pub fn set_proxy_private_ips_via_upstream(&mut self, enabled: bool) {

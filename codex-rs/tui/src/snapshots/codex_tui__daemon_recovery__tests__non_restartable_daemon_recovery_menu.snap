@@ -1,5 +1,6 @@
 ---
 source: tui/src/daemon_recovery_tests.rs
+assertion_line: 55
 expression: text
 ---
 
@@ -7,7 +8,8 @@ expression: text
   code-mode host fallback policy requires embedded mode
 
 
-  1. Run without daemon this time
-     Restart with these settings (disabled)  Restart cannot resolve this compatibility
-                                             check.
-› 2. Cancel
+     Run without daemon this time (disabled)  Emergency embedded mode requires
+                                              CODEX_ALLOW_EMBEDDED_SERVER=1.
+     Restart with these settings (disabled)   Restart cannot resolve this compatibility
+                                              check.
+› 1. Cancel

@@ -112,6 +112,7 @@ async fn hook_shell_startup_does_not_stop_on_controlling_terminal() {
     )]);
     let handler = ConfiguredHandler {
         builtin: false,
+        plugin_trust: None,
         selection: crate::engine::HookSelection::fixture(HookEventName::SessionStart, None),
         timeout_sec: 2,
         status_message: None,
@@ -215,6 +216,7 @@ async fn cmd_shell_runs_quoted_hook_command_path() {
     let env = HashMap::new();
     let handler = ConfiguredHandler {
         builtin: false,
+        plugin_trust: None,
         selection: crate::engine::HookSelection::fixture(HookEventName::SessionStart, None),
         timeout_sec: 10,
         status_message: None,
@@ -264,6 +266,7 @@ async fn fast_exiting_hook_preserves_stdout_when_stdin_is_not_consumed() {
     let env = HashMap::new();
     let handler = ConfiguredHandler {
         builtin: false,
+        plugin_trust: None,
         selection: crate::engine::HookSelection::fixture(HookEventName::SessionStart, None),
         timeout_sec: 10,
         status_message: None,
@@ -351,6 +354,7 @@ async fn command_hook_does_not_expose_configured_noise_auth_token() {
     ]);
     let handler = ConfiguredHandler {
         builtin: false,
+        plugin_trust: None,
         selection: crate::engine::HookSelection::fixture(HookEventName::SessionStart, None),
         timeout_sec: 10,
         status_message: None,
@@ -488,6 +492,7 @@ fn write_handler(temp: &TempDir, source: &str) -> ConfiguredHandler {
     std::fs::write(&script_path, source).expect("write async test hook");
     ConfiguredHandler {
         builtin: false,
+        plugin_trust: None,
         selection: crate::engine::HookSelection::fixture(HookEventName::UserPromptSubmit, None),
         timeout_sec: 10,
         status_message: None,

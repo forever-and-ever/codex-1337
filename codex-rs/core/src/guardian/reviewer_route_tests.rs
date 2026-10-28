@@ -312,7 +312,7 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
             }) if message == "original 401")
             );
             assert_eq!(calls, [chosen]);
-            assert!(warnings.is_empty());
+            assert_eq!(warnings, [] as [String; 0]);
         }
     }
 }

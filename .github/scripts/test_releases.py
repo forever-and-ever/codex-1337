@@ -69,8 +69,8 @@ class NpmAlphaTagTest(unittest.TestCase):
             info.size = len(content)
             archive.addfile(info, io.BytesIO(content))
 
-    def test_published_tags_across_packages_and_platforms(self) -> None:
-        # Each package/tag reads its own registry value, even after a partially
+    def test_published_tags_across_channels_and_platforms(self) -> None:
+        # Each channel/tag reads its own registry value, even after a partially
         # published release. Also exercise a missing pointer and dotted hotfix.
         cases = [
             (
@@ -87,7 +87,6 @@ class NpmAlphaTagTest(unittest.TestCase):
                 "0.100.0",
                 "linux-x64",
             ),
-            ("@openai/codex-responses-api-proxy", "latest", None, "0.100.0", "latest"),
             (
                 "@openai/codex",
                 "alpha",
@@ -115,13 +114,6 @@ class NpmAlphaTagTest(unittest.TestCase):
                 "0.158.0-alpha.10",
                 "0.158.0-alpha.10.1",
                 "alpha",
-            ),
-            (
-                "@openai/codex-responses-api-proxy",
-                "alpha",
-                "0.159.0-alpha.1",
-                "0.158.0-alpha.10.1",
-                "release-0.158.0-alpha.10.1-alpha",
             ),
             ("@openai/codex", "alpha", None, "0.158.0-alpha.10", "alpha"),
             (

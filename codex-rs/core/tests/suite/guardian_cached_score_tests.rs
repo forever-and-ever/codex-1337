@@ -15,6 +15,7 @@ use codex_protocol::models::NetworkPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
@@ -126,6 +127,17 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
     )
     .await;
     Mock::given(method("POST"))
+        .and(body_partial_json(json!({ "model": "gpt-5.5" })))
+        .respond_with(responses::sse_response(sse(vec![
+            ev_assistant_message("invalid", "invalid assessment"),
+            ev_completed("invalid"),
+        ])))
+        .with_priority(1)
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
         .and(path("/v1/responses"))
         .and(body_partial_json(json!({
             "model": "gpt-5.5",
@@ -150,7 +162,8 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
         .mount(&server)
         .await;
 
-    let test = test_codex()
+    let mut test = test_codex()
+        .with_model("guardian-initial-model")
         .with_pre_build_hook(|home| {
             std::fs::write(
                 home.join("config.toml"),
@@ -177,12 +190,22 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
         })
         .build_with_auto_env(&server)
         .await?;
+    let mut options = test.start_thread_options().await;
+    options.history_mode = Some(codex_protocol::protocol::ThreadHistoryMode::Legacy);
+    test.codex.shutdown_and_wait().await?;
+    test.codex = test.thread_manager.start_thread(options).await?.thread;
     test.codex.ensure_rollout_materialized().await;
     test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Inspect the available permissions.".to_owned(),
-            text_elements: Vec::new(),
-        }]))
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Inspect the available permissions.".to_owned(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                model: Some("guardian-publication-parent".into()),
+                ..Default::default()
+            }),
+        )
         .await?;
 
     let mut parent_gates = parent_gates.into_iter();

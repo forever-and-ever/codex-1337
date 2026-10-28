@@ -84,6 +84,9 @@ mod spawn_settings_tests;
 #[path = "guardian_subagent_notification_tests.rs"]
 mod guardian_subagent_notification_tests;
 
+#[path = "code_mode_agent_message_tests.rs"]
+mod code_mode_agent_message_tests;
+
 const SPAWN_CALL_ID: &str = "spawn-call-1";
 const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "wrangler_agents";
@@ -1274,7 +1277,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
             &server,
             |req: &wiremock::Request| {
                 body_contains(req, CHILD_TASK)
-                    && !body_contains(req, ROOT_CALL)
+                    && body_contains(req, r#"\"agent_name\":\"/root/child\""#)
                     && !body_contains(req, PRELUDE_CALL)
                     && !body_contains(req, COMPACT_SUMMARY)
             },
@@ -1311,7 +1314,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
                     CHILD_TASK
                 },
             ) && !body_contains(req, GRANDCHILD_TASK)
-                && !body_contains(req, ROOT_CALL)
+                && body_contains(req, r#"\"agent_name\":\"/root/child\""#)
                 && !body_contains(req, CHILD_CALL)
                 && !body_contains(req, COMPACT_PROMPT)
         },
@@ -1330,7 +1333,8 @@ async fn grandchild_full_fork_preserves_context_baseline(
     let grandchild_log = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
-            body_contains(req, GRANDCHILD_TASK) && !body_contains(req, CHILD_CALL)
+            body_contains(req, GRANDCHILD_TASK)
+                && body_contains(req, r#"\"agent_name\":\"/root/child/grandchild\""#)
         },
         sse(vec![
             ev_response_created("baseline-grandchild"),
@@ -1361,6 +1365,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
                 .features
                 .enable(Feature::MultiAgentV2)
                 .expect("test config should allow feature update");
+            config.multi_agent_v2.preserve_fork_prefix = true;
             config.model = Some(V2_DEFAULT_MODEL.to_string());
             config.agent_default_subagent_model = Some(V2_DEFAULT_MODEL.to_string());
             config.developer_instructions = Some(INSTRUCTIONS.to_string());
@@ -1452,7 +1457,22 @@ async fn grandchild_full_fork_preserves_context_baseline(
         [(1, 1); 3],
         "Initial context should appear once per agent: {parent_context:?}, {history_mode:?}"
     );
-    assert!(!descendant_requests[1].body_contains_text(CHILD_TASK));
+    if matches!(parent_context, GrandchildParentContext::FullHistory) {
+        let parent_input = root_request.input();
+        assert_eq!(
+            strip_response_item_ids_from_json(json!(
+                &descendant_requests[0].input()[..parent_input.len()]
+            )),
+            strip_response_item_ids_from_json(json!(parent_input))
+        );
+    }
+    let child_input = descendant_requests[0].input();
+    assert_eq!(
+        strip_response_item_ids_from_json(json!(
+            &descendant_requests[1].input()[..child_input.len()]
+        )),
+        strip_response_item_ids_from_json(json!(child_input))
+    );
     Ok(())
 }
 
@@ -1469,9 +1489,9 @@ enum FullHistoryV2ModelSelection {
 #[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with omitted fork_turns")]
 #[test_case(FullHistoryV2ModelSelection::ExplicitOverride("all"); "explicit override with fork_turns all")]
 #[test_case(FullHistoryV2ModelSelection::WorldStateIdentity; "world state appends context window when agent identity changes")]
-#[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork drops inherited current-time reminders")]
-#[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork drops inherited multi-agent mode instructions")]
-#[test_case(FullHistoryV2ModelSelection::MultiAgentModeTransitions; "full fork restores explicit policy after proactive transition")]
+#[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork appends current-time reminders after inherited notices")]
+#[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork appends child multi-agent mode instructions")]
+#[test_case(FullHistoryV2ModelSelection::MultiAgentModeTransitions; "full fork retains explicit policy after proactive transition")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_context(
     selection: FullHistoryV2ModelSelection,
@@ -1562,7 +1582,8 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
     let child_request_log = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
-            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
+            body_contains(req, CHILD_PROMPT)
+                && body_contains(req, r#"\"agent_name\":\"/root/worker\""#)
         },
         sse(vec![
             ev_response_created("resp-child-1"),
@@ -1573,7 +1594,9 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
     .await;
     let _turn1_followup = mount_sse_once_match(
         &server,
-        |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
+        |req: &wiremock::Request| {
+            body_contains(req, SPAWN_CALL_ID) && body_contains(req, r#"\"agent_name\":\"/root\""#)
+        },
         sse(vec![
             ev_response_created("resp-turn1-2"),
             ev_assistant_message("msg-turn1-2", "parent done"),
@@ -1590,6 +1613,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             .features
             .enable(Feature::MultiAgentV2)
             .expect("test config should allow feature update");
+        config.multi_agent_v2.preserve_fork_prefix = true;
         let model_catalog = config.model_catalog.get_or_insert_with(|| {
             bundled_models_response().expect("bundled models.json should parse")
         });
@@ -1765,6 +1789,15 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
 
     let child_request = wait_for_request_with_model(&child_request_log, expected_model).await?;
     assert!(child_request.body_contains_text(TURN_0_FORK_PROMPT));
+    // Models encode tool declarations and provenance differently; compare inherited messages.
+    let parent_input = parent_request.inputs_of_type("message");
+    let child_input = child_request.inputs_of_type("message");
+    assert_eq!(
+        strip_metadata_from_json(strip_response_item_ids_from_json(json!(
+            &child_input[..parent_input.len()]
+        ))),
+        strip_metadata_from_json(strip_response_item_ids_from_json(json!(parent_input)))
+    );
     let misaligned_child_messages = child_request
         .inputs_of_type("message")
         .into_iter()
@@ -1779,7 +1812,14 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         })
         .collect::<Vec<_>>();
     assert_eq!(misaligned_child_messages, Vec::<Value>::new());
-    let child_developer_messages = child_request.message_input_texts("developer");
+    // Inherited instructions stay in the prefix; child-specific guidance is appended after it.
+    let child_developer_messages = child_input[parent_input.len()..]
+        .iter()
+        .filter(|item| item["role"] == "developer")
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter(|part| part["type"] == "input_text")
+        .filter_map(|part| part["text"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
     if matches!(selection, FullHistoryV2ModelSelection::ConfiguredDefault) {
         assert_eq!(
             (
@@ -1793,89 +1833,174 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             (false, true, 1)
         );
     }
-    if !matches!(
+    let annotated_texts = |messages: &[Value]| {
+        let mut texts = Vec::new();
+        for message in messages {
+            let Some(kinds) =
+                message["internal_chat_message_metadata_passthrough"]["content_item_kinds"]
+                    .as_array()
+            else {
+                continue;
+            };
+            let content = message["content"].as_array().expect("annotated content");
+            assert_eq!(content.len(), kinds.len(), "content kinds remain aligned");
+            for (part, kind) in content.iter().zip(kinds) {
+                if part["type"] == "input_text" {
+                    texts.push((
+                        message["role"]
+                            .as_str()
+                            .expect("message authority")
+                            .to_owned(),
+                        kind.as_str().expect("content kind").to_owned(),
+                        part["text"].as_str().expect("instruction text").to_owned(),
+                    ));
+                }
+            }
+        }
+        texts
+    };
+    let inherited_texts = annotated_texts(&child_input[..parent_input.len()]);
+    let appended_texts = annotated_texts(&child_input[parent_input.len()..]);
+    let changed_lines = |text: &str, marker: char| {
+        text.lines()
+            .filter(|line| !line.starts_with("--- ") && !line.starts_with("+++ "))
+            .filter_map(|line| line.strip_prefix(marker).map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let role_updates = appended_texts
+        .iter()
+        .filter(|(_, kind, _)| kind == "context.instruction_diff/multi_agent_usage_hint")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        appended_texts
+            .iter()
+            .filter(|(_, kind, _)| matches!(
+                kind.as_str(),
+                "multi_agent.role_instructions" | "multi_agent.usage_hint"
+            ))
+            .map(|(authority, kind, text)| (authority.as_str(), kind.as_str(), text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(
+            "developer",
+            "multi_agent.usage_hint",
+            "You are now a newly spawned child agent. The preceding conversation is inherited parent context. Follow your own role, identity, and task below; earlier identities, tasks, and action-specific approvals belong to your ancestors. Inherited tool calls are historical records; live tool sessions and process handles are not inherited. Report your result to your parent.",
+        )],
+        "only the ancestry boundary is added outside the canonical role owner"
+    );
+    if matches!(
         selection,
         FullHistoryV2ModelSelection::MultiAgentModeTransitions
     ) {
-        assert!(child_request.has_content_kinds(&["multi_agent.role_instructions"]));
+        assert!(
+            role_updates.is_empty(),
+            "unchanged shared role stays inherited"
+        );
+    } else {
         assert_eq!(
-            child_developer_messages
-                .iter()
-                .filter(|message| message.contains(&format!("{expected_model} subagent role.")))
-                .count(),
-            1
+            role_updates.len(),
+            1,
+            "one canonical root-to-child transition"
+        );
+        let (authority, _, amendment) = role_updates[0];
+        assert_eq!(authority, "developer");
+        assert!(amendment.starts_with("<instruction_diff>\n"));
+        assert!(amendment.contains("\n--- multi_agent_usage_hint/"));
+        assert!(amendment.contains("\n+++ multi_agent_usage_hint/"));
+        assert_eq!(
+            changed_lines(amendment, '-'),
+            vec![format!("<multi_agent_role>{INHERITED_MODEL} root role.")]
+        );
+        assert_eq!(
+            changed_lines(amendment, '+'),
+            vec![format!("<multi_agent_role>{expected_model} subagent role.")]
         );
     }
-    assert!(!child_developer_messages.iter().any(|message| {
-        message.contains(&format!("{INHERITED_MODEL} root role."))
-            || message.contains(&format!("{INHERITED_MODEL} subagent role."))
-    }));
     if matches!(
         selection,
         FullHistoryV2ModelSelection::MultiAgentModeInstructions
+            | FullHistoryV2ModelSelection::MultiAgentModeTransitions
     ) {
-        let mode_instruction_count = |request: &ResponsesRequest| {
-            request
-                .message_input_texts("developer")
-                .into_iter()
-                .filter(|text| text.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
-                .count()
+        let policy_kind = |text: &str| {
+            let matches = [
+                ("explicit", FULL_HISTORY_EXPLICIT_POLICY),
+                ("proactive", FULL_HISTORY_PROACTIVE_POLICY),
+                ("custom", FULL_HISTORY_MULTI_AGENT_MODE_HINT),
+            ]
+            .into_iter()
+            .filter_map(|(policy, marker)| text.contains(marker).then_some(policy))
+            .collect::<Vec<_>>();
+            assert_eq!(matches.len(), 1, "one unambiguous policy endpoint: {text}");
+            matches[0]
+        };
+        let mut policy = None;
+        let mut transitions = Vec::new();
+        for (authority, kind, text) in &inherited_texts {
+            match kind.as_str() {
+                "multi_agent.mode_instructions" => {
+                    assert_eq!(authority, "developer");
+                    assert!(policy.is_none(), "initial policy is published once");
+                    assert!(text.starts_with(MULTI_AGENT_MODE_OPEN_TAG));
+                    policy = Some(policy_kind(text));
+                }
+                "context.instruction_diff/multi_agent_mode" => {
+                    assert_eq!(authority, "developer");
+                    assert!(text.starts_with("<instruction_diff>\n"));
+                    assert!(text.contains("\n--- multi_agent_mode/"));
+                    assert!(text.contains("\n+++ multi_agent_mode/"));
+                    assert_eq!(
+                        policy_kind(&changed_lines(text, '-').join("\n")),
+                        policy.expect("amendment has a preceding policy")
+                    );
+                    policy = Some(policy_kind(&changed_lines(text, '+').join("\n")));
+                }
+                _ => continue,
+            }
+            transitions.push(policy.expect("policy publication has an endpoint"));
+        }
+        let expected = if matches!(
+            selection,
+            FullHistoryV2ModelSelection::MultiAgentModeTransitions
+        ) {
+            vec!["explicit", "proactive", "explicit"]
+        } else {
+            vec!["custom"]
         };
         assert_eq!(
-            (
-                mode_instruction_count(&parent_request),
-                mode_instruction_count(&child_request),
-            ),
-            (1, 1)
-        );
-    }
-    if matches!(
-        selection,
-        FullHistoryV2ModelSelection::MultiAgentModeTransitions
-    ) {
-        assert_eq!(
-            child_developer_messages
-                .iter()
-                .filter(|message| message.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
-                .count(),
-            1,
-        );
-        let restoration = child_developer_messages
-            .iter()
-            .rfind(|message| {
-                message.starts_with("<instruction_diff>")
-                    && message.contains(FULL_HISTORY_EXPLICIT_POLICY)
-            })
-            .expect("full fork appends its explicit-policy restoration");
-        assert!(
-            restoration
-                .lines()
-                .any(|line| line.starts_with('-') && line.contains(FULL_HISTORY_PROACTIVE_POLICY))
+            transitions, expected,
+            "inherited policy ends at the current value"
         );
         assert!(
-            restoration
-                .lines()
-                .any(|line| line.starts_with('+') && line.contains(FULL_HISTORY_EXPLICIT_POLICY))
+            appended_texts.iter().all(|(_, kind, _)| !matches!(
+                kind.as_str(),
+                "multi_agent.mode_instructions" | "context.instruction_diff/multi_agent_mode"
+            )),
+            "the child neither reinjects nor contradicts its retained current policy"
         );
     }
     if matches!(selection, FullHistoryV2ModelSelection::CurrentTimeReminders) {
-        let notice_count = |request: &ResponsesRequest, marker: &str| {
-            request
-                .message_input_texts("developer")
-                .into_iter()
+        let notice_count = |messages: &[String], marker: &str| {
+            messages
+                .iter()
                 .filter(|text| text.starts_with(marker))
                 .count()
         };
+        let parent_developer_messages = parent_request.message_input_texts("developer");
         assert_eq!(
-            notice_count(&parent_request, "<current_time_unavailable>"),
+            notice_count(&parent_developer_messages, "<current_time_unavailable>"),
             1
         );
-        assert_eq!(notice_count(&parent_request, "<current_time_reminder>"), 1);
         assert_eq!(
-            notice_count(&child_request, "<current_time_unavailable>"),
+            notice_count(&parent_developer_messages, "<current_time_reminder>"),
+            1
+        );
+        assert_eq!(
+            notice_count(&child_developer_messages, "<current_time_unavailable>"),
             0
         );
-        assert_eq!(notice_count(&child_request, "<current_time_reminder>"), 1);
+        assert_eq!(
+            notice_count(&child_developer_messages, "<current_time_reminder>"),
+            1
+        );
     }
     let child_body = child_request.body_json();
     if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
@@ -1907,8 +2032,9 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             vec![json!("/root"), json!("/root/worker")]
         );
         let context_windows = child_request
-            .message_input_texts("developer")
+            .message_input_text_groups("developer")
             .into_iter()
+            .map(|parts| parts.concat())
             .filter(|text| text.starts_with("<context_window>\n"))
             .collect::<Vec<_>>();
         let identities = context_windows
@@ -1953,10 +2079,9 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         );
         assert!(
             child_request.has_message_with_input_texts("developer", |message| {
-                matches!(
-                    message,
-                    [text] if text.starts_with("<context_window>\nAgent name: /root/worker\n")
-                )
+                message
+                    .concat()
+                    .starts_with("<context_window>\nAgent name: /root/worker\n")
             })
         );
     }
@@ -2478,13 +2603,40 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
         })])
     );
     if model.is_some() {
+        let declares_collaboration = |tools: &Value| {
+            tools.as_array().is_some_and(|tools| {
+                tools
+                    .iter()
+                    .any(|tool| tool["name"] == MULTI_AGENT_V2_NAMESPACE)
+            })
+        };
         assert!(
-            !child_request
-                .body_json()
-                .to_string()
-                .contains("\"name\":\"collaboration\""),
-            "leaf workers must not receive collaboration tools",
+            !declares_collaboration(&child_body["tools"]),
+            "leaf workers must not receive top-level collaboration tools",
         );
+        let input = child_request.input();
+        if let Some(last_declaration) = input.iter().rposition(|item| {
+            item["type"] == "additional_tools" && declares_collaboration(&item["tools"])
+        }) {
+            let removed_namespace = format!("- {MULTI_AGENT_V2_NAMESPACE}");
+            let collaboration_removed = input[last_declaration + 1..]
+                .iter()
+                .filter(|item| item["role"] == "developer")
+                .filter_map(|item| {
+                    let kinds =
+                        item["internal_chat_message_metadata_passthrough"]["content_item_kinds"]
+                            .as_array()?;
+                    let index = kinds
+                        .iter()
+                        .position(|kind| kind == "tools.removed_definition")?;
+                    item["content"][index]["text"].as_str()
+                })
+                .any(|text| text.lines().any(|line| line == removed_namespace));
+            assert!(
+                collaboration_removed,
+                "leaf workers must mark inherited collaboration tools unavailable",
+            );
+        }
     }
     if source == SpawnMessageSource::ResponsesPlaintext {
         let parent_request = parent_request_log

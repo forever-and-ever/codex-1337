@@ -96,9 +96,11 @@ impl TranscriptView {
             ViewAction::CopyOnSelect(_) => SelectionCopy::OnSelect {
                 clear_selection: self.copy_on_select_clear_selection,
             },
+            ViewAction::PrimarySelection(_) => SelectionCopy::OnSelect {
+                clear_selection: false,
+            },
             ViewAction::Changed
             | ViewAction::ExitSelectMode
-            | ViewAction::PrimarySelection(_)
             | ViewAction::Copy(_)
             | ViewAction::CopyAndFollow(_)
             | ViewAction::OpenLink(_) => SelectionCopy::Explicit,

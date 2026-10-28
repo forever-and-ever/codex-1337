@@ -48,8 +48,9 @@ fn round_trip_preserves_supported_effective_settings() {
             allow_local_binding: Some(true),
             ..NetworkProxyConfig::default()
         };
-        config.set_allowed_domains(vec!["example.com".into()]);
+        // Domain permissions serialize as a sorted map.
         config.set_denied_domains(vec!["blocked.example.com".into()]);
+        config.set_allowed_domains(vec!["example.com".into()]);
         config.set_allow_unix_sockets(vec![socket.into()]);
 
         let remote = RemoteNetworkProxyConfig::from_effective_config(&config)

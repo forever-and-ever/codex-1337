@@ -105,7 +105,7 @@ impl Session {
                 .iter()
                 .find_map(|item| match item {
                     ResponseItem::AdditionalTools { tools, .. } => {
-                        Some(PreambleTools::History(Cow::Borrowed(tools.as_slice())))
+                        Some(PreambleTools::History(Cow::Borrowed(tools.as_ref())))
                     }
                     _ => None,
                 })
@@ -113,22 +113,12 @@ impl Session {
         } else {
             PreambleTools::Direct(Arc::clone(&prompt.tools))
         };
+        let base_part = prompt.input.iter().enumerate().find_map(|(index, item)| {
+            BaseInstructionsFragment::part_index(item).map(|part| (index, part))
+        });
         let instructions = if prompt.base_instructions.text.is_empty() {
-            prompt
-                .input
-                .iter()
-                .find_map(|item| {
-                    if !BaseInstructionsFragment::matches_item(item) {
-                        return None;
-                    }
-                    let ResponseItem::Message { content, .. } = item else {
-                        return None;
-                    };
-                    content.iter().find_map(|content| match content {
-                        ContentItem::InputText { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                })
+            base_part
+                .and_then(|(index, _)| BaseInstructionsFragment::text(&prompt.input[index]))
                 .unwrap_or_default()
         } else {
             &prompt.base_instructions.text
@@ -138,29 +128,35 @@ impl Session {
         let context: Vec<InjectedText> = prompt
             .input
             .iter()
-            .filter_map(|item| {
-                if BaseInstructionsFragment::matches_item(item) {
-                    return None;
-                }
+            .enumerate()
+            .filter_map(|(index, item)| {
                 let ResponseItem::Message { role, content, .. } = item else {
                     return None;
                 };
-                Some((role, content))
+                Some((index, role, content))
             })
-            .flat_map(|(role, content)| {
-                content.iter().filter_map(move |content| match content {
-                    ContentItem::InputText { text }
-                        if role == "developer"
-                            || role == "system"
-                            || is_contextual_user_fragment(content) =>
-                    {
-                        Some(InjectedText {
-                            role: role.clone(),
-                            text: text.clone(),
-                        })
-                    }
-                    _ => None,
-                })
+            .flat_map(|(index, role, content)| {
+                content
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(part, content)| {
+                        if base_part == Some((index, part)) {
+                            return None;
+                        }
+                        match content {
+                            ContentItem::InputText { text }
+                                if role == "developer"
+                                    || role == "system"
+                                    || is_contextual_user_fragment(content) =>
+                            {
+                                Some(InjectedText {
+                                    role: role.clone(),
+                                    text: text.clone(),
+                                })
+                            }
+                            _ => None,
+                        }
+                    })
             })
             .collect();
         Some(AbortOnDropHandle::new(tokio::task::spawn_blocking(

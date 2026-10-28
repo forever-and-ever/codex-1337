@@ -26,12 +26,12 @@ impl ContextualUserFragment for UserDelegationReceipt {
         ("<user_delegation_receipt>", "</user_delegation_receipt>")
     }
 
-    fn body(&self) -> String {
+    fn body(&self) -> codex_protocol::models::ContentItem {
         let preview = &self.task_preview[..self.task_preview.floor_char_boundary(64)];
         let path = &self.agent_path;
-        format!(
+        codex_protocol::models::input_text(format!(
             "\nUser delegated {} to {path}; it is already running. Do not duplicate it.\n",
             serde_json::json!(preview)
-        )
+        ))
     }
 }

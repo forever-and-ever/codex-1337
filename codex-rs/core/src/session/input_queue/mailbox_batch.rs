@@ -6,7 +6,6 @@ use super::PendingMailboxCommunication;
 use crate::agent::control::FamilyExecution;
 use crate::agent_communication::PENDING_MAILBOX_MESSAGES;
 use crate::session::session::Session;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::turn_input::TurnStartOptions;
 use std::collections::VecDeque;
 use std::num::NonZeroU64;
@@ -48,7 +47,7 @@ impl MailboxQueue {
 impl Session {
     pub(crate) async fn receive_agent_mail(
         self: &Arc<Self>,
-        communication: InterAgentCommunication,
+        communication: crate::PendingAgentMessage,
         start_options: TurnStartOptions,
         submission_id: String,
     ) {
@@ -100,11 +99,12 @@ impl Session {
 impl InputQueue {
     pub(crate) async fn enqueue_batched_mailbox_communication(
         &self,
-        communication: InterAgentCommunication,
+        communication: impl Into<crate::PendingAgentMessage>,
         start_options: TurnStartOptions,
         window: Option<NonZeroU64>,
         execution: FamilyExecution,
     ) {
+        let communication = communication.into();
         let window = window.filter(|_| {
             execution.active >= 2 && !communication.author.is_root() && !communication.trigger_turn
         });

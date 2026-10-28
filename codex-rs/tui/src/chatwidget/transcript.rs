@@ -15,6 +15,12 @@ pub(super) struct ActiveCellLayoutCacheKey {
     pub(super) syntax_theme_revision: u64,
 }
 
+pub(super) struct FlushedAgentMessage {
+    pub(super) turn_id: String,
+    pub(super) item_id: String,
+    pub(super) source: String,
+}
+
 /// Retains the active cell's semantic and actual wrapped heights independently.
 ///
 /// History cells may override their desired height, so it cannot be substituted for the rendered
@@ -55,6 +61,7 @@ pub(super) struct TranscriptState {
     pub(super) last_status_copy_targets: Option<StatusCopySource>,
     pub(super) last_completed_agent_message: Option<CompletedAgentMessage>,
     pub(super) agent_timestamp: Option<crate::history_cell::HistoryTimestamp>,
+    pub(super) last_flushed_agent_message: Option<FlushedAgentMessage>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,
     /// Whether this turn already produced a copyable response.
@@ -117,6 +124,7 @@ impl TranscriptState {
         self.saw_copy_source_this_turn = false;
         self.last_completed_agent_message = None;
         self.agent_timestamp = None;
+        self.last_flushed_agent_message = None;
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
         self.latest_proposed_plan_markdown = None;

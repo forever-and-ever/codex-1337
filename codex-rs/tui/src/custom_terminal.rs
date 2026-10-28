@@ -472,7 +472,7 @@ where
         self.backend.set_cursor_position(position)?;
         self.backend.clear_region(ClearType::AfterCursor)?;
         // Reset the back buffer to make sure the next update will redraw everything.
-        self.previous_buffer_mut().reset();
+        self.invalidate_viewport();
         Ok(())
     }
 
@@ -501,7 +501,7 @@ where
         self.set_cursor_position(home)?;
         std::io::Write::flush(&mut self.backend)?;
         self.visible_history_rows = 0;
-        self.previous_buffer_mut().reset();
+        self.invalidate_viewport();
         Ok(())
     }
 
@@ -521,7 +521,7 @@ where
         std::io::Write::flush(&mut self.backend)?;
         self.last_known_cursor_pos = Position { x: 0, y: 0 };
         self.visible_history_rows = 0;
-        self.previous_buffer_mut().reset();
+        self.invalidate_viewport();
         Ok(())
     }
 

@@ -200,6 +200,15 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
     }
 }
 
+// Protect in-process read-modify-write commits, never network requests.
+static AUTH_STORAGE_COMMIT: Mutex<()> = Mutex::new(());
+
+pub(super) fn auth_storage_commit_guard() -> std::io::Result<std::sync::MutexGuard<'static, ()>> {
+    AUTH_STORAGE_COMMIT
+        .lock()
+        .map_err(|_| std::io::Error::other("Auth storage commit lock is unavailable."))
+}
+
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn is_ephemeral(&self) -> bool {
         false
@@ -251,6 +260,13 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
         *target = updated.clone();
         self.write(&document)?;
         Ok(true)
+    }
+    /// Strict grant checks must never authorize a stale fallback after secure-store failure.
+    fn read_account_grant(&self) -> std::io::Result<Option<AuthDocument>> {
+        self.read()
+    }
+    fn load_account_grant(&self) -> std::io::Result<Option<AuthDotJson>> {
+        Ok(self.read_account_grant()?.map(|document| document.active))
     }
     fn delete(&self) -> std::io::Result<bool>;
 }
@@ -578,6 +594,13 @@ impl AutoAuthStorage {
 }
 
 impl AuthStorageBackend for AutoAuthStorage {
+    fn read_account_grant(&self) -> std::io::Result<Option<AuthDocument>> {
+        match self.keyring_storage.read()? {
+            Some(document) => Ok(Some(document)),
+            None => self.file_storage.read(),
+        }
+    }
+
     fn home(&self) -> &Path {
         &self.file_storage.codex_home
     }

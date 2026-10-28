@@ -2,12 +2,11 @@
 
 use std::fmt;
 
+use codex_http_client::validate_endpoint_url;
 use http::header::HeaderName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use url::Host;
-use url::Url;
 
 use crate::ModelProviderInfo;
 
@@ -66,13 +65,13 @@ fn bearer_scheme() -> String {
 
 impl GatewayOAuthConfig {
     pub(crate) fn validate(&self, provider: &ModelProviderInfo) -> Result<(), String> {
-        validate_url(&self.authorization_url, "gateway_oauth.authorization_url")?;
-        validate_url(&self.token_url, "gateway_oauth.token_url")?;
+        validate_endpoint_url(&self.authorization_url, "gateway_oauth.authorization_url")?;
+        validate_endpoint_url(&self.token_url, "gateway_oauth.token_url")?;
         let base_url = provider
             .base_url
             .as_deref()
             .ok_or("gateway_oauth requires base_url")?;
-        validate_url(base_url, "base_url")?;
+        validate_endpoint_url(base_url, "base_url")?;
         if self.client_id.trim().is_empty() || self.redirect_port == Some(0) {
             return Err(
                 "gateway_oauth requires a nonempty client_id and a nonzero redirect_port".into(),
@@ -126,27 +125,6 @@ fn is_token(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
-}
-
-fn validate_url(value: &str, field: &str) -> Result<(), String> {
-    let url = Url::parse(value).map_err(|_| format!("invalid {field} URL"))?;
-    let loopback = match url.host() {
-        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
-        Some(Host::Ipv4(host)) => host.is_loopback(),
-        Some(Host::Ipv6(host)) => host.is_loopback(),
-        None => false,
-    };
-    if url.host().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-        || !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
-    {
-        return Err(format!(
-            "{field} must use HTTPS (or loopback HTTP), without userinfo or a fragment"
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

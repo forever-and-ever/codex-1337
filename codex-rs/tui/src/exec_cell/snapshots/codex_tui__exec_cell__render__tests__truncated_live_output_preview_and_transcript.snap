@@ -1,5 +1,6 @@
 ---
 source: tui/src/exec_cell/render.rs
+assertion_line: 1128
 expression: "(preview, compact, transcript)"
 ---
 (
@@ -15,10 +16,10 @@ expression: "(preview, compact, transcript)"
     ],
     [
         Line::from_iter([
-            Span::from("•").red().bold(),
+            Span::from("•").bold(),
             Span::from(" "),
             Span::from("Command").bold(),
-            Span::from(" · failed").red(),
+            Span::from(" · nonzero exit").bold(),
             Span::from(" "),
             Span::from("echo").fg(Color::Indexed(97)),
             Span::from(" output").fg(Color::Indexed(97)),

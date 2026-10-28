@@ -1,6 +1,7 @@
 ---
 source: tui/src/history_cell/tests.rs
+assertion_line: 2066
 expression: rendered
 ---
-• Command · failed
+• Command · nonzero exit
     echo this_is_a_very_l...

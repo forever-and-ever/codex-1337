@@ -95,7 +95,9 @@ impl AgentMessage {
                     author.clone(),
                     message,
                 )
-                .render();
+                .render()
+                .into_text()
+                .unwrap_or_else(|| unreachable!("inter-agent messages render as text"));
                 InterAgentCommunication::new(author, recipient, Vec::new(), content, trigger_turn)
             }
         }

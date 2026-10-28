@@ -17,6 +17,7 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
         config: Some(Arc::new(config)),
         auth: None,
         auth_token: None,
+        auth_manager: None,
         auth_generation: Arc::new(()),
         plugins_available: false,
         ready_selected_capability_roots: Vec::new(),
@@ -54,6 +55,16 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
         rmcp::model::Tool::new("added", "added tool", Arc::default()),
     ];
     fixture.notify().await?;
+    // Host-call attribution observes current catalogs; it is not a model boundary.
+    let observed = catalog_boundary::binding_from_published_runtime(
+        Arc::clone(&published),
+        &[],
+        &required_plugins,
+        crate::client_tool_catalog::CatalogReadMode::Current,
+    )
+    .await
+    .expect("current binding");
+    assert_eq!(observed.tools(), frozen);
     let after = capture().await.expect("refreshed binding");
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(before.tools(), frozen);

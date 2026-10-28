@@ -409,9 +409,18 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         }
     }
     assert_eq!(recorded_params(&requests, "turn/start").len(), 1);
-    assert!(recorded_params(&requests, "turn/steer").is_empty());
-    assert!(recorded_params(&requests, "turn/steer/cancel").is_empty());
-    assert!(recorded_params(&requests, "thread/queue/delete").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "turn/steer"),
+        Vec::<serde_json::Value>::new()
+    );
+    assert_eq!(
+        recorded_params(&requests, "turn/steer/cancel"),
+        Vec::<serde_json::Value>::new()
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/queue/delete"),
+        Vec::<serde_json::Value>::new()
+    );
     // A reconnect retires the original thread's lane even after its widget was replaced.
     app.chat_widget.apply_external_edit("original draft".into());
     for text in ["disconnected send", "queued after disconnect"] {
@@ -600,7 +609,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
     )
     .await;
-    assert!(app.chat_widget.composer_text_with_pending().is_empty());
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "");
     let rename_id = match app.server_operations.preview(Some(thread_id)).thread {
         turn_submissions::ThreadSubmissionPreview::Sending { waiting, .. } => waiting
             .into_iter()
@@ -694,8 +703,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .cancel_unsent_alarm_disarm("after-retirement");
     let input = serde_json::to_value(app.chat_widget.capture_thread_input_state())?;
     assert_eq!(input["input_queue"]["turn"], "Idle");
-    assert!(recorded_params(&requests, "thread/alarm/disarm").is_empty());
-    assert!(recorded_params(&requests, "thread/compact/start").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/alarm/disarm"),
+        Vec::<serde_json::Value>::new()
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/compact/start"),
+        Vec::<serde_json::Value>::new()
+    );
     assert!(app.server_operations.is_empty());
 
     // Accepted consent transfers once to the existing connection owner. A withheld write
@@ -917,7 +932,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     app.handle_submission_event(&server, turn_submissions::SubmissionEvent::Retire)
         .await;
     assert!(!app.chat_widget.may_receive_realtime_transcripts());
-    assert!(recorded_params(&requests, "thread/realtime/start").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/realtime/start"),
+        Vec::<serde_json::Value>::new()
+    );
     assert_eq!(
         recorded_params(&requests, "thread/realtime/listVoices").len(),
         1
@@ -992,10 +1010,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .cwd
         .replace(app.config.cwd.to_path_buf());
     let resume_draft = recovered_message(&mut app);
+    let backend_id = server.backend_id();
     app.resume_target_session(
         &mut tui,
         &mut server,
         SessionTarget {
+            backend_id,
             path: None,
             thread_id,
             cwd: Some(app.config.cwd.to_path_buf()),
@@ -1034,7 +1054,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await;
     app.harness_overrides.cwd = resume_cwd_override;
     assert!(app.server_operations.is_empty());
-    assert!(recorded_params(&requests, "thread/resume").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/resume"),
+        Vec::<serde_json::Value>::new()
+    );
 
     let acquisition_x = Box::pin(server.start_thread(&app.config))
         .await?

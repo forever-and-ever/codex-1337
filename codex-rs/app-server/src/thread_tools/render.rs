@@ -235,8 +235,15 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                     "revisedPrompt": item.revised_prompt.as_deref().map(|prompt| truncate(prompt, DEFAULT_OUTPUT_CHARS)),
                     "savedPath": item.saved_path
                 });
-                if include_outputs {
-                    image["result"] = output_summary(&item.result, output_chars);
+                match &item.image {
+                    codex_app_server_protocol::GeneratedImageRef::Inline { result } => {
+                        if include_outputs {
+                            image["result"] = output_summary(result, output_chars);
+                        }
+                    }
+                    codex_app_server_protocol::GeneratedImageRef::File { file_id } => {
+                        image["fileId"] = json!(file_id);
+                    }
                 }
                 image
             }

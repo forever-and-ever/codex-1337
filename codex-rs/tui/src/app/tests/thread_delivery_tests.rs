@@ -278,13 +278,14 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
             .try_recv()
             .is_err()
     );
-    assert!(
+    assert_eq!(
         app.thread_event_channels[&thread_id]
             .store
             .lock()
             .await
             .pending_replay_requests()
-            .is_empty()
+            .len(),
+        0
     );
     Ok(())
 }

@@ -1,6 +1,10 @@
+//! Initial base instructions, recorded in history for incremental-tools windows.
+
 use super::ContextualUserFragment;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::input_text;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BaseInstructionsFragment(pub(crate) String);
@@ -8,21 +12,33 @@ pub(crate) struct BaseInstructionsFragment(pub(crate) String);
 impl BaseInstructionsFragment {
     pub(crate) const KIND: &str = "model.base_instructions";
 
-    pub(crate) fn matches_item(item: &ResponseItem) -> bool {
+    /// Reads only a dedicated, harness-classified base item, including an explicitly empty base.
+    pub(crate) fn text_from_item(item: &ResponseItem) -> Option<&str> {
         let ResponseItem::Message {
+            role,
+            content,
             internal_chat_message_metadata_passthrough: Some(metadata),
             ..
         } = item
         else {
-            return false;
+            return None;
         };
-        metadata
-            .content_item_kinds
-            .as_ref()
-            .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Self::KIND))
+        match (
+            role.as_str(),
+            content.as_slice(),
+            metadata.content_item_kinds.as_deref(),
+        ) {
+            ("developer", [ContentItem::InputText { text }], Some([kind]))
+                if kind.as_str() == Self::KIND =>
+            {
+                Some(text)
+            }
+            _ => None,
+        }
     }
 
-    pub(crate) fn text(item: &ResponseItem) -> Option<&str> {
+    /// Identifies only a developer text part with a fully aligned harness kind array.
+    pub(crate) fn part_index(item: &ResponseItem) -> Option<usize> {
         let ResponseItem::Message {
             role,
             content,
@@ -39,15 +55,20 @@ impl BaseInstructionsFragment {
             .content_item_kinds
             .as_ref()
             .filter(|kinds| kinds.len() == content.len())?;
-        kinds.iter().zip(content).find_map(|(kind, content)| {
-            if kind.as_str() == Self::KIND
-                && let codex_protocol::models::ContentItem::InputText { text } = content
-            {
-                Some(text.as_str())
-            } else {
-                None
-            }
+        kinds.iter().zip(content).position(|(kind, content)| {
+            kind.as_str() == Self::KIND && matches!(content, ContentItem::InputText { .. })
         })
+    }
+
+    pub(crate) fn text(item: &ResponseItem) -> Option<&str> {
+        let part = Self::part_index(item)?;
+        let ResponseItem::Message { content, .. } = item else {
+            return None;
+        };
+        match &content[part] {
+            ContentItem::InputText { text } => Some(text),
+            _ => unreachable!("part_index only identifies input text"),
+        }
     }
 
     pub(crate) fn take_prefix(items: &mut Vec<ResponseItem>) -> Option<String> {
@@ -98,7 +119,17 @@ impl BaseInstructionsFragment {
             else {
                 continue;
             };
+            if metadata
+                .content_item_metadata
+                .as_ref()
+                .is_some_and(|parts| parts.len() != content.len())
+            {
+                continue;
+            }
             kinds.remove(part);
+            if let Some(parts) = &mut metadata.content_item_metadata {
+                parts.remove(part);
+            }
             let codex_protocol::models::ContentItem::InputText { text } = content.remove(part)
             else {
                 unreachable!()
@@ -129,7 +160,7 @@ impl ContextualUserFragment for BaseInstructionsFragment {
         ("", "")
     }
 
-    fn body(&self) -> String {
-        self.0.clone()
+    fn body(&self) -> ContentItem {
+        input_text(self.0.clone())
     }
 }

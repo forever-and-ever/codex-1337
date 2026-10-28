@@ -91,6 +91,12 @@ impl App {
         }
         if !current || matches!(event, TuiEvent::FocusLost | TuiEvent::Resume) {
             self.transcript_view.cancel_primary();
+            self.chat_widget.cancel_composer_primary();
+            self.chat_widget
+                .rendered_selection
+                .borrow_mut()
+                .view
+                .cancel_primary();
             self.live_work.cancel_primary();
         }
     }

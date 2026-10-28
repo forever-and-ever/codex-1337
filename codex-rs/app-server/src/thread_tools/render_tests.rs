@@ -132,5 +132,15 @@ fn activity_metadata_is_retained_without_including_outputs() -> anyhow::Result<(
         no_outputs["items"][8]["result"],
         json!({"text": "", "truncated": true, "originalChars": 11})
     );
+    let mut file_turn = turn;
+    file_turn.items[8] = serde_json::from_value(json!({
+        "type": "imageGeneration", "id": "image-1", "status": "completed",
+        "fileId": "durable-image", "revisedPrompt": "a cat"
+    }))?;
+    for include_outputs in [false, true] {
+        let file = turn_summary(&file_turn, include_outputs, DEFAULT_OUTPUT_CHARS);
+        assert_eq!(file["items"][8]["fileId"], "durable-image");
+        assert!(file["items"][8].get("result").is_none());
+    }
     Ok(())
 }

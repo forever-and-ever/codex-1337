@@ -116,7 +116,11 @@ impl AnthropicRequestAuth {
 struct AnthropicBearerAuth(HeaderValue);
 
 impl AuthProvider for AnthropicBearerAuth {
-    fn add_auth_headers(&self, headers: &mut HeaderMap) {
+    fn add_auth_headers(
+        &self,
+        headers: &mut HeaderMap,
+    ) -> std::result::Result<(), codex_api::AuthError> {
         headers.insert(http::header::AUTHORIZATION, self.0.clone());
+        Ok(())
     }
 }

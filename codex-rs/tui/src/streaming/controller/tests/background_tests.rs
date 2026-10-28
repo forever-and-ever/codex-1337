@@ -20,7 +20,10 @@ impl Trial {
         let (cell, idle) = self.background.on_commit_tick_batch(usize::MAX);
         assert!(cell.is_none());
         assert!(idle);
-        assert!(self.background.current_tail_lines().is_empty());
+        assert_eq!(
+            self.background.current_tail_lines(),
+            [] as [HyperlinkLine; 0]
+        );
         assert_eq!(self.background.queued_lines(), 0);
     }
 

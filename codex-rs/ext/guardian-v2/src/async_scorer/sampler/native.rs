@@ -10,6 +10,7 @@ use codex_api::AnthropicCacheTtl;
 use codex_api::AnthropicClient;
 use codex_api::AnthropicOperation;
 use codex_api::AnthropicPrompt;
+use codex_api::AnthropicRequest;
 use codex_api::AnthropicRequestOptions;
 use codex_api::AnthropicStopReason;
 use codex_api::AnthropicStreamOptions;
@@ -98,14 +99,10 @@ pub(super) async fn model(
         .cloned()
 }
 
-pub(super) async fn sample(
-    sampler: &LunaSampler,
-    context: Arc<AnthropicAuthContext>,
+pub(super) fn request(
     model: &ModelInfo,
     input: &[ResponseItem],
-    account_id: &str,
-    scored: Arc<AtomicBool>,
-) -> Result<String, LunaSamplerError> {
+) -> Result<AnthropicRequest, LunaSamplerError> {
     // Never reinterpret parent signatures for a separate classifier or provider.
     if input.iter().any(|item| {
         matches!(
@@ -140,6 +137,18 @@ pub(super) async fn sample(
         },
     )
     .map_err(LunaSamplerError::Api)?;
+    Ok(request)
+}
+
+pub(super) async fn sample(
+    sampler: &LunaSampler,
+    context: Arc<AnthropicAuthContext>,
+    request: AnthropicRequest,
+    account_id: &str,
+    scored: Arc<AtomicBool>,
+    telemetry: &mut super::telemetry::SamplingTelemetry,
+) -> Result<String, LunaSamplerError> {
+    telemetry.attempts = telemetry.attempts.saturating_add(1);
     let mut captured = context
         .capture(account_id)
         .await
@@ -188,6 +197,12 @@ pub(super) async fn sample(
                 .refresh_after_rejection()
                 .await
                 .map_err(LunaSamplerError::Provider)?;
+            super::telemetry::record_retry(
+                sampler.config.metrics.as_deref(),
+                "http_401",
+                "auth_recovery",
+            );
+            telemetry.attempts = telemetry.attempts.saturating_add(1);
             AnthropicClient::new(transport, provider, captured.auth())
                 .stream_request(request, AnthropicStreamOptions::default())
                 .await

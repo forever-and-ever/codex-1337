@@ -35,7 +35,7 @@ pub(super) enum Entry {
 }
 
 pub(super) enum Amendment {
-    Unified,
+    Unified(&'static str),
     Semantic(Option<WorldStateContextFragment>),
 }
 
@@ -57,11 +57,15 @@ impl Entry {
         let Self::Instruction(section, amendment) = self else {
             return self.renderer().render_diff(previous);
         };
+        let instruction_id = match amendment {
+            Amendment::Unified(identity) => *identity,
+            Amendment::Semantic(_) => id,
+        };
         let prior = stored
-            .and_then(|snapshot| revision(snapshot, id))
+            .and_then(|snapshot| revision(snapshot, instruction_id))
             .filter(|revision| revision.retained(retained));
         let (current, state, rendered) = match amendment {
-            Amendment::Unified => {
+            Amendment::Unified(_) => {
                 let (state, full) = section.render_diff(PreviousSectionState::Absent);
                 let Canonical::Instruction(current) = canonical(&full) else {
                     // Native declarations are not replaceable instruction text.
@@ -98,9 +102,9 @@ impl Entry {
             Some(prior) if prior.current == current => (prior, Vec::new()),
             Some(mut prior) => {
                 let updates = match amendment {
-                    Amendment::Unified => {
+                    Amendment::Unified(_) => {
                         vec![WorldStateUpdate::fragment(diff(
-                            id,
+                            instruction_id,
                             prior.current.as_ref(),
                             current.as_ref(),
                         ))]
@@ -138,21 +142,29 @@ impl Entry {
             }
         };
         for update in &updates {
-            if let WorldStateUpdateContent::Fragment(fragment) = &update.content {
-                revision
-                    .lineage
-                    .push(Text::from_fragment(fragment.as_ref()).fingerprint());
+            if let Canonical::Instruction(Some(text)) = canonical(std::slice::from_ref(update)) {
+                revision.lineage.push(text.fingerprint());
             }
         }
-        snapshot
-            .sections
-            .insert(format!("{STATE_PREFIX}{id}"), revision.into_value());
+        snapshot.sections.insert(
+            format!("{STATE_PREFIX}{instruction_id}"),
+            revision.into_value(),
+        );
         (state, updates)
     }
 }
 
 impl WorldState {
     pub(crate) fn add_instruction_section<S: WorldStateSection>(&mut self, section: S) {
+        self.add_instruction_section_with_identity(section, S::ID);
+    }
+
+    /// Keeps canonical instruction ownership stable when upstream comparison sections migrate.
+    pub(crate) fn add_instruction_section_with_identity<S: WorldStateSection>(
+        &mut self,
+        section: S,
+        identity: &'static str,
+    ) {
         let id = S::ID;
         assert!(
             !self.sections.contains_key(id),
@@ -160,7 +172,7 @@ impl WorldState {
         );
         self.sections.insert(
             id,
-            Entry::Instruction(Box::new(section), Amendment::Unified),
+            Entry::Instruction(Box::new(section), Amendment::Unified(identity)),
         );
     }
 }
@@ -198,6 +210,8 @@ struct Text {
     authority: Authority,
     kind: ContentItemKind,
     text: String,
+    #[serde(default)]
+    metadata: codex_protocol::models::ContentItemMetadata,
 }
 
 impl Text {
@@ -205,7 +219,11 @@ impl Text {
         Self {
             authority: Authority::parse(fragment.role()),
             kind: fragment.content_kind(),
-            text: fragment.render(),
+            text: match fragment.render() {
+                ContentItem::InputText { text } => text,
+                _ => unreachable!("instruction amendments require text"),
+            },
+            metadata: fragment.content_metadata(),
         }
     }
 
@@ -218,14 +236,17 @@ impl ContextualUserFragment for Text {
     fn role(&self) -> &'static str {
         self.authority.as_str()
     }
+    fn content_metadata(&self) -> codex_protocol::models::ContentItemMetadata {
+        self.metadata.clone()
+    }
     fn content_kind(&self) -> ContentItemKind {
         self.kind.clone()
     }
     fn markers(&self) -> (&'static str, &'static str) {
         ("", "")
     }
-    fn body(&self) -> String {
-        self.text.clone()
+    fn body(&self) -> ContentItem {
+        codex_protocol::models::input_text(self.text.clone())
     }
     fn type_markers() -> (&'static str, &'static str) {
         (OPEN, CLOSE)
@@ -320,12 +341,24 @@ fn canonical(updates: &[WorldStateUpdate]) -> Canonical {
                 ..
             },
         ] => Canonical::Instruction(Some(Text::from_fragment(fragment.as_ref()))),
+        [
+            WorldStateUpdate {
+                content: WorldStateUpdateContent::Item(item),
+                ..
+            },
+        ] if crate::context::BaseInstructionsFragment::text_from_item(item).is_some() => {
+            let text = crate::context::BaseInstructionsFragment::text_from_item(item)
+                .unwrap_or_else(|| unreachable!("guard verified dedicated base item"));
+            Canonical::Instruction(Some(Text::from_fragment(
+                &crate::context::BaseInstructionsFragment(text.to_owned()),
+            )))
+        }
         _ => Canonical::Opaque,
     }
 }
 
 fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Text {
-    let Some(endpoint) = before.or(after) else {
+    let Some(endpoint) = after.or(before) else {
         unreachable!("instruction change has no endpoint: {id}");
     };
     let authority = endpoint.authority.clone();
@@ -346,6 +379,7 @@ fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Text {
         .to_string();
     Text {
         authority,
+        metadata: endpoint.metadata.clone(),
         kind: ContentItemKind(format!("{DIFF_KIND_PREFIX}{id}")),
         text: format!(
             "{OPEN}\nApply this update to the previously supplied {id} instructions; unchanged instructions remain in force.\n{patch}{CLOSE}"

@@ -1936,6 +1936,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     let input_state = ThreadInputState {
         questions: None,
         pending_thread_settings: None,
+        initial_user_message: None,
         composer: Some(ThreadComposerState {
             text: "composer draft".to_string(),
             ..Default::default()
@@ -1961,6 +1962,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         current_collaboration_mode: chat.current_collaboration_mode.clone(),
         active_collaboration_mask: chat.active_collaboration_mask.clone(),
         plan_mode_reasoning_effort: chat.config.plan_mode_reasoning_effort.clone(),
+        status_surface_overrides: StatusSurfaceOverrides::default(),
         task_running: true,
         agent_turn_running: true,
     };
@@ -2555,7 +2557,11 @@ async fn reconnect_resumes_unsent_input_and_reconciles_confirmed_submissions() {
                     .pending_steer
                     .set(Some(steer));
                 input.as_mut().unwrap().reconnect_pending = false;
-                restored.restore_reconnected_input(input, &[]);
+                restored.restore_reconnected_input(
+                    input,
+                    &[],
+                    crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+                );
                 for (text, id) in [("first message", &client_id), ("later steer", &later_id)] {
                     assert_no_submit_op(&mut ops);
                     restored.on_committed_user_message(
@@ -2571,7 +2577,11 @@ async fn reconnect_resumes_unsent_input_and_reconciles_confirmed_submissions() {
                     );
                 }
             } else {
-                restored.restore_reconnected_input(input, &ids);
+                restored.restore_reconnected_input(
+                    input,
+                    &ids,
+                    crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+                );
                 assert_eq!(restored.maybe_send_next_queued_input(), confirmed);
             }
             if confirmed {
@@ -2611,7 +2621,11 @@ async fn reconnect_keeps_queue_paused_after_pending_compact() {
     chat.pause_for_disconnect();
     let mut input = chat.capture_thread_input_state();
     input.as_mut().unwrap().reconnect_pending = true;
-    chat.restore_reconnected_input(input, &[]);
+    chat.restore_reconnected_input(
+        input,
+        &[],
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+    );
     chat.set_queue_autosend_suppressed(/*suppressed*/ false);
 
     assert!(!chat.maybe_send_next_queued_input());
@@ -2829,7 +2843,11 @@ async fn image_preparation_failure_restores_full_input_without_submitting() {
             let mut input = chat.capture_thread_input_state();
             input.as_mut().unwrap().reconnect_pending = true;
             let pending_client_id = pending_steer.as_ref().unwrap().client_id.clone();
-            chat.restore_reconnected_input(input, std::slice::from_ref(&pending_client_id));
+            chat.restore_reconnected_input(
+                input,
+                std::slice::from_ref(&pending_client_id),
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+            );
             chat.on_committed_user_message(
                 &[UserInput::Text {
                     text: "already sent".into(),

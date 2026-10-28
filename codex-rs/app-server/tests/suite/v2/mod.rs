@@ -21,6 +21,7 @@ mod config_model_provider_requirements;
 mod config_requirements_application;
 #[path = "config_requirements_browser_use_tests.rs"]
 mod config_requirements_browser_use;
+mod config_requirements_desktop;
 #[path = "config_requirements_exec_tests.rs"]
 mod config_requirements_exec;
 mod config_requirements_in_app_browser;
@@ -30,6 +31,8 @@ mod config_rpc;
 #[path = "connection_handling_stdio_tests.rs"]
 mod connection_handling_stdio;
 mod connection_handling_websocket;
+#[path = "connection_handling_websocket_compression_tests.rs"]
+mod connection_handling_websocket_compression;
 #[cfg(unix)]
 mod connection_handling_websocket_unix;
 #[cfg(unix)]
@@ -53,6 +56,7 @@ mod experimental_feature_list;
 #[path = "extension_lease.rs"]
 mod extension_lease;
 mod feedback;
+mod frozen_cloud_skills;
 mod fs;
 #[path = "gateway_oauth_tests.rs"]
 mod gateway_oauth;
@@ -148,6 +152,7 @@ mod thread_read;
 mod thread_read_state;
 mod thread_resume;
 mod thread_revert;
+mod thread_sample;
 mod thread_sections;
 mod thread_settings_update;
 mod thread_shell_command;

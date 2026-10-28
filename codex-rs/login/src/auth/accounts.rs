@@ -240,4 +240,11 @@ impl AuthStorageBackend for AccountStorage {
         self.write(&document)?;
         Ok(removed)
     }
+
+    fn load_account_grant(&self) -> std::io::Result<Option<AuthDotJson>> {
+        Ok(self
+            .backend
+            .read_account_grant()?
+            .and_then(|document| document.select(&self.id)))
+    }
 }

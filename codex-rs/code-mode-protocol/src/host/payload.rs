@@ -361,6 +361,8 @@ pub enum WireRuntimeResponse {
         cell_id: WireCellId,
         content_items: Vec<WireContentItem>,
         error_text: Option<String>,
+        #[serde(default)]
+        result_buffered_for_ns: u64,
         code_mode_host_duration_ns: u64,
     },
 }
@@ -403,6 +405,7 @@ impl TryFrom<RuntimeResponse> for WireRuntimeResponse {
                 cell_id,
                 content_items,
                 error_text,
+                result_buffered_for,
                 code_mode_host_duration,
             } => {
                 let code_mode_host_duration =
@@ -411,6 +414,8 @@ impl TryFrom<RuntimeResponse> for WireRuntimeResponse {
                     cell_id: cell_id.into(),
                     content_items: content_items.into_iter().map(Into::into).collect(),
                     error_text,
+                    result_buffered_for_ns: u64::try_from(result_buffered_for.as_nanos())
+                        .unwrap_or(u64::MAX),
                     code_mode_host_duration_ns: u64::try_from(code_mode_host_duration.as_nanos())
                         .unwrap_or(u64::MAX),
                 }
@@ -444,11 +449,13 @@ impl From<WireRuntimeResponse> for RuntimeResponse {
                 cell_id,
                 content_items,
                 error_text,
+                result_buffered_for_ns,
                 code_mode_host_duration_ns,
             } => Self::Result {
                 cell_id: cell_id.into(),
                 content_items: content_items.into_iter().map(Into::into).collect(),
                 error_text,
+                result_buffered_for: Duration::from_nanos(result_buffered_for_ns),
                 code_mode_host_duration: Some(Duration::from_nanos(code_mode_host_duration_ns)),
             },
         }

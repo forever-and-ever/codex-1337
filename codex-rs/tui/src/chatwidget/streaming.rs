@@ -6,6 +6,10 @@
 use super::*;
 use crate::markdown_render::ListSpacing;
 
+fn streamed_message_matches_completed(streamed: &str, completed: &str) -> bool {
+    streamed == completed || streamed.strip_suffix('\n') == Some(completed)
+}
+
 fn latest_summary_line(text: &str) -> Option<String> {
     text.lines().rev().find_map(|line| {
         let line = line.trim();
@@ -65,7 +69,7 @@ impl ChatWidget {
 
     /// Preserve received answer and plan source before ordinary turn termination.
     pub(super) fn flush_answer_and_plan_streams(&mut self) {
-        self.flush_answer_stream_with_separator();
+        self.flush_answer_stream(/*completed_message*/ None);
         if let Some(mut controller) = self.take_prepared_plan_stream(None) {
             self.clear_active_stream_tail();
             let (cell, source) = controller.finalize();
@@ -85,6 +89,14 @@ impl ChatWidget {
     }
 
     pub(super) fn flush_answer_stream_with_separator(&mut self) {
+        // An interleaved tool cannot publish an incomplete owned response.
+        if self
+            .stream_controller
+            .as_ref()
+            .is_some_and(StreamController::is_background)
+        {
+            return;
+        }
         self.flush_answer_stream(/*completed_message*/ None);
     }
 
@@ -102,7 +114,7 @@ impl ChatWidget {
                     return true;
                 };
                 // Stream finalization supplies one trailing newline when the last delta omitted it.
-                streamed != completed && streamed.strip_suffix('\n') != Some(completed)
+                !streamed_message_matches_completed(streamed, completed)
             });
             let scrollback_reflow = if needs_scrollback_reflow || completed_message_differs {
                 crate::app_event::ConsolidationScrollbackReflow::Required
@@ -125,6 +137,20 @@ impl ChatWidget {
                 };
             // Consolidate the run of streaming AgentMessageCells into a single AgentMarkdownCell
             // that can re-render from source on resize.
+            if completed_message.is_none() {
+                self.transcript.last_flushed_agent_message = controller
+                    .item_id
+                    .clone()
+                    .zip(self.turn_lifecycle.last_turn_id.clone())
+                    .zip(streamed_source.clone())
+                    .map(
+                        |((item_id, turn_id), source)| super::transcript::FlushedAgentMessage {
+                            turn_id,
+                            item_id,
+                            source,
+                        },
+                    );
+            }
             let copy_source = completed_message.map(str::to_owned).or(streamed_source);
             let source = copy_source.as_deref().map(|source| {
                 parse_assistant_markdown(source, self.config.cwd.as_path()).visible_markdown
@@ -157,6 +183,9 @@ impl ChatWidget {
         }
         if had_stream_controller {
             self.request_pending_usage_output_insertion_after_stream_shutdown();
+        }
+        if completed_message.is_some() {
+            self.transcript.last_flushed_agent_message = None;
         }
     }
 
@@ -203,10 +232,23 @@ impl ChatWidget {
         self.status_state.pending_status_indicator_restore = false;
     }
 
+    fn completed_agent_message_was_flushed(&self, message: &str) -> bool {
+        self.transcript
+            .last_completed_agent_message
+            .as_ref()
+            .zip(self.transcript.last_flushed_agent_message.as_ref())
+            .is_some_and(|(completed, flushed)| {
+                completed.turn_id == flushed.turn_id
+                    && completed.item_id == flushed.item_id
+                    && streamed_message_matches_completed(&flushed.source, message)
+            })
+    }
+
     pub(super) fn finalize_completed_assistant_message(&mut self, message: Option<&str>) {
         if self.stream_controller.is_none()
             && let Some(message) = message
             && !message.is_empty()
+            && !self.completed_agent_message_was_flushed(message)
         {
             let displayed =
                 parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown;
@@ -433,7 +475,11 @@ impl ChatWidget {
             return;
         }
         let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
-        if from_replay && self.stream_controller.is_none() && !parsed.visible_markdown.is_empty() {
+        if from_replay
+            && self.stream_controller.is_none()
+            && !parsed.visible_markdown.is_empty()
+            && !self.completed_agent_message_was_flushed(&message)
+        {
             self.prepare_assistant_message();
             self.mark_safety_buffering_agent_message_started();
             self.hide_stream_status();

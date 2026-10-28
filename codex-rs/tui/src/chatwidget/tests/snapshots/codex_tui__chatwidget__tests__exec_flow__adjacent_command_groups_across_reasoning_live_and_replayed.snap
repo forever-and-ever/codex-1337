@@ -1,9 +1,10 @@
 ---
 source: tui/src/chatwidget/tests/exec_flow.rs
+assertion_line: 242
 expression: "renders[0]"
 ---
 Compact:
-• Command · failed
+• Command · nonzero exit
     List missing
 • Command
     Read index.html (whole file)

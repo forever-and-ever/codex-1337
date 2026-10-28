@@ -114,7 +114,11 @@ source_response_item_id: None,
             assert!(snapshot.events.is_empty());
         }
         assert!(snapshot.active_reasoning_item.is_some());
-        app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            snapshot,
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         app.chat_widget.handle_server_notification(
             ServerNotification::ReasoningSummaryTextDelta(ReasoningSummaryTextDeltaNotification {
                 thread_id: thread_id.to_string(),
@@ -194,7 +198,11 @@ source_response_item_id: None,
                     .flat_map(|turn| &turn.items)
                     .all(|item| item.id() != "reasoning")
             );
-            app.replay_thread_snapshot(snapshot, false);
+            app.replay_thread_snapshot(
+                snapshot,
+                false,
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+            );
             assert!(!render_bottom_popup(&app.chat_widget, 80).contains("Final paragraph"));
             continue;
         }
@@ -553,7 +561,11 @@ async fn evicted_voice_marker_survives_widget_snapshot_for_late_reasoning() {
         crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
     app.active_thread_id = Some(thread_id);
     app.replace_chat_widget(widget);
-    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+    app.replay_thread_snapshot(
+        snapshot,
+        /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+    );
     app.chat_widget.handle_server_notification(
         ServerNotification::ReasoningSummaryTextDelta(
             codex_app_server_protocol::ReasoningSummaryTextDeltaNotification {
@@ -617,7 +629,11 @@ async fn buffered_replay_renders_completed_text_without_streaming_again() {
     let mut store = ThreadEventStore::new(/*capacity*/ 16);
     store.push_notification(delta("thread", "turn", "answer"));
     store.push_notification(completed("thread"));
-    app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+    app.replay_thread_snapshot(
+        store.snapshot(),
+        /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+    );
     let mut lines = Vec::new();
     while let Ok(event) = events.try_recv() {
         match event {
@@ -766,7 +782,11 @@ async fn misalignment_buffered_replay_preserves_input_after_continuation() {
             });
             assert_eq!(store.buffer.len(), 1);
         }
-        app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            store.snapshot(),
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         assert!(!app.chat_widget.has_misalignment_policy_violation());
         assert_eq!(app.chat_widget.composer_text_with_pending(), "keep draft");
         assert_eq!(
@@ -833,7 +853,11 @@ async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
             }
             store.push_notification_ref(&notification);
             assert_eq!(store.buffer.len(), 1);
-            app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+            app.replay_thread_snapshot(
+                store.snapshot(),
+                /*resume_restored_queue*/ false,
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+            );
             assert!(app.chat_widget.has_misalignment_policy_violation());
             assert!(render_bottom_popup(&app.chat_widget, /*width*/ 80).contains("Chat stopped"));
         }

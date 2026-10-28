@@ -109,6 +109,8 @@ const PICKER_LIST_HORIZONTAL_INSET: u16 = 4;
 
 #[derive(Debug, Clone)]
 pub struct SessionTarget {
+    /// Logical owner of the native thread ID, retained across connection replacement.
+    pub(crate) backend_id: crate::backend_id::BackendId,
     pub path: Option<PathBuf>,
     pub thread_id: ThreadId,
     /// Working directory reported by `thread/list` or `thread/read` at selection time.
@@ -118,6 +120,14 @@ pub struct SessionTarget {
 }
 
 impl SessionTarget {
+    pub(crate) fn ensure_backend(&self, backend_id: crate::backend_id::BackendId) -> Result<()> {
+        color_eyre::eyre::ensure!(
+            self.backend_id == backend_id,
+            "This session belongs to a different backend. Open the session picker again."
+        );
+        Ok(())
+    }
+
     pub fn display_label(&self) -> String {
         self.path
             .as_ref()
@@ -331,6 +341,7 @@ struct SessionPickerViewPersistence {
 }
 
 struct SessionPickerRunOptions {
+    backend_id: crate::backend_id::BackendId,
     use_theme_colors: bool,
     copy_on_select: bool,
     copy_on_select_clear_selection: bool,
@@ -441,6 +452,7 @@ async fn run_resume_picker_with_launch_context(
     let local_filter_cwd = local_picker_cwd_filter(&cwd_filter, uses_remote_filesystem);
     let runtime_keymap = picker_runtime_keymap(local_settings)?;
     let options = SessionPickerRunOptions {
+        backend_id: app_server.backend_id(),
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
         copy_on_select_clear_selection: local_settings.tui.copy_on_select_clear_selection,
@@ -499,6 +511,7 @@ pub async fn run_fork_picker_with_app_server(
     let local_filter_cwd = local_picker_cwd_filter(&cwd_filter, uses_remote_filesystem);
     let runtime_keymap = picker_runtime_keymap(local_settings)?;
     let options = SessionPickerRunOptions {
+        backend_id: app_server.backend_id(),
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
         copy_on_select_clear_selection: local_settings.tui.copy_on_select_clear_selection,
@@ -545,6 +558,7 @@ async fn run_session_picker_with_loader(
 ) -> Result<SessionSelection> {
     let alt = AltScreenGuard::enter(tui);
     let mut state = PickerState::new(
+        options.backend_id,
         alt.tui.frame_requester(),
         picker_loader,
         options.show_all,
@@ -767,6 +781,7 @@ fn spawn_app_server_page_loader(
                         })
                         .await
                         .map(|response| SessionTarget {
+                            backend_id: app_server.backend_id(),
                             path: response.thread.path,
                             thread_id,
                             cwd: Some(response.thread.cwd.to_path_buf()),
@@ -816,6 +831,7 @@ impl Drop for AltScreenGuard<'_> {
 }
 
 struct PickerState {
+    backend_id: crate::backend_id::BackendId,
     clock_format: ClockFormat,
     use_theme_colors: bool,
     copy_on_select: bool,
@@ -1009,6 +1025,7 @@ impl Row {
 
 impl PickerState {
     fn new(
+        backend_id: crate::backend_id::BackendId,
         requester: FrameRequester,
         picker_loader: PickerLoader,
         show_all: bool,
@@ -1016,6 +1033,7 @@ impl PickerState {
         action: SessionPickerAction,
     ) -> Self {
         Self {
+            backend_id,
             clock_format: ClockFormat::system(),
             use_theme_colors: true,
             copy_on_select: false,
@@ -1292,6 +1310,7 @@ impl PickerState {
                             return Ok(None);
                         }
                         return Ok(Some(self.action.selection(SessionTarget {
+                            backend_id: self.backend_id,
                             path,
                             thread_id,
                             cwd: row.cwd.clone(),
@@ -2074,6 +2093,13 @@ fn thread_list_params(
         use_state_db_only,
         search_term: None,
     }
+}
+
+pub(crate) fn repository_cwd_filter(
+    cwd: &Path,
+    _uses_remote_filesystem: bool,
+) -> ThreadListCwdFilter {
+    ThreadListCwdFilter::One(cwd.to_string_lossy().into_owned())
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {
@@ -3620,6 +3646,7 @@ mod tests {
             request_sink.lock().unwrap().push(request);
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -3928,6 +3955,7 @@ mod tests {
             ThreadId::from_string("019dabc1-0ef5-7431-b81c-03037f51f62c").expect("thread id");
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4091,6 +4119,7 @@ mod tests {
         );
         row.cwd = Some(cwd.clone());
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             page_only_loader(|_| {}),
             /*show_all*/ false,
@@ -4160,6 +4189,7 @@ mod tests {
         });
         let remote_cwd = Some(PathBuf::from("/srv/link-project"));
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -4196,6 +4226,7 @@ mod tests {
     fn remote_picker_does_not_filter_rows_by_local_cwd() {
         let loader = page_only_loader(|_| {});
         let state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -4220,6 +4251,7 @@ mod tests {
     fn resume_table_snapshot() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4278,6 +4310,7 @@ mod tests {
 
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4309,6 +4342,7 @@ mod tests {
     fn hint_line_switches_esc_label_for_search_mode() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4327,6 +4361,7 @@ mod tests {
     fn hint_line_labels_cancel_keys_as_exit_for_existing_session_resume_picker() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4354,6 +4389,7 @@ mod tests {
     fn hint_line_switches_density_label() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4384,6 +4420,7 @@ mod tests {
     fn hint_line_compacts_on_narrow_width() {
         let loader = page_only_loader(|_| {});
         let state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4406,6 +4443,7 @@ mod tests {
     fn hint_line_snapshot_uses_distributed_wide_footer() {
         let loader = page_only_loader(|_| {});
         let state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4423,6 +4461,7 @@ mod tests {
     fn hint_line_snapshot_uses_compact_footer() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4442,6 +4481,7 @@ mod tests {
     fn hint_line_preserves_primary_action_labels_when_very_narrow() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4469,6 +4509,7 @@ mod tests {
     fn hint_line_shows_loading_transcript_mode() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4488,6 +4529,7 @@ mod tests {
     fn picker_footer_percent_reports_scroll_progress() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4515,6 +4557,7 @@ mod tests {
     fn picker_footer_progress_label_shows_position_total_and_percent() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4542,6 +4585,7 @@ mod tests {
     fn picker_footer_progress_label_uses_known_count_when_more_pages_exist() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4569,6 +4613,7 @@ mod tests {
     fn picker_footer_progress_label_freezes_percent_while_loading() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4603,6 +4648,7 @@ mod tests {
     fn picker_footer_percent_is_complete_when_not_scrollable() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4624,6 +4670,7 @@ mod tests {
     async fn ctrl_o_toggles_density_without_typing_into_search() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4652,6 +4699,7 @@ mod tests {
             }
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4688,6 +4736,7 @@ mod tests {
         let loader = page_only_loader(|_| {});
         let thread_id = ThreadId::new();
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4747,6 +4796,7 @@ mod tests {
             }
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4794,6 +4844,7 @@ mod tests {
     async fn transcript_loading_still_allows_ctrl_c_exit() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4817,6 +4868,7 @@ mod tests {
 
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4884,6 +4936,7 @@ mod tests {
             }
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4913,6 +4966,7 @@ mod tests {
     async fn ctrl_t_on_row_without_thread_id_shows_inline_error() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -4948,6 +5002,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5052,6 +5107,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5095,6 +5151,7 @@ mod tests {
         let tmp = tempdir().expect("tmpdir");
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5128,6 +5185,7 @@ session_picker_view = "dense"
         std::fs::write(&codex_home_file, "not a directory").expect("write codex home file");
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5158,6 +5216,7 @@ session_picker_view = "dense"
     async fn raw_ctrl_o_toggles_density_without_typing_into_search() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5179,6 +5238,7 @@ session_picker_view = "dense"
     async fn space_appends_to_search_query() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5211,6 +5271,7 @@ session_picker_view = "dense"
             }
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5249,6 +5310,7 @@ session_picker_view = "dense"
         let thread_id = ThreadId::new();
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5281,6 +5343,7 @@ session_picker_view = "dense"
 
         let loader = page_only_loader(|_| {});
         let state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -5310,6 +5373,7 @@ session_picker_view = "dense"
     fn toolbar_compacts_on_narrow_width() {
         let loader = page_only_loader(|_| {});
         let state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -5355,6 +5419,7 @@ session_picker_view = "dense"
         let loader = page_only_loader(|_| {});
         let row = dense_snapshot_row();
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             show_all,
@@ -5413,6 +5478,7 @@ session_picker_view = "dense"
 
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5474,6 +5540,7 @@ session_picker_view = "dense"
     fn comfortable_zebra_lines_use_full_width_background() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5514,6 +5581,7 @@ session_picker_view = "dense"
         second.preview = String::from("Second dense row");
         second.git_branch = Some(String::from("fcoury/other-branch"));
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -5565,6 +5633,7 @@ session_picker_view = "dense"
             git_branch: Some(String::from("fcoury/session-picker")),
         };
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5636,6 +5705,7 @@ session_picker_view = "dense"
             git_branch: Some(String::from("fcoury/session-picker")),
         };
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5673,6 +5743,7 @@ session_picker_view = "dense"
 
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5724,6 +5795,7 @@ session_picker_view = "dense"
 
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5778,6 +5850,7 @@ session_picker_view = "dense"
     fn pageless_scrolling_deduplicates_and_keeps_order() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5837,6 +5910,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5870,6 +5944,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5904,6 +5979,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5945,6 +6021,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -5986,6 +6063,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -6019,6 +6097,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6052,6 +6131,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ false,
@@ -6093,6 +6173,7 @@ session_picker_view = "dense"
     async fn page_navigation_uses_view_rows() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6151,6 +6232,7 @@ session_picker_view = "dense"
     async fn page_and_jump_navigation_use_list_keymap() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6212,6 +6294,7 @@ session_picker_view = "dense"
     async fn ctrl_c_exits_even_when_cancel_is_remapped_to_ctrl_c() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6236,6 +6319,7 @@ session_picker_view = "dense"
             request_sink.lock().unwrap().push(req);
         });
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6279,6 +6363,7 @@ session_picker_view = "dense"
     async fn enter_on_row_without_resolvable_thread_id_shows_inline_error() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6317,6 +6402,7 @@ session_picker_view = "dense"
     async fn enter_on_pathless_thread_uses_thread_id() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6344,6 +6430,7 @@ session_picker_view = "dense"
 
         match selection {
             Some(SessionSelection::Resume(SessionTarget {
+                backend_id: _,
                 path: None,
                 thread_id: selected_thread_id,
                 cwd: None,
@@ -6654,6 +6741,7 @@ session_picker_view = "dense"
     async fn moving_to_last_card_scrolls_when_cards_exceed_viewport() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6695,6 +6783,7 @@ session_picker_view = "dense"
     async fn up_from_bottom_keeps_viewport_stable_when_card_remains_visible() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6736,6 +6825,7 @@ session_picker_view = "dense"
     async fn up_scrolls_only_after_crossing_top_edge() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6773,6 +6863,7 @@ session_picker_view = "dense"
     fn list_reports_more_rows_above_and_below() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6813,6 +6904,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6928,6 +7020,7 @@ session_picker_view = "dense"
     async fn paste_appends_to_existing_query() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6945,6 +7038,7 @@ session_picker_view = "dense"
     async fn whitespace_only_paste_is_ignored() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6967,6 +7061,7 @@ session_picker_view = "dense"
         });
 
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -6998,6 +7093,7 @@ session_picker_view = "dense"
     async fn esc_with_empty_query_starts_fresh() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,
@@ -7017,6 +7113,7 @@ session_picker_view = "dense"
     async fn esc_with_query_clears_search_and_preserves_selected_result() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
+            crate::backend_id::BackendId::new(),
             FrameRequester::test_dummy(),
             loader,
             /*show_all*/ true,

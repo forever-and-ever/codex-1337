@@ -1673,6 +1673,28 @@ async fn captured_model_replans_tools_and_retains_the_issuing_request_router() -
             .collect::<Vec<_>>(),
         vec![json!(MODEL_A), json!(MODEL_B), json!(MODEL_A)],
     );
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| {
+                let declaration = request["input"]
+                    .as_array()
+                    .expect("provider input")
+                    .iter()
+                    .rfind(|item| item["type"] == "additional_tools")
+                    .expect("latest tool declaration");
+                ["apply_patch", "exec_command", "write_stdin"]
+                    .into_iter()
+                    .filter(|name| namespace_child_tool(declaration, "functions", name).is_some())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            vec!["exec_command", "write_stdin"],
+            vec!["apply_patch"],
+            vec!["exec_command", "write_stdin"]
+        ],
+    );
     let metadata = requests
         .iter()
         .map(|request| {

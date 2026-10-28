@@ -19,7 +19,7 @@ impl ChatWidget {
     pub(crate) fn open_permissions_popup(&mut self) {
         if self.thread_id.is_some()
             || self.config.explicit_permission_profile_mode
-            || self.permission_profiles_menu_opened
+            || self.permission_discovery.is_some()
             || self
                 .config
                 .permissions
@@ -34,6 +34,9 @@ impl ChatWidget {
     }
 
     pub(super) fn open_legacy_permissions_popup(&mut self) {
+        if !matches!(self.permission_popup, PermissionPopupState::ApplyingInline) {
+            self.permission_popup = PermissionPopupState::Choosing(PermissionIntent::Menu);
+        }
         let include_read_only = cfg!(target_os = "windows");
         let current_approval =
             AskForApproval::from(self.config.permissions.approval_policy.value());
@@ -337,8 +340,7 @@ impl ChatWidget {
                 Self::permission_profile_selection_actions,
             )
         };
-        let requires_confirmation =
-            approvals_reviewer == ApprovalsReviewer::User && preset.id == "full-access";
+        let requires_confirmation = preset.id == "full-access";
         #[cfg(target_os = "windows")]
         if preset.id == "auto"
             && matches!(

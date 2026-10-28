@@ -1,8 +1,9 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Tool definitions enter history in one batch; a catalog change appends one developer notice before only the changed exec definition, without modifying namespace descriptions. The next unchanged turn appends only user input.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+assertion_line: 367
+expression: "context_snapshot::format_request_history_snapshot(if use_responses_lite\n{\n    \"Tool definitions precede the initial base instructions. A model switch appends a tools notice, changed tools, a base-instructions amendment, and an identity-only model notice without rewriting the prefix; the next unchanged turn appends only user input.\"\n} else\n{\n    \"Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests.\"\n}, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: Tool definitions enter history in one batch; a catalog change appends one developer notice before only the changed exec definition, without modifying namespace descriptions. The next unchanged turn appends only user input.
+Scenario: Tool definitions precede the initial base instructions. A model switch appends a tools notice, changed tools, a base-instructions amendment, and an identity-only model notice without rewriting the prefix; the next unchanged turn appends only user input.
 
 ## Window 1
 Settings:
@@ -16,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=40accf7106052adc):
-        - namespace/functions; hash=af002353222c8d34
+00:additional_tools/developer (2; hash=a6c7fb20205054b4):
+        - namespace/functions; hash=b0b013683508985e
           - custom/exec
           - function/wait
           - custom/python
@@ -46,8 +47,8 @@ Settings:
 Settings: relative to window 1
   model: "updated-tools-model"
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=40accf7106052adc):
-        - namespace/functions; hash=af002353222c8d34
+00:additional_tools/developer (2; hash=a6c7fb20205054b4):
+        - namespace/functions; hash=b0b013683508985e
           - custom/exec
           - function/wait
           - custom/python
@@ -72,13 +73,26 @@ Settings: relative to window 1
     Continue with the same tools.
 06:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-07:additional_tools/developer (1; hash=26cd263a29587cc7):
-        - namespace/functions; hash=771cad2ff250d2f3
+07:additional_tools/developer (1; hash=3bc381297be3b8fa):
+        - namespace/functions; hash=bfe9b634bdb03dfa
           - custom/exec
 08:message/developer:
-    <MODEL_SWITCH>
-09:message/user:
+    <instruction_diff>
+    Apply this update to the previously supplied base_instructions instructions; unchanged instructions remain in force.
+    --- base_instructions/ab3b949ce7eb774e1e6461dc93032c2a43a78d23
+    +++ base_instructions/ea87cb61a89c989d6339a9e07faa727e0a569172
+    @@ -1 +1 @@
+    -Use the available tools to help the user.
+    \\ No newline at end of file
+    +Review results before responding.
+    \\ No newline at end of file
+    </instruction_diff>
+09:message/developer:
+    <model_instructions>
+    The current model is updated-tools-model.
+    </model_instructions>
+10:message/user:
     Continue with the updated execution instructions.
 -- request 4 (turn) --
-10:message/user:
+11:message/user:
     Continue with the same updated tools.

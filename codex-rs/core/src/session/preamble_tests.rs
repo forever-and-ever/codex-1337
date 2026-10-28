@@ -1,15 +1,18 @@
 use super::exec_sections;
+use crate::context::ContextualUserFragment;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::ImageDetailVisibility;
 use codex_code_mode::MediaHelpers;
 use codex_code_mode::ToolDefinition;
+use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ContentItemMetadata;
 use codex_tools::ToolName;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
 /// The census parses headings that `build_exec_tool_description` renders in another crate.
-#[test]
-fn exec_sections_split_the_rendered_nested_tools_losslessly() {
+#[tokio::test]
+async fn exec_sections_split_the_rendered_nested_tools_losslessly() {
     let tool = |name: &str| ToolDefinition {
         summary: String::new(),
         name: name.to_string(),
@@ -65,5 +68,64 @@ fn exec_sections_split_the_rendered_nested_tools_losslessly() {
                 text: text.into()
             },
         ]
+    );
+
+    // Base ownership is positional: a merged sibling and later amendment still count.
+    let mut merged = ContextualUserFragment::into(crate::context::BaseInstructionsFragment(
+        "canonical base".into(),
+    ));
+    let mut content = codex_context_fragments::to_annotated_content(&mut merged).unwrap();
+    content.push(codex_context_fragments::AnnotatedContent::text(
+        "merged sibling",
+        ContentItemKind("developer_instructions".into()),
+        ContentItemMetadata::skills(),
+    ));
+    codex_context_fragments::set_annotated_content(&mut merged, content).unwrap();
+    let mut amendment = merged.clone();
+    codex_context_fragments::set_annotated_content(
+        &mut amendment,
+        vec![codex_context_fragments::AnnotatedContent::text(
+            "<instruction_diff>updated base</instruction_diff>",
+            ContentItemKind("context.instruction_diff/base_instructions".into()),
+            ContentItemMetadata::default(),
+        )],
+    )
+    .unwrap();
+    let prompt = crate::client_common::Prompt {
+        input: vec![merged, amendment],
+        tools: std::sync::Arc::from([]),
+        parallel_tool_calls: false,
+        base_instructions: codex_protocol::models::BaseInstructions {
+            text: String::new(),
+            provenance: None,
+        },
+        output_schema: None,
+        output_schema_strict: false,
+        cyber_access_program: None,
+    };
+    let (session, _) = Box::pin(crate::session::tests::make_session_and_context()).await;
+    let mark = session
+        .prepare_preamble(&prompt)
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    assert_eq!(
+        mark.sources,
+        vec![
+            codex_protocol::ContextSource::Prompt {
+                label: "Base instructions".into(),
+                text: "canonical base".into(),
+            },
+            codex_protocol::ContextSource::ToolDeclarations { text: "[]".into() },
+            codex_protocol::ContextSource::Prompt {
+                label: "developer".into(),
+                text: "merged sibling".into(),
+            },
+            codex_protocol::ContextSource::Prompt {
+                label: "developer".into(),
+                text: "<instruction_diff>updated base</instruction_diff>".into(),
+            },
+        ],
     );
 }

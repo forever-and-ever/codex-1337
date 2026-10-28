@@ -18,7 +18,10 @@ impl ChatWidget {
         if !self.bottom_pane.no_modal_or_popup_active() {
             return false;
         }
-        if self.permission_shortcut_pending {
+        if !matches!(
+            self.permission_popup,
+            PermissionPopupState::Idle | PermissionPopupState::BackgroundDiscovery { .. }
+        ) {
             return true;
         }
         if self.blocks_direct_input {
@@ -131,7 +134,7 @@ impl ChatWidget {
             .take(choices.len())
             .find(|(current, _)| !current)
         {
-            self.permission_shortcut_pending = true;
+            self.permission_popup = PermissionPopupState::ApplyingShortcut;
             self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
                 thread_id,
                 selection: selection.clone(),
@@ -147,7 +150,12 @@ impl ChatWidget {
 
     pub(crate) fn complete_permission_shortcut(&mut self, thread_id: ThreadId) {
         if self.thread_id == Some(thread_id) {
-            self.permission_shortcut_pending = false;
+            if matches!(
+                self.permission_popup,
+                PermissionPopupState::ApplyingShortcut
+            ) {
+                self.permission_popup = PermissionPopupState::Idle;
+            }
         }
     }
 }

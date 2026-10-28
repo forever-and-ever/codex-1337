@@ -7,7 +7,6 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::*;
 use crate::clipboard_copy::CopyFormat;
-use crate::clipboard_copy::SelectionTarget;
 use crate::clipboard_copy::worker::CopyResult;
 use crate::text_selection::SelectionUnit;
 use crate::tui::Tui;
@@ -326,14 +325,15 @@ impl TranscriptView {
 
     /// A PRIMARY write is silent: it neither claims CLIPBOARD was copied nor ends selection.
     pub(crate) fn publish_primary(&mut self, tui: &mut Tui, text: &str) {
-        let (_, owner) = tui.clipboard.select(
-            text.into(),
+        let (_, owner) = tui.copy_selection(
+            text,
             CopyFormat::PlainText,
-            SelectionTarget::Primary,
-            tui.frame_requester(),
+            SelectionCopy::OnSelect {
+                clear_selection: false,
+            },
         );
         if let Some(selection) = &mut self.selection {
-            selection.primary_owner = Some(owner);
+            selection.primary_owner = owner;
         }
     }
 
@@ -464,8 +464,8 @@ impl TranscriptView {
                         (text, CopyFormat::MarkdownSelection(source))
                     }
                 };
-                tui.clipboard
-                    .copy(copy_text.into(), format, tui.frame_requester())
+                tui.copy_selection(copy_text, format, SelectionCopy::Explicit)
+                    .0
             });
         if matches!(action, ViewAction::CopyAndFollow(_))
             && matches!(result, Ok(CopyStatus::Pending(_)))

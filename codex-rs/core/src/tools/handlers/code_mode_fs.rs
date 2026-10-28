@@ -110,9 +110,8 @@ impl ToolExecutor<ToolInvocation> for FileSystemHandler {
                 } => (path, environment_id),
             };
             let environment = resolve_tool_environment(
-                &invocation.step_context,
+                &invocation.step_context.environments,
                 environment_id.as_deref(),
-                "no filesystem execution environment",
             )?;
             let path = environment.cwd().join(path).map_err(fault)?;
             let grants = apply_granted_turn_permissions(

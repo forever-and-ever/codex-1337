@@ -3162,6 +3162,8 @@
     },
     "HookEventName": {
       "enum": [
+        "preModelRequest",
+        "postModelRequest",
         "preToolUse",
         "permissionRequest",
         "postToolUse",
@@ -3406,6 +3408,23 @@
           "type": "object"
         }
       ]
+    },
+    "ImageGenerationInputImage": {
+      "description": "A local image file successfully read for this exact image-generation request.",
+      "properties": {
+        "path": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "sha256": {
+          "description": "Lowercase SHA-256 of the file bytes read before image normalization.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "type": "object"
     },
     "InternalChatMessageMetadataPassthrough": {
       "description": "Internal Responses API passthrough metadata copied into underlying chat messages.\n\nResponses API strongly types this payload. Do not modify it without first getting API approval and making the corresponding Responses API change.",
@@ -4259,6 +4278,8 @@
         "edu",
         "edu_plus",
         "edu_pro",
+        "sci",
+        "sci_plus",
         "unknown"
       ],
       "type": "string"
@@ -10014,6 +10035,33 @@
           "type": "object"
         },
         {
+          "anyOf": [
+            {
+              "properties": {
+                "fileId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "fileId"
+              ],
+              "title": "FileIdThreadItem",
+              "type": "object"
+            },
+            {
+              "properties": {
+                "result": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "result"
+              ],
+              "title": "ResultThreadItem",
+              "type": "object"
+            }
+          ],
+          "description": "Either inline generated-image data or its durable attachment-store identity.\n\n`File` must remain first so rollouts written during the migration, which contain both an empty `result` and a `fileId`, retain the file reference when deserialized.",
           "properties": {
             "failure": {
               "anyOf": [
@@ -10029,8 +10077,12 @@
             "id": {
               "type": "string"
             },
-            "result": {
-              "type": "string"
+            "inputImages": {
+              "description": "Observed local inputs for a completed generation, absent on older items.",
+              "items": {
+                "$ref": "#/definitions/ImageGenerationInputImage"
+              },
+              "type": "array"
             },
             "revisedPrompt": {
               "type": [
@@ -10068,7 +10120,6 @@
           },
           "required": [
             "id",
-            "result",
             "status",
             "type"
           ],

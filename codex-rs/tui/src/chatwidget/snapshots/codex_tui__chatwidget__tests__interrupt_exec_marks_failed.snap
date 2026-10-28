@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/review_mode.rs
+assertion_line: 1311
 expression: exec_blob
 ---
-• Command · failed sleep 1
+• Command · nonzero exit sleep 1

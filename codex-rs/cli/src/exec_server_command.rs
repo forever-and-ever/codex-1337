@@ -25,6 +25,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_websocket_auth::WebsocketAuthArgs;
 
+use crate::exec_server_credential::ExecutorCredentialPipe;
 use crate::exec_server_telemetry;
 
 /// [EXPERIMENTAL] Run the standalone exec-server service.
@@ -102,6 +103,15 @@ pub(super) struct ExecServerCommand {
     )]
     pub(super) use_agent_identity_auth: bool,
 
+    /// Read rotating executor credentials from stdin; exit when the pipe closes.
+    #[arg(
+        long = "executor-credential-stdin",
+        requires = "exec_server_remote",
+        conflicts_with = "use_agent_identity_auth",
+        global = true
+    )]
+    pub(super) executor_credential_stdin: bool,
+
     /// Exit when the parent-owned standard-input pipe closes.
     #[arg(
         long = "exit-on-stdin-close",
@@ -150,32 +160,51 @@ impl ExecServerCommand {
             let config = load_exec_server_config(
                 root_config_overrides,
                 strict_config,
-                /*enable_workload_identity*/ true,
+                /*enable_workload_identity*/ !self.executor_credential_stdin,
             )
             .await?;
-            let (_otel, telemetry) = exec_server_telemetry::init(Some(&config));
-            let auth_provider = load_exec_server_remote_auth_provider(
-                &config,
-                &base_url,
-                self.use_agent_identity_auth,
-            )
-            .await?;
+            // Configured exporters may contain account-wide credentials or client keys.
+            // The scoped executor must not initialize those exporters.
+            let telemetry_config = (!self.executor_credential_stdin).then_some(&config);
+            let (_otel, telemetry) = exec_server_telemetry::init(telemetry_config);
+            let mut credential_provider = None;
+            let mut parent_lifetime = if self.exit_on_stdin_close {
+                exec_server_telemetry::ParentLifetime::StdinPipe
+            } else {
+                exec_server_telemetry::ParentLifetime::Independent
+            };
+            let auth_provider: codex_api::SharedAuthProvider = if self.executor_credential_stdin {
+                let ExecutorCredentialPipe {
+                    provider,
+                    parent_closed,
+                } = ExecutorCredentialPipe::from_stdin(environment_id.trim().to_string());
+                provider.wait_for_initial().await?;
+                parent_lifetime =
+                    exec_server_telemetry::ParentLifetime::MonitoredStdin(parent_closed);
+                credential_provider = Some(Arc::clone(&provider));
+                provider
+            } else {
+                load_exec_server_remote_auth_provider(
+                    &config,
+                    &base_url,
+                    self.use_agent_identity_auth,
+                )
+                .await?
+            };
             let mut remote_config = codex_exec_server::RemoteEnvironmentConfig::new(
                 base_url,
                 environment_id,
                 auth_provider,
                 config.http_client_factory(),
             )?;
+            if self.executor_credential_stdin {
+                remote_config = remote_config.with_executor_credential_auth()?;
+            }
             if let Some(name) = self.name {
                 remote_config.name = name;
             }
             remote_config.request_dispatch_mode = self.request_dispatch_mode;
             let remote_config = remote_config.with_telemetry(telemetry);
-            let parent_lifetime = if self.exit_on_stdin_close {
-                exec_server_telemetry::ParentLifetime::StdinPipe
-            } else {
-                exec_server_telemetry::ParentLifetime::Independent
-            };
             let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
             #[cfg(target_os = "macos")]
             let runtime_paths = runtime_paths.with_allowed_symlinked_codex_home(
@@ -184,7 +213,7 @@ impl ExecServerCommand {
                     &config.codex_home,
                 ),
             );
-            exec_server_telemetry::run_until_shutdown(
+            let result = exec_server_telemetry::run_until_shutdown(
                 async move {
                     let shutdown = async move {
                         let _ = shutdown_receiver.await;
@@ -212,7 +241,11 @@ impl ExecServerCommand {
                 parent_lifetime,
                 exec_server_telemetry::ShutdownBehavior::Graceful(shutdown_sender),
             )
-            .await
+            .await;
+            if let Some(provider) = credential_provider {
+                provider.check_pipe_failure()?;
+            }
+            result
         } else {
             let config_result = load_exec_server_config(
                 root_config_overrides,
@@ -307,7 +340,7 @@ async fn load_exec_server_remote_auth_provider(
         validate_api_key_remote_host(base_url)?;
     }
 
-    if auth_manager.is_workload_identity_selected() {
+    if auth.is_chatgpt_auth() || auth_manager.is_workload_identity_selected() {
         Ok(codex_model_provider::auth_provider_from_auth_manager(
             auth_manager,
             &auth,

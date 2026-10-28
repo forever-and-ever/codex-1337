@@ -20,6 +20,13 @@ impl App {
     ) -> Result<AppRunControl> {
         match selection {
             SessionSelection::Resume(target_session) => {
+                if let Err(error) = target_session.ensure_backend(app_server.backend_id()) {
+                    self.show_agents_overview_error(
+                        Some("Unable to resume session"),
+                        error.to_string(),
+                    );
+                    return Ok(AppRunControl::Continue);
+                }
                 let thread_id = target_session.thread_id;
                 let switching_threads = self.current_displayed_thread_id() != Some(thread_id);
                 if switching_threads {

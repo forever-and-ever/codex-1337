@@ -63,6 +63,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SandboxPermissions;
+use codex_protocol::models::input_text;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -189,14 +190,21 @@ impl ContextContributor for ReadyCapabilityRootsTestExtension {
         &'a self,
         input: WorldStateContributionInput<'a>,
     ) -> ExtensionFuture<'a, Vec<WorldStateSectionContribution>> {
+        let roots = input
+            .step_store
+            .get::<Vec<codex_exec_server::ResolvedSelectedCapabilityRoot>>()
+            .expect("captured capability roots should be present in step state");
+        let selected_roots = roots
+            .iter()
+            .map(|root| root.selected_root().clone())
+            .collect::<Vec<_>>();
         if let Some(observed_roots) = &self.observed_roots {
             observed_roots
                 .lock()
                 .expect("observed capability roots should not be poisoned")
-                .push(input.ready_selected_capability_roots.to_vec());
+                .push(selected_roots.clone());
         }
-        let root_ids = input
-            .ready_selected_capability_roots
+        let root_ids = selected_roots
             .iter()
             .map(|root| root.id.clone())
             .collect::<Vec<_>>();
@@ -210,7 +218,7 @@ impl ContextContributor for ReadyCapabilityRootsTestExtension {
                         Some(RenderedWorldStateFragment::new(
                             "user",
                             ("<ready_capability_roots>", "</ready_capability_roots>"),
-                            body.clone(),
+                            input_text(body.clone()),
                         )),
                     )
                 },
@@ -1465,7 +1473,7 @@ async fn serve_environment_info(listener: TcpListener) {
     send_environment_info(&mut websocket).await;
 }
 
-async fn serve_environment_with_agents_md(
+pub(super) async fn serve_environment_with_agents_md(
     listener: TcpListener,
     contents: &str,
     attach: tokio::sync::oneshot::Receiver<()>,
@@ -1631,7 +1639,9 @@ impl NoiseRendezvousConnectProvider for OfflineThenReadyNoiseConnectProvider {
 struct NoopRegistryAuthProvider;
 
 impl AuthProvider for NoopRegistryAuthProvider {
-    fn add_auth_headers(&self, _: &mut HeaderMap) {}
+    fn add_auth_headers(&self, _: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
+        Ok(())
+    }
 }
 
 async fn wait_for_response_request_count(response_mock: &ResponseMock, expected_count: usize) {
@@ -1934,10 +1944,6 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         let mut builder = test_codex()
             .with_extensions(Arc::new(extensions.build()))
             .with_config(|config| {
-                config
-                    .features
-                    .enable(Feature::StableEnvironmentTools)
-                    .expect("enable stable environment tools");
                 assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
                 assert!(
                     config
@@ -2012,98 +2018,98 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         )
         .await?;
         let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
-                ev_function_call(
-                    UNKNOWN_ENV_CALL_ID,
-                    "request_permissions",
-                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
-                ),
-                ev_completed("no-environment-exec"),
-            ]),
-            sse(vec![
-                ev_assistant_message("no-environment-message", "waiting for an environment"),
-                ev_completed("no-environment-done"),
-            ]),
-            sse(vec![
-                ev_response_created("pending-configuration-exec"),
-                ev_function_call(
-                    EXEC_CALL_ID,
-                    "exec_command",
-                    &json!({ "cmd": "pwd" }).to_string(),
-                ),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
-                ev_function_call(
-                    UNKNOWN_ENV_CALL_ID,
-                    "request_permissions",
-                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
-                ),
-                ev_function_call(
-                    SELECTED_ENV_CALL_ID,
-                    "request_permissions",
-                    &json!({
-                        "environment_id": selection.environment_id,
-                        "permissions": {"network": {"enabled": true}},
-                    })
-                    .to_string(),
-                ),
-                ev_completed("pending-configuration-exec"),
-            ]),
-            sse(vec![
-                ev_response_created("pending-configuration-wait"),
-                ev_function_call(
-                    WAIT_CALL_ID,
-                    "wait_for_environment",
-                    &json!({ "environment_id": selection.environment_id }).to_string(),
-                ),
-                ev_completed("pending-configuration-wait"),
-            ]),
-            sse(vec![
-                ev_response_created("pending-configuration-ready"),
-                ev_function_call(
-                    LOGIN_CALL_ID,
-                    "exec_command",
-                    r#"{"cmd":"pwd","login":true}"#,
-                ),
-                ev_completed("pending-configuration-ready"),
-            ]),
-            sse(vec![
-                ev_assistant_message("pending-configuration-message", "done"),
-                ev_completed("pending-configuration-done"),
-            ]),
-            sse(vec![
-                ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
-                ev_function_call(
-                    UNKNOWN_ENV_CALL_ID,
-                    "request_permissions",
-                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
-                ),
-                ev_function_call(
-                    SELECTED_ENV_CALL_ID,
-                    "request_permissions",
-                    &json!({
-                        "environment_id": selection.environment_id,
-                        "permissions": {"network": {"enabled": true}},
-                    })
-                    .to_string(),
-                ),
-                ev_completed("failed-environment-exec"),
-            ]),
-            sse(vec![
-                ev_assistant_message("failed-environment-message", "waiting for an environment"),
-                ev_completed("failed-environment-done"),
-            ]),
-            sse(vec![
-                ev_assistant_message("recovered-environment-message", "ready"),
-                ev_completed("recovered-environment-done"),
-            ]),
-        ],
-    )
-    .await;
+            &server,
+            vec![
+                sse(vec![
+                    ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
+                    ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                    ev_function_call(
+                        UNKNOWN_ENV_CALL_ID,
+                        "request_permissions",
+                        r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                    ),
+                    ev_completed("no-environment-exec"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("no-environment-message", "waiting for an environment"),
+                    ev_completed("no-environment-done"),
+                ]),
+                sse(vec![
+                    ev_response_created("pending-configuration-exec"),
+                    ev_function_call(
+                        EXEC_CALL_ID,
+                        "exec_command",
+                        &json!({ "cmd": "pwd" }).to_string(),
+                    ),
+                    ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                    ev_function_call(
+                        UNKNOWN_ENV_CALL_ID,
+                        "request_permissions",
+                        r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                    ),
+                    ev_function_call(
+                        SELECTED_ENV_CALL_ID,
+                        "request_permissions",
+                        &json!({
+                            "environment_id": selection.environment_id,
+                            "permissions": {"network": {"enabled": true}},
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("pending-configuration-exec"),
+                ]),
+                sse(vec![
+                    ev_response_created("pending-configuration-wait"),
+                    ev_function_call(
+                        WAIT_CALL_ID,
+                        "wait_for_environment",
+                        &json!({ "environment_id": selection.environment_id }).to_string(),
+                    ),
+                    ev_completed("pending-configuration-wait"),
+                ]),
+                sse(vec![
+                    ev_response_created("pending-configuration-ready"),
+                    ev_function_call(
+                        LOGIN_CALL_ID,
+                        "exec_command",
+                        r#"{"cmd":"pwd","login":true}"#,
+                    ),
+                    ev_completed("pending-configuration-ready"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("pending-configuration-message", "done"),
+                    ev_completed("pending-configuration-done"),
+                ]),
+                sse(vec![
+                    ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
+                    ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                    ev_function_call(
+                        UNKNOWN_ENV_CALL_ID,
+                        "request_permissions",
+                        r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                    ),
+                    ev_function_call(
+                        SELECTED_ENV_CALL_ID,
+                        "request_permissions",
+                        &json!({
+                            "environment_id": selection.environment_id,
+                            "permissions": {"network": {"enabled": true}},
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("failed-environment-exec"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("failed-environment-message", "waiting for an environment"),
+                    ev_completed("failed-environment-done"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("recovered-environment-message", "ready"),
+                    ev_completed("recovered-environment-done"),
+                ]),
+            ],
+        )
+        .await;
         empty
             .thread
             .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
@@ -2253,9 +2259,7 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             .context("wait_for_environment output should be model visible")?;
         assert_ne!(wait_succeeded, Some(false));
         assert_eq!(
-            serde_json::from_str::<Value>(
-                &wait_output.context("wait output should contain JSON")?
-            )?,
+            serde_json::from_str::<Value>(&wait_output.context("wait output should contain JSON")?)?,
             json!({ "environment_id": selection.environment_id, "status": "ready" })
         );
         let body = ready_request.body_json();
@@ -2364,9 +2368,9 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
                     .find(|tool| tool["name"] == "exec_command")
                     .context("exec_command should stay available")?;
                 let parameters = &exec_command["parameters"];
-                parameters["properties"].get("login").context(
-                    "login should be advertised regardless of environment state or policy",
-                )?;
+                parameters["properties"]
+                    .get("login")
+                    .context("login should be advertised regardless of environment state or policy")?;
                 parameters["properties"].get("shell").context(
                     "shell should be advertised regardless of environment state or shell mode",
                 )?;
@@ -2787,7 +2791,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
             };
             let mut executor_root = refreshed_root.clone();
             if owner_provided {
-                // An owner-selected root must never become the executor's shared root.
+                // Owner configuration must not inherit the executor's shared root location.
                 let CapabilityRootLocation::Environment { path, .. } = &mut executor_root.location;
                 *path = PathUri::parse("file:///shared-root-not-selected-by-owner")?;
             }
@@ -2902,6 +2906,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
             // The first request may legally see either Starting or Ready; the wait makes step two ready.
             let first_tools = tool_names(&requests[0].body_json());
             assert!(first_tools.contains(&"wait_for_environment".to_string()));
+            assert!(first_tools.contains(&"exec_command".to_string()));
             let first_user_context = requests[0].message_input_texts("user");
             let first_environment_context = first_user_context
                 .iter()
@@ -2910,13 +2915,8 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
             let first_has_ready_root = first_user_context
                 .iter()
                 .any(|text| text.contains("<ready_capability_roots>ready-first-root"));
-            let first_is_starting = first_environment_context.contains("<status>starting</status>");
-            assert_eq!(
-                first_tools.contains(&"exec_command".to_string()),
-                !first_is_starting,
-                "without stable_environment_tools, commands require a ready transport"
-            );
-            if first_is_starting {
+            // Tool availability no longer distinguishes Starting from Ready.
+            if first_environment_context.contains("<status>starting</status>") {
                 assert!(!first_has_ready_root);
             } else {
                 assert!(first_environment_context.contains("<shell>"));

@@ -55,7 +55,7 @@ impl MutableCatalog {
                 Box::new(|_, _| async { Err(anyhow!("unexpected elicitation")) }.boxed()),
             )
             .await?;
-        let initial_tools = list_tools_for_client_uncached(
+        let (initial_tools, initial_meta) = list_tools_for_client_uncached(
             "docs",
             /*is_codex_apps_mcp_server*/ false,
             "test",
@@ -69,7 +69,11 @@ impl MutableCatalog {
             _auth_change_notifications: None,
             client: Arc::clone(&client),
             server_info: create_test_server_info("Mutable catalog"),
-            tool_catalog: Arc::new(ClientToolCatalog::new(initial_tools, /*updates*/ None)),
+            tool_catalog: Arc::new(ClientToolCatalog::new(
+                initial_tools,
+                initial_meta,
+                /*updates*/ None,
+            )),
             tool_timeout: Some(Duration::from_secs(5)),
             server_instructions: None,
             server_supports_sandbox_state_meta_capability: false,
@@ -79,6 +83,7 @@ impl MutableCatalog {
         connections.insert_test_client(
             "docs".to_string(),
             AsyncManagedClient {
+                ema_authority: None,
                 client: futures::future::ready(Ok(managed_client)).boxed().shared(),
                 is_codex_apps_mcp_server: false,
                 server_capabilities: Arc::new(std::sync::Mutex::new(None)),
@@ -107,7 +112,7 @@ impl MutableCatalog {
     }
 
     pub(crate) async fn notify(&self) -> Result<()> {
-        let before = self.client.tool_list_revision().await?;
+        let before = self.client.tool_list_revision().current();
         let peer = self
             .control
             .peer
@@ -118,7 +123,7 @@ impl MutableCatalog {
             .clone();
         peer.notify_tool_list_changed().await?;
         tokio::time::timeout(Duration::from_secs(5), async {
-            while self.client.tool_list_revision().await? == before {
+            while self.client.tool_list_revision().current() == before {
                 tokio::task::yield_now().await;
             }
             anyhow::Ok(())

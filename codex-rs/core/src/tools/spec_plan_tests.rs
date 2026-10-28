@@ -2927,7 +2927,10 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
                 .and_then(|schema| schema.encrypted),
             None
         );
-        assert_eq!(tool.parameters.one_of.as_ref().map(Vec::len), Some(2));
+        assert_eq!(
+            tool.parameters.one_of.as_ref().map(|schemas| schemas.len()),
+            Some(2)
+        );
     }
 
     // Old catalog schemas must not erase the explicit plaintext route or its XOR.
@@ -2948,11 +2951,9 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
     old.properties.as_mut().unwrap().remove("plaintext_message");
     old.one_of = None;
     let mut required_message = compatible.clone();
-    required_message
-        .required
-        .as_mut()
-        .unwrap()
-        .push("message".into());
+    let mut required = required_message.required.take().unwrap().into_vec();
+    required.push("message".into());
+    required_message.required = Some(required.into_boxed_slice());
     let mut encrypted_plaintext = compatible.clone();
     encrypted_plaintext
         .properties

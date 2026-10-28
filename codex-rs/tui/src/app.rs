@@ -215,6 +215,8 @@ mod app_server_events;
 pub(crate) mod app_server_requests;
 mod app_server_thread_ownership;
 mod backend_banner_fallback;
+mod backend_events;
+mod backend_sessions;
 mod background_requests;
 mod claude_quota;
 mod composer_hints;
@@ -247,6 +249,7 @@ mod model_defaults;
 pub(crate) use turn_submissions::ui_requests::UiReply;
 mod navigation_config;
 mod new_session;
+mod quick_dials;
 mod turn_tips;
 mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
@@ -256,6 +259,7 @@ mod native_history;
 mod openrouter;
 mod owned_transcript;
 mod pending_interactive_replay;
+mod permission_reservations;
 mod permission_shortcuts;
 mod platform_actions;
 mod plugin_mentions;
@@ -577,6 +581,7 @@ pub(crate) struct App {
     config_notification_test_pending: Option<u64>,
     model_catalog: Arc<ModelCatalog>,
     pub(crate) session_telemetry: SessionTelemetry,
+    terminal_size_tags: crate::terminal_size_telemetry::LaunchTags,
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) chat_widget: ChatWidget,
     workspace_command_runner: Option<WorkspaceCommandRunner>,
@@ -595,7 +600,7 @@ pub(crate) struct App {
     runtime_approvals_reviewer_override: Option<ApprovalsReviewer>,
     runtime_permission_profile_override: Option<RuntimePermissionProfileOverride>,
     /// In-flight remote selections; confirmed settings live in each task's server snapshot.
-    pending_server_profiles: HashMap<ThreadId, PermissionProfileSelection>,
+    pending_server_profiles: HashMap<ThreadId, permission_reservations::PendingPermissionProfile>,
 
     pub(crate) file_search: FileSearchManager,
 
@@ -933,6 +938,12 @@ impl App {
             self.discard_startup_modal_input(tui)?;
             return Ok(AppRunControl::Continue);
         }
+        if matches!(&event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release)
+            || matches!(&event, TuiEvent::Paste(text) if !text.is_empty())
+            || matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved)
+        {
+            self.chat_widget.acknowledge_program_status();
+        }
         if self.handle_rendered_selection_event(tui, &event)? {
             return Ok(AppRunControl::Continue);
         }
@@ -1201,7 +1212,7 @@ impl App {
                     let restrict_disconnected_input = self.reconnect.offline
                         && !self.chat_widget.keymap_contexts().is_warnings()
                         && self.reconnect.presentation
-                            == reconnect::ReconnectPresentation::Conversation
+                            != reconnect::ReconnectPresentation::Overview
                         && !self
                             .chat_widget
                             .active_view_accepts_input_when_disconnected();
@@ -1277,7 +1288,6 @@ impl App {
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
         self.refresh_submission_preview();
-        self.sync_thread_title_progress();
         self.chat_widget
             .set_sparkle_terminal_focus(tui.is_terminal_focused());
         if tui.is_owned_screen() {

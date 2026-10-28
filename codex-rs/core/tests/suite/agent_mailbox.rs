@@ -1,12 +1,35 @@
 //! Ordinary family mail wakes idle recipients without another user submission.
 
 use super::*;
+use crate::suite::settings_commits::COMMITTED_MODEL;
+use crate::suite::settings_commits::PauseAfterCommit;
 use codex_core::config::Config;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::MessageLifecycleContributor;
+use codex_extension_api::MessageLifecycleInput;
+use codex_protocol::ResponseItemId;
+use codex_protocol::ThreadId;
 use codex_protocol::protocol::Op;
 use core_test_support::ThreadIdle;
 use pretty_assertions::assert_eq;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc;
+use tokio::sync::oneshot;
+
+#[derive(Default)]
+struct Messages(Mutex<HashSet<ResponseItemId>>);
+impl MessageLifecycleContributor for Messages {
+    fn on_publish(&self, input: &MessageLifecycleInput) {
+        let mut pending = self.0.lock().expect("messages lock");
+        assert!(pending.insert(input.message_id.clone()));
+    }
+    fn on_consumed(&self, input: &MessageLifecycleInput, _recipient: ThreadId) {
+        let mut pending = self.0.lock().expect("messages lock");
+        assert!(pending.remove(&input.message_id));
+    }
+}
 
 #[test_case::test_case(false, false; "singleton")]
 #[test_case::test_case(true, false; "nested_active_family")]
@@ -243,4 +266,173 @@ async fn idle_mail_wakes_without_user_input(nested: bool, completion: bool) -> R
         .shutdown_all_threads_bounded(Duration::from_secs(5))
         .await;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_mail_preserves_publications_and_followup_order() -> Result<()> {
+    const MAIL: &str = "Keep this note for later";
+    const LATE_MAIL: &str = "Another note while dispatch is held";
+    const FOLLOWUP: &str = "Read the pending note";
+    const AFTER_FOLLOWUP: &str = "This note must follow the new task";
+    let server = core_test_support::responses::start_mock_server().await;
+    core_test_support::mock_server::run(&[&server], async {
+        mount_root_collaboration_call(
+            &server,
+            FIRST_PROMPT,
+            "first-call",
+            "spawn_agent",
+            json!({ "message": FIRST_TASK, "task_name": "first", "fork_turns": "none" }),
+        )
+        .await;
+        mount_completed_worker(&server, FIRST_TASK, "first-call").await;
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.config_contributor(Arc::new(PauseAfterCommit {
+            gate: Mutex::new(Some((entered_tx, release_rx))),
+        }));
+        extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
+        let messages = Arc::new(Messages::default());
+        extensions.message_lifecycle_contributor(messages.clone());
+        let test = test_codex()
+            .with_model("gpt-5.6-sol")
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.features.enable(Feature::Collab).unwrap();
+                config.features.enable(Feature::MultiAgentV2).unwrap();
+                config.multi_agent_v2.max_concurrent_threads_per_session = 2;
+                config.multi_agent_v2.hide_spawn_agent_metadata = true;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let mut created = test.thread_manager.subscribe_thread_created();
+        test.submit_turn(FIRST_PROMPT).await?;
+        ThreadIdle::wait(&test.codex).await;
+        let first_id = created.recv().await?;
+        let first = test.thread_manager.get_thread(first_id).await?;
+        wait_for_event(&first, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        ThreadIdle::wait(&first).await;
+        let resumed = Arc::clone(&first);
+        resumed
+            .submit(Op::ThreadSettings {
+                thread_settings: ThreadSettingsOverrides {
+                    model: Some(COMMITTED_MODEL.to_string()),
+                    ..Default::default()
+                },
+                reply: None,
+            })
+            .await?;
+        entered_rx.await?;
+
+        mount_root_collaboration_call(
+            &server,
+            "send a note",
+            "queued-mail",
+            "send_message",
+            json!({ "target": "first", "message": MAIL }),
+        )
+        .await;
+        test.submit_turn("send a note").await?;
+        ThreadIdle::wait(&test.codex).await;
+        mount_root_collaboration_call(
+            &server,
+            "send while dispatch is held",
+            "late-mail",
+            "send_message",
+            json!({ "target": "first", "message": LATE_MAIL }),
+        )
+        .await;
+        test.submit_turn("send while dispatch is held").await?;
+        ThreadIdle::wait(&test.codex).await;
+        assert!(test.thread_manager.get_thread(first_id).await.is_ok());
+
+        let retained = messages.0.lock().unwrap().clone();
+        assert_eq!(retained.len(), 2);
+        // Held dispatch preserves publication ownership until the first sample.
+        mount_root_collaboration_call(
+            &server,
+            "drain the note",
+            "followup",
+            "followup_task",
+            json!({ "target": "first", "message": FOLLOWUP }),
+        )
+        .await;
+        let (at_sampling, pending_at_sampling) = mpsc::channel();
+        mount_sse_once_match(
+            &server,
+            move |request: &wiremock::Request| {
+                let matches = body_contains(request, FOLLOWUP)
+                    && !has_function_call_output(request, "followup");
+                if matches {
+                    at_sampling
+                        .send(messages.0.lock().unwrap().clone())
+                        .unwrap();
+                }
+                matches
+            },
+            sse(vec![
+                ev_response_created("worker-wait"),
+                ev_function_call_with_namespace(
+                    "wait-note",
+                    MULTI_AGENT_V2_NAMESPACE,
+                    "wait_agent",
+                    r#"{"timeout_ms":1}"#,
+                ),
+                ev_completed("worker-wait"),
+            ]),
+        )
+        .await;
+        let delivered = mount_sse_once_match(
+            &server,
+            |request: &wiremock::Request| has_function_call_output(request, "wait-note"),
+            sse(vec![
+                ev_assistant_message("done", "Read all notes"),
+                ev_completed("done"),
+            ]),
+        )
+        .await;
+        test.submit_turn("drain the note").await?;
+        ThreadIdle::wait(&test.codex).await;
+        mount_root_collaboration_call(
+            &server,
+            "send after followup",
+            "after-followup",
+            "send_message",
+            json!({ "target": "first", "message": AFTER_FOLLOWUP }),
+        )
+        .await;
+        test.submit_turn("send after followup").await?;
+        ThreadIdle::wait(&test.codex).await;
+        release_tx.send(())?;
+        wait_for_event(&resumed, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        ThreadIdle::wait(&resumed).await;
+        assert!(
+            pending_at_sampling.try_recv()?.is_disjoint(&retained),
+            "both retained publications must be consumed before the first resumed sample"
+        );
+        let request = delivered
+            .requests()
+            .into_iter()
+            .find(|request| request.function_call_output_text("wait-note").is_some())
+            .expect("worker continuation after waiting for mail");
+        let messages = request.inputs_of_type("agent_message");
+        let expected = [MAIL, LATE_MAIL, FOLLOWUP, AFTER_FOLLOWUP];
+        let received = messages
+            .iter()
+            .filter_map(|item| {
+                expected
+                    .iter()
+                    .find(|text| item.to_string().contains(**text))
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(received, expected);
+        assert_eq!(test.thread_manager.list_thread_ids().await.len(), 2);
+
+        test.thread_manager
+            .shutdown_all_threads_bounded(Duration::from_secs(5))
+            .await;
+        Ok(())
+    })
+    .await
 }

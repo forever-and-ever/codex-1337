@@ -13,6 +13,7 @@ use codex_core::FarmMode;
 use codex_core::FarmRequest;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
+use codex_core::compact::content_items_to_text;
 use codex_core::config::Config;
 use codex_core::config::ThreadStoreConfig;
 use codex_extension_api::ExtensionFuture;
@@ -1099,11 +1100,10 @@ async fn standalone_fork_retains_inherited_user_instructions(
         .items()
         .find_map(|item| match item {
             ResponseItem::Message { role, content, .. } if role == "user" => {
-                let [ContentItem::InputText { text }] = content.as_slice() else {
-                    return None;
-                };
+                // Compaction keeps the retained text and truncation notice in separate parts.
+                let text = content_items_to_text(content)?;
                 text.starts_with("You may publish the release.")
-                    .then(|| text.clone())
+                    .then_some(text)
             }
             _ => None,
         })

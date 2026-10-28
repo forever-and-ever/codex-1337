@@ -694,14 +694,70 @@ async fn thread_settings_updated_preserves_default_settings_for_plan_mode() {
     let mut session = configured_thread_session(thread_id);
     session.model = "gpt-default".to_string();
     session.reasoning_effort = Some(ReasoningEffortConfig::Low);
-    chat.handle_thread_session(session);
+    chat.handle_thread_session(session.clone());
     let _ = drain_insert_history(&mut rx);
     let default_mode = chat.current_collaboration_mode().clone();
+
+    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
+        .expect("expected Plan mask");
+    chat.set_collaboration_mask(plan_mask);
+    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::Ultra));
+    chat.set_model("obsolete-local-model");
+    chat.restore_user_message_to_composer("retained Plan draft".into());
+    let retained = chat.capture_thread_input_state();
+    // Cache-only restoration preserves local Plan settings and the draft.
+    chat.restore_bound_thread_input_state(
+        retained,
+        ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: true,
+        },
+        ThreadInputSettingsAuthority::Retained,
+    );
+    assert_eq!(chat.current_model(), "obsolete-local-model");
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::Ultra)
+    );
+    assert_eq!(chat.composer_text_with_pending(), "retained Plan draft");
+    let retained = chat.capture_thread_input_state();
+    // A fresh legacy session supplies the runtime model and effort, not mode kind.
+    chat.handle_thread_session(session);
+    chat.restore_bound_thread_input_state(
+        retained,
+        ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: true,
+        },
+        ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
+    );
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.current_model(), "gpt-default");
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::Low)
+    );
+    assert_eq!(chat.current_collaboration_mode(), &default_mode);
+    assert_eq!(chat.composer_text_with_pending(), "retained Plan draft");
+    let retained = chat.capture_thread_input_state();
 
     chat.handle_server_notification(
         ServerNotification::ThreadSettingsUpdated(thread_settings_for_test("gpt-plan", thread_id)),
         /*replay_kind*/ None,
     );
+    // A newer accepted server mode wins after restoring the same local Plan draft.
+    let accepted_mode = chat.effective_collaboration_mode();
+    chat.restore_bound_thread_input_state(
+        retained,
+        ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: true,
+        },
+        ThreadInputSettingsAuthority::Session {
+            accepted_mode: Some(accepted_mode.clone()),
+        },
+    );
+    assert_eq!(chat.effective_collaboration_mode(), accepted_mode);
+    assert_eq!(chat.composer_text_with_pending(), "retained Plan draft");
 
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
     assert_eq!(chat.current_model(), "gpt-plan");
@@ -1771,6 +1827,47 @@ async fn live_app_server_turn_completion_repairs_dropped_message_deltas() {
 }
 
 #[tokio::test]
+async fn live_app_server_interleaved_flush_repairs_mismatched_completion() {
+    for (completed_item_id, completed) in [
+        ("msg-1", "The transport kept this.\nAnd dropped this."),
+        ("msg-2", "The transport kept this."),
+    ] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+        handle_turn_started(&mut chat, "turn-1");
+        while rx.try_recv().is_ok() {}
+        handle_agent_message_delta(&mut chat, "The transport kept this.");
+        chat.flush_answer_stream_with_separator();
+        while rx.try_recv().is_ok() {}
+
+        complete_assistant_message(
+            &mut chat,
+            completed_item_id,
+            completed,
+            Some(MessagePhase::FinalAnswer),
+        );
+
+        let consolidations = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::ConsolidateAgentMessage {
+                    source,
+                    scrollback_reflow,
+                    ..
+                } => Some((source, scrollback_reflow)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            consolidations,
+            vec![(
+                completed.to_string(),
+                crate::app_event::ConsolidationScrollbackReflow::IfResizeReflowRan,
+            )]
+        );
+    }
+}
+
+#[tokio::test]
 async fn live_app_server_stream_recovery_restores_previous_status_header() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -2223,7 +2320,7 @@ async fn permission_discovery_invalidates_on_thread_settings_and_uses_updated_cw
     chat.config.explicit_permission_profile_mode = true;
     for complete in [false, true] {
         chat.open_permissions_popup();
-        let request_id = chat.permission_popup_request_id.unwrap();
+        let request_id = chat.permission_popup_request_id().unwrap();
         if complete {
             chat.on_permission_profiles_loaded(request_id, Err("disconnected".to_string()));
         }

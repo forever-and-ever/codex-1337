@@ -15,6 +15,8 @@ pub struct MitmHookConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct MitmHookMatchConfig {
+    pub schemes: Vec<String>,
+    pub ports: Vec<u16>,
     pub methods: Vec<String>,
     pub path_prefixes: Vec<String>,
     pub query: BTreeMap<String, Vec<String>>,
@@ -36,6 +38,7 @@ pub struct InjectedHeaderConfig {
     pub secret_env_var: Option<String>,
     pub secret_file: Option<String>,
     pub prefix: Option<String>,
+    pub placeholder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

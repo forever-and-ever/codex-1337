@@ -900,7 +900,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             name: ToolName::plain(name),
             payload,
         });
-        assert!(input_text(&folded, 80, false).is_empty());
+        assert_eq!(input_text(&folded, 80, false), "");
         let full = input_text(&folded, 80, true);
         assert!(full.contains(source));
         assert!(full.contains("plain result, not Python"));

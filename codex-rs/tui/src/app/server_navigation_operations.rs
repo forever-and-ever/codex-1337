@@ -150,6 +150,8 @@ enum NavigationIntent {
 }
 
 struct PickerPreparation {
+    backend_id: crate::backend_id::BackendId,
+    remote_cwd: Option<PathBuf>,
     config: Config,
     target: AppServerTarget,
     cli_kv_overrides: Vec<(String, TomlValue)>,
@@ -537,6 +539,8 @@ impl App {
         );
         // Config is captured only after earlier connection mutations have settled.
         let preparation = Box::new(PickerPreparation {
+            backend_id: server.backend_id(),
+            remote_cwd: server.remote_cwd_override().map(Path::to_path_buf),
             config: self.config.clone(),
             target: self.app_server_target.clone(),
             cli_kv_overrides: self.cli_kv_overrides.clone(),
@@ -809,6 +813,7 @@ impl App {
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
             let result = Box::pin(
                 std::panic::AssertUnwindSafe(crate::start_app_server_for_picker(
+                    preparation.backend_id,
                     &preparation.config,
                     &preparation.target,
                     preparation.cli_kv_overrides,
@@ -820,7 +825,8 @@ impl App {
             )
             .await
             .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
-            .and_then(|result| result.map_err(|error| error.to_string()));
+            .and_then(|result| result.map_err(|error| error.to_string()))
+            .map(|session| session.with_remote_cwd_override(preparation.remote_cwd));
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
                 NavigationCompletion {
                     id,

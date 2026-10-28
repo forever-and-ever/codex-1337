@@ -1,6 +1,4 @@
 use crate::function_tool::FunctionCallError;
-use codex_features::Feature;
-
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -86,18 +84,7 @@ impl WriteStdinHandler {
         };
 
         let args: WriteStdinArgs = parse_arguments(&arguments)?;
-        if turn
-            .config
-            .features
-            .get()
-            .enabled(Feature::StableEnvironmentTools)
-        {
-            resolve_tool_environment(
-                &step_context,
-                /*environment_id*/ None,
-                "unified exec is unavailable in this session",
-            )?;
-        }
+        resolve_tool_environment(&step_context.environments, /*environment_id*/ None)?;
         // A cell owns yielding. Its originating step's latched news must not turn
         // a surviving nested script into a tight loop of immediately yielded polls.
         let poll_interjection = match source {

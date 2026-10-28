@@ -5,6 +5,7 @@
 mod continuations;
 
 use super::*;
+use crate::history_cell::ForkedThreadHistoryCell;
 use crate::style::accent_color;
 
 impl ChatWidget {
@@ -60,7 +61,6 @@ impl ChatWidget {
             };
         self.invalidate_permission_discovery();
         self.permission_discovery = None;
-        self.permission_profiles_menu_opened = false;
         self.transcript.reset_copy_history();
         let history_metadata = session.message_history.unwrap_or_default();
         self.bottom_pane.set_history_metadata(
@@ -91,8 +91,7 @@ impl ChatWidget {
         self.bottom_pane
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {
-            if (previous_thread_id.is_some()
-                || (self.remote_connection.is_some() && self.config.cwd != session.cwd))
+            if (previous_thread_id.is_some() || self.config.cwd != session.cwd)
                 && self.status_account_display == Some(StatusAccountDisplay::ApiKey)
             {
                 self.refresh_account_scoped_models();
@@ -129,9 +128,6 @@ impl ChatWidget {
         self.bottom_pane
             .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
         self.set_daybreak_enabled(self.daybreak_enabled);
-        if self.daybreak_enabled && previous_thread_id != self.thread_id {
-            self.add_info_message("Daybreak is on for new turns.".into(), /*hint*/ None);
-        }
         if connector_scope_changed {
             self.invalidate_connector_scope();
         }
@@ -140,6 +136,7 @@ impl ChatWidget {
         self.config
             .permissions
             .set_workspace_roots(runtime_workspace_roots);
+        self.config.service_tier = session.service_tier.clone();
         self.effective_service_tier = session.service_tier.clone();
         if let Err(err) = self
             .config
@@ -250,6 +247,10 @@ impl ChatWidget {
             self.transcript.active_cell = None;
             self.bump_active_cell_revision();
         }
+        // Emit notices after replacing or removing the placeholder header.
+        if self.daybreak_enabled && previous_thread_id != self.thread_id {
+            self.add_info_message("Daybreak is on for new turns.".into(), /*hint*/ None);
+        }
         self.transcript.saw_copy_source_this_turn = false;
         self.app_event_tx.send(AppEvent::RefreshSkills);
         self.refresh_connector_mentions(/*force_refresh*/ false);
@@ -326,7 +327,7 @@ impl ChatWidget {
             .into()
         };
         self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-            PlainHistoryCell::new(vec![line]),
+            ForkedThreadHistoryCell(PlainHistoryCell::new(vec![line])),
         )));
     }
 

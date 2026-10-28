@@ -9,6 +9,7 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::app_server_event_targets::server_request_thread_id;
 use super::*;
+use crate::app_server_session::is_server_shutting_down_error;
 use crate::app_server_session::source_agent_path;
 use crate::app_server_session::thread_blocks_direct_input;
 
@@ -256,8 +257,8 @@ impl App {
         }
     }
 
-    /// Replaces the chat widget, carrying the editor yank and re-seeding collab metadata from the
-    /// navigation cache.
+    /// Replaces the chat widget, carrying composer preferences and the editor yank, and
+    /// re-seeding collab metadata from the navigation cache.
     ///
     /// Thread switches reconstruct the `ChatWidget`, which loses the `collab_agent_metadata` map.
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
@@ -309,6 +310,9 @@ impl App {
         ));
         chat_widget.inherit_backend_banner_state(&mut self.chat_widget);
         chat_widget.inherit_security_setup(&mut self.chat_widget);
+        chat_widget
+            .mention_usage_mut()
+            .inherit(self.chat_widget.mention_usage_mut());
         for (thread_id, entry) in self.agent_navigation.ordered_threads() {
             chat_widget.set_collab_agent_metadata(
                 thread_id,
@@ -383,6 +387,7 @@ impl App {
         thread_id: ThreadId,
         snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
+        settings_authority: crate::chatwidget::ThreadInputSettingsAuthority,
     ) -> Result<()> {
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
@@ -415,7 +420,7 @@ impl App {
         self.pending_thread_switch_resets += 1;
         self.app_event_tx
             .send(AppEvent::ResetTranscriptForThreadSwitch);
-        self.replay_thread_snapshot(snapshot, resume_restored_queue);
+        self.replay_thread_snapshot(snapshot, resume_restored_queue, settings_authority);
         if let Some(thread_id) = self.chat_widget.thread_id()
             && let Some(active) = self
                 .chat_widget
@@ -437,16 +442,13 @@ impl App {
     }
 
     pub(super) fn should_attach_live_thread_for_selection(&self, thread_id: ThreadId) -> bool {
-        if self
-            .agent_navigation
+        self.agent_navigation
             .get(&thread_id)
             .is_some_and(|entry| entry.is_closed)
-        {
-            return false;
-        }
-        self.thread_event_channels
-            .get(&thread_id)
-            .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::Live)
+            || self
+                .thread_event_channels
+                .get(&thread_id)
+                .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::Live)
     }
 
     pub(super) fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {
@@ -536,14 +538,21 @@ impl App {
         if !self.pending_startup_thread_start {
             if let Ok(started) = result {
                 let thread_id = started.session.thread_id;
-                if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
-                    tracing::warn!(
-                        thread_id = %thread_id,
-                        "failed to unsubscribe stale startup thread: {err}"
-                    );
-                }
+                self.adopt_navigation_cleanup(app_server, thread_id);
                 self.discard_thread_local_state(thread_id).await;
             }
+            return Ok(());
+        }
+
+        // A refusal proves no thread was created.
+        if let Err(error) = &result
+            && matches!(
+                error.downcast_ref::<TypedRequestError>(),
+                Some(TypedRequestError::Server { method, source })
+                    if method == "thread/start" && is_server_shutting_down_error(source)
+            )
+            && self.begin_reconnect_for_rejected_startup()
+        {
             return Ok(());
         }
 
@@ -802,6 +811,10 @@ impl App {
         app_server: &mut AppServerSession,
         target_session: SessionTarget,
     ) -> Result<AppRunControl> {
+        if let Err(error) = target_session.ensure_backend(app_server.backend_id()) {
+            self.show_agents_overview_error(Some("Unable to resume session"), error.to_string());
+            return Ok(AppRunControl::Continue);
+        }
         self.supersede_pending_navigation();
         if self.ignore_same_thread_resume(&target_session) {
             self.agents_overview

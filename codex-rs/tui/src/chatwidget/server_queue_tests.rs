@@ -60,5 +60,5 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         chat.composer_text_with_pending(),
         "Check the service after your current turn.\nunfinished prompt"
     );
-    assert!(chat.input_queue_frontend.server_messages.is_empty());
+    assert_eq!(chat.input_queue_frontend.server_messages.len(), 0);
 }

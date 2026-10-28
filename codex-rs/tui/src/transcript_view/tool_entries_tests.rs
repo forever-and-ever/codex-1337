@@ -610,7 +610,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             for cell in assistant_cells {
                 let lines =
                     crate::history_cell::output_provenance::raw_cell_lines(cell.as_ref(), 80);
-                assert!(!lines.is_empty());
+                assert_ne!(lines, [] as [HyperlinkLine; 0]);
                 for line in lines {
                     let source = line.source.as_ref().unwrap();
                     assert_eq!(source.bracket, Some(crate::warpaint::Bracket::Response));
@@ -679,7 +679,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                             })
                         })
                         .collect();
-                    assert!(!definitions.is_empty());
+                    assert_ne!(definitions, [] as [&HyperlinkLine; 0]);
                     assert!(definitions.iter().all(|line| {
                         line.line.style.bg
                             == match mode {
@@ -792,7 +792,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 cwd,
             );
             let lines = crate::history_cell::output_provenance::raw_cell_lines(&thought, 80);
-            assert!(!lines.is_empty());
+            assert_ne!(lines, [] as [HyperlinkLine; 0]);
             assert!(lines.iter().all(|line| {
                 line.source
                     .as_ref()
@@ -1357,7 +1357,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         );
         {
             assert!(!tests::text(&buffer).contains("waiting"));
-            assert!(retained[1].raw_lines().is_empty());
+            assert_eq!(retained[1].raw_lines(), [] as [Line<'_>; 0]);
             assert!(tests::text(&buffer).contains("outcome unavailable"));
         }
     }
@@ -1399,7 +1399,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             .any(|line| line.to_string() == capture)
     );
     assert_eq!(replay[1].outer_call_id(), Some("message-q"));
-    assert!(replay[2].tool_call_ids().is_empty());
+    assert_eq!(replay[2].tool_call_ids(), [] as [&str; 0]);
     assert_eq!(replay[2].outer_call_id(), None);
     let live = crate::multi_agents::sub_agent_activity_history_cell(&interrupted).unwrap();
     let scoped = crate::thread_transcript::scoped_item_cells(
@@ -1503,6 +1503,6 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         let heading = cell.display_lines(120)[0].to_string();
         assert!(heading.contains(label), "{heading}");
         assert!(!heading.contains("task completed"));
-        assert!(cell.raw_lines().is_empty());
+        assert_eq!(cell.raw_lines(), [] as [Line<'_>; 0]);
     }
 }

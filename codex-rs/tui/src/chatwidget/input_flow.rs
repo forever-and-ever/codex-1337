@@ -110,6 +110,7 @@ impl ChatWidget {
             // Inline commands still follow so their output (including usage errors) is visible.
             InputResult::Command(
                 SlashCommand::Model
+                | SlashCommand::Presets
                 | SlashCommand::Keymap
                 | SlashCommand::Memories
                 | SlashCommand::Config
@@ -222,6 +223,13 @@ impl ChatWidget {
     }
 
     pub(super) fn on_modal_or_popup_closed(&mut self) {
+        if self.apply_pending_permission_profile() {
+            return;
+        }
+        if self.cancel_pending_permission_profile_selection() {
+            return;
+        }
+        self.close_permission_menu();
         if self.input_queue_frontend.suppress_queue_autosend {
             self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
         } else {

@@ -1338,7 +1338,10 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             id: "image-a".into(),
             status: "completed".into(),
             revised_prompt: Some("A precise diagram".into()),
-            result: String::new(),
+            image: codex_app_server_protocol::GeneratedImageRef::Inline {
+                result: String::new(),
+            },
+            input_images: Vec::new(),
             transparent_background: None,
             failure: None,
             saved_path: None,

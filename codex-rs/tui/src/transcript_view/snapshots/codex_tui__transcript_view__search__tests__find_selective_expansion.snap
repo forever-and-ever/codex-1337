@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/search_tests.rs
+assertion_line: 1029
 expression: "crate::transcript_view::tests::text(&buffer)"
 ---
             Command •                  [in]             [out]

@@ -416,6 +416,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
         Some(ThreadInputState {
             pending_thread_settings: None,
             questions: None,
+            initial_user_message: None,
             composer: None,
             input_queue: InputQueueState {
                 pending_steer: input_queue::SteerInput::Pending {
@@ -430,6 +431,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
             current_collaboration_mode: chat.current_collaboration_mode.clone(),
             active_collaboration_mask: chat.active_collaboration_mask.clone(),
             plan_mode_reasoning_effort: chat.config.plan_mode_reasoning_effort.clone(),
+            status_surface_overrides: StatusSurfaceOverrides::default(),
             task_running: false,
             agent_turn_running: false,
         }),

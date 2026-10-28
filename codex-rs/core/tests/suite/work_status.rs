@@ -204,11 +204,10 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
         .expect("child model request");
     assert!(child_request.body_contains_text("Inherited request: inspect the batchable tools."));
     // Forks retain conversation, not the parent's in-flight exec or any unmatched tool output.
-    assert!(child_request.inputs_of_type("custom_tool_call").is_empty());
-    assert!(
-        child_request
-            .inputs_of_type("custom_tool_call_output")
-            .is_empty()
+    assert_eq!(child_request.inputs_of_type("custom_tool_call"), [] as [serde_json::Value; 0]);
+    assert_eq!(
+        child_request.inputs_of_type("custom_tool_call_output"),
+        [] as [serde_json::Value; 0]
     );
     responses::mount_sse_once(
         &server,

@@ -2,11 +2,22 @@
 
 use std::collections::HashSet;
 
+use codex_protocol::models::local_image_label_text;
+
 use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::KillBufferSnapshot;
+use crate::bottom_pane::MentionUsage;
 
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
+
+#[derive(Debug, Clone)]
+pub(crate) enum ThreadInputSettingsAuthority {
+    Retained,
+    Session {
+        accepted_mode: Option<CollaborationMode>,
+    },
+}
 
 impl ThreadInputState {
     pub(crate) fn restore_queued_text(&mut self, text: String) {
@@ -42,6 +53,10 @@ impl ThreadInputState {
 }
 
 impl ChatWidget {
+    pub(crate) fn mention_usage_mut(&mut self) -> &mut MentionUsage {
+        self.bottom_pane.mention_usage_mut()
+    }
+
     pub(crate) fn take_kill_buffer_snapshot(&mut self) -> KillBufferSnapshot {
         self.bottom_pane.take_kill_buffer_snapshot()
     }
@@ -209,7 +224,46 @@ impl ChatWidget {
             return;
         }
         if let Some(user_message) = self.initial_user_message.take() {
-            self.submit_user_message(user_message);
+            // Command-line input bypasses the composer, which normally records local recall.
+            let mut entry = HistoryEntry {
+                text: user_message.text.clone(),
+                text_elements: user_message.text_elements.clone(),
+                local_image_paths: user_message
+                    .local_images
+                    .iter()
+                    .map(|image| image.path.clone())
+                    .collect(),
+                remote_image_urls: user_message.remote_image_urls.clone(),
+                mention_bindings: user_message.mention_bindings.clone(),
+                pending_pastes: Vec::new(),
+            };
+            // CLI images have no composer elements. Give recalled attachments owned placeholders
+            // so the composer retains them when the user submits the recalled prompt again.
+            for index in 0..entry.local_image_paths.len() {
+                let placeholder = local_image_label_text(entry.remote_image_urls.len() + index + 1);
+                if entry
+                    .text_elements
+                    .iter()
+                    .any(|element| element.placeholder(&entry.text) == Some(placeholder.as_str()))
+                {
+                    continue;
+                }
+                if !entry.text.is_empty() {
+                    entry.text.push(' ');
+                }
+                let start = entry.text.len();
+                entry.text.push_str(&placeholder);
+                entry.text_elements.push(TextElement::new(
+                    (start..entry.text.len()).into(),
+                    Some(placeholder),
+                ));
+            }
+            if self.submit_user_message_with_history_record(
+                user_message,
+                UserMessageHistoryRecord::UserMessageText,
+            ) {
+                self.bottom_pane.record_local_user_message_history(entry);
+            }
         }
     }
 
@@ -270,6 +324,11 @@ impl ChatWidget {
         self.requeue_image_submission();
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
+        // Cancellation means idle in the program-status protocol, not a failed task.
+        if reason == TurnAbortReason::Interrupted {
+            self.status_state.program_status_after_turn =
+                crate::terminal_program_status::ProgramStatus::Idle;
+        }
         let send_pending_steer_immediately =
             self.input_queue.pending_steer.interrupt() == input_queue::SteerInterrupt::SubmitAsTurn;
         self.input_queue
@@ -407,15 +466,42 @@ impl ChatWidget {
                 .as_deref_mut()
                 .map(crate::bottom_pane::AsyncQuestions::capture),
             pending_thread_settings: None,
+            initial_user_message: self.initial_user_message.clone(),
             composer: composer.has_content().then_some(composer),
             input_queue: self.input_queue.clone(),
             reconnect_pending: false,
             current_collaboration_mode: self.current_collaboration_mode.clone(),
             active_collaboration_mask: self.active_collaboration_mask.clone(),
             plan_mode_reasoning_effort: self.config.plan_mode_reasoning_effort.clone(),
+            status_surface_overrides: self.status_surface_overrides.clone(),
             task_running: self.bottom_pane.is_task_running(),
             agent_turn_running: self.turn_lifecycle.agent_turn_running,
         })
+    }
+
+    /// Restore local input without replacing settings already accepted for this session.
+    pub(crate) fn restore_bound_thread_input_state(
+        &mut self,
+        mut input_state: Option<ThreadInputState>,
+        restore_mode: ThreadInputStateRestoreMode,
+        authority: ThreadInputSettingsAuthority,
+    ) {
+        let ThreadInputSettingsAuthority::Session { accepted_mode } = authority else {
+            self.restore_thread_input_state(input_state, restore_mode);
+            return;
+        };
+        if let Some(input) = input_state.as_mut() {
+            input.current_collaboration_mode = self.current_collaboration_mode.clone();
+            if let Some(mask) = input.active_collaboration_mask.as_mut() {
+                // Absence inherits the confirmed base instead of duplicating it.
+                mask.model = None;
+                mask.reasoning_effort = None;
+            }
+        }
+        self.restore_thread_input_state(input_state, restore_mode);
+        if let Some(mode) = accepted_mode {
+            self.set_effective_collaboration_mode(mode);
+        }
     }
 
     pub(crate) fn restore_thread_input_state(
@@ -428,9 +514,11 @@ impl ChatWidget {
             preserve_in_flight_turn && input_state.as_ref().is_some_and(|state| state.task_running);
         if let Some(input_state) = input_state {
             self.bottom_pane.restore_questions(input_state.questions);
+            self.initial_user_message = input_state.initial_user_message;
             self.current_collaboration_mode = input_state.current_collaboration_mode;
             self.active_collaboration_mask = input_state.active_collaboration_mask;
             self.config.plan_mode_reasoning_effort = input_state.plan_mode_reasoning_effort;
+            self.restore_status_surface_overrides(input_state.status_surface_overrides);
             self.turn_lifecycle.restore_running(
                 preserve_in_flight_turn && input_state.agent_turn_running,
                 Instant::now(),

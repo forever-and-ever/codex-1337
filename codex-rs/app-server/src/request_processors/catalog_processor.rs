@@ -8,6 +8,8 @@ use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use futures::StreamExt;
 
+mod account_catalog;
+
 #[derive(Clone)]
 pub(crate) struct CatalogRequestProcessor {
     pub(super) outgoing: Arc<OutgoingMessageSender>,
@@ -178,74 +180,19 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        // Every request reads current configuration. A loaded conversation lists through the
-        // catalog its own accounts select; one not yet loaded, such as a resume target, reads the
-        // active login's, as account/read does. Otherwise the startup catalog is reused only for
-        // an unchanged provider definition that is not a Claude subscription, whose catalog
-        // captures the default account.
-        let config = Arc::new(
-            self.config_manager
-                .load_with_overrides(
-                    /*request_overrides*/ None,
-                    codex_core::config::ConfigOverrides {
-                        model_provider: params.model_provider.clone(),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(|err| config_load_error(&err))?,
-        );
-        let thread = match params.thread_id.as_deref() {
-            Some(thread_id) => {
-                let thread_id = ThreadId::from_string(thread_id)
-                    .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
-                self.thread_manager.get_thread(thread_id).await.ok()
-            }
-            None => None,
-        };
-        let catalog = if let Some(catalog) = super::turn_processor::openrouter::catalog_for_list(
-            config.clone(),
-            self.config_manager.clone(),
-        )? {
-            catalog
-        } else if let Some(thread) = thread {
-            let manager = thread
-                .models_manager(&config)
-                .await
-                .map_err(invalid_request)?;
-            Arc::new(ModelCatalog::new(
-                self.config_manager.clone(),
-                config.clone(),
-                manager,
-            ))
-        } else if config.model_provider_id == self.config.model_provider_id
-            && config.model_provider == self.config.model_provider
-            && match config.model_provider.adapter {
-                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => true,
-                codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
-                | codex_model_provider_info::ModelProviderAdapter::OpenRouter => false,
-            }
-        {
-            self.model_catalog.clone()
-        } else {
-            let manager =
-                codex_core::build_models_manager(&config, self.thread_manager.auth_manager());
-            Arc::new(ModelCatalog::new(
-                self.config_manager.clone(),
-                config.clone(),
-                manager,
-            ))
-        };
-        // Gate the same provider used by the catalog, including when its model cache is warm.
-        // Resolving credentials may refresh them, but explicit host policy prevents browser login.
+        let account_catalog::AccountCatalog {
+            config,
+            models_manager,
+            auth_manager,
+        } = self.account_catalog(&params).await?;
+        // Credential refresh must use the same account and policy as catalog discovery.
         if let Some(gateway) = codex_model_provider::create_model_provider(
             config.model_provider.clone(),
-            Some(self.thread_manager.auth_manager()),
+            Some(auth_manager),
         )
         .gateway_auth_manager()
         .map_err(|error| internal_error(error.to_string()))?
         {
-            // Refreshing credentials can contact the gateway before the catalog's own check.
             self.config_manager
                 .check_thread_model_provider(&config)
                 .await
@@ -256,7 +203,7 @@ impl CatalogRequestProcessor {
                 ));
             }
         }
-        self.list_models(params, &config, &catalog)
+        self.list_models(params, config, models_manager)
             .await
             .map(|response| Some(response.into()))
     }
@@ -325,8 +272,8 @@ impl CatalogRequestProcessor {
     async fn list_models(
         &self,
         params: ModelListParams,
-        config: &Config,
-        catalog: &ModelCatalog,
+        config: Arc<Config>,
+        models_manager: codex_models_manager::manager::SharedModelsManager,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
             limit,
@@ -335,8 +282,13 @@ impl CatalogRequestProcessor {
             model_provider: _,
             thread_id: _,
         } = params;
-        let presets = catalog
-            .list_models(codex_models_manager::manager::RefreshStrategy::OnlineIfUncached)
+        let presets = self
+            .model_catalog
+            .list_models_from_snapshot(
+                Arc::clone(&config),
+                models_manager,
+                codex_models_manager::manager::RefreshStrategy::OnlineIfUncached,
+            )
             .await
             .map_err(|err| config_load_error(&err))?;
         let models = supported_models(presets, include_hidden.unwrap_or(false));
@@ -365,7 +317,7 @@ impl CatalogRequestProcessor {
                 },
             )
             .collect::<Vec<_>>();
-        super::turn_processor::openrouter::offer_provider(config, &mut providers).await?;
+        super::turn_processor::openrouter::offer_provider(&config, &mut providers).await?;
         providers.sort_by(|a, b| a.id.cmp(&b.id));
 
         if total == 0 {
@@ -738,14 +690,17 @@ impl CatalogRequestProcessor {
             } else {
                 codex_core_plugins::PluginHookLoadOutcome::default()
             };
-            let hooks = codex_hooks::list_hooks(codex_hooks::HooksConfig {
+            let hooks_config = codex_hooks::HooksConfig {
                 feature_enabled: hooks_enabled,
                 bypass_hook_trust: config.bypass_hook_trust,
                 config_layer_stack: Some(config.config_layer_stack),
                 plugin_hook_sources: plugin_hooks.hook_sources,
                 plugin_hook_load_warnings: plugin_hooks.hook_load_warnings,
                 ..Default::default()
-            });
+            };
+            let hooks = tokio::task::spawn_blocking(move || codex_hooks::list_hooks(hooks_config))
+                .await
+                .map_err(|err| internal_error(format!("hook discovery task failed: {err}")))?;
             data.push(codex_app_server_protocol::HooksListEntry {
                 cwd,
                 hooks: hooks_to_info(&hooks.hooks),

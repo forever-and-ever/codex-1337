@@ -81,6 +81,26 @@ pub(in crate::app) enum RemovalOperation {
     },
 }
 
+impl super::ServerOperations {
+    /// Presentation is derived from the admitted lifecycle operation, never a second owner.
+    pub(in crate::app) fn overview_removal(&self) -> Option<AgentsOverviewAction> {
+        let lane = self.lanes.get(&OperationLane::Connection)?;
+        std::iter::once(&lane.active)
+            .chain(&lane.waiting)
+            .find_map(|pending| {
+                let SubmissionRequest::Operation(operation) = &pending.request else {
+                    return None;
+                };
+                match &**operation {
+                    ServerOperation::Connection(ConnectionMutation::Removal(removal)) => {
+                        Some(removal.request().action)
+                    }
+                    _ => None,
+                }
+            })
+    }
+}
+
 #[derive(Debug)]
 pub(in crate::app) enum RemovalReceipt {
     Inspected {
@@ -123,15 +143,18 @@ impl RemovalOperation {
         matches!(self, Self::Inspect { .. })
     }
 
-    pub(super) fn label(&self) -> &'static str {
-        let request = match self {
+    fn request(&self) -> &RemovalRequest {
+        match self {
             Self::Inspect { request, .. } => request,
             Self::Before { target, .. }
             | Self::Mutate(target)
             | Self::Reconcile { target, .. }
             | Self::After { target, .. } => &target.request,
-        };
-        match request.action {
+        }
+    }
+
+    pub(super) fn label(&self) -> &'static str {
+        match self.request().action {
             AgentsOverviewAction::Archive => "Archiving task",
             AgentsOverviewAction::Delete => "Deleting task",
         }

@@ -13,6 +13,17 @@ impl MetricsClient {
         match *self {}
     }
 
+    pub fn counter_with_analytics_consent(
+        &self,
+        name: &str,
+        inc: i64,
+        tags: &[(&str, &str)],
+        analytics_enabled: bool,
+    ) -> Result<()> {
+        let _ = (name, inc, tags, analytics_enabled);
+        match *self {}
+    }
+
     pub fn counter_with_description(
         &self,
         name: &str,

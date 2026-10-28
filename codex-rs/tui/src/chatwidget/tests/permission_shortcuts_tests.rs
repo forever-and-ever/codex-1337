@@ -158,7 +158,13 @@ async fn permission_shortcuts_load_once_and_reuse_the_picker_catalog() {
     let request_id = assert_matches!(events.try_recv(), Ok(AppEvent::FetchPermissionProfiles { request_id, .. }) => request_id);
     assert!(chat.bottom_pane.has_active_view());
     chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(chat.permission_popup_request_id(), Some(request_id));
+    assert!(chat.begin_permission_popup());
+    assert!(chat.permission_popup_pending());
+    assert_eq!(chat.permission_popup_request_id(), Some(request_id));
+    chat.permission_popup_dispatched();
     chat.handle_key_event(KeyEvent::from(KeyCode::F(8)));
+    assert_eq!(chat.permission_popup_request_id(), Some(request_id));
     assert!(events.try_recv().is_err(), "reuse pending fetch");
     chat.on_permission_profiles_loaded(
         request_id,
@@ -183,8 +189,40 @@ async fn permission_shortcuts_load_once_and_reuse_the_picker_catalog() {
     chat.pause_for_disconnect();
     while events.try_recv().is_ok() {}
     chat.handle_key_event(KeyEvent::from(KeyCode::F(8)));
-    assert_matches!(
+    let background_request_id = assert_matches!(
         events.try_recv(),
-        Ok(AppEvent::FetchPermissionProfiles { .. })
+        Ok(AppEvent::FetchPermissionProfiles { request_id, .. }) => request_id
+    );
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    while events.try_recv().is_ok() {}
+    assert!(!chat.bottom_pane.has_active_view());
+    assert_ne!(background_request_id, request_id);
+    chat.on_permission_profiles_loaded(
+        request_id,
+        Ok(crate::permission_discovery::PermissionDiscovery::local(
+            &chat.config,
+        )),
+    );
+    assert!(
+        chat.permission_discovery.is_none(),
+        "stale discovery cannot replace the catalog"
+    );
+    chat.on_permission_profiles_loaded(
+        background_request_id,
+        Ok(crate::permission_discovery::PermissionDiscovery::local(
+            &chat.config,
+        )),
+    );
+    assert!(chat.permission_discovery.is_some());
+    assert!(
+        !chat.bottom_pane.has_active_view(),
+        "closed discovery must not reopen its picker"
+    );
+    assert!(events.try_recv().is_err());
+    chat.open_permissions_popup();
+    assert!(chat.bottom_pane.has_active_view());
+    assert!(
+        events.try_recv().is_err(),
+        "closed discovery still warms the catalog"
     );
 }

@@ -122,16 +122,16 @@ pub(crate) fn formatted_input(script: &str) -> Option<Vec<HyperlinkLine>> {
     )
 }
 
-/// One heading for a command group, retaining failures and declined execution separately.
+/// One heading for a command group, retaining nonzero exits and declined execution separately.
 pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHeader) {
     let active = cells.iter().any(|cell| cell.is_active());
-    let (failed, declined) = cells
+    let (nonzero_exit, declined) = cells
         .iter()
         .flat_map(|cell| cell.iter_calls())
         .filter_map(|call| call.output.as_ref().map(|output| output.outcome))
-        .fold((false, false), |(failed, declined), outcome| {
+        .fold((false, false), |(nonzero_exit, declined), outcome| {
             (
-                failed || matches!(outcome, CommandOutcome::Exited(code) if code != 0),
+                nonzero_exit || matches!(outcome, CommandOutcome::Exited(code) if code != 0),
                 declined || outcome == CommandOutcome::Declined,
             )
         });
@@ -142,16 +142,18 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
             ReducedMotionIndicator::StaticBullet,
         )
         .unwrap_or_else(|| "•".dim())
-    } else if failed || declined {
+    } else if declined {
         "•".red().bold()
+    } else if nonzero_exit {
+        "•".bold()
     } else {
         "•".green().bold()
     };
     let mut heading = Line::from(vec![marker, " ".into()]);
     heading.push_span("Command".bold());
     let header = ActivityHeader::at_end(&heading);
-    if failed {
-        heading.push_span(" · failed".red());
+    if nonzero_exit {
+        heading.push_span(" · nonzero exit".bold());
     }
     if declined {
         heading.push_span(" · declined".red());

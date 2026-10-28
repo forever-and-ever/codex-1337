@@ -123,7 +123,8 @@ pub(crate) async fn execute_handlers_with_metadata<T: 'static>(
         pending.push(async move {
             let result =
                 execute_handler(engine, &handler, &input_json, cwd, /*metadata*/ None).await;
-            (configured_order, parse(&handler, result, turn_id))
+            let parsed = parse(&handler, result, turn_id);
+            (configured_order, parsed)
         });
     }
 
@@ -243,6 +244,8 @@ pub(crate) fn scope_for_event(event_name: HookEventName) -> HookScope {
         | HookEventName::UserPromptSubmit
         | HookEventName::SubagentStop
         | HookEventName::Stop
+        | HookEventName::PreModelRequest
+        | HookEventName::PostModelRequest
         | HookEventName::Interrupt => HookScope::Turn,
     }
 }
@@ -254,6 +257,8 @@ pub(crate) fn hook_event_name_label(event_name: HookEventName) -> &'static str {
         HookEventName::PostToolUse => "PostToolUse",
         HookEventName::PreCompact => "PreCompact",
         HookEventName::PostCompact => "PostCompact",
+        HookEventName::PreModelRequest => "PreModelRequest",
+        HookEventName::PostModelRequest => "PostModelRequest",
         HookEventName::SessionStart => "SessionStart",
         HookEventName::SessionEnd => "SessionEnd",
         HookEventName::UserPromptSubmit => "UserPromptSubmit",
@@ -328,6 +333,7 @@ mod tests {
     ) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
+            plugin_trust: None,
             selection: crate::engine::HookSelection::fixture(
                 event_name,
                 matcher.map(|pattern| {

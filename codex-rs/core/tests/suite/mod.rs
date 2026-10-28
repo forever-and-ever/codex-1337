@@ -55,6 +55,7 @@ mod approvals;
 mod audio_truncation;
 mod auth_recovery_policy;
 mod auto_review;
+mod base_instructions;
 mod catalog_permission_messages;
 mod cli_stream;
 mod client;
@@ -253,5 +254,6 @@ mod work_status;
 mod workspace_roots;
 mod worktree_trust;
 
+mod executor_discovery_v2;
 #[path = "guardian_sender_messages_tests.rs"]
 mod guardian_sender_messages;

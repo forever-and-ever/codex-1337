@@ -44,6 +44,7 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::turn_input::AnnotatedResponseItem;
 use codex_protocol::turn_input::NotSubmittedReason;
+use codex_protocol::turn_input::ResponsesApiClientMetadataUpdate;
 use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
 use codex_protocol::turn_input::TurnInputMode;
 use codex_protocol::turn_input::TurnInputRequest;
@@ -52,7 +53,6 @@ use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::user_input::UserInput;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -430,11 +430,9 @@ async fn start_or_steer(
                 unreachable!("explicit user input can enter Plan mode");
             };
             session.observe_human_turn(human);
-            if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
-                turn_context
-                    .turn_metadata_state
-                    .set_responsesapi_client_metadata(responsesapi_client_metadata);
-            }
+            turn_context
+                .turn_metadata_state
+                .update_responsesapi_client_metadata(responsesapi_client_metadata);
             session
                 .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
                 .await;
@@ -596,11 +594,9 @@ async fn start_if_idle(
         }
     };
     session.observe_human_turn(human);
-    if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
-        turn_context
-            .turn_metadata_state
-            .set_responsesapi_client_metadata(responsesapi_client_metadata);
-    }
+    turn_context
+        .turn_metadata_state
+        .update_responsesapi_client_metadata(responsesapi_client_metadata);
     session
         .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
         .await;
@@ -712,7 +708,7 @@ async fn steer(
 }
 
 impl Session {
-    /// Called under the active-turn lock before running any task or lifecycle callback.
+    /// Called under the active-turn lock when registering a task (or a realtime transcript turn).
     pub(crate) async fn record_started_turn(
         &self,
         turn_id: &str,
@@ -736,7 +732,7 @@ impl Session {
         if active_turn.is_some() {
             return None;
         }
-        let needs_new_turn = self.input_queue.has_trigger_turn_mailbox_items().await;
+        let has_trigger_turn = self.input_queue.has_trigger_turn_mailbox_items().await;
         if !self.input_queue.has_pending_mailbox_items().await {
             return None;
         }
@@ -744,7 +740,7 @@ impl Session {
             return None;
         }
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-        let previous_options = if needs_new_turn {
+        let previous_options = if has_trigger_turn {
             Default::default()
         } else {
             self.state
@@ -834,7 +830,7 @@ impl Session {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         required_final_output_json_schema: Option<&Value>,
-        responsesapi_client_metadata: Option<HashMap<String, String>>,
+        responsesapi_client_metadata: ResponsesApiClientMetadataUpdate,
         origin: UserInputOrigin,
     ) -> Result<(String, String), NotSubmittedReason> {
         let mut active = self.active_turn.lock().await;
@@ -883,12 +879,10 @@ impl Session {
         }
         let mut pending_input = merge_additional_context_input(self, additional_context).await;
 
-        if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
-            active_task
-                .turn_context
-                .turn_metadata_state
-                .set_responsesapi_client_metadata(responsesapi_client_metadata);
-        }
+        active_task
+            .turn_context
+            .turn_metadata_state
+            .update_responsesapi_client_metadata(responsesapi_client_metadata);
 
         let input = match input {
             SubmittedTurnInput::UserInput { content, client_id } => {
@@ -990,7 +984,9 @@ async fn pending_turn_input(
                 let mut messages = SenderUserMessages {
                     receiver_turn_id: turn_id.to_owned(),
                     receiver_message_id: fragment.delivery.clone(),
-                    text: fragment.render(),
+                    text: fragment.render().into_text().unwrap_or_else(|| {
+                        unreachable!("guardian sender fragments render as text")
+                    }),
                 };
                 messages.bound();
                 Some(CodexHarnessMetadata {
@@ -1008,7 +1004,7 @@ async fn pending_turn_input(
             TurnInput::ResponseItem(item.into())
         }
         SubmittedTurnInput::InterAgentCommunication(communication) => {
-            TurnInput::InterAgentCommunication(communication)
+            TurnInput::InterAgentCommunication(communication.into())
         }
     };
     if retain

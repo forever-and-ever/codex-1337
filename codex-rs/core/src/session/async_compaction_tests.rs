@@ -88,7 +88,9 @@ async fn cancelled_turn_skips_launch_but_preserves_existing_work(trigger: Compac
             .lock()
             .await
             .async_compaction
-            .last_attempt
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.last_attempt.as_ref())
             .is_none()
     );
     assert_eq!(request.requests().len(), 0);

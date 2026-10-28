@@ -8,6 +8,8 @@
 
 use super::*;
 use crate::clipboard_copy::CopyStatus;
+use crate::clipboard_copy::worker::CopyResult;
+use crate::tui::SelectionCopy;
 use crate::tui::TuiEvent;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
@@ -93,12 +95,36 @@ impl ChatComposer {
         Some((char_count, result))
     }
 
+    pub(crate) fn copy_selection_on_release(
+        &mut self,
+        event: MouseEvent,
+        selection_copy: SelectionCopy,
+        copy: impl FnOnce(&str, SelectionCopy) -> (CopyResult, Option<std::sync::Arc<()>>),
+    ) -> Option<(usize, Option<CopyResult>)> {
+        if event.kind != MouseEventKind::Up(MouseButton::Left) {
+            return None;
+        }
+        let range = self.draft.textarea.mouse_selection_range()?;
+        let text = &self.draft.textarea.text()[range];
+        let char_count = text.chars().count();
+        let (result, primary_owner) = copy(text, selection_copy);
+        self.draft.textarea.retain_primary(primary_owner);
+        if selection_copy.copies_clipboard() {
+            return Some((char_count, Some(result)));
+        }
+        Some((char_count, None))
+    }
+
     pub(crate) fn clear_mouse_selection(&mut self) {
         self.draft.textarea.set_cursor(self.draft.textarea.cursor());
     }
 
     pub(crate) fn end_mouse_drag(&mut self) {
         self.draft.textarea.end_mouse_drag();
+    }
+
+    pub(crate) fn cancel_primary(&mut self) {
+        self.draft.textarea.cancel_primary();
     }
 
     pub(crate) fn prepare_mouse(&mut self, event: MouseEvent) -> bool {

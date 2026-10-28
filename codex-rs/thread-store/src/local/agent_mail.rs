@@ -74,10 +74,14 @@ impl LocalThreadStore {
         ids: &[ResponseItemId],
     ) -> ThreadStoreResult<HashMap<ResponseItemId, ResponseItemEnvelope>> {
         let ids: HashSet<_> = ids.iter().cloned().collect();
-        tokio::task::spawn_blocking(move || {
+        let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
+        let result = tokio::task::spawn_blocking(move || {
             let mut found = HashMap::new();
             for segment in lineage.segments() {
-                let mut reader = codex_rollout::open_rollout_seekable_reader(&segment.rollout_path)
+                let mut reader =
+                    codex_rollout::open_rollout_seekable_reader(&segment.rollout_path, || {
+                        stop.is_closed()
+                    })
                     .map_err(mail_history_error)?;
                 let end = match segment.end {
                     Some(end) => end.end_byte_offset,
@@ -157,7 +161,9 @@ impl LocalThreadStore {
             Ok(found)
         })
         .await
-        .map_err(mail_history_error)?
+        .map_err(mail_history_error)?;
+        drop(keep_running);
+        result
     }
 
     /// The caller owns the unloaded recipient's lifecycle and writer locks through cutover.

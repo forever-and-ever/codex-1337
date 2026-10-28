@@ -444,6 +444,7 @@ impl App {
         root_thread_id: ThreadId,
         started: (Config, crate::app_server_session::AppServerStartedThread),
     ) -> color_eyre::Result<AppRunControl> {
+        let has_authoritative_mode = started.1.session.collaboration_mode.is_some();
         if self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
         }
@@ -651,11 +652,14 @@ impl App {
                 .active_turn_id_for_thread(root_thread_id)
                 .await
                 .is_some();
-            self.chat_widget.restore_thread_input_state(
+            let accepted_mode =
+                has_authoritative_mode.then(|| self.chat_widget.effective_collaboration_mode());
+            self.chat_widget.restore_bound_thread_input_state(
                 Some(input_state),
                 ThreadInputStateRestoreMode {
                     preserve_in_flight_turn,
                 },
+                crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode },
             );
 
             if !preserve_in_flight_turn {
@@ -705,7 +709,6 @@ impl App {
             .as_ref()
             .filter(|_| remote)
             .map(AbsolutePathBuf::to_path_buf);
-        let preserve_service_tier = remote || cwd.is_none();
         let local_cwd = if remote {
             self.config.cwd.to_path_buf()
         } else {
@@ -714,7 +717,7 @@ impl App {
                 |cwd| cwd.to_path_buf(),
             )
         };
-        let mut config = match StartupDraftPump::run_with_optional_draft(
+        let config = match StartupDraftPump::run_with_optional_draft(
             Some(&mut *startup_draft),
             tui,
             self.rebuild_config_for_cwd(local_cwd),
@@ -727,9 +730,6 @@ impl App {
                 return None;
             }
         };
-        if preserve_service_tier {
-            config.service_tier = self.chat_widget.configured_service_tier();
-        }
         self.prepare_pumped_dashboard_trust(
             tui,
             app_server,
@@ -940,7 +940,7 @@ impl App {
 
 #[cfg(test)]
 #[path = "agents_overview_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 fn agents_overview_group(
     thread: &Thread,

@@ -46,6 +46,34 @@ impl App {
         false
     }
 
+    /// Publish a completed composer selection with the transcript/footer copy policy.
+    fn handle_composer_selection_release(
+        &mut self,
+        tui: &mut tui::Tui,
+        event: crossterm::event::MouseEvent,
+    ) -> bool {
+        if !self.mouse_paste_environment.primary {
+            return false;
+        }
+        let selection_copy = crate::tui::SelectionCopy::OnSelect {
+            clear_selection: false,
+        };
+        let Some(_) = self.chat_widget.copy_composer_selection_on_release(
+            event,
+            selection_copy,
+            |text, selection_copy| {
+                tui.copy_selection(
+                    text,
+                    crate::clipboard_copy::CopyFormat::PlainText,
+                    selection_copy,
+                )
+            },
+        ) else {
+            return false;
+        };
+        true
+    }
+
     fn sync_owned_transcript(&mut self, width: u16) -> bool {
         self.sync_rewind();
         let chat_widget = &self.chat_widget;
@@ -571,6 +599,7 @@ impl App {
                 return Ok(true);
             }
             if composer_ready && self.chat_widget.handle_composer_mouse(*mouse) {
+                self.handle_composer_selection_release(tui, *mouse);
                 if !matches!(
                     mouse.kind,
                     crossterm::event::MouseEventKind::ScrollUp

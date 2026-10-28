@@ -44,6 +44,7 @@ impl App {
                     tui,
                     server,
                     SessionTarget {
+                        backend_id: server.backend_id(),
                         path: self
                             .primary_session_configured
                             .as_ref()
@@ -124,6 +125,7 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
         let target = SessionTarget {
+            backend_id: server.backend_id(),
             path: thread.path.clone(),
             thread_id,
             cwd: Some(thread.cwd.to_path_buf()),
@@ -262,6 +264,7 @@ impl App {
             unreachable!("overview commit requires its captured settings policy");
         };
         let thread_id = started.session.thread_id;
+        let has_authoritative_mode = started.session.collaboration_mode.is_some();
         let unloaded = matches!(thread.status, api::ThreadStatus::NotLoaded);
         let restored_blank = matches!(presentation, ResumePresentation::CachedBlank);
         let read_only = matches!(presentation, ResumePresentation::ReadOnly(_));
@@ -389,11 +392,19 @@ impl App {
                 .flatten();
             let preserve_in_flight_turn =
                 !read_only && self.active_turn_id_for_thread(thread_id).await.is_some();
-            self.chat_widget.restore_thread_input_state(
+            let accepted_mode =
+                has_authoritative_mode.then(|| self.chat_widget.effective_collaboration_mode());
+            let authority = if restored_blank {
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained
+            } else {
+                crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode }
+            };
+            self.chat_widget.restore_bound_thread_input_state(
                 Some(input),
                 ThreadInputStateRestoreMode {
                     preserve_in_flight_turn,
                 },
+                authority,
             );
             if let Some(settings) = pending_settings {
                 self.chat_widget.on_thread_settings_updated(settings);

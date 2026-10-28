@@ -2,6 +2,7 @@
 use super::*;
 use crate::bottom_pane::RestrictedInputMode;
 use codex_protocol::items::AsyncUserInputQuestion;
+use codex_protocol_test_support::ContentItemTestExt;
 use pretty_assertions::assert_eq;
 
 fn questions() -> Vec<AsyncUserInputQuestion> {
@@ -181,7 +182,11 @@ async fn pending_question_reply_coalesces_follow_up_inside_the_answer() {
         );
         answer.push('\n');
         answer.push_str(suffix);
-        let expected = AnsweredQuestion::new(&id, "Which terminal?", &answer).render();
+        let codex_protocol::models::ContentItem::InputText { text: expected } =
+            AnsweredQuestion::new(&id, "Which terminal?", &answer).render()
+        else {
+            panic!("question reply renders a text envelope")
+        };
         let replacement = pending_steer_replacement.unwrap();
         assert_eq!(replacement.client_user_message_id, client_user_message_id);
         let [
@@ -267,7 +272,9 @@ async fn async_question_answers_preserve_ambiguous_skill_selection_and_dismiss_r
         items,
         vec![
             UserInput::Text {
-                text: AnsweredQuestion::new(&id, "Which way?", "Use $route").render(),
+                text: AnsweredQuestion::new(&id, "Which way?", "Use $route")
+                    .render()
+                    .expect_text(),
                 text_elements: Vec::new(),
             },
             UserInput::Skill {
@@ -317,7 +324,11 @@ async fn ordinary_follow_up_preserves_questions_and_drafts_through_reconnect() {
         let (mut restored, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
         restored.thread_id = chat.thread_id;
         restored.add_async_questions("old", &questions());
-        restored.restore_reconnected_input(saved, &[]);
+        restored.restore_reconnected_input(
+            saved,
+            &[],
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         assert_eq!(question_count(&restored), 2);
         restored.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
         assert!(render_bottom_popup(&restored, /*width*/ 80).contains("unfinished answer"));
@@ -538,7 +549,11 @@ async fn reconnect_preserves_buffered_question_answer_source() {
 
     let (mut restored, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     restored.thread_id = Some(ThreadId::new());
-    restored.restore_reconnected_input(state, &[]);
+    restored.restore_reconnected_input(
+        state,
+        &[],
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+    );
     assert_eq!(
         restored
             .input_queue
@@ -976,7 +991,11 @@ async fn question_drafts_survive_navigation_and_snapshot_replay() {
         Some(ReplayKind::ThreadSnapshot),
     );
     assert_eq!(question_count(&chat), 1);
-    chat.restore_reconnected_input(saved, &[]);
+    chat.restore_reconnected_input(
+        saved,
+        &[],
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+    );
     assert!(render_bottom_popup(&chat, /*width*/ 80).contains("second draft"));
     chat.pause_unavailable_thread();
     chat.handle_question_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL));
@@ -1213,7 +1232,9 @@ async fn distinct_async_question_replies_with_identical_text_both_render() {
     drain_insert_history(&mut rx);
     for id in ["first", "first", "second"] {
         let items = [UserInput::Text {
-            text: AnsweredQuestion::new(id, "Continue?", "Yes").render(),
+            text: AnsweredQuestion::new(id, "Continue?", "Yes")
+                .render()
+                .expect_text(),
             text_elements: Vec::new(),
         }];
         chat.on_committed_user_message(

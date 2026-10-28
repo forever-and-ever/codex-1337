@@ -1,5 +1,7 @@
 use super::*;
 use crate::SortDirection;
+use crate::sqlite::SqlitePoolWriteExt;
+use crate::sqlite::SqliteWriteQueryExt;
 use codex_protocol::SanitizedGitUrl;
 use codex_protocol::protocol::SessionSource;
 use std::sync::atomic::AtomicI64;
@@ -91,7 +93,7 @@ WHERE id = ?
         )
         .bind(legacy_name.map(str::trim).filter(|name| !name.is_empty()))
         .bind(thread_id.to_string())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -121,7 +123,7 @@ WHERE id = ? AND preview = ''
         )
         .bind(preview)
         .bind(thread_id.to_string())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -148,7 +150,7 @@ ON CONFLICT(child_thread_id) DO UPDATE SET
         .bind(parent_thread_id.to_string())
         .bind(child_thread_id.to_string())
         .bind(status.as_ref())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(())
     }
@@ -162,7 +164,7 @@ ON CONFLICT(child_thread_id) DO UPDATE SET
         sqlx::query("UPDATE thread_spawn_edges SET status = ? WHERE child_thread_id = ?")
             .bind(status.as_ref())
             .bind(child_thread_id.to_string())
-            .execute(self.pool.as_ref())
+            .execute_with_busy_retry(self.pool.as_ref())
             .await?;
         Ok(())
     }
@@ -359,7 +361,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
         .bind(parent_thread_id.to_string())
         .bind(child_thread_id.to_string())
         .bind(crate::DirectionalThreadSpawnEdgeStatus::Open.as_ref())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(())
     }
@@ -415,7 +417,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
                 .bind(replacement.display().to_string())
                 .bind(id.to_string())
                 .bind(expected.display().to_string())
-                .execute(self.pool.as_ref())
+                .execute_with_busy_retry(self.pool.as_ref())
                 .await?;
         Ok(result.rows_affected() == 1)
     }
@@ -717,7 +719,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.daybreak_enabled)
         .bind(metadata.comms.as_str())
         .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
             .await?;
@@ -733,7 +735,7 @@ ON CONFLICT(id) DO NOTHING
         let result = sqlx::query("UPDATE threads SET daybreak_enabled = ? WHERE id = ?")
             .bind(daybreak_enabled)
             .bind(thread_id.to_string())
-            .execute(self.pool.as_ref())
+            .execute_with_busy_retry(self.pool.as_ref())
             .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -746,7 +748,7 @@ ON CONFLICT(id) DO NOTHING
         let result = sqlx::query("UPDATE threads SET memory_mode = ? WHERE id = ?")
             .bind(memory_mode)
             .bind(thread_id.to_string())
-            .execute(self.pool.as_ref())
+            .execute_with_busy_retry(self.pool.as_ref())
             .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -759,7 +761,7 @@ ON CONFLICT(id) DO NOTHING
         let result = sqlx::query("UPDATE threads SET title = ? WHERE id = ?")
             .bind(title)
             .bind(thread_id.to_string())
-            .execute(self.pool.as_ref())
+            .execute_with_busy_retry(self.pool.as_ref())
             .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -776,7 +778,7 @@ ON CONFLICT(id) DO NOTHING
         let result = sqlx::query("UPDATE threads SET name = ? WHERE id = ?")
             .bind(name.map(str::trim).filter(|name| !name.is_empty()))
             .bind(thread_id.to_string())
-            .execute(self.pool.as_ref())
+            .execute_with_busy_retry(self.pool.as_ref())
             .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -792,7 +794,7 @@ ON CONFLICT(id) DO NOTHING
                 .bind(datetime_to_epoch_seconds(updated_at))
                 .bind(datetime_to_epoch_millis(updated_at))
                 .bind(thread_id.to_string())
-                .execute(self.pool.as_ref())
+                .execute_with_busy_retry(self.pool.as_ref())
                 .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -818,7 +820,7 @@ WHERE id = ?
         .bind(recency_at_millis)
         .bind(recency_at_millis)
         .bind(thread_id.to_string())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -907,7 +909,7 @@ WHERE id = ?
         .bind(git_origin_url.is_some())
         .bind(git_origin_url.flatten().map(SanitizedGitUrl::as_str))
         .bind(thread_id.to_string())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(result.rows_affected() > 0)
     }
@@ -1061,7 +1063,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.daybreak_enabled)
         .bind(metadata.comms.as_str())
         .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
             .await?;
@@ -1169,7 +1171,7 @@ ON CONFLICT(id) DO UPDATE SET
         for (thread_id, thread_id_string) in thread_ids.iter().zip(&thread_id_strings) {
             sqlx::query("DELETE FROM logs WHERE thread_id = ?")
                 .bind(thread_id_string)
-                .execute(self.logs_pool.as_ref())
+                .execute_with_busy_retry(self.logs_pool.as_ref())
                 .await?;
             self.thread_queue
                 .delete_thread_agent_mail(*thread_id)
@@ -1179,7 +1181,7 @@ ON CONFLICT(id) DO UPDATE SET
             self.thread_goals.delete_thread_goal(*thread_id).await?;
         }
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_immediate().await?;
         for thread_id_string in &thread_id_strings {
             sqlx::query("DELETE FROM thread_dynamic_tools WHERE thread_id = ?")
                 .bind(thread_id_string)
@@ -2828,7 +2830,7 @@ mod tests {
             metadata.created_at,
             SessionSource::Cli,
         );
-        let items = vec![RolloutItem::SessionMeta(SessionMetaLine {
+        let items = vec![RolloutItem::SessionMeta(Box::new(SessionMetaLine {
             meta: SessionMeta {
                 creator_user_id: None,
                 creator_account_id: None,
@@ -2859,7 +2861,7 @@ mod tests {
                 context_window: None,
             },
             git: None,
-        })];
+        }))];
 
         runtime
             .apply_rollout_items(
@@ -2902,7 +2904,7 @@ mod tests {
             metadata.created_at,
             SessionSource::Cli,
         );
-        let items = vec![RolloutItem::SessionMeta(SessionMetaLine {
+        let items = vec![RolloutItem::SessionMeta(Box::new(SessionMetaLine {
             meta: SessionMeta {
                 creator_user_id: None,
                 creator_account_id: None,
@@ -2940,7 +2942,7 @@ mod tests {
                         .expect("valid git remote URL"),
                 ),
             }),
-        })];
+        }))];
 
         runtime
             .apply_rollout_items(

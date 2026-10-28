@@ -30,8 +30,13 @@ struct CompactionAttempt {
 
 #[derive(Default)]
 pub(crate) struct AsyncCompactionState {
+    // Disabled sessions never allocate task tracking or a cancellation tree.
+    runtime: Option<AsyncCompactionRuntime>,
+}
+
+#[derive(Default)]
+struct AsyncCompactionRuntime {
     last_attempt: Option<CompactionAttempt>,
-    // Keep prepared request state off the turn stack while checkpoints await adoption.
     result: Option<oneshot::Receiver<Box<BackgroundCompactionCandidate>>>,
     tasks: TaskTracker,
     shutdown_cancellation: CancellationToken,
@@ -92,7 +97,12 @@ pub(super) async fn maybe_start(
     // Stop blocks new launches; already-running compaction remains session-owned.
     if turn_cancellation.is_cancelled()
         || state.shutting_down
-        || state.async_compaction.last_attempt.as_ref() == Some(&attempt)
+        || state
+            .async_compaction
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.last_attempt.as_ref())
+            == Some(&attempt)
         || state.history.annotated_items().is_empty()
         || sess.services.model_client.auth_owner_generation() != auth_owner_generation
     {
@@ -115,9 +125,13 @@ pub(super) async fn maybe_start(
     let task_step = Arc::clone(step_context);
     let cutoff_world_state = Arc::clone(world_state);
     let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
-    state.async_compaction.last_attempt = Some(attempt);
+    let runtime = state
+        .async_compaction
+        .runtime
+        .get_or_insert_with(AsyncCompactionRuntime::default);
+    runtime.last_attempt = Some(attempt);
     let (send, result) = oneshot::channel();
-    state.async_compaction.result = Some(result);
+    runtime.result = Some(result);
     let task = async move {
         match run_background_compaction(
             &task_session,
@@ -136,10 +150,7 @@ pub(super) async fn maybe_start(
             }
         }
     };
-    state
-        .async_compaction
-        .tasks
-        .spawn(storage_originator.scope(task));
+    runtime.tasks.spawn(storage_originator.scope(task));
 }
 
 pub(super) async fn take_ready(
@@ -150,8 +161,17 @@ pub(super) async fn take_ready(
         return None;
     }
     let mut state = sess.state.lock().await;
-    let candidate = state.async_compaction.result.as_mut()?.try_recv().ok()?;
-    state.async_compaction.result = None;
+    let runtime = state.async_compaction.runtime.as_mut()?;
+    let mut result = runtime.result.take()?;
+    let candidate = match result.try_recv() {
+        Ok(candidate) => candidate,
+        Err(oneshot::error::TryRecvError::Empty) => {
+            runtime.result = Some(result);
+            return None;
+        }
+        // try_recv consumes a closed receiver; awaiting it later would panic.
+        Err(oneshot::error::TryRecvError::Closed) => return None,
+    };
     (candidate.prefix.generation == state.history.history_version()).then_some(candidate)
 }
 
@@ -164,9 +184,14 @@ pub(crate) async fn wait_for_pending(
     }
     let result = {
         let mut state = sess.state.lock().await;
-        let result = state.async_compaction.result.take()?;
+        let result = state.async_compaction.runtime.as_mut()?.result.take()?;
         let model = &step_context.settings.model_info;
-        let attempt = state.async_compaction.last_attempt.as_ref()?;
+        let attempt = state
+            .async_compaction
+            .runtime
+            .as_ref()?
+            .last_attempt
+            .as_ref()?;
         if attempt.history_version != state.history.history_version()
             || attempt.model_slug != model.slug
             || attempt.compaction_hash != model.comp_hash
@@ -180,19 +205,24 @@ pub(crate) async fn wait_for_pending(
     result.await.ok()
 }
 
-pub(crate) async fn shutdown_cancellation(sess: &Session) -> CancellationToken {
-    sess.state
-        .lock()
-        .await
-        .async_compaction
-        .shutdown_cancellation
-        .clone()
+pub(crate) async fn shutdown_cancellation(sess: &Session) -> Option<CancellationToken> {
+    let state = sess.state.lock().await;
+    Some(
+        state
+            .async_compaction
+            .runtime
+            .as_ref()?
+            .shutdown_cancellation
+            .clone(),
+    )
 }
 
 pub(super) async fn shutdown(sess: &Session) {
     let tasks = {
         let mut state = sess.state.lock().await;
-        let async_compaction = &mut state.async_compaction;
+        let Some(async_compaction) = &mut state.async_compaction.runtime else {
+            return;
+        };
         async_compaction.result = None;
         async_compaction.tasks.close();
         async_compaction.shutdown_cancellation.cancel();
@@ -204,7 +234,13 @@ pub(super) async fn shutdown(sess: &Session) {
 
 /// Test barrier: callers must gate foreground work so it cannot launch another attempt.
 pub(crate) async fn wait_for_background_compaction_for_test(sess: &Session) {
-    let tasks = sess.state.lock().await.async_compaction.tasks.clone();
+    let tasks = {
+        let state = sess.state.lock().await;
+        let Some(runtime) = &state.async_compaction.runtime else {
+            return;
+        };
+        runtime.tasks.clone()
+    };
     // Closing only enables waiting; it neither cancels tasks nor prevents future launches.
     tasks.close();
     tasks.wait().await;

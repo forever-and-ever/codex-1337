@@ -15,7 +15,10 @@ use tokio::net::TcpListener;
 #[tokio::test]
 async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<()> {
     let (mut app, mut events, _commands) = make_test_app_with_channels().await;
-    app.config.thread_unload_delay = Duration::ZERO;
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        "thread_unload_delay_secs = 0\n",
+    )?;
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let started = server.start_thread(&app.config).await?;
     let thread_id = started.session.thread_id;
@@ -38,10 +41,22 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
     );
 
     // A genuine close must still exit.
-    server.thread_unsubscribe(thread_id).await?;
+    server
+        .request_handle()
+        .request_typed::<codex_app_server_protocol::ThreadUnsubscribeResponse>(
+            ClientRequest::ThreadUnsubscribe {
+                request_id: codex_app_server_protocol::RequestId::String(
+                    Uuid::new_v4().to_string(),
+                ),
+                params: codex_app_server_protocol::ThreadUnsubscribeParams {
+                    thread_id: thread_id.to_string(),
+                },
+            },
+        )
+        .await?;
     let closed = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
         while let Some(event) = server.next_event().await {
-            if matches!(&event,
+            if matches!(&event.event,
                 AppServerEvent::ServerNotification(notification)
                     if matches!(notification.as_ref(), ServerNotification::ThreadClosed(closed)
                         if closed.thread_id == thread_id.to_string()))
@@ -52,7 +67,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
         panic!("server event stream ended before the thread closed");
     })
     .await?;
-    app.handle_app_server_event(&server, closed).await;
+    app.handle_backend_event(&server, closed).await;
     finish_close_verification(&mut app, &mut tui, &mut server, &mut events).await?;
     app.drain_active_thread_events(&mut tui).await?;
     assert!(
@@ -123,6 +138,7 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
             .await
         });
         let mut session = AppServerSession::new(
+            crate::backend_id::BackendId::new(),
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Remote,
         );

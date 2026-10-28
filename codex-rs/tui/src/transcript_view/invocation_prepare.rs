@@ -105,7 +105,7 @@ mod tests {
         );
         view.cache.clear();
         assert_eq!(text(&render(&mut view, &cells, 80, 12)), text(&original));
-        assert!(text(&render(&mut view, &cells, 40, 12)).trim().is_empty());
+        assert_eq!(text(&render(&mut view, &cells, 40, 12)).trim(), "");
         let mut live = TranscriptView::default();
         live.enable_background_preparation(frames);
         let key = |revision| {
@@ -125,7 +125,7 @@ mod tests {
         live.sync_owned_live_tail(80, key(2), false, || {
             panic!("an in-flight revision must finish before it is replaced")
         });
-        assert!(text(&render(&mut live, &[], 80, 12)).trim().is_empty());
+        assert_eq!(text(&render(&mut live, &[], 80, 12)).trim(), "");
         drop(releases);
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {

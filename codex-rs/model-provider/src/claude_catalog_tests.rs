@@ -52,7 +52,7 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     );
     let manager = provider.models_manager_without_cache(/*config_model_catalog*/ None);
     manager.set_api_key_model_discovery_enabled(true);
-    assert!(manager.try_list_models().unwrap().is_empty());
+    assert_eq!(manager.try_list_models().unwrap(), []);
     // A resumed model must not change tool protocol while catalog discovery is unavailable.
     let missing_slug = "claude-haiku-4-5-20251001";
     let mut missing = codex_models_manager::model_info::model_info_from_slug(missing_slug);

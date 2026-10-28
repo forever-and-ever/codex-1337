@@ -1,18 +1,15 @@
+//! Renders prepared step catalogs without performing discovery or changing tool readiness.
+
 use std::sync::Arc;
 
 use codex_extension_api::ExtensionEventSink;
 use codex_extension_api::ExtensionWarning;
-use codex_extension_api::SelectedPluginSnapshot;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::HostSkillsSnapshot;
-use crate::SkillsExtensionConfig;
 use crate::catalog::SkillCatalog;
-use crate::provider::SkillListQuery;
-use crate::provider::attribute_executor_plugins;
 use crate::render::AvailableSkillsRender;
 use crate::render::PreparedSkillCatalog;
 use crate::render::RenderedSkillCatalogs;
@@ -30,13 +27,11 @@ use crate::roster::Muster;
 use crate::roster::cloud_section;
 use crate::roster::executor_section;
 use crate::roster::host_section;
-use crate::sources::SkillProviders;
 use crate::state::EmittedCatalogBudgetWarnings;
-use crate::state::ExecutorSkillsStepState;
 use crate::state::HostSkillsCatalogInWorldState;
-use crate::state::HostSkillsStepState;
-use crate::state::SkillsSessionState;
-use crate::state::SkillsThreadState;
+use crate::step_state::CatalogStatus;
+use crate::step_state::SkillToolAuthoritySelector;
+use crate::step_state::SkillsStepState;
 
 // Start with one quarter reserved for filesystem skills, before their inventory is known.
 const FILESYSTEM_BUDGET_DIVISOR: usize = 4;
@@ -71,13 +66,6 @@ impl CatalogKind {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum CatalogStatus {
-    Unavailable,
-    Disabled,
-    Enabled,
-}
-
 struct CatalogContribution {
     catalog: SkillCatalog,
     status: CatalogStatus,
@@ -92,42 +80,40 @@ impl CatalogContribution {
     }
 }
 
-pub(crate) struct CatalogContributions {
+struct CatalogContributions {
     executor: CatalogContribution,
     cloud: CatalogContribution,
     host: CatalogContribution,
 }
 
-pub(crate) struct RenderedCatalogContribution {
+struct RenderedCatalogContribution {
     kind: CatalogKind,
-    pub(crate) status: CatalogStatus,
+    status: CatalogStatus,
     budget: SkillMetadataBudget,
     allocation: CatalogBudgetAllocation,
     rendered: Option<AvailableSkillsRender>,
     muster: Muster,
 }
 
-pub(crate) struct CatalogContext<'a> {
-    providers: &'a SkillProviders,
+struct CatalogRenderingContext<'a> {
     input: WorldStateContributionInput<'a>,
-    thread_state: Arc<SkillsThreadState>,
-    config: SkillsExtensionConfig,
+    step_state: Arc<SkillsStepState>,
     metadata_budget: SkillMetadataBudget,
+    render_policy: SkillCatalogRenderPolicy,
     include_usage: bool,
     warning_emitter: CatalogWarningEmitter,
 }
 
-impl<'a> CatalogContext<'a> {
-    pub(crate) fn new(
-        providers: &'a SkillProviders,
+impl<'a> CatalogRenderingContext<'a> {
+    fn new(
         event_sink: Arc<dyn ExtensionEventSink>,
         input: WorldStateContributionInput<'a>,
     ) -> Option<Self> {
-        let thread_state = input.thread_store.get::<SkillsThreadState>()?;
-        let config = thread_state.config();
+        let step_state = input.step_store.get::<SkillsStepState>()?;
         let include_usage = input.model_info.include_skills_usage_instructions;
         let context_window = input.model_info.resolved_context_window();
-        let metadata_budget = skill_metadata_budget(context_window, config.max_context_tokens);
+        let metadata_budget =
+            skill_metadata_budget(context_window, step_state.config.max_context_tokens);
         let emitted_warnings = input
             .turn_store
             .get_or_init(EmittedCatalogBudgetWarnings::default);
@@ -143,135 +129,57 @@ impl<'a> CatalogContext<'a> {
             }
         });
 
+        let render_policy = if step_state.discovery_v2 {
+            SkillCatalogRenderPolicy::DiscoveryV2
+        } else {
+            SkillCatalogRenderPolicy::ExtensionCompatible
+        };
         Some(Self {
-            providers,
             input,
-            thread_state,
-            config,
+            step_state,
             metadata_budget,
+            render_policy,
             include_usage,
             warning_emitter,
         })
     }
 
-    pub(crate) async fn discover_catalogs(&self) -> CatalogContributions {
-        let cloud_enabled =
-            self.thread_state.cloud_skill_enabled() && self.providers.has_cloud_provider();
-        let query = SkillListQuery {
-            turn_id: self.input.turn_id.to_string(),
-            executor_roots: self.input.ready_selected_capability_roots.to_vec(),
-            resolved_executor_roots: Vec::new(),
-            host_snapshot: None,
-            include_host_skills: false,
-            include_bundled_skills: self.config.bundled_skills_enabled,
-            include_cloud_skills: cloud_enabled,
-            mcp_resources: self
-                .input
-                .session_store
-                .get::<SkillsSessionState>()
-                .and_then(|state| state.mcp_resources.clone()),
-            executor_capability_discovery: self.input.executor_capability_discovery.cloned(),
+    fn render_world_state_catalogs(&self) -> [RenderedCatalogContribution; 3] {
+        let catalogs = CatalogContributions {
+            executor: CatalogContribution {
+                catalog: self
+                    .step_state
+                    .catalog
+                    .select_from_catalog(SkillToolAuthoritySelector::Executor),
+                status: CatalogStatus::Enabled,
+            },
+            cloud: CatalogContribution {
+                catalog: self
+                    .step_state
+                    .catalog
+                    .select_from_catalog(SkillToolAuthoritySelector::Cloud),
+                status: self.step_state.cloud_status,
+            },
+            host: self.step_state.host_catalog.as_ref().map_or_else(
+                CatalogContribution::unavailable,
+                |catalog| CatalogContribution {
+                    catalog: catalog.clone(),
+                    status: CatalogStatus::Enabled,
+                },
+            ),
         };
-
-        let cloud = self.cloud_catalog_contribution(&query);
-        let (executor, host) = futures::join!(
-            self.discover_executor_catalog(query),
-            self.discover_host_catalog(),
-        );
-
-        CatalogContributions {
-            executor,
-            cloud,
-            host,
-        }
-    }
-
-    async fn discover_executor_catalog(&self, query: SkillListQuery) -> CatalogContribution {
-        let mut catalog = self
-            .thread_state
-            .refresh_executor_catalog(self.providers, query)
-            .await;
-        if let Some(selected_plugins) = self.input.step_store.get::<SelectedPluginSnapshot>() {
-            attribute_executor_plugins(&mut catalog, &selected_plugins);
-        }
-        self.input
-            .turn_store
-            .insert(ExecutorSkillsStepState(catalog.clone()));
-
-        CatalogContribution {
-            catalog,
-            status: CatalogStatus::Enabled,
-        }
-    }
-
-    fn cloud_catalog_contribution(&self, query: &SkillListQuery) -> CatalogContribution {
-        if !self.providers.has_cloud_provider() {
-            return CatalogContribution::unavailable();
-        }
-
-        if !query.include_cloud_skills {
-            return CatalogContribution {
-                catalog: SkillCatalog::default(),
-                status: CatalogStatus::Disabled,
-            };
-        }
-
-        CatalogContribution {
-            catalog: self.thread_state.cloud_catalog_snapshot(),
-            status: CatalogStatus::Enabled,
-        }
-    }
-
-    async fn discover_host_catalog(&self) -> CatalogContribution {
-        let Some(host_snapshot) = self
-            .input
-            .turn_store
-            .get::<HostSkillsSnapshot>()
-            .filter(|_| self.providers.has_host_provider())
-        else {
-            return CatalogContribution::unavailable();
-        };
-
-        let needs_catalog =
-            self.config.include_instructions || self.config.shadow_selection_enabled;
-        let catalog = if needs_catalog {
-            let catalog = self
-                .providers
-                .list_host_for_turn(SkillListQuery {
-                    turn_id: self.input.turn_id.to_string(),
-                    executor_roots: Vec::new(),
-                    resolved_executor_roots: Vec::new(),
-                    host_snapshot: Some(host_snapshot),
-                    include_host_skills: true,
-                    include_bundled_skills: false,
-                    include_cloud_skills: false,
-                    mcp_resources: None,
-                    executor_capability_discovery: None,
-                })
-                .await;
-            self.input
-                .turn_store
-                .insert(HostSkillsStepState(catalog.clone()));
-            catalog
-        } else {
-            SkillCatalog::default()
-        };
-
-        CatalogContribution {
-            catalog,
-            status: CatalogStatus::Enabled,
-        }
-    }
-
-    pub(crate) fn render_catalogs(
-        &self,
-        catalogs: CatalogContributions,
-    ) -> [RenderedCatalogContribution; 3] {
         let total_limit = self.metadata_budget.limit();
         let default_cloud_limit = total_limit - total_limit / FILESYSTEM_BUDGET_DIVISOR;
-        let mut executor = PreparedSkillCatalog::new(
+        let executor_aliases = Some(
+            self.step_state
+                .catalog
+                .aliases
+                .for_authority(SkillToolAuthoritySelector::Executor),
+        );
+        let mut executor = PreparedSkillCatalog::with_alias_plan(
             &catalogs.executor.catalog,
-            SkillCatalogRenderPolicy::ExtensionCompatible,
+            self.render_policy,
+            executor_aliases,
         );
         executor.prefer_cloud_skills(&catalogs.cloud.catalog);
         // Identify the full visible cloud inventory before budgeting, including entries
@@ -330,11 +238,7 @@ impl<'a> CatalogContext<'a> {
         }
         let [executor_muster, cloud_muster, host_muster] = [
             executor.muster(),
-            PreparedSkillCatalog::new(
-                &catalogs.cloud.catalog,
-                SkillCatalogRenderPolicy::ExtensionCompatible,
-            )
-            .muster(),
+            PreparedSkillCatalog::new(&catalogs.cloud.catalog, self.render_policy).muster(),
             PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
                 SkillCatalogRenderPolicy::CoreCompatible,
@@ -391,11 +295,18 @@ impl<'a> CatalogContext<'a> {
             return None;
         }
 
+        let cloud_aliases = Some(
+            self.step_state
+                .catalog
+                .aliases
+                .for_authority(SkillToolAuthoritySelector::Cloud),
+        );
         let shared = render_prepared_skill_catalogs(
             executor,
-            &PreparedSkillCatalog::new(
+            &PreparedSkillCatalog::with_alias_plan(
                 &catalogs.cloud.catalog,
-                SkillCatalogRenderPolicy::ExtensionCompatible,
+                self.render_policy,
+                cloud_aliases,
             ),
             &PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
@@ -426,16 +337,23 @@ impl<'a> CatalogContext<'a> {
         executor: &PreparedSkillCatalog<'_>,
         cloud_limit: usize,
     ) -> (RenderedSkillCatalogs, SkillMetadataBudget) {
-        if !self.config.include_instructions {
+        if !self.step_state.config.include_instructions {
             return (RenderedSkillCatalogs::default(), self.metadata_budget);
         }
 
+        let cloud_aliases = Some(
+            self.step_state
+                .catalog
+                .aliases
+                .for_authority(SkillToolAuthoritySelector::Cloud),
+        );
         let cloud_budget = self.metadata_budget.with_limit(cloud_limit);
         let cloud = render_available_skills(
             &catalogs.cloud.catalog,
-            SkillCatalogRenderPolicy::ExtensionCompatible,
+            self.render_policy,
             cloud_budget,
             self.include_usage,
+            cloud_aliases,
         );
         // Empty or disabled cloud catalogs leave the full allowance to filesystem skills.
         let cloud_cost = cloud.as_ref().map_or(0, |rendered| {
@@ -446,10 +364,7 @@ impl<'a> CatalogContext<'a> {
             .with_limit(self.metadata_budget.limit().saturating_sub(cloud_cost));
         let mut rendered = render_prepared_skill_catalogs(
             executor,
-            &PreparedSkillCatalog::new(
-                &SkillCatalog::default(),
-                SkillCatalogRenderPolicy::ExtensionCompatible,
-            ),
+            &PreparedSkillCatalog::new(&SkillCatalog::default(), self.render_policy),
             &PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
                 SkillCatalogRenderPolicy::CoreCompatible,
@@ -462,7 +377,7 @@ impl<'a> CatalogContext<'a> {
         (rendered, filesystem_budget)
     }
 
-    pub(crate) fn build_world_state_section(
+    fn build_world_state_section(
         &self,
         catalog: RenderedCatalogContribution,
     ) -> WorldStateSectionContribution {
@@ -479,7 +394,7 @@ impl<'a> CatalogContext<'a> {
             .map(|rendered| rendered.report.clone())
             .unwrap_or_default();
         let content = Content::new(rendered, muster, self.include_usage);
-        let include_instructions = self.config.include_instructions;
+        let include_instructions = self.step_state.config.include_instructions;
         let metrics = self.input.extension_metrics.clone();
         let warning_emitter = Arc::clone(&self.warning_emitter);
         let render_report = report.clone();
@@ -514,4 +429,20 @@ impl<'a> CatalogContext<'a> {
             }
         }
     }
+}
+
+/// Returns complete sections, omitting catalogs unavailable in this step.
+pub(crate) fn render_world_state_sections(
+    event_sink: Arc<dyn ExtensionEventSink>,
+    input: WorldStateContributionInput<'_>,
+) -> Vec<WorldStateSectionContribution> {
+    let Some(context) = CatalogRenderingContext::new(event_sink, input) else {
+        return Vec::new();
+    };
+    context
+        .render_world_state_catalogs()
+        .into_iter()
+        .filter(|catalog| catalog.status != CatalogStatus::Unavailable)
+        .map(|catalog| context.build_world_state_section(catalog))
+        .collect()
 }

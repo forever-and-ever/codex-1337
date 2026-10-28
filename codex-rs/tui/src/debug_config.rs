@@ -944,6 +944,7 @@ interrupt_message = false
         };
 
         let requirements_toml = ConfigRequirementsToml {
+            config_server: None,
             application: None,
             allowed_login_methods: None,
             allowed_chatgpt_workspaces: None,
@@ -1387,7 +1388,7 @@ approval_policy = "never"
                         std::path::PathBuf::from("/enterprise/hooks")
                     }),
                     windows_managed_dir: Some(std::path::PathBuf::from(r"C:\enterprise\hooks")),
-                    hooks: HookEventsToml {
+                    hooks: Box::new(HookEventsToml {
                         pre_tool_use: vec![MatcherGroup {
                             selector: Some(HookSelector::Tool {
                                 namespace: Some("^functions$".to_string()),
@@ -1403,7 +1404,7 @@ approval_policy = "never"
                             }],
                         }],
                         ..Default::default()
-                    },
+                    }),
                 }),
                 Some(RequirementSource::LegacyManagedConfigTomlFromMdm),
             )),

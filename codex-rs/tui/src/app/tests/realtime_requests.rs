@@ -454,6 +454,7 @@ async fn switching_threads_keeps_the_source_voice_partial_only_on_reattach() {
     app.replay_thread_snapshot(
         empty_thread_snapshot(&app, source),
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
     );
     assert!(!app.pending_realtime_transcript_replay.contains_key(&source));
     app.chat_widget.handle_server_notification(
@@ -524,6 +525,7 @@ async fn queued_voice_caption_after_switch_returns_once_to_its_source_thread() {
         app.replay_thread_snapshot(
             empty_thread_snapshot(&app, source),
             /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
         );
     }
 
@@ -626,6 +628,7 @@ async fn queued_voice_caption_after_switch_returns_once_to_its_source_thread() {
     app.replay_thread_snapshot(
         empty_thread_snapshot(&app, source),
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
     );
     commit_realtime_history_events(&mut app.chat_widget, &mut source_events);
     let rendered = std::iter::from_fn(|| source_events.try_recv().ok())
@@ -700,6 +703,9 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
     commit_realtime_history_events(&mut app.chat_widget, &mut events);
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
@@ -761,6 +767,7 @@ async fn retained_caption_consumes_only_one_matching_answer_fallback_on_reattach
     app.replay_thread_snapshot(
         empty_thread_snapshot(&app, source),
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
     );
     let (mut app_server, _requests, proxy) = start_recording_remote_app_server(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -877,6 +884,9 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
@@ -981,6 +991,9 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
     commit_realtime_history_events(&mut app.chat_widget, &mut events);
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
@@ -1074,7 +1087,11 @@ async fn completed_voice_caption_survives_repeated_thread_replacement() {
             ..typed.clone()
         });
         snapshot.turns.push(typed.clone());
-        app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            snapshot,
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         assert!(!app.pending_realtime_transcript_replay.contains_key(&source));
         commit_realtime_history_events(&mut app.chat_widget, &mut source_events);
         let rendered = std::iter::from_fn(|| source_events.try_recv().ok())
@@ -1157,7 +1174,11 @@ async fn inactive_caption_precedes_later_buffered_turn_without_start_event() {
                     ),
                 }),
             )));
-        app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            snapshot,
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         let rendered = std::iter::from_fn(|| events.try_recv().ok())
             .filter_map(|event| match event {
                 AppEvent::InsertHistoryCell(cell) => Some(
@@ -1375,6 +1396,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
     app.replay_thread_snapshot(
         empty_thread_snapshot(&app, original),
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
     );
     assert!(!app.pending_realtime_speech_replay.contains_key(&original));
     let mut restored = 0;
@@ -1416,6 +1438,9 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
     let mut snapshot_cells = 0;
     while let Ok(event) = original_events.try_recv() {
@@ -1477,6 +1502,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
     app.replay_thread_snapshot(
         empty_thread_snapshot(&app, original),
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
     );
     let mut early_restored = 0;
     while let Ok(event) = early_events.try_recv() {
@@ -2077,6 +2103,7 @@ async fn overridden_voice_save_keeps_effective_voice() -> Result<()> {
         )
         .await?;
         let mut server = AppServerSession::new(
+            crate::backend_id::BackendId::new(),
             codex_app_server_client::AppServerClient::InProcess(client),
             crate::app_server_session::ThreadParamsMode::Embedded,
         );

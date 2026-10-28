@@ -1,0 +1,130 @@
+---
+source: tui/src/streaming/controller.rs
+assertion_line: 1932
+expression: lines
+---
+[
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("• ").dim(),
+            Span::from("Proposed Plan").bold(),
+        ]),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from(" "),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from("# ").fg(Color::Indexed(78)).bold().underlined(),
+            Span::from("Plan").fg(Color::Indexed(78)).bold().underlined(),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from("  ").bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from("> "),
+            Span::from("Quote"),
+        ]).green().bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from("  ").bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("Step"),
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("URL"),
+        ]).fg(Color::Indexed(98)).bg(Color::Indexed(33)).bold(),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from("━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━").dim(),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("Verify"),
+            Span::from(" "),
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("https://example.com/").fg(Color::Indexed(70)).underlined(),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [
+            TerminalHyperlink {
+                columns: 13..33,
+                destination: "https://example.com/a/very/long/path/to/a/table/artifact",
+                destination_kind: Web,
+            },
+        ],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("      "),
+            Span::from(" "),
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("a/very/long/path/to/").fg(Color::Indexed(70)).underlined(),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [
+            TerminalHyperlink {
+                columns: 13..33,
+                destination: "https://example.com/a/very/long/path/to/a/table/artifact",
+                destination_kind: Web,
+            },
+        ],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("      "),
+            Span::from(" "),
+            Span::from("  "),
+            Span::from(" "),
+            Span::from("a/table/artifact").fg(Color::Indexed(70)).underlined(),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [
+            TerminalHyperlink {
+                columns: 13..29,
+                destination: "https://example.com/a/very/long/path/to/a/table/artifact",
+                destination_kind: Web,
+            },
+        ],
+    },
+    HyperlinkLine {
+        line: Line::from_iter([
+            Span::from("  "),
+            Span::from(" "),
+        ]).bg(Color::Indexed(33)),
+        hyperlinks: [],
+    },
+]

@@ -149,7 +149,7 @@ async fn partial_answers_survive_forked_child_requests(
             sse(vec![
                 if code_mode {
                     ev_custom_tool_call("spawn-worker", "exec",
-                        r#"text(await tools.collaboration__spawn_agent({task_name: "worker", message: "Check both inherited results.", fork_turns: "all"}));"#)
+                        r#"text(await tools.wrangler_agents__spawn_agent({task_name: "worker", message: "Check both inherited results.", fork_turns: "all"}));"#)
                 } else { ev_function_call_with_namespace(
                     "spawn-worker",
                     "wrangler_agents",
@@ -180,7 +180,10 @@ async fn partial_answers_survive_forked_child_requests(
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             configure_scenario_catalog(config);
-            config.multi_agent_v2.preserve_fork_prefix = preserve_fork_prefix;
+            // Exercise default filtering and explicit prefix preservation.
+            if preserve_fork_prefix {
+                config.multi_agent_v2.preserve_fork_prefix = true;
+            }
             config.multi_agent_v2.non_code_mode_only = !code_mode;
             if code_mode {
                 config

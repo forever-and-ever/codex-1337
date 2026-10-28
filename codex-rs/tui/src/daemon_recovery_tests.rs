@@ -13,6 +13,8 @@ fn daemon_recovery_requires_explicit_restart_and_defaults_to_cancel() {
         reason: "This session requires api_key_model_discovery to be enabled".to_string(),
         restart_features: Some(BTreeMap::from([
             ("api_key_model_discovery".to_string(), true),
+            ("code_mode_host".to_string(), true),
+            ("instant_interrupt".to_string(), true),
             ("mcp_oauth_refresh_coordination".to_string(), false),
         ])),
     };
@@ -55,7 +57,15 @@ fn daemon_recovery_requires_explicit_restart_and_defaults_to_cancel() {
         assert_eq!(view.take_last_selected_index(), Some(2));
 
         let mut view = recovery_view(issue, managed, &RuntimeKeymap::defaults());
-        view.handle_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        let restart_ordinal = if std::env::var_os("CODEX_ALLOW_EMBEDDED_SERVER").is_some() {
+            '2'
+        } else {
+            '1'
+        };
+        view.handle_key_event(KeyEvent::new(
+            KeyCode::Char(restart_ordinal),
+            KeyModifiers::NONE,
+        ));
         if managed && issue.restart_features.is_some() {
             assert!(!view.is_complete());
             view.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

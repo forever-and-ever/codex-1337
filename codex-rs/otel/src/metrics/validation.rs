@@ -26,5 +26,5 @@ fn validate_tag_component(value: &str, label: &str) -> Result<()> {
 }
 
 fn is_tag_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/')
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '+')
 }

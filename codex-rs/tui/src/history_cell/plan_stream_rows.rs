@@ -30,7 +30,7 @@ pub(crate) fn render_plan_rows(
     out.extend(
         prefix_proposed_plan_lines(plan)
             .into_iter()
-            .map(|line| line.style(proposed_plan_style())),
+            .map(|line| super::style_proposed_plan_line(line, proposed_plan_style())),
     );
     out
 }

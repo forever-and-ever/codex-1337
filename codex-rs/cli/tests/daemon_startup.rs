@@ -16,6 +16,13 @@ async fn auto_daemon_start_attaches_to_shared_server() -> Result<()> {
 
 #[tokio::test]
 #[cfg(unix)]
+async fn discovered_daemon_reconnects_after_explicit_cli_restart_with_auto_start_disabled()
+-> Result<()> {
+    daemon_startup("discovered").await
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn incompatible_daemon_can_cancel() -> Result<()> {
     daemon_startup("mismatch-cancel").await
 }
@@ -146,8 +153,14 @@ async fn daemon_startup(command: &str) -> Result<()> {
          windows.sandbox = \"unelevated\"\n\
          tui.disable_paste_burst = true\n\
          notice.model_migrations.\"gpt-5.6-terra\" = \"gpt-6-sol\"\n\
-         [projects.{}]\ntrust_level = \"trusted\"\n",
+         {}\n[projects.{}]\ntrust_level = \"{}\"\n",
+            if command == "discovered" {
+                "tui.status_line=[\"model\",\"thread-id\",\"thread-name\"]\nfeatures.daemon_auto_start=false"
+            } else {
+                ""
+            },
             serde_json::to_string(&workspace_path)?,
+            "trusted",
         ),
     )?;
     let mismatch = command.starts_with("mismatch-");
@@ -182,7 +195,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let mut args = Vec::new();
     let mut steps: VecDeque<(&str, &[u8])> = VecDeque::new();
-    if matches!(command, "start" | "restrictive-job") || mismatch {
+    if matches!(command, "start" | "discovered" | "restrictive-job") || mismatch {
         // A selected package with a stopped daemon avoids installing a release.
         let managed = home
             .path()
@@ -209,7 +222,8 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let pid_file = home.path().join("app-server-daemon/daemon.pid");
     let result = async {
-        let mut existing_daemon = if mismatch && !disabling {
+        // Discovery requires an already running daemon; auto-start is deliberately disabled.
+        let mut existing_daemon = if command == "discovered" || mismatch && !disabling {
             let started = Command::new(&codex)
                 .env_clear()
                 .envs(&env)
@@ -225,9 +239,22 @@ async fn daemon_startup(command: &str) -> Result<()> {
         } else {
             None
         };
+        let mut restarted_thread = None;
         let expected = if command == "start" {
             // The draft header is visible before the session's command composer is ready.
             steps.push_back(("GPT-5.6-Terra", b"/status\r"));
+            "Server:Localbackgroundserver"
+        } else if command == "discovered" {
+            args.extend(["--disable".into(), "daemon_auto_start".into()]);
+            // Empty drafts need not survive a daemon restart. Renaming materializes the
+            // thread; wait for the confirmed footer name, not the echoed command.
+            steps.push_back(("GPT-5.6-Terra", b"/rename daemon-restart-test\r"));
+            // Readiness-only barrier: the harness, never the TUI, restarts its private daemon.
+            steps.push_back(("·daemon-restart-test", b""));
+            // Offline editing preserves text but suppresses Enter. Observe the command
+            // popup in a complete connected frame before submitting the retained draft.
+            steps.push_back(("GPT-5.6-Terra", b"/status"));
+            steps.push_back(("/statusshowcurrentsessionconfigurationandtokenusage", b"\r"));
             "Server:Localbackgroundserver"
         } else if elevated_launch || command == "restrictive-job" && elevated {
             if let Some(action) = command.strip_prefix("elevated-") {
@@ -260,7 +287,33 @@ async fn daemon_startup(command: &str) -> Result<()> {
             }
         } else {
             args.extend([command.into(), "--strict-config".into()]);
-            steps.push_back(("Nosessionsyet", b"\x1b"));
+            if command == "resume" {
+                let thread_id = "00000000-0000-0000-0000-000000000001";
+                let sessions = home.path().join("sessions/2025/01/05");
+                fs::create_dir_all(&sessions)?;
+                let metadata = serde_json::json!({
+                    "timestamp": "2025-01-05T12:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "session_id": thread_id, "id": thread_id,
+                        "timestamp": "2025-01-05T12:00:00Z", "cwd": workspace_path,
+                        "originator": "codex", "cli_version": "0.0.0",
+                        "source": "cli", "model_provider": "openai"
+                    }
+                });
+                let message = serde_json::json!({
+                    "timestamp": "2025-01-05T12:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "user_message", "message": "Saved resume session", "kind": "plain"}
+                });
+                fs::write(
+                    sessions.join(format!("rollout-2025-01-05T12-00-00-{thread_id}.jsonl")),
+                    format!("{metadata}\n{message}\n"),
+                )?;
+                steps.push_back(("Savedresumesession", b"\r"));
+            } else {
+                steps.push_back(("Nosessionsyet", b"\x1b"));
+            }
             steps.push_back(("GPT-5.6-Terra", b"\x14"));
             if elevated {
                 "Runningasadministrator:sharedbackgroundserverdisabled."
@@ -292,6 +345,8 @@ async fn daemon_startup(command: &str) -> Result<()> {
             codex_utils_pty::ChildFds::Inherited(&[]),
         )
         .await?;
+        let total_steps = steps.len();
+        let mut waiting_on = "first_pty_output";
         let exit = spawned.exit_rx;
         let session = spawned.session;
         let writer = session.writer_sender();
@@ -311,6 +366,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         let timeout = Duration::from_secs(if disabling { 90 } else { 45 });
         let result = tokio::time::timeout(timeout, async {
             while let Some(bytes) = stdout.recv().await {
+                waiting_on = "ready_text";
                 output.push_str(&String::from_utf8_lossy(&bytes));
                 screen.process(&bytes);
                 for (query, reply) in &mut queries {
@@ -318,6 +374,16 @@ async fn daemon_startup(command: &str) -> Result<()> {
                         writer.send(reply.to_vec()).await?;
                         *query = "";
                     }
+                }
+                // PTY reads can split a redraw after the reconnect notice is erased but
+                // before it is repainted. Only inspect completed synchronized updates.
+                if command == "discovered"
+                    && output
+                        .rfind("\x1b[?2026l")
+                        .is_none_or(|end| output[end..].contains("\x1b[?2026h"))
+                {
+                    waiting_on = "complete_synchronized_frame";
+                    continue;
                 }
                 let text: String = screen
                     .screen()
@@ -328,6 +394,70 @@ async fn daemon_startup(command: &str) -> Result<()> {
                 if let Some((ready, input)) = steps.front()
                     && text.contains(ready)
                 {
+                    if command == "discovered" {
+                        if *ready == "·daemon-restart-test" {
+                            let Some(thread_id) = screen
+                                .screen()
+                                .contents()
+                                .split_whitespace()
+                                .find_map(|part| codex_protocol::ThreadId::from_string(part).ok())
+                            else {
+                                waiting_on = "pre_restart_live_thread_uuid";
+                                continue;
+                            };
+                            restarted_thread = Some(thread_id);
+                            existing_daemon = Some(fs::read(&pid_file)?);
+                            // The fork's /daemon menu is status-only. Exercise the supported
+                            // explicit CLI control against this fixture's hermetic daemon.
+                            waiting_on = "explicit_cli_restart";
+                            let restarted = tokio::process::Command::new(&codex)
+                                .env_clear()
+                                .envs(&env)
+                                .current_dir(&workspace_path)
+                                .args(["app-server", "daemon", "restart"])
+                                .kill_on_drop(true)
+                                .output()
+                                .await?;
+                            ensure!(
+                                restarted.status.success(),
+                                "{}",
+                                String::from_utf8_lossy(&restarted.stderr)
+                            );
+                            ensure!(Some(fs::read(&pid_file)?) != existing_daemon);
+                            steps.pop_front();
+                            output.clear();
+                            waiting_on = "post_restart_redraw";
+                            continue;
+                        }
+                        if *input == b"/status" || *input == b"\r" {
+                            let thread_id = restarted_thread.context("missing pre-restart thread")?;
+                            if !text.contains(&thread_id.to_string())
+                                || !text.contains("·daemon-restart-test")
+                            {
+                                waiting_on = "same_restored_thread_uuid_and_name";
+                                continue;
+                            }
+                        }
+                        // Reconnect renders the restored snapshot through clear_for_thread_switch.
+                        // Owned fullscreen clears AfterCursor (CSI J); only inline purges with CSI 3J.
+                        // Require the owned-screen rebuild receipt before probing the composer.
+                        if *input == b"/status" && !output.contains("\x1b[J") {
+                            waiting_on = "owned_screen_rebuild_csi_j";
+                            continue;
+                        }
+                        // The old header can linger while the daemon stops. Check both
+                        // the draft and its Enter against the replacement process and UI.
+                        if *input == b"/status" || *input == b"\r" {
+                            if !fs::read(&pid_file).is_ok_and(|pid| Some(pid) != existing_daemon) {
+                                waiting_on = "replacement_daemon_pid";
+                                continue;
+                            }
+                            if text.contains("Reconnecting") {
+                                waiting_on = "connected_frame_without_reconnecting";
+                                continue;
+                            }
+                        }
+                    }
                     if disabling && *ready == "Backgroundserverhasincompatiblefeaturesettings" {
                         existing_daemon = Some(fs::read(&pid_file)?);
                         let settings: serde_json::Value = serde_json::from_slice(&fs::read(home.path().join("app-server-daemon/settings.json"))?)?;
@@ -340,6 +470,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
                     writer.send(input.to_vec()).await?;
                     steps.pop_front();
                     output.clear();
+                    waiting_on = "next_step_or_expected_status";
                 } else if steps.is_empty() && text.contains(expected) {
                     if mismatch {
                         let previous_pid = existing_daemon.as_ref().context("missing original daemon PID")?;
@@ -363,6 +494,14 @@ async fn daemon_startup(command: &str) -> Result<()> {
                     } else if command == "start" {
                         ensure!(text.contains("Server:Localbackgroundserver"));
                         ensure!(home.path().join("app-server-daemon/daemon.pid").exists());
+                    } else if command == "discovered" {
+                        let previous_pid = existing_daemon.as_ref().context("missing original daemon PID")?;
+                        ensure!(fs::read(&pid_file)? != *previous_pid);
+                        ensure!(text.contains("Server:Localbackgroundserver"));
+                        let thread_id = restarted_thread.context("missing pre-restart thread")?;
+                        ensure!(text.contains(&thread_id.to_string()));
+                        ensure!(text.contains("·daemon-restart-test"));
+                        ensure!(!text.contains("Reconnecting"));
                     } else if let Some(existing_daemon) = &existing_daemon {
                         ensure!(fs::read(&pid_file)? == *existing_daemon);
                     } else if elevated_launch {
@@ -393,7 +532,45 @@ async fn daemon_startup(command: &str) -> Result<()> {
         }
         Ok::<_, anyhow::Error>((
             session,
-            result.with_context(|| format!("{command} timed out waiting for {}: {}", steps.front().map_or(expected, |(ready, _)| *ready), screen.screen().contents())),
+            result.with_context(|| {
+                let contents = screen.screen().contents();
+                let text: String = contents.chars().filter(|c| !c.is_whitespace()).collect();
+                let actual_thread = contents
+                    .split_whitespace()
+                    .find_map(|part| codex_protocol::ThreadId::from_string(part).ok());
+                let actual_name = contents
+                    .lines()
+                    .find(|line| line.trim_start().starts_with("GPT-5.6-Terra"))
+                    .and_then(|line| line.split('·').nth(2))
+                    .map(str::trim);
+                let actual_pid = fs::read(&pid_file).ok();
+                let ready = steps.front().map_or(expected, |(ready, _)| *ready);
+                let frame_complete = output
+                    .rfind("\x1b[?2026l")
+                    .is_some_and(|end| !output[end..].contains("\x1b[?2026h"));
+                format!(
+                    "{command} failed: phase={waiting_on}, step={}/{total_steps}, \
+                     ready={ready:?}, ready_present={}, expected_status={expected:?}, status_present={}, \
+                     expected_uuid={restarted_thread:?}, actual_uuid={actual_thread:?}, \
+                     expected_name=daemon-restart-test, actual_name={actual_name:?}, name_present={}, footer={:?}, \
+                     previous_pid={:?}, actual_pid={:?}, pid_changed={}, \
+                     frame_complete={frame_complete}, sync_begin={}, sync_end={}, \
+                     owned_clear_csi_j={}, inline_purge_csi_3j={}, reconnecting={}\n{contents}",
+                    total_steps - steps.len(),
+                    text.contains(ready),
+                    text.contains(expected),
+                    text.contains("·daemon-restart-test"),
+                    contents.lines().last(),
+                    existing_daemon.as_deref().map(String::from_utf8_lossy),
+                    actual_pid.as_deref().map(String::from_utf8_lossy),
+                    actual_pid.is_some() && actual_pid != existing_daemon,
+                    output.contains("\x1b[?2026h"),
+                    output.contains("\x1b[?2026l"),
+                    output.contains("\x1b[J"),
+                    output.contains("\x1b[3J"),
+                    text.contains("Reconnecting"),
+                )
+            }),
         ))
     }
     .await;

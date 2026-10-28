@@ -1,5 +1,6 @@
 //! Restores compacted retained evidence and checks complete synchronous requests.
 //! Restored records are budgeted and persisted before sampling, including continuations.
+//! Admitted sampling inputs are observed once per step, independent of transport retries.
 
 use codex_api::ResponsesApiRequest;
 use codex_context_fragments::set_annotated_content;
@@ -8,7 +9,6 @@ use codex_guardian_context::REQUEST_TOKENS_BOUNDARIES;
 use codex_guardian_context::REQUEST_TOKENS_METRIC;
 use codex_guardian_context::RequestBudget;
 use codex_guardian_context::effective_input_token_limit;
-use codex_otel::SessionTelemetry;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
@@ -33,16 +33,8 @@ pub(crate) enum ExhaustedReviewBudget {
     Compacting,
 }
 
-pub(crate) fn observe(telemetry: &SessionTelemetry, total: usize) {
-    // The assembled input already includes inherited history and the current
-    // review. Do not report a guessed old/new split after context injection.
-    telemetry.histogram_with_boundaries(
-        REQUEST_TOKENS_METRIC,
-        i64::try_from(total).unwrap_or(i64::MAX),
-        REQUEST_TOKENS_BOUNDARIES,
-        &[("target", "sync"), ("component", "total")],
-    );
-}
+/// Guardian-owned marker scoped to one sampling step, including all transport retries.
+struct ObservedRequest;
 
 pub(crate) fn estimate_request_tokens(request: &ResponsesApiRequest) -> usize {
     let input = request
@@ -89,7 +81,9 @@ pub(crate) async fn prepare_prompt(
                     max_input_tokens: maximum,
                     existing_context_tokens: baseline,
                 },
-                GuardianBudgetOmission.render(),
+                GuardianBudgetOmission.render().into_text().ok_or_else(|| {
+                    CodexErr::InvalidRequest("Guardian budget omission must be text".to_owned())
+                })?,
                 HistoryTruncation::Preserve,
             )
             .map_err(|error| {
@@ -138,12 +132,11 @@ pub(crate) async fn prepare_prompt(
             .input
             .extend(restored.iter().map(|envelope| envelope.item.clone()));
     }
-    if session
+    let total = session
         .services
         .model_client
-        .estimate_model_request_tokens(prompt, model, metadata)?
-        > maximum
-    {
+        .estimate_model_request_tokens(prompt, model, metadata)?;
+    if total > maximum {
         session
             .services
             .thread_extension_data
@@ -168,5 +161,27 @@ pub(crate) async fn prepare_prompt(
         .services
         .thread_extension_data
         .remove::<ExhaustedReviewBudget>();
+    if step
+        .extension_data
+        .insert_if(ObservedRequest, |existing| existing.is_none())
+    {
+        step.session_telemetry.histogram_with_boundaries(
+            REQUEST_TOKENS_METRIC,
+            i64::try_from(total).unwrap_or(i64::MAX),
+            REQUEST_TOKENS_BOUNDARIES,
+            &[
+                ("target", "sync"),
+                ("component", "total"),
+                (
+                    "token_bucket",
+                    codex_guardian_context::request_token_bucket(total),
+                ),
+            ],
+        );
+    }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "request_budget_tests.rs"]
+mod tests;

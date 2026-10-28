@@ -32,34 +32,15 @@ impl App {
             return;
         };
         params.effort = effort;
-        let defaulted_to_auto_review = params.approvals_reviewer
-            == Some(AppServerApprovalsReviewer::AutoReview)
-            && (self.chat_widget.config_ref().approvals_reviewer != ApprovalsReviewer::AutoReview
-                || AppServerAskForApproval::from(
-                    self.chat_widget
-                        .config_ref()
-                        .permissions
-                        .approval_policy
-                        .value(),
-                ) != AppServerAskForApproval::OnRequest);
-        let pending_cyber_profile =
-            params
-                .permissions
-                .as_ref()
-                .map(|profile_id| PermissionProfileSelection {
-                    profile_id: profile_id.clone(),
-                    approval_policy: params.approval_policy,
-                    approvals_reviewer: params
-                        .approvals_reviewer
-                        .map(codex_app_server_protocol::ApprovalsReviewer::to_core),
-                    display_label: profile_id.clone(),
-                });
-        self.request_active_model_settings(
-            app_server,
-            params,
-            defaulted_to_auto_review,
-            pending_cyber_profile,
-        );
+        self.send_model_settings_update(app_server, params).await;
+    }
+
+    pub(super) async fn send_model_settings_update(
+        &mut self,
+        app_server: &mut AppServerSession,
+        params: ThreadSettingsUpdateParams,
+    ) -> bool {
+        self.request_active_model_settings(app_server, params, |_, _| {})
     }
 
     pub(super) fn active_thread_model_setting_update_params(

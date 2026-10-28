@@ -15,16 +15,15 @@ use tokio_util::task::TaskTracker;
 #[derive(Debug)]
 pub(crate) struct ConnectionRpcGate {
     pub(crate) auth: Option<ConnectionAuth>,
-    accepting: Mutex<bool>,
+    admission: Mutex<()>,
     tasks: TaskTracker,
 }
 
 impl ConnectionRpcGate {
     pub(crate) fn new() -> Self {
-        let accepting = true;
         Self {
             auth: None,
-            accepting: Mutex::new(accepting),
+            admission: Mutex::new(()),
             tasks: TaskTracker::new(),
         }
     }
@@ -34,8 +33,8 @@ impl ConnectionRpcGate {
         F: Future<Output = ()>,
     {
         let token = {
-            let accepting = self.accepting.lock().await;
-            if !*accepting || self.is_closed() {
+            let _admission = self.admission.lock().await;
+            if self.is_closed() {
                 return;
             }
             self.tasks.token()
@@ -50,8 +49,7 @@ impl ConnectionRpcGate {
     }
 
     pub(crate) async fn close(&self) {
-        let mut accepting = self.accepting.lock().await;
-        *accepting = false;
+        let _admission = self.admission.lock().await;
         self.tasks.close();
     }
 
@@ -62,7 +60,8 @@ impl ConnectionRpcGate {
 
     #[cfg(test)]
     async fn is_accepting(&self) -> bool {
-        *self.accepting.lock().await
+        let _admission = self.admission.lock().await;
+        !self.is_closed()
     }
 
     #[cfg(test)]

@@ -12,6 +12,7 @@ use codex_tools::ToolApprovalMode;
 
 use crate::tools::context::ToolInvocation;
 
+use super::McpToolApproval;
 use super::McpToolApprovalMetadata;
 use super::McpToolApprovalPolicy;
 use super::apply_mcp_tool_approval_decision;
@@ -170,13 +171,15 @@ pub(crate) async fn approve_extension_tool(
     .await;
     match decision {
         None => Ok(()),
-        Some(
-            decision @ (ReviewDecision::Approved
-            | ReviewDecision::ApprovedForSession
-            | ReviewDecision::ApprovedMcpPolicyAmendment
-            | ReviewDecision::ApprovedExecpolicyAmendment { .. }
-            | ReviewDecision::NetworkPolicyAmendment { .. }),
-        ) => {
+        Some(McpToolApproval {
+            decision:
+                decision @ (ReviewDecision::Approved
+                | ReviewDecision::ApprovedForSession
+                | ReviewDecision::ApprovedMcpPolicyAmendment
+                | ReviewDecision::ApprovedExecpolicyAmendment { .. }
+                | ReviewDecision::NetworkPolicyAmendment { .. }),
+            ..
+        }) => {
             let decision = if native_policy_owner
                 && matches!(decision, ReviewDecision::ApprovedMcpPolicyAmendment)
             {
@@ -214,11 +217,15 @@ pub(crate) async fn approve_extension_tool(
             .await;
             Ok(())
         }
-        Some(ReviewDecision::Denied { rejection }) => {
-            Err(FunctionCallError::RespondToModel(rejection))
-        }
-        Some(ReviewDecision::TimedOut | ReviewDecision::Abort) => Err(
-            FunctionCallError::RespondToModel("tool approval was not granted".into()),
-        ),
+        Some(McpToolApproval {
+            decision: ReviewDecision::Denied { rejection },
+            ..
+        }) => Err(FunctionCallError::RespondToModel(rejection)),
+        Some(McpToolApproval {
+            decision: ReviewDecision::TimedOut | ReviewDecision::Abort,
+            ..
+        }) => Err(FunctionCallError::RespondToModel(
+            "tool approval was not granted".into(),
+        )),
     }
 }

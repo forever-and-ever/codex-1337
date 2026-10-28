@@ -16,14 +16,11 @@ use crate::agent::types::MessageDeliveryMode;
 use crate::agent::types::SpawnAgentForkMode;
 use crate::agent::types::SpawnAgentOptions;
 use crate::codex_thread::ThreadConfigSnapshot;
-use crate::session::multi_agents::resolve_usage_hints;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
-use codex_prompts::ResolvedModelMessages;
 use codex_protocol::AgentPath;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 
@@ -113,31 +110,6 @@ pub(crate) async fn spawn(
         agent_nickname: None,
         agent_role: prepared.role_name,
     });
-    let multi_agent_v2_usage_hints = if matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory))
-        && turn.multi_agent_version == MultiAgentVersion::V2
-    {
-        let child_model_info = match config.model.as_deref() {
-            Some(model) if model != turn.model_info().slug => Some(
-                session
-                    .services
-                    .models_manager
-                    .get_model_info(model, &config.to_models_manager_config())
-                    .await,
-            ),
-            _ => None,
-        };
-        let child_multi_agent_messages = ResolvedModelMessages::from_model(
-            child_model_info.as_ref().unwrap_or(turn.model_info()),
-        )
-        .multi_agent();
-        Some(resolve_usage_hints(
-            &config.multi_agent_v2,
-            child_multi_agent_messages,
-            !config.update_plan_enabled && config.model_catalog.is_none(),
-        ))
-    } else {
-        None
-    };
     let (agent, config) = session
         .services
         .agent_control
@@ -157,9 +129,8 @@ pub(crate) async fn spawn(
                 parent_turn_id: Some(turn.sub_id.clone()),
                 root_turn_id: turn.turn_metadata_state.root_turn_id(),
                 turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
-                environments: Some(step_context.environments.clone()),
+                environments: Some(step_context.inherited_environments.clone()),
                 disabled_plugin_ids: Some(turn.disabled_plugin_ids.clone()),
-                multi_agent_v2_usage_hints,
                 cyber_access_program: turn.cyber_access_program,
             },
         })

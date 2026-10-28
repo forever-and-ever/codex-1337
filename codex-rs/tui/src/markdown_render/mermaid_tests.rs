@@ -165,16 +165,11 @@ fn mermaid_fallback_notices_follow_nested_indentation() {
 
 #[test]
 fn mermaid_styles_follow_the_supplied_theme() {
-    use two_face::theme::EmbeddedThemeName;
-
-    let themes = two_face::theme::extra();
+    let theme = crate::render::highlight::resolve_theme_by_name("slag", None)
+        .expect("embedded warpaint pack");
     let fallback = syntect::highlighting::Theme::default();
     let mut cases = Vec::new();
-    for (name, theme) in [
-        ("dark", themes.get(EmbeddedThemeName::Dracula)),
-        ("light", themes.get(EmbeddedThemeName::SolarizedLight)),
-        ("fallback", &fallback),
-    ] {
+    for (name, theme) in [("dark", &theme), ("light", &theme), ("fallback", &fallback)] {
         let colors = if name == "light" {
             crate::terminal_probe::DefaultColors {
                 fg: (30, 30, 30),

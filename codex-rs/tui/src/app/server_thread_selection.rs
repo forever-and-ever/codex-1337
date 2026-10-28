@@ -691,6 +691,16 @@ impl App {
         context: SelectionContext,
         selected: SelectedThread,
     ) -> Result<()> {
+        let settings_authority = match &selected {
+            SelectedThread::Cached { .. } | SelectedThread::ReadOnly(_) => {
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained
+            }
+            SelectedThread::Attached(_) | SelectedThread::Refreshed(_) => {
+                crate::chatwidget::ThreadInputSettingsAuthority::Session {
+                    accepted_mode: None,
+                }
+            }
+        };
         let SelectionContext {
             thread_id,
             pending_profile_on_unavailable_thread,
@@ -822,7 +832,14 @@ impl App {
         self.recap.seed_from_progress(recap_progress, now);
         self.schedule_recap_check(thread_id, now);
 
-        self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        self.render_thread_snapshot(
+            tui,
+            app_server,
+            thread_id,
+            snapshot,
+            !is_replay_only,
+            settings_authority,
+        )?;
         if let Ok(Some(notice)) = session_verification {
             self.chat_widget.add_info_message(notice, /*hint*/ None);
         }

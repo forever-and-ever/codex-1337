@@ -299,6 +299,9 @@ async fn replayed_patch_approval_pager_recovers_stored_turn_changes() {
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
     assert_eq!(open_patch(&mut app, &mut rx).changes, expected_changes());
 }

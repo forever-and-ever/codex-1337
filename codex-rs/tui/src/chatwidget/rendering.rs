@@ -246,7 +246,7 @@ impl ChatWidget {
                 != crate::bottom_pane::CommandPopupPlacement::AboveComposer;
             options.prompt_cache = self.prompt_cache;
             options.alarms = &self.alarms.armed;
-            self.bottom_pane.as_renderable_with_extension(
+            let bottom_pane = self.bottom_pane.as_renderable_with_extension(
                 options,
                 Some(RenderableItem::Owned(Box::new(
                     crate::render::ruled_sections::RuledSections(vec![
@@ -264,7 +264,17 @@ impl ChatWidget {
                         })),
                     ]),
                 ))),
-            )
+            );
+            if !self.quick_dial_menu {
+                return bottom_pane;
+            }
+            let mut column = FlexRenderable::new();
+            column.push(
+                /*flex*/ 1,
+                RenderableItem::Owned(Box::new(self.quick_dial_hud())),
+            );
+            column.push(/*flex*/ 0, bottom_pane);
+            RenderableItem::Owned(Box::new(column))
         }
     }
 

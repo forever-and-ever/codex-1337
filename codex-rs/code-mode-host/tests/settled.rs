@@ -147,6 +147,9 @@ async fn assert_partial_results(provider: &dyn CodeModeSessionProvider) {
                     max_tokens: None,
                     text: json!({"index": 0, "status": "fulfilled", "value": "slow"}).to_string(),
                 }],
+                result_buffered_for: completed
+                    .result_buffered_for()
+                    .expect("completed result includes buffering duration"),
                 error_text: None,
             })
         );

@@ -118,9 +118,8 @@ impl ChatWidget {
             has_codex_backend_auth,
             model_catalog,
             model_popup_request: None,
-            permission_popup_request_id: None,
+            permission_popup: Default::default(),
             permission_discovery: None,
-            permission_profiles_menu_opened: false,
             model_popup_model_ids: Vec::new(),
             session_telemetry,
             session_header: SessionHeader::new(header_model),
@@ -227,13 +226,14 @@ impl ChatWidget {
             submission_preview: Default::default(),
             input_queue_frontend: input_queue::InputQueueFrontend::default(),
             chat_keymap,
-            permission_shortcut_pending: false,
             show_welcome_banner: is_first_run,
             startup_tooltip_override,
             suppress_session_configured_redraw: false,
             suppress_initial_user_message_submit: false,
             pending_notification: None,
             quit_shortcut_expires_at: None,
+            quick_dial_menu: false,
+            quick_dial_menu_key_guard: None,
             quit_shortcut_key: None,
             turn_runtime_metrics: RuntimeMetricsSummary::default(),
             last_rendered_width: std::cell::Cell::new(None),
@@ -248,6 +248,7 @@ impl ChatWidget {
             last_terminal_title: None,
             last_terminal_title_requires_action: false,
             terminal_title_setup_original_items: None,
+            status_surface_overrides: StatusSurfaceOverrides::default(),
             terminal_title_animation_origin: Instant::now(),
             terminal_title_next_refresh: None,
             status_line_project_root_name_cache: None,
@@ -279,6 +280,10 @@ impl ChatWidget {
             test_codex_home: None,
         };
 
+        widget.bottom_pane.set_mention_usage_home(
+            widget.local_settings.codex_home.as_path(),
+            widget.local_settings.history.persistence,
+        );
         widget.prefetch_rate_limits();
         if let Some(keymap) = runtime_keymap {
             widget.bottom_pane.set_keymap_bindings(&keymap);

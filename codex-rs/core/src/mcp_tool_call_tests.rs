@@ -40,6 +40,7 @@ use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use codex_protocol::turn_input::ResponsesApiClientMetadataUpdate;
 use codex_tools::ToolName;
 use codex_utils_path_uri::PathUri;
 use core_test_support::hooks::trusted_config_layer_stack;
@@ -499,53 +500,6 @@ async fn mcp_tool_call_span_records_expected_fields() {
     );
 }
 
-#[tokio::test]
-async fn mcp_tool_call_span_records_error_type_and_error_code() {
-    let buffer: &'static std::sync::Mutex<Vec<u8>> =
-        Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
-    let subscriber = tracing_subscriber::fmt()
-        .with_level(true)
-        .with_ansi(false)
-        .with_max_level(Level::TRACE)
-        .with_span_events(FmtSpan::FULL)
-        .with_writer(MockWriter::new(buffer))
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let (session, turn_context) = make_session_and_context().await;
-    let result = Ok(CallToolResult {
-        content: Vec::new(),
-        structured_content: Some(serde_json::json!({"error_code": "RATE_LIMITED"})),
-        is_error: Some(true),
-        meta: None,
-    });
-    let span = mcp_tool_call_span(
-        &session,
-        &turn_context,
-        McpToolCallSpanFields {
-            server_name: CODEX_APPS_MCP_SERVER_NAME,
-            tool_name: "calendar_search",
-            call_id: "call-123",
-            server_origin: Some("https://chatgpt.com/api/codex/ps/mcp"),
-            connector_id: Some("calendar"),
-            connector_name: Some("Calendar"),
-        },
-    );
-
-    async {
-        record_mcp_result_span_telemetry(&Span::current(), &result);
-    }
-    .instrument(span)
-    .await;
-
-    let logs = String::from_utf8(buffer.lock().expect("buffer lock").clone()).expect("utf8 logs");
-    assert!(
-        logs.contains("error.type=\"tool_result\"")
-            && logs.contains("codex.mcp.error.code=\"RATE_LIMITED\""),
-        "missing MCP tool error span fields\nlogs:\n{logs}"
-    );
-}
-
 async fn mcp_result_telemetry_span_logs(meta: Option<serde_json::Value>) -> String {
     let buffer: &'static std::sync::Mutex<Vec<u8>> =
         Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
@@ -581,7 +535,11 @@ async fn mcp_result_telemetry_span_logs(meta: Option<serde_json::Value>) -> Stri
         );
 
         async {
-            record_mcp_result_span_telemetry(&Span::current(), &result);
+            record_mcp_result_span_telemetry(
+                &Span::current(),
+                &result,
+                /*request_error_code*/ None,
+            );
         }
         .instrument(span)
         .await;
@@ -1228,15 +1186,19 @@ async fn mcp_tool_call_request_meta_includes_turn_metadata_for_custom_server() {
     let (_, turn_context) = make_session_and_context().await;
     let turn_context = Arc::new(turn_context);
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
+    let client_metadata = HashMap::from([
+        (
+            "node_repl_auto_review_required".to_string(),
+            "true".to_string(),
+        ),
+        ("node_repl_disabled".to_string(), "true".to_string()),
+    ]);
     turn_context
         .turn_metadata_state
-        .set_responsesapi_client_metadata(HashMap::from([
-            (
-                "node_repl_auto_review_required".to_string(),
-                "true".to_string(),
-            ),
-            ("node_repl_disabled".to_string(), "true".to_string()),
-        ]));
+        .update_responsesapi_client_metadata(ResponsesApiClientMetadataUpdate {
+            replacement: Some(client_metadata),
+            ..Default::default()
+        });
     let expected_turn_metadata = expected_mcp_turn_metadata(&turn_context);
 
     let meta = build_mcp_tool_call_request_meta(
@@ -2417,7 +2379,11 @@ async fn dispatched_mcp_approval_with_closed_response_is_classified_as_approval(
     *session.active_turn.lock().await = None;
     assert_eq!(
         approval.await.expect("approval task should complete"),
-        ReviewDecision::Abort
+        ApprovalResolution {
+            decision: ReviewDecision::Abort,
+            source: ApprovalResolutionSource::User,
+            cancellation_reason: Some(McpApprovalCancellationReason::Interrupted),
+        }
     );
 
     item["status"] = serde_json::json!("failed");
@@ -3084,7 +3050,14 @@ async fn permission_request_hook_allows_mcp_tool_call() {
     )
     .await;
 
-    assert_eq!(decision, Some(ReviewDecision::Approved));
+    assert_eq!(
+        decision,
+        Some(McpToolApproval {
+            decision: ReviewDecision::Approved,
+            source: Some(ApprovalResolutionSource::Hook),
+            cancellation_reason: None,
+        })
+    );
     let log = std::fs::read_to_string(log_path).expect("read MCP permission hook log");
     let inputs = log
         .lines()
@@ -3157,7 +3130,14 @@ async fn permission_request_hook_preserves_callable_address_without_metadata() {
     )
     .await;
 
-    assert_eq!(decision, Some(ReviewDecision::Approved));
+    assert_eq!(
+        decision,
+        Some(McpToolApproval {
+            decision: ReviewDecision::Approved,
+            source: Some(ApprovalResolutionSource::Hook),
+            cancellation_reason: None,
+        })
+    );
     let log = std::fs::read_to_string(log_path).expect("read MCP permission hook log");
     let inputs = log
         .lines()
@@ -3246,7 +3226,14 @@ async fn permission_request_hook_runs_after_remembered_mcp_approval() {
     )
     .await;
 
-    assert_eq!(decision, Some(ReviewDecision::Approved));
+    assert_eq!(
+        decision,
+        Some(McpToolApproval {
+            decision: ReviewDecision::Approved,
+            source: None,
+            cancellation_reason: None,
+        })
+    );
     assert!(
         !log_path.exists(),
         "remembered approval should skip PermissionRequest hooks"
@@ -3341,7 +3328,12 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
     )
     .await;
 
-    let Some(ReviewDecision::Denied { rejection: message }) = decision else {
+    let Some(McpToolApproval {
+        decision: ReviewDecision::Denied { rejection: message },
+        source: Some(ApprovalResolutionSource::Guardian),
+        cancellation_reason: None,
+    }) = decision
+    else {
         panic!("guardian-denied MCP approval should carry a rejection message");
     };
     assert!(message.contains("Reason: The tool call would expose private calendar data"));
@@ -3451,7 +3443,11 @@ async fn assert_mcp_user_approval_persistence(
             .await
             .expect("MCP approval task timed out")
             .expect("MCP approval task failed"),
-        Some(expected_decision),
+        Some(McpToolApproval {
+            decision: expected_decision,
+            source: Some(ApprovalResolutionSource::User),
+            cancellation_reason: None,
+        }),
     );
 }
 

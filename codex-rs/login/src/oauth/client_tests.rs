@@ -186,6 +186,7 @@ async fn rejection_preserves_status_and_omits_oversized_diagnostics() {
                 refresh_token,
                 resource: Some("urn:gateway"),
                 scope: None,
+                refresh_reason: None,
             })
             .await;
         let Err(OAuthError::Rejected(error)) = result else {
@@ -230,6 +231,7 @@ async fn rejection_keeps_status_when_reading_the_body_fails() {
             refresh_token: "refresh",
             resource: None,
             scope: None,
+            refresh_reason: None,
         })
         .await;
     let Err(OAuthError::Rejected(error)) = result else {
@@ -291,7 +293,8 @@ async fn success_body_revocation_preserves_the_policy_error() {
             form.refresh::<Value>(RefreshTokenGrant {
                 refresh_token: "refresh",
                 resource: None,
-                scope: None
+                scope: None,
+                refresh_reason: None,
             }),
             server
         )

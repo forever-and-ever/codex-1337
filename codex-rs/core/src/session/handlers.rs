@@ -34,7 +34,6 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::GuardianAssessmentStatus;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RealtimeConversationListVoicesResponseEvent;
 use codex_protocol::protocol::RealtimeVoicesList;
@@ -83,7 +82,7 @@ pub async fn realtime_conversation_list_voices(sess: &Session, sub_id: String) {
 pub async fn inter_agent_communication(
     sess: &Arc<Session>,
     sub_id: String,
-    communication: InterAgentCommunication,
+    communication: crate::PendingAgentMessage,
     start_options: codex_protocol::turn_input::TurnStartOptions,
 ) {
     sess.receive_agent_mail(communication, start_options, sub_id)
@@ -316,6 +315,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
         state.take_session_startup_prewarm()
     };
     sess.drain_agent_mail_admissions().await;
+    sess.agent_mail.publications.close();
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
@@ -684,6 +684,8 @@ pub(super) async fn submission_loop(
                     communication,
                     start_options,
                 } => {
+                    let communication =
+                        crate::PendingAgentMessage::new(communication, sub.message_delivery);
                     inter_agent_communication(&sess, sub.id.clone(), communication, start_options)
                         .await;
                     false

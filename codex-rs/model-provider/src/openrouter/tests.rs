@@ -174,7 +174,7 @@ fn normalization_contract() {
     );
     let routed = normalize(&resolved, &only, 0);
     assert_eq!(routed.context_window, Some(1_040_000));
-    assert!(routed.service_tiers.is_empty());
+    assert_eq!(routed.service_tiers, []);
     assert_eq!(
         routed.description.as_deref(),
         Some("$0.10 in · $0.72 out per M · 1.04M context")
@@ -193,7 +193,7 @@ fn normalization_contract() {
         ]))
         .expect("nonempty"),
     );
-    assert!(normalize(&resolved, &ignore, 0).service_tiers.is_empty());
+    assert_eq!(normalize(&resolved, &ignore, 0).service_tiers, []);
     resolved.endpoints.clear();
     assert_eq!(
         normalize(&resolved, &EndpointFilter::All, 0).context_window,

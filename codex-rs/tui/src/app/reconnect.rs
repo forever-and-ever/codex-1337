@@ -11,6 +11,7 @@ pub(super) enum ReconnectPresentation {
     Conversation,
     Overview,
     Draft,
+    Startup(tokio::time::Instant),
 }
 
 #[derive(Default)]
@@ -28,7 +29,12 @@ pub(super) struct Reconnected {
     thread: Option<AppServerStartedThread>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "retain logical ownership across connection replacement"
+)]
 pub(super) async fn reconnect(
+    backend_id: crate::backend_id::BackendId,
     target: AppServerTarget,
     config: Config,
     local_settings: crate::local_settings::LocalSettings,
@@ -47,13 +53,20 @@ pub(super) async fn reconnect(
     }
     // Connecting already has transport deadlines. Give healthy history/inventory hydration one
     // shared budget instead of repeatedly discarding its progress on a short per-attempt timer.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 120);
+    let deadline = match presentation {
+        ReconnectPresentation::Startup(deadline) => deadline,
+        ReconnectPresentation::Conversation
+        | ReconnectPresentation::Overview
+        | ReconnectPresentation::Draft => {
+            tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 120)
+        }
+    };
     for delay in [0, 1, 2, 4].into_iter().chain(std::iter::repeat(/*elt*/ 8)) {
         let attempt = async {
             tokio::time::sleep(Duration::from_secs(delay)).await;
             let client = crate::app_server_connection::connect(&target).await?;
-            let mut session =
-                AppServerSession::new(client, mode).with_remote_cwd_override(remote_cwd.clone());
+            let mut session = AppServerSession::new(backend_id, client, mode)
+                .with_remote_cwd_override(remote_cwd.clone());
             if presentation == ReconnectPresentation::Draft {
                 session.model_provider_override = Some(config.model_provider_id.clone());
             }
@@ -129,7 +142,7 @@ pub(super) async fn reconnect(
         }
         // Transport errors can contain endpoint credentials. Do not render or log them.
     }
-    color_eyre::eyre::bail!("Server connection could not be restored")
+    color_eyre::eyre::bail!("Server connection could not be restored");
 }
 
 impl App {
@@ -191,6 +204,37 @@ impl App {
     }
 
     pub(super) fn begin_reconnect(&mut self) -> bool {
+        self.pending_startup_thread_start = false;
+        self.begin_reconnect_inner(/*preserve_startup_input*/ false)
+    }
+
+    pub(super) fn recover_failed_startup_reconnect(&mut self) {
+        self.pending_startup_thread_start = false;
+        self.chat_widget.cancel_startup_submission();
+        self.chat_widget
+            .set_initial_user_message_submit_suppressed(true);
+        self.chat_widget
+            .set_queue_submissions_until_session_configured(false);
+        if let Some(message) = self.chat_widget.initial_user_message.take() {
+            self.chat_widget.restore_user_message_to_composer(message);
+        }
+    }
+
+    pub(super) fn begin_reconnect_for_rejected_startup(&mut self) -> bool {
+        if matches!(
+            self.reconnect.presentation,
+            ReconnectPresentation::Startup(_)
+        ) {
+            self.begin_reconnect();
+            self.recover_failed_startup_reconnect();
+            self.reconnect.failed = true;
+            self.chat_widget.reconnect_failed();
+            return true;
+        }
+        self.begin_reconnect_inner(/*preserve_startup_input*/ true)
+    }
+
+    fn begin_reconnect_inner(&mut self, preserve_startup_input: bool) -> bool {
         if matches!(self.app_server_target, AppServerTarget::Embedded) {
             return false;
         }
@@ -277,7 +321,16 @@ impl App {
                     ReconnectPresentation::Conversation
                 }
             };
-            self.chat_widget.pause_for_disconnect();
+            if preserve_startup_input {
+                // Draining admission never reopens. Wait for this connection to close before
+                // reconnecting, then give the ordinary startup path one more attempt.
+                self.reconnect.presentation = ReconnectPresentation::Startup(
+                    tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 120),
+                );
+                self.chat_widget.pause_for_rejected_startup();
+            } else {
+                self.chat_widget.pause_for_disconnect();
+            }
             self.startup_pending_protected_request = false;
             self.abort_all_thread_event_listeners();
         }
@@ -321,6 +374,7 @@ impl App {
         for (thread_id, item) in queued_edits {
             self.restore_queued_edit(thread_id, item).await;
         }
+        let startup_submission = self.chat_widget.take_startup_submission();
         let mut input = self.chat_widget.capture_thread_input_state();
         if let Some(input) = input.as_mut() {
             input.reconnect_pending = true;
@@ -387,11 +441,14 @@ impl App {
         // The displayed task was resumed above. Keep offscreen selections pending until those
         // tasks can be resumed from the server too; their old confirmations cannot arrive.
         let pending_displayed_profile = displayed.and_then(|id| {
-            self.pending_server_profiles.remove(&id).or_else(|| {
-                self.agents_overview
-                    .requested_permission_profiles
-                    .remove(&id)
-            })
+            self.pending_server_profiles
+                .remove(&id)
+                .map(|pending| pending.selection)
+                .or_else(|| {
+                    self.agents_overview
+                        .requested_permission_profiles
+                        .remove(&id)
+                })
         });
         if let Some(selection) = &pending_displayed_profile {
             self.runtime_approval_policy_override = None;
@@ -407,7 +464,6 @@ impl App {
         for (_, cancellation) in self.pending_thread_titles.drain() {
             cancellation.cancel();
         }
-        self.sync_thread_title_progress();
         self.agents_overview.dispatched_requests.clear();
         self.agents_overview.request_id = None;
         self.agents_overview.refresh_show_more = false;
@@ -416,7 +472,10 @@ impl App {
         for input in self.agents_overview.input_states.values_mut() {
             input.reconnect_pending = true;
         }
-        self.pending_startup_thread_start = false;
+        self.pending_startup_thread_start = matches!(
+            self.reconnect.presentation,
+            ReconnectPresentation::Startup(_)
+        );
         // Move cached UI state into fresh channels. Old producers retain the old sender/store,
         // so their late requests cannot leak into recovery. Background threads attach on selection.
         for channel in self.thread_event_channels.values_mut() {
@@ -453,6 +512,14 @@ impl App {
             input.reconnect_pending = true;
             self.agents_overview.input_states.insert(id, input);
         }
+        let settings_authority = match thread.as_ref() {
+            Some(started) if displayed == Some(started.session.thread_id) => {
+                crate::chatwidget::ThreadInputSettingsAuthority::Session {
+                    accepted_mode: None,
+                }
+            }
+            _ => crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        };
         if let Some(mut started) = thread {
             let id = started.session.thread_id;
             if pending_displayed_profile.is_none()
@@ -504,7 +571,12 @@ impl App {
             self.active_thread_rx = Some(receiver);
             self.recap.seed_from_turns(&snapshot.turns, Instant::now());
             if let Err(err) = self.render_thread_snapshot(
-                tui, app_server, id, snapshot, /*resume_restored_queue*/ false,
+                tui,
+                app_server,
+                id,
+                snapshot,
+                /*resume_restored_queue*/ false,
+                settings_authority,
             ) {
                 if discard_replaced_view_input
                     && let Err(drain_err) = tui.discard_pending_input_before_interactive_screen()
@@ -533,11 +605,17 @@ impl App {
                 /*initial_user_message*/ None,
             );
             self.replace_chat_widget(ChatWidget::new_with_app_event(init));
-            self.chat_widget.restore_reconnected_input(input, &[]);
+            self.chat_widget.restore_reconnected_input(
+                input,
+                &[],
+                crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+            );
             if restoring_draft {
                 self.chat_widget.restore_session_draft();
             }
         }
+        self.chat_widget
+            .restore_startup_submission(startup_submission);
         if let Some(notice) = history_notice {
             self.chat_widget.add_info_message(notice, /*hint*/ None);
         }
@@ -617,6 +695,10 @@ impl App {
             if self.reconnect.presentation != ReconnectPresentation::Overview {
                 self.chat_widget.add_server_version_warning(notice);
             }
+        }
+        if self.pending_startup_thread_start {
+            self.chat_widget
+                .set_queue_submissions_until_session_configured(/*queue*/ true);
         }
         if discard_replaced_view_input
             && let Err(err) = tui.discard_pending_input_before_interactive_screen()

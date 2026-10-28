@@ -8,3 +8,7 @@ pub(crate) fn extract_prompt_request_with_offset(message: &str) -> (&str, usize)
     let leading_trimmed_len = request.len() - request.trim_start().len();
     (request.trim(), request_start + leading_trimmed_len)
 }
+
+#[cfg(test)]
+#[path = "prompt_request_tests.rs"]
+mod tests;

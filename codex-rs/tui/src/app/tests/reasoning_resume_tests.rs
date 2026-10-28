@@ -41,6 +41,7 @@ async fn resumed_reasoning_without_start_accepts_deltas_and_completion() {
                     app.replay_thread_snapshot(
                         store.snapshot(),
                         /*resume_restored_queue*/ false,
+                        crate::chatwidget::ThreadInputSettingsAuthority::Retained,
                     );
                 }
                 let delta = |turn_id: &str, text: &str| {
@@ -133,7 +134,11 @@ async fn resumed_trailing_reasoning_is_kept_when_no_more_reasoning_arrives() {
                 }],
             )],
         );
-        app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            store.snapshot(),
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         if next_item {
             app.chat_widget.handle_server_notification(
                 ServerNotification::ItemStarted(

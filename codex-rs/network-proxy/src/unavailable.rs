@@ -120,7 +120,31 @@ impl NetworkProxy {
     pub async fn remote_launch_config(
         &self,
         local_binding_policy: crate::LocalBindingPolicy,
+        credential_masking: crate::RemoteCredentialMasking,
     ) -> Result<crate::RemoteNetworkProxyLaunchConfig> {
+        match *self {}
+    }
+    pub async fn bind_credential_broker_environment(
+        &self,
+        credential_brokers: &crate::RemoteCredentialBrokerCache,
+        environment: &HashMap<String, String>,
+    ) -> Result<()> {
+        match *self {}
+    }
+    pub fn apply_to_env_for_snapshot(&self, env: &mut HashMap<String, String>) {
+        match *self {}
+    }
+    pub fn virtualize_brokered_text(&self, text: &mut str, env: &HashMap<String, String>) -> bool {
+        match *self {}
+    }
+    pub fn restore_brokered_text(&self, text: &mut str) -> bool {
+        match *self {}
+    }
+    pub fn handle_unmasked_credentials(
+        &self,
+        env: &mut HashMap<String, String>,
+        mode: crate::CredentialMaskingFailureMode,
+    ) -> Result<()> {
         match *self {}
     }
     pub fn remote_policy_decider(
@@ -203,6 +227,9 @@ pub enum NetworkProxyHandle {}
     reason = "The uninhabited stub preserves the upstream async shutdown signature"
 )]
 impl NetworkProxyHandle {
+    pub fn proxy(&self) -> Option<&NetworkProxy> {
+        match *self {}
+    }
     pub async fn shutdown(self) -> Result<()> {
         match self {}
     }

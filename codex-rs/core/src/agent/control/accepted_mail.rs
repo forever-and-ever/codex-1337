@@ -129,12 +129,17 @@ impl LocalAgentControl {
             }
             AgentMailState::Pending(_) => {}
         }
+        communication.id = Some(record.id.clone());
+        let delivery = thread.session.agent_mail.publications.publish(
+            context.sender_thread_id,
+            &record.id,
+            manager.extensions.message_lifecycle_contributors(),
+        );
         if !predecessors_published {
             // An older row awaits an actor's batching decision before its orphaned
             // successor can publish. Retain this acceptance behind that obligation.
             return Ok(record.id.to_string());
         }
-        communication.id = Some(record.id.clone());
         if !thread
             .session
             .reserve_agent_mail_submission(&record.id)
@@ -151,6 +156,7 @@ impl LocalAgentControl {
                 },
                 None,
                 None,
+                delivery,
             )
             .await
         {

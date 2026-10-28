@@ -12,6 +12,7 @@ use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolPayload;
+use codex_protocol::models::ContentItem;
 use codex_utils_absolute_path::test_support::PathBufExt;
 use codex_utils_absolute_path::test_support::PathExt;
 use codex_utils_absolute_path::test_support::test_path_buf;
@@ -198,11 +199,11 @@ async fn prompt_contribution_uses_memory_summary_when_enabled() {
 
     assert_eq!(fragments.len(), 1);
     assert_eq!(fragments[0].slot(), PromptSlot::DeveloperPolicy);
-    assert!(
-        fragments[0]
-            .text()
-            .contains("Remember repository-specific implementation preferences.")
-    );
+    assert!(matches!(
+        fragments[0].content(),
+        ContentItem::InputText { text }
+            if text.contains("Remember repository-specific implementation preferences.")
+    ));
 }
 
 #[tokio::test]
@@ -229,6 +230,8 @@ async fn add_ad_hoc_note_tool_creates_note_file() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload: payload.clone(),
         })
@@ -277,6 +280,8 @@ async fn add_ad_hoc_note_tool_rejects_paths_as_filenames() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload,
         })
@@ -324,6 +329,8 @@ async fn read_tool_reads_memory_file() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload: payload.clone(),
         })
@@ -443,6 +450,8 @@ async fn search_tool_accepts_multiple_queries() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload: payload.clone(),
         })
@@ -521,6 +530,8 @@ async fn search_tool_accepts_windowed_all_match_mode() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload: payload.clone(),
         })
@@ -579,6 +590,8 @@ async fn search_tool_rejects_legacy_single_query() {
             source: ToolCallSource::Direct,
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: codex_core::passthrough_image_store(),
+            ephemeral: false,
             environments: Vec::new(),
             payload,
         })

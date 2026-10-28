@@ -59,7 +59,7 @@ fn header_auth_exposes_a_valid_chatgpt_account_id() {
 }
 
 #[tokio::test]
-async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
+async fn refresh_merges_metadata_but_yields_to_newer_credentials() -> anyhow::Result<()> {
     let codex_home = tempdir().unwrap();
     let fake_jwt = write_auth_file(
         AuthFileParams {
@@ -68,8 +68,7 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
             chatgpt_account_id: None,
         },
         codex_home.path(),
-    )
-    .expect("failed to write auth file");
+    )?;
 
     let storage = create_auth_storage(
         codex_home.path().to_path_buf(),
@@ -77,6 +76,10 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
         AuthKeyringBackendKind::default(),
     );
     let previous = storage.load().unwrap().unwrap();
+    let provenance = AccountOAuthProvenance {
+        issuer: "https://idp.example".to_string(),
+        client_id: "codex-client".to_string(),
+    };
     // Agent registration may commit while the OAuth exchange is in flight.
     let mut registered = previous.clone();
     registered.agent_identity = Some(AgentIdentityStorage::Record(agent_identity_record(
@@ -86,11 +89,11 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
     let updated = super::persist_tokens(
         &storage,
         &previous,
+        Some(provenance.clone()),
         /*id_token*/ None,
         Some("new-access-token".to_string()),
         Some("new-refresh-token".to_string()),
-    )
-    .expect("update_tokens should succeed");
+    )?;
 
     assert_eq!(storage.load().unwrap(), Some(updated.clone()));
     assert_eq!(updated.agent_identity, registered.agent_identity);
@@ -98,10 +101,12 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
     assert_eq!(tokens.id_token.raw_jwt, fake_jwt);
     assert_eq!(tokens.access_token, "new-access-token");
     assert_eq!(tokens.refresh_token, "new-refresh-token");
+    assert_eq!(tokens.oauth_provenance, Some(provenance));
 
     let winner = super::persist_tokens(
         &storage,
         &previous,
+        /*provenance*/ None,
         /*id_token*/ None,
         Some("stale-access-token".to_string()),
         Some("stale-refresh-token".to_string()),
@@ -110,11 +115,25 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
     assert_eq!(winner, updated);
     assert_eq!(storage.load().unwrap(), Some(updated.clone()));
 
+    // A refresh through a different authority drops provenance without losing a retained grant.
+    let updated = super::persist_tokens(
+        &storage,
+        &updated,
+        /*provenance*/ None,
+        /*id_token*/ None,
+        Some("later-access-token".to_string()),
+        /*refresh_token*/ None,
+    )?;
+    let tokens = updated.tokens.as_ref().expect("tokens should exist");
+    assert_eq!(tokens.refresh_token, "new-refresh-token");
+    assert_eq!(tokens.oauth_provenance, None);
+
     storage.delete().unwrap();
     assert!(
         super::persist_tokens(
             &storage,
             &updated,
+            /*provenance*/ None,
             /*id_token*/ None,
             Some("removed-access-token".to_string()),
             Some("removed-refresh-token".to_string()),
@@ -122,6 +141,7 @@ async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
         .is_err()
     );
     assert_eq!(storage.load().unwrap(), None);
+    Ok(())
 }
 
 #[test]
@@ -596,6 +616,10 @@ async fn chatgpt_auth_registers_agent_identity_when_enabled() -> anyhow::Result<
         },
         codex_home.path(),
     )?;
+    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+    let mut stored = storage.load()?.expect("auth should exist");
+    stored.tokens.as_mut().unwrap().login_owner_id = Some("login-a".into());
+    storage.save(&stored)?;
     let auth = super::load_auth(
         codex_home.path(),
         /*enable_codex_api_key_env*/ false,
@@ -609,6 +633,10 @@ async fn chatgpt_auth_registers_agent_identity_when_enabled() -> anyhow::Result<
     )
     .await?
     .expect("auth should load");
+
+    // An older client rewrites the same credentials without login metadata.
+    stored.tokens.as_mut().unwrap().login_owner_id = None;
+    storage.save(&stored)?;
 
     assert!(
         auth.agent_identity_auth(
@@ -678,6 +706,8 @@ async fn chatgpt_auth_registers_agent_identity_when_enabled() -> anyhow::Result<
         .expect("identity should persist");
     assert_eq!(persisted.agent_runtime_id, "agent-runtime-123");
     assert_eq!(persisted.task_id.as_deref(), Some("task-123"));
+    stored.agent_identity = Some(AgentIdentityStorage::Record(agent_auth.record().clone()));
+    assert_eq!(storage.load()?, Some(stored));
 
     let reloaded = super::load_auth(
         codex_home.path(),
@@ -1094,6 +1124,8 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
                 },
                 access_token: "test-access-token".to_string(),
                 refresh_token: "test-refresh-token".to_string(),
+                oauth_provenance: None,
+                login_owner_id: None,
                 account_id: None,
             }),
             last_refresh: Some(last_refresh),

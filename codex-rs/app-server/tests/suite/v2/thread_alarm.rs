@@ -316,7 +316,7 @@ async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
                 late_by_seconds: None
             }
         );
-        assert!(soundings[0].still_armed.is_empty());
+        assert_eq!(soundings[0].still_armed, Vec::<String>::new());
         assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
         assert_eq!(model.requests().len(), 3);
         Ok(())
@@ -401,7 +401,7 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
         anyhow::bail!("expected matched sounding: {:?}", soundings[0])
     };
     assert_eq!((command.as_str(), line.as_str()), (READY_COMMAND, "ready"));
-    assert!(soundings[0].still_armed.is_empty());
+    assert_eq!(soundings[0].still_armed, Vec::<String>::new());
     assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
 
     let local: ThreadBackgroundTerminalsListResponse = app
@@ -437,7 +437,10 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
             json!({"threadId": unrelated, "scope": "subtree"}),
         )
         .await?;
-    assert!(isolated.data.is_empty());
+    assert_eq!(
+        isolated.data,
+        Vec::<codex_app_server_protocol::ThreadBackgroundTerminal>::new()
+    );
     let stopped: ThreadBackgroundTerminalsTerminateResponse = app
         .request(
             "thread/backgroundTerminals/terminate",
@@ -451,7 +454,10 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
             json!({"threadId": selected, "scope": "subtree"}),
         )
         .await?;
-    assert!(remaining.data.is_empty());
+    assert_eq!(
+        remaining.data,
+        Vec::<codex_app_server_protocol::ThreadBackgroundTerminal>::new()
+    );
     Ok(())
 }
 

@@ -2,7 +2,10 @@
 
 use super::App;
 use super::AppEvent;
+use super::AppServerApprovalsReviewer;
+use super::AppServerAskForApproval;
 use super::AppServerSession;
+use super::ApprovalsReviewer;
 use super::PermissionProfileSelection;
 use super::ThreadId;
 use super::ThreadSettingsUpdateParams;
@@ -19,6 +22,44 @@ impl App {
     where
         A: FnOnce(&mut App, bool) + Send + 'static,
     {
+        self.request_thread_settings_update_with_outcome(server, params, move |app, result| {
+            apply(app, matches!(result, Ok(true)));
+        })
+    }
+
+    pub(in crate::app) fn request_thread_settings_update_with_outcome<A>(
+        &mut self,
+        server: &AppServerSession,
+        params: ThreadSettingsUpdateParams,
+        apply: A,
+    ) -> bool
+    where
+        A: FnOnce(&mut App, Result<bool, &super::super::turn_submissions::SubmissionFailure>)
+            + Send
+            + 'static,
+    {
+        self.request_thread_settings_update_with_outcome_for_id(
+            server,
+            params,
+            uuid::Uuid::new_v4(),
+            None,
+            apply,
+        )
+    }
+
+    fn request_thread_settings_update_with_outcome_for_id<A>(
+        &mut self,
+        server: &AppServerSession,
+        params: ThreadSettingsUpdateParams,
+        request_id: uuid::Uuid,
+        profile_selection: Option<PermissionProfileSelection>,
+        apply: A,
+    ) -> bool
+    where
+        A: FnOnce(&mut App, Result<bool, &super::super::turn_submissions::SubmissionFailure>)
+            + Send
+            + 'static,
+    {
         if !thread_settings_update_has_changes(&params) || !server.operation_settings_supported() {
             return false;
         }
@@ -33,6 +74,16 @@ impl App {
         if changes_permissions && self.pending_server_profiles.contains_key(&thread_id) {
             return false;
         }
+        let reserves_profile = profile_selection.is_some();
+        if let Some(selection) = profile_selection {
+            self.pending_server_profiles.insert(
+                thread_id,
+                super::super::permission_reservations::PendingPermissionProfile {
+                    request_id,
+                    selection,
+                },
+            );
+        }
         let generation = self.model_selection_generation;
         self.request_server(
             server,
@@ -42,18 +93,23 @@ impl App {
             move |handle| async move {
                 handle
                     .thread_settings_update(
-                        codex_app_server_protocol::RequestId::String(
-                            uuid::Uuid::new_v4().to_string(),
-                        ),
+                        codex_app_server_protocol::RequestId::String(request_id.to_string()),
                         params,
                     )
                     .await
             },
             move |app, server, result| {
+                let owns_reservation = app.owns_pending_permission_profile(thread_id, request_id);
                 if matches!(result, Ok(false)) {
                     server.note_operation_settings_unsupported();
                 }
-                if changes_permissions {
+                // Profile confirmation may precede this model receipt. Retired
+                // permission authority cannot revoke the model's own acceptance.
+                if changes_permissions
+                    && (owns_reservation
+                        || (!reserves_profile
+                            && !app.pending_server_profiles.contains_key(&thread_id)))
+                {
                     match result {
                         Ok(true) => {
                             app.agents_overview
@@ -61,7 +117,9 @@ impl App {
                                 .remove(&thread_id);
                         }
                         Ok(false)
-                        | Err(super::super::turn_submissions::SubmissionFailure::Rejected(_)) => {
+                        | Err(super::super::turn_submissions::SubmissionFailure::Rejected(_))
+                            if owns_reservation =>
+                        {
                             app.pending_server_profiles.remove(&thread_id);
                         }
                         _ => {}
@@ -72,7 +130,7 @@ impl App {
                     app.chat_widget
                         .add_error_message(format!("Failed to update thread settings: {error}"));
                 }
-                apply(app, matches!(result, Ok(true)));
+                apply(app, result);
                 if matches!(result, Ok(true))
                     && app.model_selection_generation == generation
                     && app.chat_widget.thread_id() == Some(thread_id)
@@ -107,24 +165,57 @@ impl ModelSelectionGeneration {
 }
 
 impl App {
-    pub(super) fn request_active_model_settings(
+    pub(in crate::app) fn request_active_model_settings<A>(
         &mut self,
         app_server: &AppServerSession,
         params: ThreadSettingsUpdateParams,
-        defaulted_to_auto_review: bool,
-        pending_cyber_profile: Option<PermissionProfileSelection>,
-    ) {
+        apply: A,
+    ) -> bool
+    where
+        A: FnOnce(&mut App, Result<bool, &super::super::turn_submissions::SubmissionFailure>)
+            + Send
+            + 'static,
+    {
+        let defaulted_to_auto_review = params.approvals_reviewer
+            == Some(AppServerApprovalsReviewer::AutoReview)
+            && (self.chat_widget.config_ref().approvals_reviewer != ApprovalsReviewer::AutoReview
+                || AppServerAskForApproval::from(
+                    self.chat_widget
+                        .config_ref()
+                        .permissions
+                        .approval_policy
+                        .value(),
+                ) != AppServerAskForApproval::OnRequest);
+        let pending_cyber_profile =
+            params
+                .permissions
+                .as_ref()
+                .map(|profile_id| PermissionProfileSelection {
+                    profile_id: profile_id.clone(),
+                    approval_policy: params.approval_policy,
+                    approvals_reviewer: params
+                        .approvals_reviewer
+                        .map(codex_app_server_protocol::ApprovalsReviewer::to_core),
+                    display_label: profile_id.clone(),
+                });
+
         let thread_id = self.active_thread_id;
-        let accepted =
-            self.request_thread_settings_update(app_server, params, move |app, updated| {
-                if defaulted_to_auto_review && updated && app.active_thread_id == thread_id {
+        let request_id = uuid::Uuid::new_v4();
+        self.request_thread_settings_update_with_outcome_for_id(
+            app_server,
+            params,
+            request_id,
+            pending_cyber_profile,
+            move |app, result| {
+                if defaulted_to_auto_review
+                    && matches!(result, Ok(true))
+                    && app.active_thread_id == thread_id
+                {
                     app.app_event_tx.send(AppEvent::CyberModelAutoReviewNotice);
                 }
-            });
-        // Reserve the selection before its confirming notification can arrive.
-        if accepted && let (Some(thread_id), Some(selection)) = (thread_id, pending_cyber_profile) {
-            self.pending_server_profiles.insert(thread_id, selection);
-        }
+                apply(app, result);
+            },
+        )
     }
 
     pub(super) fn pending_automatic_model_setting(&self) -> Option<String> {

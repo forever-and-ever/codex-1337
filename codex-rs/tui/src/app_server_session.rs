@@ -5,6 +5,7 @@
 
 mod account;
 mod daybreak_api_key_compat;
+mod events;
 pub(crate) mod fork_preparation;
 pub(crate) mod fs;
 mod history;
@@ -30,6 +31,7 @@ mod web_search;
 #[path = "app_server_session/collaboration_catalog_tests.rs"]
 mod collaboration_catalog_tests;
 
+pub(crate) use events::AppServerSessionEvent;
 pub(crate) use history::HISTORY_ITEM_PAGE_LIMIT;
 pub(crate) use history::HISTORY_ITEM_SCAN_LIMIT;
 pub(crate) use history::HistoryContent;
@@ -52,7 +54,6 @@ use crate::status::StatusAccountDisplay;
 use crate::status::plan_type_display_name;
 use crate::terminal_visualization_instructions::with_terminal_visualization_instructions;
 use codex_app_server_client::AppServerClient;
-use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::AppServerPath;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
@@ -93,8 +94,6 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStartSource;
 use codex_app_server_protocol::ThreadUnarchiveParams;
 use codex_app_server_protocol::ThreadUnarchiveResponse;
-use codex_app_server_protocol::ThreadUnsubscribeParams;
-use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::Turn;
 #[cfg(test)]
 use codex_app_server_protocol::TurnStartResponse;
@@ -289,6 +288,7 @@ pub(crate) struct AppServerBootstrap {
 }
 
 pub(crate) struct AppServerSession {
+    backend_id: crate::backend_id::BackendId,
     client: AppServerClient,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
@@ -298,7 +298,7 @@ pub(crate) struct AppServerSession {
     /// Explicit CLI provider selection, distinct from resolved configuration defaults.
     pub(crate) model_provider_override: Option<String>,
     history_support: ThreadHistorySupport,
-    thread_settings_update_supported: bool,
+    pub(crate) thread_settings_update_supported: bool,
     default_model: Option<String>,
     available_models: Vec<ModelPreset>,
     daybreak_api_key_compat: Arc<tokio::sync::Semaphore>,
@@ -348,6 +348,17 @@ pub(crate) fn is_active_writer_error(err: &color_eyre::eyre::Report) -> bool {
         .any(|cause| cause.to_string().contains("already has an active writer"))
 }
 
+/// Recognizes a draining server's refusal, using the legacy message only when data is absent.
+pub(crate) fn is_server_shutting_down_error(error: &JSONRPCErrorError) -> bool {
+    error.code == JSONRPC_INVALID_REQUEST
+        && match &error.data {
+            Some(data) => {
+                data.get("reason").and_then(serde_json::Value::as_str) == Some("serverShuttingDown")
+            }
+            None => error.message == "Server is draining; retry after reconnecting",
+        }
+}
+
 pub(crate) fn source_agent_path(source: &SessionSource) -> Option<String> {
     match source {
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_path, .. }) => {
@@ -391,8 +402,13 @@ impl AppServerSession {
         self.client.platform_os()
     }
 
-    pub(crate) fn new(client: AppServerClient, thread_params_mode: ThreadParamsMode) -> Self {
+    pub(crate) fn new(
+        backend_id: crate::backend_id::BackendId,
+        client: AppServerClient,
+        thread_params_mode: ThreadParamsMode,
+    ) -> Self {
         Self {
+            backend_id,
             client,
             next_request_id: 1,
             history_pagination: HashMap::new(),
@@ -408,6 +424,11 @@ impl AppServerSession {
             managed_new_thread_defaults: None,
         }
     }
+
+    pub(crate) fn backend_id(&self) -> crate::backend_id::BackendId {
+        self.backend_id
+    }
+
     pub(crate) fn with_remote_cwd_override(mut self, remote_cwd_override: Option<PathBuf>) -> Self {
         self.remote_cwd_override = remote_cwd_override;
         self
@@ -676,8 +697,14 @@ impl AppServerSession {
             .map_err(|err| bootstrap_request_error("account/read failed during TUI bootstrap", err))
     }
 
-    pub(crate) async fn next_event(&mut self) -> Option<AppServerEvent> {
-        self.client.next_event().await
+    pub(crate) async fn next_event(&mut self) -> Option<AppServerSessionEvent> {
+        self.client
+            .next_event()
+            .await
+            .map(|event| AppServerSessionEvent {
+                backend_id: self.backend_id,
+                event,
+            })
     }
 
     #[cfg(test)]
@@ -939,21 +966,6 @@ impl AppServerSession {
             .request_typed(ClientRequest::TurnStart { request_id, params })
             .await
             .wrap_err("turn/start failed in TUI")
-    }
-
-    pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadUnsubscribeResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadUnsubscribe {
-                request_id,
-                params: ThreadUnsubscribeParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/unsubscribe failed in TUI")?;
-        Ok(())
     }
 
     pub(crate) async fn shutdown(self) -> std::io::Result<()> {
@@ -1830,6 +1842,13 @@ mod tests {
                 ],
             });
         }
+        let catalog_path = codex_home.path().join("models.json");
+        std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
+        let catalog_config = format!(
+            "model_catalog_json = {}\n",
+            toml::Value::String(catalog_path.display().to_string()),
+        );
+        std::fs::write(codex_home.path().join("config.toml"), &catalog_config)?;
         config.model_catalog = Some(catalog);
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
         let next_request_id = app_server.next_request_id;
@@ -1883,7 +1902,9 @@ mod tests {
         ] {
             std::fs::write(
                 codex_home.path().join("config.toml"),
-                format!("[features]\napi_key_cyber_access_programs = {server_enabled}\n"),
+                format!(
+                    "{catalog_config}[features]\napi_key_cyber_access_programs = {server_enabled}\n"
+                ),
             )?;
             let client_config = ConfigBuilder::default()
                 .codex_home(client_home.path().to_path_buf())
@@ -1949,7 +1970,17 @@ mod tests {
         let codex_home = tempfile::tempdir()?;
         let mut config = build_config(&codex_home).await;
         config.model = None;
-        config.model_catalog = Some(codex_protocol::openai_models::ModelsResponse::default());
+        let catalog = codex_protocol::openai_models::ModelsResponse::default();
+        let catalog_path = codex_home.path().join("models.json");
+        std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            format!(
+                "model_catalog_json = {}\n",
+                toml::Value::String(catalog_path.display().to_string()),
+            ),
+        )?;
+        config.model_catalog = Some(catalog);
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
 
         let error = app_server
@@ -1957,7 +1988,20 @@ mod tests {
             .await
             .err()
             .expect("bootstrap requires a model");
-        insta::assert_snapshot!(error.to_string(), @"No models are available. Set `model` explicitly or check your model catalog configuration.");
+        let message = error.to_string();
+        assert!(
+            message.starts_with("account/read failed during TUI bootstrap:"),
+            "{message}"
+        );
+        assert!(message.contains("model_catalog_json path"), "{message}");
+        assert!(
+            message.contains(&catalog_path.display().to_string()),
+            "{message}"
+        );
+        assert!(
+            message.ends_with("must contain at least one model (code -32600)"),
+            "{message}"
+        );
 
         app_server.shutdown().await?;
         Ok(())

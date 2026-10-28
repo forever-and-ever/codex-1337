@@ -27,7 +27,7 @@ pub(super) fn out_of_order_streams(
         item_id: "first".into(),
     });
     assert!(marker.copy_source().is_none());
-    assert!(marker.activity_ids().is_empty());
+    assert_eq!(marker.activity_ids(), Vec::<String>::new());
     assert!(marker.activity_disclosure(40).is_none());
     app.transcript_cells.push(marker);
     let mut responding = Buffer::empty(area);

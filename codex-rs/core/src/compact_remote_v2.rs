@@ -316,7 +316,11 @@ async fn run_remote_compaction_request_v2(
     let client_session = match transport {
         CompactionRequestTransport::Background(turn_state, auth_owner_generation) => {
             let settings = &step_context.settings;
-            let cancellation = crate::session::async_compaction::shutdown_cancellation(sess).await;
+            let Some(cancellation) =
+                crate::session::async_compaction::shutdown_cancellation(sess).await
+            else {
+                return Err(CodexErr::TurnAborted);
+            };
             let effort = sess
                 .reasoning_effort_for_request(settings, RequestEffortUsage::Compaction)
                 .await;

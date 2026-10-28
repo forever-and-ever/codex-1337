@@ -17,7 +17,6 @@ use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use tempfile::tempdir;
-#[cfg(windows)]
 use test_case::test_case;
 
 use super::PreparedExecRequest;
@@ -44,6 +43,7 @@ async fn prepare_exec_request(
         runtime_paths,
         network_policy_decider,
         network_policy_audit_observer,
+        &codex_network_proxy::RemoteCredentialBrokerCache::default(),
         &ProcessTelemetry::default(),
     )
     .await

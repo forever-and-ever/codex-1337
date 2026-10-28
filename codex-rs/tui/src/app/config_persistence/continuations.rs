@@ -88,7 +88,16 @@ impl App {
         params: ThreadSettingsUpdateParams,
         fallback_policy: AskForApproval,
         fallback_reviewer: ApprovalsReviewer,
+        already_selected: bool,
     ) {
+        let request_id = Uuid::new_v4();
+        self.pending_server_profiles.insert(
+            thread_id,
+            super::super::permission_reservations::PendingPermissionProfile {
+                request_id,
+                selection: selection.clone(),
+            },
+        );
         self.request_server(
             app_server,
             turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
@@ -97,15 +106,21 @@ impl App {
             move |handle| async move {
                 handle
                     .thread_settings_update(
-                        codex_app_server_protocol::RequestId::String(Uuid::new_v4().to_string()),
+                        codex_app_server_protocol::RequestId::String(request_id.to_string()),
                         params,
                     )
                     .await
             },
             move |app, server, result| {
+                // A matching notification may already have confirmed this request and
+                // admitted a newer intent, even one with the same profile name.
+                if !app.owns_pending_permission_profile(thread_id, request_id) {
+                    return Ok(());
+                }
                 let displayed = app.chat_widget.thread_id() == Some(thread_id);
                 match result {
                     Ok(true) => {
+                        app.pending_server_profiles.remove(&thread_id);
                         // Omission preserves the preceding accepted value, including an
                         // earlier request whose notification has not reached the UI yet.
                         let previous = app
@@ -132,9 +147,11 @@ impl App {
                         app.agents_overview
                             .selected_permission_profiles
                             .insert(thread_id, selection.profile_id.clone());
-                        app.agents_overview
-                            .requested_permission_profiles
-                            .insert(thread_id, selection.clone());
+                        if !already_selected {
+                            app.agents_overview
+                                .requested_permission_profiles
+                                .insert(thread_id, selection.clone());
+                        }
                         if displayed {
                             app.chat_widget.add_info_message(
                                 format!(
@@ -144,9 +161,11 @@ impl App {
                                 None,
                             );
                             app.chat_widget.submit_initial_user_message_if_pending();
+                            app.app_event_tx.send(AppEvent::SettingsSelectionClosed);
                         }
                     }
                     Ok(false) => {
+                        app.pending_server_profiles.remove(&thread_id);
                         server.note_operation_settings_unsupported();
                         if displayed {
                             app.chat_widget
@@ -157,6 +176,9 @@ impl App {
                         }
                     }
                     Err(error) => {
+                        if matches!(error, turn_submissions::SubmissionFailure::Rejected(_)) {
+                            app.pending_server_profiles.remove(&thread_id);
+                        }
                         if displayed {
                             app.chat_widget
                                 .retain_input_after_failed_permission_selection();

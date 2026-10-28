@@ -17,7 +17,7 @@ fn rendered_classifier_text(config: &GuardianV2Config, policy: &str) -> String {
     let (_, content) = config
         .render_classifier_instructions(policy, "", CLASSIFICATION_OUTPUT_INSTRUCTIONS)
         .into_parts();
-    let (ContentItem::InputText { text }, _) = content.into_parts() else {
+    let (ContentItem::InputText { text }, _, _) = content.into_parts() else {
         panic!("classifier instructions must be text");
     };
     text
@@ -57,7 +57,7 @@ fn extra_policy_reaches_templated_and_legacy_classifier_instructions() {
                     CLASSIFICATION_OUTPUT_INSTRUCTIONS,
                 )
                 .into_parts();
-            let (ContentItem::InputText { text }, _) = content.into_parts() else {
+            let (ContentItem::InputText { text }, _, _) = content.into_parts() else {
                 panic!("classifier instructions must be text");
             };
             assert_eq!(
@@ -344,14 +344,20 @@ fn classifier_mode_uses_local_override_then_model_default() {
             ..Default::default()
         })
         .unwrap();
-        let defaults = GuardianV2ModelConfig {
-            async_classifier_mode: Some(AsyncClassifierMode::Conversation),
-            ..Default::default()
-        };
-        assert_eq!(
-            config.classifier_mode(Some(&defaults)),
-            local.unwrap_or(AsyncClassifierMode::Conversation)
-        );
+        for model in [
+            None,
+            Some(AsyncClassifierMode::Snapshot),
+            Some(AsyncClassifierMode::Conversation),
+        ] {
+            let defaults = GuardianV2ModelConfig {
+                async_classifier_mode: model,
+                ..Default::default()
+            };
+            assert_eq!(
+                config.classifier_mode(Some(&defaults)),
+                local.or(model).unwrap_or(AsyncClassifierMode::Conversation)
+            );
+        }
         assert_eq!(
             config.classifier_mode(/*model_defaults*/ None),
             local.unwrap_or(AsyncClassifierMode::Conversation)

@@ -165,7 +165,7 @@
           "type": "object"
         },
         {
-          "description": "Dollars an OpenRouter key can still spend.",
+          "description": "Dollars an `OpenRouter` key can still spend.",
           "properties": {
             "type": {
               "enum": [

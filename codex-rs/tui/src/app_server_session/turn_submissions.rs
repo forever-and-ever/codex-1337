@@ -43,6 +43,7 @@ pub(crate) fn turn_start_params(
         input: items,
         tool_output: None,
         responsesapi_client_metadata: None,
+        responsesapi_client_metadata_patch: None,
         additional_context: None,
         environments: None,
         cwd: Some(cwd),

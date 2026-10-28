@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-#[cfg(windows)]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -8,13 +7,12 @@ use codex_exec_server_protocol::JSONRPCErrorError;
 use codex_file_system::WindowsSandboxSelection;
 use codex_network_proxy::CUSTOM_CA_ENV_KEYS;
 use codex_network_proxy::ManagedNetworkSandboxContext;
-use codex_network_proxy::ManagedProxyRouting;
 use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyHandle;
 use codex_network_proxy::NetworkProxyState;
-use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
+use codex_network_proxy::RemoteCredentialBrokerCache;
 use codex_network_proxy::is_managed_mitm_ca_trust_bundle_path;
 #[cfg(target_os = "windows")]
 use codex_network_proxy::strip_managed_proxy_env;
@@ -42,7 +40,6 @@ use crate::CODEX_ARG0_EXEC_HELPER_ARG1;
 use crate::ExecServerRuntimeOptions;
 use crate::process_telemetry::trace_process_id;
 use crate::protocol::ExecParams;
-use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
 use crate::sandbox_selection::select_sandbox;
 
@@ -67,6 +64,15 @@ struct PreparedWindowsSandboxRequest {
 }
 
 impl PreparedExecRequest {
+    #[cfg(unix)]
+    pub(crate) fn credential_snapshot_proxy(&self, params: &ExecParams) -> Option<&NetworkProxy> {
+        let launch = params.network_proxy.as_ref()?;
+        if !launch.proxy.credential_masking_enabled() || !supports_credential_snapshot(params) {
+            return None;
+        }
+        self.network_proxy_handle.as_ref()?.proxy()
+    }
+
     pub(crate) fn windows_sandbox_spawn_request(&self) -> Option<WindowsSandboxSpawnRequest<'_>> {
         self.windows_sandbox
             .as_ref()
@@ -82,6 +88,18 @@ impl PreparedExecRequest {
     }
 }
 
+fn supports_credential_snapshot(params: &ExecParams) -> bool {
+    cfg!(any(target_os = "linux", target_os = "macos"))
+        && params.arg0.is_none()
+        && params.shell_snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.shell.name == "zsh"
+                && matches!(params.argv.as_slice(), [program, flag, _]
+                    if program == &snapshot.shell.path
+                        && flag == "-lc"
+                        && Path::new(program).file_name().is_some_and(|name| name == "zsh"))
+        })
+}
+
 #[tracing::instrument(
     name = "codex.exec_server.process_prepare_sandbox",
     skip_all,
@@ -93,8 +111,10 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
     runtime_paths: Option<&ExecServerRuntimeOptions>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
+    credential_brokers: &RemoteCredentialBrokerCache,
     telemetry: &ProcessTelemetry,
 ) -> Result<PreparedExecRequest, JSONRPCErrorError> {
+    let network_proxy = params.network_proxy.clone();
     if let Some(sandbox) = params.sandbox.as_ref()
         && sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
     {
@@ -120,10 +140,19 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
         }
         None
     } else {
-        params.network_proxy.as_ref()
+        network_proxy
     };
-    #[cfg(not(target_os = "windows"))]
-    let network_proxy = params.network_proxy.as_ref();
+    let network_proxy = network_proxy
+        .map(|launch| {
+            NetworkProxyState::from_remote_launch_config(
+                launch,
+                codex_utils_path_uri::Platform::native(),
+                credential_brokers,
+                &env,
+            )
+        })
+        .transpose()
+        .map_err(|err| invalid_params(format!("invalid network proxy config: {err}")))?;
 
     let (env, managed_network, network_proxy_handle, network_proxy_restricting_sid) =
         prepare_managed_network(
@@ -346,14 +375,18 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
     })
 }
 
+#[expect(
+    clippy::unused_async,
+    reason = "The uninhabited seam retains the upstream async preparation signature"
+)]
 async fn prepare_managed_network(
     params: &ExecParams,
-    network_proxy: Option<&RemoteNetworkProxyLaunchConfig>,
-    proxy_private_ips_via_upstream: bool,
+    network_proxy: Option<NetworkProxyState>,
+    _proxy_private_ips_via_upstream: bool,
     env: HashMap<String, String>,
-    network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
-    network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
-    telemetry: &ProcessTelemetry,
+    _network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
+    _network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
+    _telemetry: &ProcessTelemetry,
 ) -> Result<
     (
         HashMap<String, String>,
@@ -363,81 +396,11 @@ async fn prepare_managed_network(
     ),
     JSONRPCErrorError,
 > {
-    let Some(network_proxy) = network_proxy.cloned() else {
-        return Ok((env, params.managed_network.clone(), None, None));
-    };
-    let routing =
-        if params.sandbox.as_ref().is_some_and(|sandbox| {
-            sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
-        }) {
-            ManagedProxyRouting::DedicatedListeners
-        } else {
-            ManagedProxyRouting::SharedIngress
-        };
-    let mut state = NetworkProxyState::from_remote_launch_config(
-        network_proxy,
-        codex_utils_path_uri::Platform::native(),
-    )
-    .map_err(|err| invalid_params(format!("invalid network proxy config: {err}")))?;
-    state.set_proxy_private_ips_via_upstream(proxy_private_ips_via_upstream);
-    if let Some(observer) = network_policy_audit_observer {
-        state.set_policy_audit_observer(observer);
+    // TELOS(removed-network-proxy): launch construction rejects; state has no values.
+    match network_proxy {
+        Some(state) => match state {},
+        None => Ok((env, params.managed_network.clone(), None, None)),
     }
-    if let Some(launch_context) = &telemetry.launch_context {
-        state.set_launch_span_context(launch_context.clone());
-    }
-    state.set_process_log_metadata(codex_network_proxy::NetworkProxyProcessLogMetadata {
-        thread_id: telemetry.thread_id.clone(),
-        tool_call_id: telemetry.tool_call_id.clone(),
-        executor_identity: telemetry
-            .executor_registration
-            .as_ref()
-            .map(|registration| codex_network_proxy::ExecutorLogIdentity {
-                environment_id: registration.environment_id.clone(),
-                registration_id: registration.executor_registration_id.clone(),
-            }),
-    });
-    let mut builder = NetworkProxy::builder()
-        .state(Arc::new(state))
-        .managed_proxy_routing(routing);
-    if let Some(network_policy_decider) = network_policy_decider {
-        builder = builder.policy_decider_arc(network_policy_decider);
-    }
-    let proxy = builder
-        .build()
-        .await
-        .map_err(|err| internal_error(format!("failed to build executor network proxy: {err}")))?;
-    let handle = proxy
-        .run()
-        .await
-        .map_err(|err| internal_error(format!("failed to start executor network proxy: {err}")))?;
-    #[cfg(target_os = "windows")]
-    let network_proxy_restricting_sid = if routing == ManagedProxyRouting::SharedIngress {
-        Some(
-            proxy
-                .network_proxy_restricting_sid(/*environment_id*/ None)
-                .ok_or_else(|| {
-                    internal_error(
-                        "managed Windows proxy route is missing its restricting SID".to_string(),
-                    )
-                })?,
-        )
-    } else {
-        None
-    };
-    #[cfg(not(target_os = "windows"))]
-    let network_proxy_restricting_sid = None;
-    let prepared = proxy
-        .prepare_for_optional_environment(env, /*environment_id*/ None)
-        .map_err(|err| {
-            internal_error(format!("failed to prepare executor network proxy: {err}"))
-        })?;
-    Ok((
-        prepared.env,
-        Some(prepared.sandbox_context),
-        Some(handle),
-        network_proxy_restricting_sid,
-    ))
 }
 
 fn native_path(path: &PathUri, label: &str) -> Result<AbsolutePathBuf, JSONRPCErrorError> {

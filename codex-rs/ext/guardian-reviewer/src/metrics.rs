@@ -26,7 +26,7 @@ pub(crate) fn emit_guardian_review_metrics(
     result: &GuardianReviewAnalyticsResult,
     approval_request_source: GuardianApprovalRequestSource,
     reviewed_action: &GuardianReviewedAction,
-    completion_latency_ms: u64,
+    elapsed: Duration,
 ) {
     let tags = guardian_review_metric_tags(result, approval_request_source, reviewed_action);
     let tag_refs: Vec<(&str, &str)> = tags
@@ -46,15 +46,28 @@ pub(crate) fn emit_guardian_review_metrics(
     };
     let mut counter_tag_refs = tag_refs.clone();
     counter_tag_refs.extend(mcp_tags.iter().map(|(key, value)| (*key, value.as_str())));
+    counter_tag_refs.push(("context_changed", bool_tag(result.context_changed)));
     session_telemetry.counter(
         GUARDIAN_REVIEW_COUNT_METRIC,
         /*inc*/ 1,
         &counter_tag_refs,
     );
-    session_telemetry.record_duration(
-        GUARDIAN_REVIEW_DURATION_METRIC,
-        Duration::from_millis(completion_latency_ms),
+    session_telemetry.record_duration(GUARDIAN_REVIEW_DURATION_METRIC, elapsed, &tag_refs);
+
+    // Cached approvals may cancel an in-flight review: retain its attempt count,
+    // but use the final review status to distinguish recovery from async release.
+    session_telemetry.histogram_with_boundaries(
+        "codex.guardian.review.attempt_count",
+        result.attempt_count,
+        &[0.0, 1.0, 2.0, 3.0],
         &tag_refs,
+    );
+    let mut retry_tags = tag_refs.clone();
+    retry_tags.push(("retried", bool_tag(result.attempt_count > 1)));
+    session_telemetry.counter(
+        "codex.guardian.review.retry_outcome",
+        /*inc*/ 1,
+        &retry_tags,
     );
 
     if let Some(time_to_first_token_ms) = result.time_to_first_token_ms {
@@ -182,7 +195,7 @@ fn terminal_status_tag(status: GuardianReviewTerminalStatus) -> &'static str {
     }
 }
 
-fn failure_reason_tag(reason: Option<GuardianReviewFailureReason>) -> &'static str {
+pub(crate) fn failure_reason_tag(reason: Option<GuardianReviewFailureReason>) -> &'static str {
     match reason {
         Some(GuardianReviewFailureReason::Timeout) => "timeout",
         Some(GuardianReviewFailureReason::Cancelled) => "cancelled",

@@ -27,6 +27,7 @@ use codex_utils_plugins::mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
 use codex_utils_plugins::mention_syntax::TOOL_MENTION_SIGIL;
 
 use super::ChatWidget;
+use super::StatusSurfaceOverrides;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -151,6 +152,8 @@ pub(crate) struct ThreadInputState {
     pub(crate) questions: Option<crate::bottom_pane::QuestionState>,
     pub(crate) pending_thread_settings:
         Option<codex_app_server_protocol::ThreadSettingsUpdatedNotification>,
+    #[serde(default)]
+    pub(super) initial_user_message: Option<UserMessage>,
     pub(super) composer: Option<ThreadComposerState>,
     pub(crate) input_queue: super::input_queue::InputQueueState,
     /// Reconcile delivery after transport recovery, not after a fork or ordinary thread switch.
@@ -159,6 +162,8 @@ pub(crate) struct ThreadInputState {
     pub(super) current_collaboration_mode: CollaborationMode,
     pub(super) active_collaboration_mask: Option<CollaborationModeMask>,
     pub(super) plan_mode_reasoning_effort: Option<ReasoningEffortConfig>,
+    #[serde(default)]
+    pub(super) status_surface_overrides: StatusSurfaceOverrides,
     pub(crate) task_running: bool,
     pub(crate) agent_turn_running: bool,
 }

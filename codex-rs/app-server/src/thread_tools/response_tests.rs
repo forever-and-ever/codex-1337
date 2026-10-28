@@ -29,7 +29,7 @@ fn oversized_wait_preserves_every_target_and_marks_shortened_answers() {
         let retained = output["polls"][index]["latestAssistantMessage"]["text"]
             .as_str()
             .unwrap();
-        assert!(!retained.is_empty());
+        assert_ne!(retained, "");
         assert!(answer.starts_with(retained));
         poll["latestAssistantMessage"]["text"] = json!(retained);
         poll["latestAssistantMessage"]["truncated"] = json!(true);

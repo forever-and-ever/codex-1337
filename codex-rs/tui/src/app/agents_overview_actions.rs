@@ -1,5 +1,5 @@
 //! Server RPCs own lifecycle outcomes; successful actions invalidate dashboard group caches.
-//! A modal keeps rendering during RPCs while deferring navigation and task notifications.
+//! Keep the dashboard browsable during RPCs while deferring task notifications.
 //! Removing the current root leaves an unattached dashboard, even when it is empty.
 
 use super::App;

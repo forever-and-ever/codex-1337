@@ -298,6 +298,7 @@ mod input_submission;
 mod interrupts;
 mod questions;
 mod session_draft;
+mod startup_handoff;
 mod startup_submission;
 pub(crate) use session_draft::SessionDraft;
 mod ui_reload;
@@ -324,6 +325,7 @@ pub(crate) use context_role::ContextRoleCommand;
 mod alarms;
 mod prompt_cache;
 mod skills;
+mod slash_command_args;
 mod slash_dispatch;
 use self::skills::collect_tool_mentions;
 use self::skills::find_app_mentions;
@@ -336,15 +338,20 @@ use self::plugins::PluginListFetchState;
 use self::plugins::PluginsCacheState;
 mod plan_implementation;
 use self::plan_implementation::PLAN_IMPLEMENTATION_TITLE;
+mod model_command;
 mod model_popup_state;
 mod model_popups;
 mod notifications;
 mod openrouter;
 mod provider_models;
+pub(crate) mod quick_dials;
 mod session_model_selection;
 use self::notifications::Notification;
 pub(crate) use self::session_model_selection::AstraModelPickerAction;
 mod permission_discovery;
+mod permission_popup_state;
+use self::permission_popup_state::PermissionIntent;
+use self::permission_popup_state::PermissionPopupState;
 mod permission_popups;
 mod permission_shortcuts;
 mod permissions_menu;
@@ -409,11 +416,12 @@ use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
 mod status_controls;
+mod status_surface_commands;
 mod status_surfaces;
 mod stream_preparation;
+use self::status_surface_commands::StatusSurfaceOverrides;
 mod streaming;
 use self::status_surfaces::CachedProjectRootName;
-mod thread_title_status;
 mod thread_usage;
 pub(crate) use self::thread_usage::ThreadUsageOutcome;
 mod tool_lifecycle;
@@ -429,6 +437,7 @@ mod prompt_order;
 mod usage;
 mod user_messages;
 mod working_directory;
+pub(crate) use self::input_restore::ThreadInputSettingsAuthority;
 use self::user_messages::MessageDelivery;
 pub(crate) use self::user_messages::PendingSteer;
 #[cfg(test)]
@@ -564,9 +573,8 @@ pub(crate) struct ChatWidget {
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
     model_popup_request: Option<model_popup_state::ModelPopupRequest>,
-    permission_popup_request_id: Option<uuid::Uuid>,
+    permission_popup: PermissionPopupState,
     permission_discovery: Option<crate::permission_discovery::PermissionDiscovery>,
-    permission_profiles_menu_opened: bool,
     model_popup_model_ids: Vec<String>,
     session_telemetry: SessionTelemetry,
     session_header: SessionHeader,
@@ -714,7 +722,10 @@ pub(crate) struct ChatWidget {
     input_queue_frontend: input_queue::InputQueueFrontend,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.
     chat_keymap: ChatKeymap,
-    permission_shortcut_pending: bool,
+    /// Whether the preset submenu owns the next key.
+    quick_dial_menu: bool,
+    /// Ignore a held key after it dismisses the preset submenu.
+    quick_dial_menu_key_guard: Option<crate::activation_key_guard::ActivationKeyGuard>,
     // Pending notification to show when unfocused on next Draw
     pub(crate) pending_notification: Option<Notification>,
     /// When `Some`, the user has pressed a quit shortcut and the second press
@@ -756,6 +767,8 @@ pub(crate) struct ChatWidget {
     // On cancel or persist-failure the inner value is restored to config;
     // on confirm the outer is set to `None` to end the session.
     terminal_title_setup_original_items: Option<Option<Vec<String>>>,
+    // Explicit per-thread layout choices made through `/title` and `/statusline`.
+    status_surface_overrides: StatusSurfaceOverrides,
     // Baseline instant used to animate spinner-prefixed title statuses.
     terminal_title_animation_origin: Instant,
     // The foreground loop refreshes the title at this deadline without drawing a frame.
@@ -1022,7 +1035,11 @@ impl ChatWidget {
             self.thread_id
                 .is_some_and(|thread_id| thread_id.to_string() == request_thread_id)
         }) && self.interrupts.remove_resolved_prompt(request);
+        let had_modal_or_popup = !self.bottom_pane.no_modal_or_popup_active();
         let removed_visible = self.bottom_pane.dismiss_app_server_request(request);
+        if removed_visible && had_modal_or_popup && self.bottom_pane.no_modal_or_popup_active() {
+            self.on_modal_or_popup_closed();
+        }
         if removed_deferred || removed_visible {
             self.request_redraw();
         }
@@ -1955,6 +1972,10 @@ impl ChatWidget {
             .as_ref()
             .map(|ti| ti.total_token_usage.clone())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn last_turn_id(&self) -> Option<&str> {
+        self.turn_lifecycle.last_turn_id.as_deref()
     }
 
     pub(crate) fn thread_id(&self) -> Option<ThreadId> {

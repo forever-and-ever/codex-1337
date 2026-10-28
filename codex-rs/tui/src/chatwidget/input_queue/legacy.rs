@@ -163,6 +163,8 @@ impl LegacyInput {
         Ok(ThreadInputState {
             questions: self.questions,
             pending_thread_settings: self.pending_thread_settings,
+            initial_user_message: None,
+            status_surface_overrides: super::super::StatusSurfaceOverrides::default(),
             composer: self.composer,
             input_queue: InputQueueState {
                 queued_user_messages,

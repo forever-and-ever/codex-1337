@@ -24,6 +24,17 @@ pub(crate) const BROKERED_CREDENTIALS_ENV_KEY: &str = "CODEX_NETWORK_PROXY_BROKE
 const MIN_EMBEDDED_CREDENTIAL_LENGTH: usize = 16;
 const BROKERED_CREDENTIAL_ALIAS_MARKER_PREFIX: &str = "@alias:";
 
+/// How to handle recognized credentials left raw in a prepared command environment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CredentialMaskingFailureMode {
+    /// Warn and keep the unmasked values.
+    Warn,
+    /// Remove variables containing unmasked values, including copied aliases.
+    Deny,
+    /// Reject the command environment.
+    Error,
+}
+
 fn env_key_matches(candidate: &str, expected: &str) -> bool {
     if cfg!(windows) {
         candidate.eq_ignore_ascii_case(expected)

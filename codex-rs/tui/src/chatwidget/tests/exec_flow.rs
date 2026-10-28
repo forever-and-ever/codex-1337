@@ -449,7 +449,7 @@ async fn exec_history_cell_shows_working_then_failed() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let lines = cells[0].display_lines(/*width*/ 80);
     let blob = lines_to_single_string(&lines);
-    assert_eq!(blob, "• Command · failed false\n");
+    assert_eq!(blob, "• Command · nonzero exit false\n");
     assert!(
         lines_to_single_string(&cells[0].transcript_lines(/*width*/ 80))
             .to_lowercase()

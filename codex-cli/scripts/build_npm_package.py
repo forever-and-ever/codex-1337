@@ -13,7 +13,6 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 CODEX_CLI_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = CODEX_CLI_ROOT.parent
-RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / "npm"
 CODEX_NPM_NAME = "@openai/codex"
 CODEX_PACKAGE_COMPONENT = "codex-package"
 
@@ -76,7 +75,6 @@ PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
     "codex-darwin-arm64": [CODEX_PACKAGE_COMPONENT],
     "codex-win32-x64": [CODEX_PACKAGE_COMPONENT],
     "codex-win32-arm64": [CODEX_PACKAGE_COMPONENT],
-    "codex-responses-api-proxy": ["codex-responses-api-proxy"],
 }
 
 PACKAGE_TARGET_FILTERS: dict[str, str] = {
@@ -182,12 +180,6 @@ def main() -> int:
                     f"    node {staging_dir_str}/bin/codex.js --version\n"
                     f"    node {staging_dir_str}/bin/codex.js --help\n\n"
                 )
-            elif package == "codex-responses-api-proxy":
-                print(
-                    f"Staged version {version} for release in {staging_dir_str}\n\n"
-                    "Verify the responses API proxy:\n"
-                    f"    node {staging_dir_str}/bin/codex-responses-api-proxy.js --help\n\n"
-                )
             elif package in CODEX_PLATFORM_PACKAGES:
                 print(
                     f"Staged version {version} for release in {staging_dir_str}\n\n"
@@ -263,19 +255,6 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         package_manager = codex_package_json.get("packageManager")
         if isinstance(package_manager, str):
             package_json["packageManager"] = package_manager
-    elif package == "codex-responses-api-proxy":
-        bin_dir = staging_dir / "bin"
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        launcher_src = (
-            RESPONSES_API_PROXY_NPM_ROOT / "bin" / "codex-responses-api-proxy.js"
-        )
-        shutil.copy2(launcher_src, bin_dir / "codex-responses-api-proxy.js")
-
-        readme_src = RESPONSES_API_PROXY_NPM_ROOT / "README.md"
-        if readme_src.exists():
-            shutil.copy2(readme_src, staging_dir / "README.md")
-
-        package_json_path = RESPONSES_API_PROXY_NPM_ROOT / "package.json"
     else:
         raise RuntimeError(f"Unknown package '{package}'.")
 

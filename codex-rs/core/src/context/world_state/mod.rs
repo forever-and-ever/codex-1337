@@ -1,9 +1,11 @@
+mod instruction_base;
+pub(crate) use instruction_base::BaseInstructionsState;
+
 mod instruction_diff;
 pub(crate) use instruction_diff::is_instruction_diff;
 
 mod agents_md;
 mod apps_instructions;
-mod base_instructions;
 mod collaboration_mode;
 mod context_window_guidance;
 mod environment;
@@ -11,6 +13,7 @@ mod environments_instructions;
 mod managed_developer_instructions;
 mod model;
 mod model_catalog;
+mod model_identity;
 mod multi_agent_mode;
 mod multi_agent_usage_hint;
 mod permissions;
@@ -42,7 +45,6 @@ use std::fmt;
 
 pub(crate) use agents_md::AgentsMdState;
 pub(crate) use apps_instructions::AppsInstructionsState;
-pub(crate) use base_instructions::BaseInstructionsState;
 pub(crate) use collaboration_mode::CollaborationModeState;
 pub(crate) use context_window_guidance::ContextWindowGuidanceState;
 pub(crate) use environment::EnvironmentsState;
@@ -52,6 +54,7 @@ pub(crate) use managed_developer_instructions::ManagedDeveloperInstructionsState
 pub(crate) use managed_developer_instructions::validate_managed_developer_instructions;
 pub(crate) use model::ModelInstructionsState;
 pub(crate) use model_catalog::ModelCatalogState;
+pub(crate) use model_identity::ModelIdentityState;
 pub(crate) use multi_agent_mode::MultiAgentModeState;
 pub(crate) use multi_agent_usage_hint::MultiAgentUsageHintState;
 pub(crate) use permissions::PermissionsState;
@@ -106,18 +109,6 @@ impl WorldStateUpdate {
             .into_iter()
             .map(Self::boxed_fragment)
             .map(Self::standalone)
-            .collect()
-    }
-
-    pub(crate) fn optional_prefix_boxed_fragment(
-        fragment: Option<Box<dyn ContextualUserFragment>>,
-    ) -> Vec<Self> {
-        fragment
-            .into_iter()
-            .map(|fragment| Self {
-                placement: Placement::Prefix,
-                content: WorldStateUpdateContent::Fragment(fragment),
-            })
             .collect()
     }
 
@@ -201,7 +192,7 @@ impl<S: WorldStateSection> ErasedWorldStateSection for S {
     }
 
     fn has_retained_fragment_matcher(&self) -> bool {
-        S::has_retained_fragment_matcher()
+        WorldStateSection::has_current_retained_fragment_matcher(self)
     }
 
     fn matches_retained_fragment(
@@ -295,6 +286,10 @@ struct WorldStateContextFragment {
 }
 
 impl ContextualUserFragment for WorldStateContextFragment {
+    fn content_metadata(&self) -> codex_protocol::models::ContentItemMetadata {
+        self.fragment.metadata().clone()
+    }
+
     fn content_kind(&self) -> ContentItemKind {
         self.content_kind.clone()
     }
@@ -307,8 +302,8 @@ impl ContextualUserFragment for WorldStateContextFragment {
         self.fragment.markers()
     }
 
-    fn body(&self) -> String {
-        self.fragment.body().to_string()
+    fn body(&self) -> ContentItem {
+        self.fragment.body().clone()
     }
 
     fn type_markers() -> (&'static str, &'static str) {
@@ -358,6 +353,11 @@ pub(crate) trait WorldStateSection: Send + Sync + 'static {
         false
     }
 
+    /// Whether this instance requires its rendered fragment to survive in history.
+    fn has_current_retained_fragment_matcher(&self) -> bool {
+        Self::has_retained_fragment_matcher()
+    }
+
     /// Recognizes this section's rendered fragment in retained model history.
     fn matches_retained_fragment(_role: &str, _text: &str) -> bool {
         false
@@ -385,9 +385,21 @@ impl WorldStateHash {
 
     pub(crate) fn from_fragment(fragment: &(impl ContextualUserFragment + ?Sized)) -> Self {
         let mut hasher = Sha1::new();
-        hasher.update(b"codex-world-state-fragment-v1\0");
-        hash_component(&mut hasher, fragment.role());
-        hash_component(&mut hasher, &fragment.render());
+        match fragment.render() {
+            ContentItem::InputText { text } => {
+                hasher.update(b"codex-world-state-fragment-v1\0");
+                hash_component(&mut hasher, fragment.role());
+                hash_component(&mut hasher, &text);
+            }
+            content => {
+                let content = serde_json::to_vec(&content)
+                    .unwrap_or_else(|_| unreachable!("ContentItem always serializes"));
+                hasher.update(b"codex-world-state-fragment-v2\0");
+                hash_component(&mut hasher, fragment.role());
+                hasher.update((content.len() as u64).to_be_bytes());
+                hasher.update(content);
+            }
+        }
         Self(format!("{:x}", hasher.finalize()))
     }
 }
@@ -542,7 +554,9 @@ impl WorldState {
                     PreviousSectionState::Absent
                 };
             }
-            if let Some(previous) = previous.and_then(|previous| previous.sections.get(id)) {
+            if let Some(previous) =
+                previous.and_then(|previous| model_identity::previous_snapshot(previous, id))
+            {
                 if section.has_retained_fragment_matcher()
                     && !has_retained_fragment(items.clone(), section)
                 {

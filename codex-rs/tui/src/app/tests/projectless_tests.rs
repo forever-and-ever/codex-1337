@@ -110,10 +110,12 @@ sandbox = "unelevated"
         .await?;
     tui.pause_events();
     app.launch_cwd = source.path().to_path_buf();
+    let backend_id = server.backend_id();
     app.resume_target_session_and_settle(
         &mut tui,
         &mut server,
         SessionTarget {
+            backend_id,
             path: None,
             thread_id: saved.session.thread_id,
             cwd: Some(source.path().to_path_buf()),
@@ -170,7 +172,7 @@ sandbox = "unelevated"
                 .next_event()
                 .await
                 .expect("server notification stream");
-            app.handle_app_server_event(&server, event).await;
+            app.handle_backend_event(&server, event).await;
             app.drain_active_thread_events(&mut tui).await?;
         }
         Ok::<_, color_eyre::Report>(())

@@ -87,6 +87,12 @@ impl App {
         }
     }
     pub(in crate::app) fn refresh_submission_preview(&mut self) {
+        let removal = self.server_operations.overview_removal();
+        self.agents_overview
+            .view_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .removal = removal;
         let preview = self.server_operations.preview(self.chat_widget.thread_id());
         self.chat_widget.update_submission_preview(preview);
     }

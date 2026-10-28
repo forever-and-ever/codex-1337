@@ -64,20 +64,18 @@ impl Session {
             let mut instructions = prefix.instructions;
             let mut tools = prefix.tools;
             let mut context = Vec::new();
-            let mut saw_base = false;
+            let mut items = items;
+            if let Some(text) = BaseInstructionsFragment::take_prefix(&mut items)
+                && instructions.is_empty()
+            {
+                instructions = text;
+            }
             for item in items {
-                if !saw_base && let Some(text) = BaseInstructionsFragment::text(&item) {
-                    if instructions.is_empty() {
-                        instructions = text.to_string();
-                    }
-                    saw_base = true;
-                    continue;
-                }
                 match item {
                     ResponseItem::AdditionalTools {
                         tools: declarations,
                         ..
-                    } => tools.extend(declarations),
+                    } => tools.extend(declarations.iter().cloned()),
                     ResponseItem::Message { role, content, .. } => {
                         for part in content {
                             if (role == "developer"

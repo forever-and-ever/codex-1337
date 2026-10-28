@@ -77,7 +77,7 @@ async fn permission_picker_retry_and_confirmation_follow_configured_bindings() {
     chat.request_permission_profiles();
     rx.try_recv().unwrap();
     chat.on_permission_profiles_loaded(
-        chat.permission_popup_request_id.unwrap(),
+        chat.permission_popup_request_id().unwrap(),
         Err("Disconnected".into()),
     );
     let popup = render_bottom_popup(&chat, /*width*/ 40);

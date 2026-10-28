@@ -3,7 +3,6 @@
 use super::InputQueue;
 use super::PendingMailboxCommunication;
 use super::TurnStartOptions;
-use codex_protocol::protocol::InterAgentCommunication;
 
 pub(super) fn start_options<'a>(
     mut pending: impl DoubleEndedIterator<Item = &'a PendingMailboxCommunication> + Clone,
@@ -38,7 +37,7 @@ pub(super) fn start_options<'a>(
 impl InputQueue {
     pub(crate) async fn pending_mailbox_snapshot(
         &self,
-    ) -> (Vec<InterAgentCommunication>, TurnStartOptions) {
+    ) -> (Vec<crate::PendingAgentMessage>, TurnStartOptions) {
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending.ready);
         (

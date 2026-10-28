@@ -70,6 +70,13 @@ fn auto_auth_storage_load_falls_back_when_keyring_errors() -> anyhow::Result<()>
     // Neither a different fallback identity nor an absent fallback proves logout.
     mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
     assert!(storage.load_account(&encrypted_id).is_err());
+    // A pinned account cannot authorize an EMA grant using stale plaintext fallback.
+    let selected = crate::auth::accounts::AccountStorage {
+        backend: Arc::new(storage.clone()),
+        id: fallback_id,
+    };
+    mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
+    assert!(selected.load_account_grant().is_err());
     std::fs::remove_file(get_auth_file(codex_home.path()))?;
     mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
     assert!(storage.load_account(&encrypted_id).is_err());
@@ -202,6 +209,8 @@ fn secrets_keyring_auth_storage_save_persists_and_removes_fallback_file() -> any
             id_token: Default::default(),
             access_token: "access".to_string(),
             refresh_token: "refresh".to_string(),
+            oauth_provenance: None,
+            login_owner_id: None,
             account_id: Some("account".to_string()),
         }),
         last_refresh: Some(Utc::now()),

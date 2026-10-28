@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
+assertion_line: 1172
 expression: "context_snapshot::format_context_snapshot(description, &entries,\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra applies refreshed plugin policy to the next step while preserving earlier authorized skill context and tool output.
@@ -16,20 +17,17 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=5e8370540461db70):
-        - namespace/functions; hash=7d26e086c1dbba28
+00:additional_tools/developer (2; hash=08e322738460a2cf):
+        - namespace/functions; hash=1042aa54c0e96cbb
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
-          - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=2c8d6295978dbe63
-          - function/followup_task
-          - function/interrupt_agent
-          - function/list_agents
-          - function/send_message
-          - function/spawn_agent
+          - function/fence
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
           - function/wait_agent
 01:message/developer:
     You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
@@ -54,18 +52,9 @@ Settings:
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 
-        Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+        Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
 
-        - Pipes: |
-        - Logical operators: &&, ||
-        <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
-        NEVER provide a prefix_rule if your command uses a heredoc or herestring.
-
-        ### Examples
-        Good examples of prefixes:
-        - ["npm", "run", "dev"]
-        - ["gh", "pr", "check"]
-        - ["cargo", "test"]
+        Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
         </permissions instructions>
     [02] <collaboration_mode># Collaboration Mode: Default
 
@@ -85,7 +74,7 @@ Settings:
         </collaboration_mode>
     [03] <skills_instructions>
         ## Skills
-        A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that ...locators can be expanded using the skill roots table. [hash=f00d6a4d3e192f06]
+        A skill is a `SKILL.md` source of instructions. Entries give each skill's name, description, and source ...or; expand short locators from the skill roots table. [hash=90ab7ded0b920aae]
         ### Skill roots
         - `e0` = `skill://plugin-skills/<SKILLS_ROOT>/plugin/skills`
         - `e1` = `skill://workspace-skills/<SKILLS_ROOT>/skills`
@@ -103,7 +92,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
+    <OMITTED 17 LINES; ~172 TOKENS; hash=1880e979c121dc83>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -113,7 +102,7 @@ Settings:
 
     Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
 04:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 05:message/user:
     <environment_context>
       <cwd><CWD></cwd>
@@ -129,11 +118,11 @@ Settings:
 08:function_call_output:{"next_cursor":null,"skills":[{"authority":{"id":"plugin-skills","kind":"executor"},"description":"Use a.../<SKILLS_ROOT>/skills/active-helper"}],"warnings":[]} [hash=a640b563d0b76db9]
 09:message/developer:
     <skills_instructions>
-    ## Skills
-    A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that ...locators can be expanded using the skill roots table. [hash=f00d6a4d3e192f06]
-    ### Skill roots
-    - `e0` = `skill://other-skills/<SKILLS_ROOT>/other-skills`
-    Read a skill package directly with `skills.read({"package":"<package>"})` to read its `SKILL.md`; root a...ackage is not provided, use `skills.list` to find it. [hash=25bf84ea2123d647]
-    ### Available skills
-    - next-helper: Use the next workflow (executor package: e0/next-helper)
+    ## Skills update
+    Skills not named below are unchanged.
+    ### Added skills
+    - next-helper: Use the next workflow (executor package: skill://other-skills/<SKILLS_ROOT>/other-skills/next-helper)
+    ### Removed skills
+    - active-helper: (executor package: skill://workspace-skills/<SKILLS_ROOT>/skills/active-helper)
+    - disabled:disabled-plugin-helper: (executor package: skill://plugin-skills/<SKILLS_ROOT>/plugin/skills/disabled-plugin-helper)
     </skills_instructions>

@@ -102,7 +102,10 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
             original_input
         );
         assert_eq!(app.chat_widget.thread_id(), None);
-        assert!(recorded_params(&requests, "thread/start").is_empty());
+        assert_eq!(
+            recorded_params(&requests, "thread/start"),
+            Vec::<serde_json::Value>::new()
+        );
         // Reload must pin this draft's provider even if another TUI changes the global default.
         let retained = crate::reload::RetainedInput {
             primary: None,
@@ -169,7 +172,10 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
     );
-    assert!(recorded_params(&requests, "thread/start").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/start"),
+        Vec::<serde_json::Value>::new()
+    );
 
     while events.try_recv().is_ok() {}
     app.chat_widget
@@ -207,7 +213,19 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         started.session.model_provider_id,
         app.config.model_provider_id
     );
-    server.thread_unsubscribe(started.session.thread_id).await?;
+    server
+        .request_handle()
+        .request_typed::<codex_app_server_protocol::ThreadUnsubscribeResponse>(
+            ClientRequest::ThreadUnsubscribe {
+                request_id: codex_app_server_protocol::RequestId::String(
+                    Uuid::new_v4().to_string(),
+                ),
+                params: codex_app_server_protocol::ThreadUnsubscribeParams {
+                    thread_id: started.session.thread_id.to_string(),
+                },
+            },
+        )
+        .await?;
     server.shutdown().await?;
     proxy.abort();
     let _ = proxy.await;
@@ -234,6 +252,7 @@ async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> R
     assert!(app.reconnect.presentation == reconnect::ReconnectPresentation::Draft);
     let mut tui = tui::test_support::make_test_tui()?;
     let connected = Box::pin(reconnect::reconnect(
+        server.backend_id(),
         app.app_server_target.clone(),
         app.config.clone(),
         app.local_settings.clone(),

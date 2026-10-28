@@ -634,6 +634,7 @@ impl App {
         mut ready: ForkReady,
     ) -> Result<()> {
         let target = ready.started.session.thread_id;
+        let has_authoritative_mode = ready.started.session.collaboration_mode.is_some();
         if matches!(ready.context.input.purpose, ForkPurpose::Ordinary { .. }) {
             let (source, store) = ready.context.input.origin.thread();
             let drafts = self.take_unsent_thread_operations(source, store).await;
@@ -734,14 +735,19 @@ impl App {
         if ready.context.input.permissions.selection().is_some() {
             self.adopt_inherited_server_selection();
         }
+        let accepted_mode =
+            has_authoritative_mode.then(|| self.chat_widget.effective_collaboration_mode());
         match ready.context.input.purpose {
             ForkPurpose::Ordinary {
                 from_locked_thread,
                 from_agents_overview,
                 ..
             } => {
-                self.chat_widget
-                    .restore_reconnected_input(retained_input, &[]);
+                self.chat_widget.restore_reconnected_input(
+                    retained_input,
+                    &[],
+                    crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode },
+                );
                 self.chat_widget
                     .add_info_message("Fork created. You can continue here.".into(), None);
                 if (from_locked_thread || from_agents_overview)
@@ -768,11 +774,12 @@ impl App {
                     .clone()
                     .expect("installed fork session");
                 retry.turn.inherit_permissions(&session);
-                self.chat_widget.restore_thread_input_state(
+                self.chat_widget.restore_bound_thread_input_state(
                     retained_input,
                     crate::chatwidget::ThreadInputStateRestoreMode {
                         preserve_in_flight_turn: false,
                     },
+                    crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode },
                 );
                 self.chat_widget
                     .prepare_safety_buffered_retry_submission(prompt.clone());

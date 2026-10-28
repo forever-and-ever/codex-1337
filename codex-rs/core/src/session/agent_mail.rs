@@ -4,7 +4,10 @@
 use super::session::Session;
 use super::turn_context::TurnContext;
 use crate::TurnStartOptions;
+use crate::agent_communication::MessageDelivery;
+use codex_extension_api::MessageLifecycleContributor;
 use codex_protocol::ResponseItemId;
+use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ResponseItem;
@@ -14,18 +17,95 @@ use codex_rollout::ResponseItemEnvelope;
 use codex_state::AgentMailState;
 use codex_thread_store::AgentMailPersistence;
 use futures::FutureExt;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 // TELOS(accepted-agent-mail): Acceptance, canonical admission and uncertain writes remain distinct obligations.
 
 #[derive(Default)]
 pub(crate) struct AgentMailRuntime {
     pub(crate) acceptance: tokio::sync::Mutex<()>,
-    received: tokio::sync::Mutex<std::collections::HashMap<ResponseItemId, MailProjection>>,
-    admissions: std::sync::Mutex<tokio_util::task::TaskTracker>,
-    health: std::sync::Mutex<AdmissionHealth>,
+    pub(crate) publications: MailPublications,
+    received: tokio::sync::Mutex<HashMap<ResponseItemId, MailProjection>>,
+    admissions: Mutex<tokio_util::task::TaskTracker>,
+    health: Mutex<AdmissionHealth>,
     #[cfg(test)]
-    append_fault: std::sync::Mutex<Option<AgentMailAppendFault>>,
+    append_fault: Mutex<Option<AgentMailAppendFault>>,
+}
+
+/// Only observer attachments live here; the database owns acceptance.
+/// Publication and removal require the recipient's acceptance gate.
+pub(crate) struct MailPublications(Mutex<Option<HashMap<ResponseItemId, MessageDelivery>>>);
+
+impl Default for MailPublications {
+    fn default() -> Self {
+        Self(Mutex::new(Some(HashMap::new())))
+    }
+}
+
+impl MailPublications {
+    pub(crate) fn publish(
+        &self,
+        sender: ThreadId,
+        id: &ResponseItemId,
+        observers: &[Arc<dyn MessageLifecycleContributor>],
+    ) -> Option<MessageDelivery> {
+        if let Some(delivery) = self.get(id) {
+            return Some(delivery);
+        }
+        if observers.is_empty()
+            || self
+                .0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_none()
+        {
+            return None;
+        }
+        let delivery = MessageDelivery::publish(sender, id.clone(), observers);
+        // Shutdown may close ownership while an observer captures its attachment.
+        let replaced = {
+            let mut publications = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(pending) = publications.as_mut() else {
+                drop(publications);
+                delivery.discard();
+                return None;
+            };
+            pending.insert(id.clone(), delivery.clone())
+        };
+        drop(replaced);
+        Some(delivery)
+    }
+
+    fn get(&self, id: &ResponseItemId) -> Option<MessageDelivery> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|publications| publications.get(id))
+            .cloned()
+    }
+
+    fn remove(&self, id: &ResponseItemId) {
+        let publication = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+            .and_then(|publications| publications.remove(id));
+        drop(publication);
+    }
+
+    pub(super) fn close(&self) {
+        let publications = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(publications) = publications {
+            for delivery in publications.into_values() {
+                delivery.discard();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -70,7 +150,7 @@ pub(super) fn accepted_mail_submission_id(op: &codex_protocol::protocol::Op) -> 
 }
 
 fn canonical_agent_mail(
-    history: &std::collections::HashMap<ResponseItemId, ResponseItemEnvelope>,
+    history: &HashMap<ResponseItemId, ResponseItemEnvelope>,
     communication: &InterAgentCommunication,
 ) -> CodexResult<bool> {
     let Some(envelope) = communication.id.as_ref().and_then(|id| history.get(id)) else {
@@ -253,6 +333,9 @@ impl Session {
                 })?;
             communication.id = Some(record.id.clone());
             if canonical_agent_mail(&history, &communication)? {
+                if let Some(delivery) = self.agent_mail.publications.get(&record.id) {
+                    delivery.consumed(self.thread_id);
+                }
                 // Identity proves past admission, not current context membership.
                 // Owned admission or ordinary resume owns effective history;
                 // compaction/rollback removal must never be undone here.
@@ -264,10 +347,12 @@ impl Session {
                             "cannot acknowledge reconciled agent mail: {error:#}"
                         ))
                     })?;
+                self.agent_mail.publications.remove(&record.id);
                 continue;
             }
             let config = self.get_config().await;
             let mut received = self.agent_mail.received.lock().await;
+            let delivery = self.agent_mail.publications.get(&record.id);
             if let std::collections::hash_map::Entry::Vacant(projection) = received.entry(record.id)
             {
                 // Reuse current execution state and any original held deadline.
@@ -279,7 +364,7 @@ impl Session {
                     .borrow();
                 self.input_queue
                     .enqueue_batched_mailbox_communication(
-                        communication,
+                        crate::PendingAgentMessage::new(communication, delivery),
                         TurnStartOptions::default(),
                         config.multi_agent_v2.wait_agent_batch_window_ms,
                         execution,
@@ -296,7 +381,7 @@ impl Session {
             .agent_mail
             .health
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(PoisonError::into_inner);
         match &*health {
             AdmissionHealth::Ready => Ok(()),
             AdmissionHealth::Uncertain { id, reason } => Err(CodexErr::Fatal(format!(
@@ -313,7 +398,7 @@ impl Session {
             .agent_mail
             .health
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = AdmissionHealth::Uncertain {
+            .unwrap_or_else(PoisonError::into_inner) = AdmissionHealth::Uncertain {
             id: id.clone(),
             reason,
         };
@@ -335,7 +420,7 @@ impl Session {
                 .agent_mail
                 .admissions
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                .unwrap_or_else(PoisonError::into_inner);
             tasks.close();
             tasks.clone()
         };
@@ -347,7 +432,7 @@ impl Session {
         self.agent_mail
             .admissions
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .len()
     }
 
@@ -357,7 +442,7 @@ impl Session {
             .agent_mail
             .append_fault
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(fault);
+            .unwrap_or_else(PoisonError::into_inner) = Some(fault);
     }
 
     #[cfg(test)]
@@ -369,7 +454,7 @@ impl Session {
             .agent_mail
             .append_fault
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .take();
         match (outcome, fault) {
             (Ok(_), Some(AgentMailAppendFault::MetadataAfterCommit)) => {
@@ -392,7 +477,7 @@ impl Session {
         self: &Arc<Self>,
         turn_context: &Arc<TurnContext>,
         model_info: &ModelInfo,
-        communication: &InterAgentCommunication,
+        communication: &crate::PendingAgentMessage,
     ) -> CodexResult<bool> {
         let Some(id) = communication
             .id
@@ -429,7 +514,7 @@ impl Session {
             self.agent_mail
                 .admissions
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .unwrap_or_else(PoisonError::into_inner)
                 .spawn(async move {
                     session
                         .agent_mail
@@ -450,6 +535,13 @@ impl Session {
                     });
                     session.agent_mail.received.lock().await.remove(&id);
                     drop(boundary);
+                    if result.is_ok() {
+                        // Never take acceptance while holding the boundary: recovery
+                        // owns them in the opposite order. Keep observer custody until
+                        // the receipt is committed so retrying acceptance cannot publish twice.
+                        let _acceptance = session.agent_mail.acceptance.lock().await;
+                        session.agent_mail.publications.remove(&id);
+                    }
                     drop(lifecycle);
                     result
                 })
@@ -475,7 +567,7 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         model_info: &ModelInfo,
-        communication: &InterAgentCommunication,
+        communication: &crate::PendingAgentMessage,
         id: &ResponseItemId,
     ) -> CodexResult<Option<ResponseItem>> {
         let db = self
@@ -493,15 +585,22 @@ impl Session {
             .ok_or_else(|| {
                 CodexErr::Fatal(format!("accepted agent-mail identity {id} disappeared"))
             })?;
-        let AgentMailState::Pending(payload) = record.state else {
-            return Ok(None);
+        let payload = match record.state {
+            AgentMailState::Pending(payload) => payload,
+            AgentMailState::Admitted => {
+                if let Some(delivery) = &communication.delivery {
+                    delivery.consumed(self.thread_id);
+                }
+                return Ok(None);
+            }
+            AgentMailState::Cancelled => return Ok(None),
         };
         let mut accepted: InterAgentCommunication =
             serde_json::from_str(&payload).map_err(|error| {
                 CodexErr::Fatal(format!("invalid accepted agent-mail payload: {error}"))
             })?;
         accepted.id = Some(record.id);
-        if &accepted != communication || communication.trigger_turn {
+        if accepted != **communication || communication.trigger_turn {
             return Err(CodexErr::Fatal(format!(
                 "accepted agent-mail identity {id} has conflicting content or mode"
             )));
@@ -519,6 +618,9 @@ impl Session {
                 ))
             })?;
         if canonical_agent_mail(&history, communication)? {
+            if let Some(delivery) = &communication.delivery {
+                delivery.consumed(self.thread_id);
+            }
             // Resume owns effective context; past canonical admission must never
             // resurrect an item subsequently removed by compaction or rollback.
             db.thread_queue()
@@ -579,6 +681,9 @@ impl Session {
         state.history = staged;
         drop(state);
         drop(settings);
+        if let Some(delivery) = &communication.delivery {
+            delivery.consumed(self.thread_id);
+        }
         db.thread_queue()
             .admit_agent_mail(self.thread_id, id)
             .await

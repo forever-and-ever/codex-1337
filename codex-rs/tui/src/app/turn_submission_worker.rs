@@ -168,6 +168,7 @@ async fn send_inner(
                             client_user_message_id: params.client_user_message_id.clone(),
                             input: params.input.clone(),
                             responsesapi_client_metadata: None,
+                            responsesapi_client_metadata_patch: None,
                             additional_context: None,
                             expected_turn_id: turn_id.clone(),
                         },

@@ -76,8 +76,11 @@ async fn choose_model(
             let changes_model = matches!(&event, AppEvent::AstraSelectedFromModelPicker { model, .. }
                 if app.chat_widget.current_model() != model);
             app.handle_event(tui, server, event).await?;
-            if changes_model && app.chat_widget.current_model() == model {
-                sparkle_offers += 1;
+            if changes_model {
+                app.settle_turn_submissions(server).await?;
+                if app.chat_widget.current_model() == model {
+                    sparkle_offers += 1;
+                }
             }
         }
     }

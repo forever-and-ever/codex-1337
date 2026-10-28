@@ -33,7 +33,7 @@ pub(in crate::app) enum RealtimeOperation {
     },
     Start {
         identity: RealtimeIdentity,
-        params: api::ThreadRealtimeStartParams,
+        params: Box<api::ThreadRealtimeStartParams>,
     },
     Speech {
         identity: RealtimeIdentity,
@@ -100,7 +100,10 @@ pub(super) async fn send(
         }
         RealtimeOperation::Start { params, .. } => {
             let _: api::ThreadRealtimeStartResponse = handle
-                .request_typed(ClientRequest::ThreadRealtimeStart { request_id, params })
+                .request_typed(ClientRequest::ThreadRealtimeStart {
+                    request_id,
+                    params: *params,
+                })
                 .await?;
             Ok(OperationReceipt::RealtimeStarted)
         }
@@ -146,6 +149,7 @@ fn start_params(
         transport: Some(api::ThreadRealtimeStartTransport::Webrtc { sdp: offer_sdp }),
         version: Some(codex_protocol::protocol::RealtimeConversationVersion::V3),
         voice,
+        voice_session_id: None,
     }
 }
 
@@ -229,7 +233,12 @@ impl App {
             Ok(voice) => {
                 *realtime = RealtimeOperation::Start {
                     identity: *identity,
-                    params: start_params(thread_id, offer_sdp.clone(), model.clone(), voice),
+                    params: Box::new(start_params(
+                        thread_id,
+                        offer_sdp.clone(),
+                        model.clone(),
+                        voice,
+                    )),
                 };
                 true
             }

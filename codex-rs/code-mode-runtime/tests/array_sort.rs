@@ -80,6 +80,7 @@ text(JSON.stringify([3, 1, 2].sort((a, b) => a - b)));
                 max_tokens: None,
                 text: "[1,2,3]".to_string(),
             }],
+            result_buffered_for: std::time::Duration::ZERO,
             error_text: None,
         }
     );

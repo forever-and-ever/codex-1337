@@ -84,6 +84,7 @@ async fn reports_cell_actor_panics_to_the_owner() {
                 max_tokens: None,
                 text: "done".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         })
     );
@@ -110,6 +111,7 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
             max_tokens: None,
             text: "uncommitted output".to_string(),
         }],
+        result_buffered_for: Duration::ZERO,
         error_text: None,
     };
 
@@ -167,6 +169,7 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
                 max_tokens: None,
                 text: "undefined".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         })
     );

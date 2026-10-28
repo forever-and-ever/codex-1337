@@ -22,11 +22,12 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
     use tokio::net::UnixListener;
 
     // Losing an optional, previously opened thread must not strand the command center either.
-    for (previous_thread, changed_child_permissions, overview_initialized) in [
-        (None, false, false),
-        (None, false, true),
-        (Some(ThreadId::new()), false, true),
-        (Some(ThreadId::new()), true, true),
+    for (previous_thread, changed_child_permissions, overview_initialized, stale_model) in [
+        (None, false, false, false),
+        (None, false, true, false),
+        (Some(ThreadId::new()), false, true, false),
+        (Some(ThreadId::new()), true, true, false),
+        (Some(ThreadId::new()), true, true, true),
     ] {
         let (mut app, mut events, _) = make_test_app_with_channels().await;
         app.keymap.app.open_agents = vec![crate::key_hint::alt(KeyCode::Char('a'))];
@@ -204,6 +205,11 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                         "thread/resume" if request.params.as_ref().unwrap()["threadId"] != child.to_string() && !server_available.load(std::sync::atomic::Ordering::SeqCst) => Some(json!({"error": {"code": -32600, "message": "thread no longer exists"}})),
                         "thread/resume" => {
                             let mut thread = if request.params.as_ref().unwrap()["threadId"] == child.to_string() {
+                                // Reattach observes destination policy, not parent or stale cache.
+                                let params = request.params.as_ref().unwrap();
+                                for field in ["approvalPolicy", "approvalsReviewer", "sandbox", "permissions"] {
+                                    assert!(params[field].is_null(), "unexpected {field}: {params}");
+                                }
                                 child_opened = true;
                                 child_thread.clone()
                             } else {
@@ -246,6 +252,9 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                             json!({"result": {"thread": thread}})
                         } else if server_available.load(std::sync::atomic::Ordering::SeqCst) { json!({"result": {"thread": restored_previous}}) } else { json!({"error": {"code": -32600, "message": "thread no longer exists"}}) }),
                         "thread/read" if request.params.as_ref().unwrap()["threadId"] == vanished.to_string() => Some(json!({"error": {"code": -32600, "message": "thread no longer exists"}})),
+                        "thread/queue/list" | "app/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
+                        "skills/list" => Some(json!({"result": {"data": []}})),
+                        "plugin/list" => Some(json!({"result": {"marketplaces": [], "marketplaceLoadErrors": [], "featuredPluginIds": []}})),
                         "thread/read" => Some(json!({"result": {"thread": fresh.iter().find(|thread| request.params.as_ref().unwrap()["threadId"] == thread.id).unwrap()}})),
                         method => panic!("unexpected daemon reconnect request: {method}"),
                     }
@@ -259,6 +268,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             Ok::<_, color_eyre::Report>(methods)
         });
         let mut session = AppServerSession::new(
+            crate::backend_id::BackendId::new(),
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Embedded,
         );
@@ -279,7 +289,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 "Waiting for active turns.".into(),
             );
         }
-        app.handle_app_server_event(&session, disconnected).await;
+        app.handle_backend_event(&session, disconnected).await;
         assert!(app.reconnect.offline);
         assert!(app.agents_overview.last_messages.is_empty());
         assert!(refresh.await.unwrap_err().is_cancelled());
@@ -321,6 +331,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             );
         }
         let connected = reconnect(
+            session.backend_id(),
             app.app_server_target.clone(),
             app.config.clone(),
             app.local_settings.clone(),
@@ -447,6 +458,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         );
         assert!(!app.agents_overview.visible_thread_ids.contains(&vanished));
 
+        let mut dispatched_user_turns = 0;
+        let mut submission_history = String::new();
         if let Some(id) = previous_thread {
             app.handle_tui_event(
                 &mut tui,
@@ -524,7 +537,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                     .config_ref()
                     .permissions
                     .permission_profile(),
-                &PermissionProfile::read_only()
+                &PermissionProfile::Disabled
             );
             if changed_child_permissions {
                 app.runtime_approval_policy_override = Some(
@@ -546,6 +559,13 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 );
             }
             available.store(true, std::sync::atomic::Ordering::SeqCst);
+            if stale_model {
+                // An older nonempty cached choice is no more authoritative than the
+                // read-only fallback's empty model once resume supplies fresh settings.
+                app.chat_widget.set_model("obsolete-cached-model");
+                app.chat_widget
+                    .set_reasoning_effort(Some(ReasoningEffortConfig::High));
+            }
             app.handle_event_and_settle_navigation(
                 &mut tui,
                 &mut session,
@@ -553,6 +573,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             )
             .await?;
             assert!(!app.thread_unavailable(id));
+            assert_eq!(app.chat_widget.current_model(), "gpt-test");
+            assert_eq!(app.chat_widget.current_reasoning_effort(), None);
             assert_eq!(
                 app.primary_session_configured,
                 app.thread_event_channels[&id].store.lock().await.session
@@ -599,11 +621,17 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             )
             .await?;
-            while let Ok(event) = events.try_recv() {
-                if matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
+            while !events.is_empty() || !app.server_operations.is_empty() {
+                while let Ok(event) = events.try_recv() {
+                    if matches!(&event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
+                        dispatched_user_turns += 1;
+                    }
                     app.handle_event(&mut tui, &mut session, event).await?;
                 }
+                app.settle_turn_submissions(&mut session).await?;
             }
+            submission_history =
+                drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
             let channel = app.thread_event_channels.get(&id).unwrap();
             let event = ThreadBufferedEvent::Notification(Box::new(
                 agent_message_delta_notification(id, "new-turn", "new-item", "fresh delivery"),
@@ -619,7 +647,13 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 .iter()
                 .filter(|method| *method == "turn/start")
                 .count(),
-            usize::from(previous_thread.is_some())
+            usize::from(previous_thread.is_some()),
+            "previous_thread={previous_thread:?}, changed_child_permissions={changed_child_permissions}, \
+             overview_initialized={overview_initialized}, dispatched_user_turns={dispatched_user_turns}, \
+             composer={:?}, running={}, modal={}, methods={methods:?}\n{submission_history}",
+            app.chat_widget.composer_text_with_pending(),
+            app.chat_widget.is_task_running_for_test(),
+            app.chat_widget.has_active_view(),
         );
         assert_eq!(
             methods.iter().any(|method| method == "thread/resume"),

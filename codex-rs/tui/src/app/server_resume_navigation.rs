@@ -1282,6 +1282,7 @@ impl App {
             return Box::pin(self.commit_overview_attachment(tui, server, operation, ready)).await;
         }
         let thread_id = ready.started.session.thread_id;
+        let has_authoritative_mode = ready.started.session.collaboration_mode.is_some();
         let running = ready
             .started
             .turns
@@ -1342,14 +1343,27 @@ impl App {
         if let Some(mut input) =
             retained_input.or(self.agents_overview.input_states.remove(&thread_id))
         {
+            let pending_settings = matches!(ready.presentation, ResumePresentation::CachedBlank)
+                .then(|| input.pending_thread_settings.take())
+                .flatten();
             input.agent_turn_running = running;
             input.task_running = running;
-            self.chat_widget.restore_thread_input_state(
+            let accepted_mode =
+                has_authoritative_mode.then(|| self.chat_widget.effective_collaboration_mode());
+            self.chat_widget.restore_bound_thread_input_state(
                 Some(input),
                 ThreadInputStateRestoreMode {
                     preserve_in_flight_turn: running && !read_only,
                 },
+                if matches!(ready.presentation, ResumePresentation::CachedBlank) {
+                    crate::chatwidget::ThreadInputSettingsAuthority::Retained
+                } else {
+                    crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode }
+                },
             );
+            if let Some(settings) = pending_settings {
+                self.chat_widget.on_thread_settings_updated(settings);
+            }
         }
         if !read_only {
             self.chat_widget.maybe_send_next_queued_input();

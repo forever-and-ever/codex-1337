@@ -71,7 +71,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         chat.bottom_pane.status_widget().unwrap().header(),
         status.activity,
     );
-    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_eq!(drain_insert_history(&mut rx).len(), 0);
     chat.on_agent_reasoning_delta("**Checking the lifecycle**".into());
     let mut panels = Vec::new();
     for goal in [
@@ -118,7 +118,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         update.status.emitted_at = status.emitted_at.map(|time| time + 1);
     }
     chat.handle_server_notification(changed.clone(), Some(ReplayKind::ResumeInitialMessages));
-    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_eq!(drain_insert_history(&mut rx).len(), 0);
     chat.handle_server_notification(changed, /*replay_kind*/ None);
     history.extend(
         std::iter::from_fn(|| rx.try_recv().ok()).filter_map(|event| match event {
@@ -193,7 +193,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         "Working"
     );
     assert_eq!(chat.current_work_status, None);
-    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_eq!(drain_insert_history(&mut rx).len(), 0);
     // Activity text is a projection: neither legacy labels nor row recreation own the timer.
     chat.bottom_pane.reset_status_timer(Duration::from_secs(42));
     let elapsed = chat.bottom_pane.status_elapsed().unwrap();

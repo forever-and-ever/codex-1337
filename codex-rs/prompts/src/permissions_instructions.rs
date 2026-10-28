@@ -13,8 +13,10 @@ use crate::model_messages::permissions::WORKSPACE_WRITE_TEMPLATE;
 use codex_context_fragments::ContextualUserFragment;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::input_text;
 use codex_protocol::permissions::FileSystemSandboxPolicyContext;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GranularApprovalConfig;
@@ -131,8 +133,7 @@ impl PermissionsInstructions {
             &mut text,
             &approval_text(
                 context.approval_policy,
-                approval_context.reviewer,
-                approval_context.messages,
+                approval_context,
                 context.exec_permission_approvals_enabled,
                 context.request_permissions_tool_enabled,
             ),
@@ -268,8 +269,8 @@ impl ContextualUserFragment for PermissionsInstructions {
         ("<permissions instructions>", "</permissions instructions>")
     }
 
-    fn body(&self) -> String {
-        self.text.clone()
+    fn body(&self) -> ContentItem {
+        input_text(self.text.clone())
     }
 }
 
@@ -282,13 +283,13 @@ fn append_section(text: &mut String, section: &str) {
 
 fn approval_text(
     approval_policy: AskForApproval,
-    approvals_reviewer: ApprovalsReviewer,
-    messages: ResolvedApprovalMessages<'_>,
+    approval_context: ApprovalPromptContext<'_>,
     exec_permission_approvals_enabled: bool,
     request_permissions_tool_enabled: bool,
 ) -> String {
+    let messages = approval_context.messages;
     let selected = match approval_policy {
-        AskForApproval::OnRequest => match approvals_reviewer {
+        AskForApproval::OnRequest => match approval_context.reviewer {
             ApprovalsReviewer::User => messages.on_request,
             ApprovalsReviewer::AutoReview => messages.on_request_auto_review,
         },
@@ -328,7 +329,7 @@ fn approval_text(
         ),
     };
 
-    if approvals_reviewer == ApprovalsReviewer::AutoReview {
+    if approval_context.reviewer == ApprovalsReviewer::AutoReview {
         format!("{text}\n\n{AUTO_REVIEW_SUFFIX}")
     } else {
         text

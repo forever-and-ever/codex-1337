@@ -183,6 +183,7 @@ impl Account {
                 refresh_token,
                 resource: None,
                 scope: Some(super::OAUTH_SCOPE),
+                refresh_reason: None,
             })
             .await
             .map_err(|error| match error {

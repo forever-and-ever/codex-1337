@@ -1,4 +1,5 @@
 use super::*;
+use crate::status::StatusAccountDisplay;
 use assert_matches::assert_matches;
 use codex_config::types::ModelAvailabilityNuxConfig;
 use codex_protocol::config_types::ServiceTier;
@@ -158,6 +159,10 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         model.default_service_tier = model
             .is_default
             .then(|| ServiceTier::Fast.request_value().to_string());
+        model.available_access_programs =
+            Some(codex_protocol::openai_models::ModelAccessPrograms {
+                cyber: vec![codex_protocol::turn_input::CyberAccessProgram::Standard],
+            });
     }
     let expected = models.clone();
     Box::pin(app.handle_event(&mut tui, &mut app_server, loaded)).await?;
@@ -192,6 +197,33 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         ),
         (expected.clone(), expected)
     );
+    app.chat_widget.update_account_state(
+        Some(StatusAccountDisplay::ApiKey),
+        /*plan_type*/ None,
+        /*has_chatgpt_account*/ false,
+        /*has_codex_backend_auth*/ false,
+    );
+    let request_id = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::FetchModels { request_id } => Some(request_id),
+            _ => None,
+        })
+        .last()
+        .expect("account-scoped model refresh");
+    let stripped = app.chat_widget.model_catalog().try_list_models()?;
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::ApiKeyCompatModelsLoaded {
+            request_id,
+            result: Ok(crate::model_catalog::ModelListing {
+                models: stripped.clone(),
+                providers: app.model_catalog.providers.clone(),
+            }),
+        },
+    ))
+    .await?;
+    assert_eq!(app.model_catalog.try_list_models()?, stripped);
     let mut config = app.config.clone();
     config.service_tier = None;
     config.features.enable(Feature::FastMode)?;
@@ -229,6 +261,15 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         ),
     )
     .await?;
+    let checked = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(event @ AppEvent::ApiKeyCompatModelsLoaded { .. }) = rx.recv().await {
+                break event;
+            }
+        }
+    })
+    .await?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, checked)).await?;
     app.chat_widget
         .handle_key_event(KeyEvent::from(KeyCode::Esc));
     assert!(

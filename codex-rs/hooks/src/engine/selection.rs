@@ -59,6 +59,8 @@ pub(crate) enum HookSelection {
     SessionEnd(Option<HookMatcher>),
     SubagentStart(Option<HookMatcher>),
     SubagentStop(Option<HookMatcher>),
+    PreModelRequest,
+    PostModelRequest,
     UserPromptSubmit,
     Stop,
     Interrupt,
@@ -77,6 +79,8 @@ impl HookSelection {
             HookEventName::SessionEnd => Self::SessionEnd(None),
             HookEventName::SubagentStart => Self::SubagentStart(None),
             HookEventName::SubagentStop => Self::SubagentStop(None),
+            HookEventName::PreModelRequest => Self::PreModelRequest,
+            HookEventName::PostModelRequest => Self::PostModelRequest,
             HookEventName::UserPromptSubmit => Self::UserPromptSubmit,
             HookEventName::Stop => Self::Stop,
             HookEventName::Interrupt => Self::Interrupt,
@@ -109,9 +113,11 @@ impl HookSelection {
             HookEventName::SessionEnd => event_value().map(Self::SessionEnd),
             HookEventName::SubagentStart => event_value().map(Self::SubagentStart),
             HookEventName::SubagentStop => event_value().map(Self::SubagentStop),
-            HookEventName::UserPromptSubmit | HookEventName::Stop | HookEventName::Interrupt => {
-                Err("this event does not accept a selector".to_string())
-            }
+            HookEventName::PreModelRequest
+            | HookEventName::PostModelRequest
+            | HookEventName::UserPromptSubmit
+            | HookEventName::Stop
+            | HookEventName::Interrupt => Err("this event does not accept a selector".to_string()),
         }
     }
 
@@ -126,6 +132,8 @@ impl HookSelection {
             Self::SessionEnd(_) => HookEventName::SessionEnd,
             Self::SubagentStart(_) => HookEventName::SubagentStart,
             Self::SubagentStop(_) => HookEventName::SubagentStop,
+            Self::PreModelRequest => HookEventName::PreModelRequest,
+            Self::PostModelRequest => HookEventName::PostModelRequest,
             Self::UserPromptSubmit => HookEventName::UserPromptSubmit,
             Self::Stop => HookEventName::Stop,
             Self::Interrupt => HookEventName::Interrupt,
@@ -159,7 +167,11 @@ impl HookSelection {
             | Self::SubagentStop(matcher) => matcher
                 .as_ref()
                 .is_none_or(|matcher| matcher.matches(value)),
-            Self::UserPromptSubmit | Self::Stop | Self::Interrupt => true,
+            Self::PreModelRequest
+            | Self::PostModelRequest
+            | Self::UserPromptSubmit
+            | Self::Stop
+            | Self::Interrupt => true,
             Self::PreToolUse(_) | Self::PermissionRequest(_) | Self::PostToolUse(_) => false,
         }
     }

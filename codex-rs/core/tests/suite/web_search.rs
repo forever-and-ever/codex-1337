@@ -501,6 +501,8 @@ async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<(
             source: ToolCallSource::Direct,
             conversation_history: ConversationHistory::new(history.clone()),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+            ephemeral: false,
             environments: Vec::new(),
             payload: payload.clone(),
         })

@@ -26,3 +26,20 @@ fn exec_server_help_documents_remote_options() {
         .join("\n");
     insta::assert_snapshot!(help_text);
 }
+#[test]
+fn exec_server_parses_executor_credential_options() {
+    let args = [
+        "--remote",
+        "https://registry.example.com",
+        "--environment-id",
+        "env-1",
+    ];
+    for options in [
+        vec!["--executor-credential-stdin"],
+        vec!["--executor-credential-stdin", "--exit-on-stdin-close"],
+    ] {
+        let options: Vec<_> = args.iter().copied().chain(options).collect();
+        let command = exec_server_from_args(&options);
+        assert!(command.executor_credential_stdin);
+    }
+}

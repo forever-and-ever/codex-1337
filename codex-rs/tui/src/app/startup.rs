@@ -270,6 +270,11 @@ impl App {
         tui.prepare_owned_screen(config.tui_fullscreen_transcript)?;
         let mut local_settings = crate::local_settings::LocalSettings::for_tui(&config, tui);
         let startup_started_at = Instant::now();
+        if let SessionSelection::Resume(target) | SessionSelection::Fork(target) =
+            &session_selection
+        {
+            target.ensure_backend(app_server.backend_id())?;
+        }
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         if let Some(message) = project_config_warning(&config) {
@@ -517,7 +522,7 @@ impl App {
                         &app_server,
                         local_settings.clone(),
                         config.clone(),
-                        launch_choices,
+                        launch_choices.clone(),
                         app_event_tx.clone(),
                         app_server.explicit_model_provider(&config),
                     );
@@ -881,6 +886,7 @@ See the Codex keymap documentation for supported actions and examples."
             config_notification_test_pending: None,
             model_catalog,
             session_telemetry: session_telemetry.clone(),
+            terminal_size_tags: tui.terminal_size_tags.clone(),
             app_event_tx,
             chat_widget,
             workspace_command_runner: Some(workspace_command_runner),
@@ -1196,6 +1202,8 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;
 
+        let initial_owner = app_server.backend_id();
+        let mut backends = super::backend_sessions::BackendSessions::new(app_server);
         drop(startup_stage);
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
@@ -1203,7 +1211,9 @@ See the Codex keymap documentation for supported actions and examples."
             ui_schedule::drive(
                 &mut app,
                 tui,
-                &mut app_server,
+                &mut backends,
+                initial_owner,
+                launch_choices.clone(),
                 &mut app_event_rx,
                 tui_events.as_mut().get_mut(),
                 &mut pending_startup_draft,
@@ -1228,7 +1238,8 @@ See the Codex keymap documentation for supported actions and examples."
             }),
             None => exit_reason_result,
         };
-        if let Err(err) = app_server.shutdown().await {
+        app.chat_widget.mention_usage_mut().flush().await;
+        if let Err(err) = backends.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
         let clear_result = tui.terminal.clear();

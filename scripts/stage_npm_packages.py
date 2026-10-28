@@ -43,25 +43,9 @@ CODEX_PACKAGE_COMPONENT = getattr(
 
 
 @dataclass(frozen=True)
-class BinaryComponent:
-    artifact_prefix: str
-    dest_dir: str
-    binary_basename: str
-
-
-@dataclass(frozen=True)
 class WorkflowArtifact:
     name: str
     size_in_bytes: int
-
-
-BINARY_COMPONENTS = {
-    "codex-responses-api-proxy": BinaryComponent(
-        artifact_prefix="codex-responses-api-proxy",
-        dest_dir="codex-responses-api-proxy",
-        binary_basename="codex-responses-api-proxy",
-    ),
-}
 
 
 def _gha_enabled() -> bool:
@@ -231,21 +215,13 @@ def install_from_downloaded_artifacts(
 ) -> None:
     if CODEX_PACKAGE_COMPONENT in components:
         install_codex_package_archives(artifacts_dir, vendor_dir, BINARY_TARGETS)
-    install_binary_components(
-        artifacts_dir,
-        vendor_dir,
-        [BINARY_COMPONENTS[name] for name in components if name in BINARY_COMPONENTS],
-    )
 
 
 def select_target_artifacts(
     workflow_id: str,
     components: Sequence[str],
 ) -> list[WorkflowArtifact]:
-    needs_target_artifacts = CODEX_PACKAGE_COMPONENT in components or any(
-        component in BINARY_COMPONENTS for component in components
-    )
-    if not needs_target_artifacts:
+    if CODEX_PACKAGE_COMPONENT not in components:
         return []
 
     artifacts_by_name = {
@@ -374,86 +350,6 @@ def install_single_codex_package_archive(
     return dest_dir
 
 
-def install_binary_components(
-    artifacts_dir: Path,
-    vendor_dir: Path,
-    selected_components: Sequence[BinaryComponent],
-) -> None:
-    for component in selected_components:
-        component_targets = list(BINARY_TARGETS)
-
-        print(
-            f"Installing {component.binary_basename} binaries for targets: "
-            + ", ".join(component_targets),
-            flush=True,
-        )
-        max_workers = min(len(component_targets), max(1, (os.cpu_count() or 1)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    install_single_binary,
-                    artifacts_dir,
-                    vendor_dir,
-                    target,
-                    component,
-                ): target
-                for target in component_targets
-            }
-            for future in as_completed(futures):
-                installed_path = future.result()
-                print(f"  installed {installed_path}", flush=True)
-
-
-def install_single_binary(
-    artifacts_dir: Path,
-    vendor_dir: Path,
-    target: str,
-    component: BinaryComponent,
-) -> Path:
-    artifact_subdir = artifact_dir_for_target(artifacts_dir, target)
-    archive_path = binary_archive_path(
-        artifact_subdir, component.artifact_prefix, target
-    )
-
-    dest_dir = vendor_dir / target / component.dest_dir
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    binary_name = (
-        f"{component.binary_basename}.exe"
-        if "windows" in target
-        else component.binary_basename
-    )
-    dest = dest_dir / binary_name
-    dest.unlink(missing_ok=True)
-    extract_zstd_archive(archive_path, dest)
-    if "windows" not in target:
-        dest.chmod(0o755)
-    return dest
-
-
-def binary_archive_path(artifact_dir: Path, artifact_prefix: str, target: str) -> Path:
-    archive_names = [archive_name_for_target(artifact_prefix, target)]
-    if artifact_dir.name == f"{target}-unsigned":
-        archive_names.append(
-            archive_name_for_target(artifact_prefix, f"{target}-unsigned")
-        )
-
-    for archive_name in archive_names:
-        archive_path = artifact_dir / archive_name
-        if archive_path.exists():
-            return archive_path
-
-    raise FileNotFoundError(
-        f"Expected artifact not found: {artifact_dir / archive_names[0]}"
-    )
-
-
-def archive_name_for_target(artifact_prefix: str, target: str) -> str:
-    if "windows" in target:
-        return f"{artifact_prefix}-{target}.exe.zst"
-    return f"{artifact_prefix}-{target}.zst"
-
-
 def artifact_dir_for_target(artifacts_dir: Path, target: str) -> Path:
     for artifact_name in [target, f"{target}-unsigned"]:
         artifact_dir = artifacts_dir / artifact_name
@@ -461,16 +357,6 @@ def artifact_dir_for_target(artifacts_dir: Path, target: str) -> Path:
             return artifact_dir
 
     return artifacts_dir / target
-
-
-def extract_zstd_archive(archive_path: Path, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    output_path = archive_path.parent / dest.name
-    subprocess.check_call(
-        ["zstd", "-f", "-d", str(archive_path), "-o", str(output_path)]
-    )
-    shutil.move(str(output_path), dest)
 
 
 def format_bytes(size_in_bytes: int) -> str:

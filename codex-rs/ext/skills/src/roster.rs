@@ -96,15 +96,21 @@ impl Content {
             truncated_description_count,
             ..
         } = rendered.report;
-        match rendered.into_fragment(usage) {
-            None => Self::Unlisted,
-            Some(fragment) if omitted_count == 0 => Self::Complete(Catalog {
-                body: fragment.body(),
+        let Some(fragment) = rendered.into_fragment(usage) else {
+            return Self::Unlisted;
+        };
+        let codex_protocol::models::ContentItem::InputText { text: body } = fragment.body() else {
+            unreachable!("available skill catalogs are input text");
+        };
+        if omitted_count == 0 {
+            Self::Complete(Catalog {
+                body,
                 muster,
                 usage,
                 abridged: truncated_description_count > 0,
-            }),
-            Some(fragment) => Self::Bounded(fragment.body()),
+            })
+        } else {
+            Self::Bounded(body)
         }
     }
 }
@@ -286,8 +292,9 @@ impl Section {
             RenderedWorldStateFragment::new(
                 "developer",
                 (SKILLS_INSTRUCTIONS_OPEN_TAG, SKILLS_INSTRUCTIONS_CLOSE_TAG),
-                body,
+                codex_protocol::models::input_text(body),
             )
+            .with_metadata(codex_protocol::models::ContentItemMetadata::skills())
         };
         let (_, full) = self.render(&PreviousWorldStateSection::Absent);
         let current = match full {

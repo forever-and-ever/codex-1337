@@ -61,9 +61,13 @@ fn continuation_rules_section(update_plan_enabled: bool) -> WorldStateSectionCon
             {
                 None
             }
-            PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => Some(
-                RenderedWorldStateFragment::new("user", (START_MARKER, END_MARKER), body.clone()),
-            ),
+            PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => {
+                Some(RenderedWorldStateFragment::new(
+                    "user",
+                    (START_MARKER, END_MARKER),
+                    codex_protocol::models::input_text(body.clone()),
+                ))
+            }
         };
         (Some(Value::String(instructions.to_owned())), fragment)
     })

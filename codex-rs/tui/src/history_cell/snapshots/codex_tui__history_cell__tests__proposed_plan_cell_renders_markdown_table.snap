@@ -1,0 +1,43 @@
+---
+source: tui/src/history_cell/tests.rs
+assertion_line: 368
+expression: lines
+---
+[
+    Line::from_iter([
+        Span::from("• ").dim(),
+        Span::from("Proposed Plan").bold(),
+    ]),
+    Line::from(" "),
+    Line::from(" ").bg(Color::Indexed(33)),
+    Line::from_iter([
+        Span::from("  "),
+        Span::from("## ").fg(Color::Indexed(78)).bold(),
+        Span::from("Plan").fg(Color::Indexed(78)).bold(),
+    ]).bg(Color::Indexed(33)),
+    Line::from("  ").bg(Color::Indexed(33)),
+    Line::from_iter([
+        Span::from("  "),
+        Span::from(" "),
+        Span::from("Step"),
+        Span::from("  "),
+        Span::from(" "),
+        Span::from("  "),
+        Span::from(" "),
+        Span::from("Owner"),
+    ]).fg(Color::Indexed(98)).bg(Color::Indexed(33)).bold(),
+    Line::from_iter([
+        Span::from("  "),
+        Span::from("━━━━━━━━  ━━━━━━━").dim(),
+    ]).bg(Color::Indexed(33)),
+    Line::from_iter([
+        Span::from("  "),
+        Span::from(" "),
+        Span::from("Verify"),
+        Span::from(" "),
+        Span::from("  "),
+        Span::from(" "),
+        Span::from("Codex"),
+    ]).bg(Color::Indexed(33)),
+    Line::from(" ").bg(Color::Indexed(33)),
+]

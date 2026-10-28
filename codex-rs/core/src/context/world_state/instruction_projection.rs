@@ -91,8 +91,11 @@ impl WorldStateSnapshot {
                             revisions.get(id).map(|revision| revision.current.as_ref())
                     {
                         assert_eq!(role, text.role(), "instruction amendment changed authority");
-                        materialized
-                            .push(AnnotatedContent::input_text(&text.text, text.kind.clone()));
+                        materialized.push(AnnotatedContent::text(
+                            &text.text,
+                            text.kind.clone(),
+                            text.metadata.clone(),
+                        ));
                         emitted.insert(id.to_string());
                     }
                     changed = true;
@@ -125,7 +128,11 @@ impl WorldStateSnapshot {
                         text.role(),
                         "materialized instruction changed authority"
                     );
-                    materialized.push(AnnotatedContent::input_text(&text.text, text.kind.clone()));
+                    materialized.push(AnnotatedContent::text(
+                        &text.text,
+                        text.kind.clone(),
+                        text.metadata.clone(),
+                    ));
                 }
             }
             if materialized.is_empty() {

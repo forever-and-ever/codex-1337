@@ -391,13 +391,13 @@ impl PreparedMcpCall {
             .await
     }
 
-    async fn check_tool_list_revision(&self, tool_list_revision: Option<u64>) -> Result<()> {
+    fn check_tool_list_revision(&self, tool_list_revision: Option<u64>) -> Result<()> {
         // Apps may opt out of shared catalogs; their explicit refresh path still owns updates.
         if self.server_name == crate::mcp::CODEX_APPS_MCP_SERVER_NAME {
             return Ok(());
         }
         if let Some(tool_list_revision) = tool_list_revision
-            && self.client.client.tool_list_revision().await? != tool_list_revision
+            && self.client.client.tool_list_revision().current() != tool_list_revision
         {
             anyhow::bail!(
                 "tool catalog update pending; no MCP call was dispatched; inspect the current catalog on the next model step before retrying"
@@ -438,7 +438,7 @@ impl PreparedMcpCall {
             .run_with_snapshot(&self.catalog_snapshot, |tool_list_revision| {
                 let tool_name = &tool_name;
                 async move {
-                self.check_tool_list_revision(tool_list_revision).await?;
+                self.check_tool_list_revision(tool_list_revision)?;
                 let (arguments, meta) = prepare().await?;
                 let timeout_deadline =
                     effective_timeout.map(|timeout| tokio::time::Instant::now() + timeout);
@@ -453,7 +453,7 @@ impl PreparedMcpCall {
                         tokio::time::timeout_at(deadline, add_trusted_access_context)
                             .await
                             .map_err(|_| {
-                                anyhow::anyhow!("timed out awaiting tools/call after {timeout:.0?}")
+                                codex_rmcp_client::request_timeout_error("tools/call", timeout)
                             })?
                     }
                     None => add_trusted_access_context.await,
@@ -462,9 +462,7 @@ impl PreparedMcpCall {
                     Some((timeout, deadline)) => {
                         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                         if remaining.is_zero() {
-                            return Err(anyhow::anyhow!(
-                                "timed out awaiting tools/call after {timeout:.0?}"
-                            ));
+                            return Err(codex_rmcp_client::request_timeout_error("tools/call", timeout));
                         }
                         Some(remaining)
                     }
@@ -472,7 +470,7 @@ impl PreparedMcpCall {
                 };
                 // Preparation may await uploads or policy enrichment. Do not dispatch a
                 // definition invalidated during those waits; preparation is not replayed.
-                self.check_tool_list_revision(tool_list_revision).await?;
+                self.check_tool_list_revision(tool_list_revision)?;
                 if self
                     .lease_guard
                     .as_ref()

@@ -5,9 +5,10 @@
 # ///
 """Gate fork-owned Rust files on the house lint policy in codex-rs/fork-lints.toml.
 
-A file is fork-owned when the merged upstream release tag lacks its path; upstream files keep
-upstream's [workspace.lints]. Clippy runs with every lint capped at warn, so upstream code cannot stop
-the build, and any diagnostic whose primary span lies in a fork-owned file fails the gate.
+A file is fork-owned when the latest merged or incoming upstream release lacks its path;
+upstream files keep upstream's [workspace.lints]. Clippy runs with every lint capped at
+warn, so upstream code cannot stop the build. Any diagnostic whose primary span lies
+in a fork-owned file fails the gate.
 Exit status: 0 clean, 1 findings, 2 the build itself failed.
 """
 
@@ -65,8 +66,12 @@ def git(*args: str) -> str:
 
 
 def ownership(only: list[str]) -> Ownership:
+    # During an upstream merge, incoming release files already belong to upstream.
+    merge_head = ROOT / git("rev-parse", "--git-path", "MERGE_HEAD").strip()
+    incoming = merge_head.read_text().split() if merge_head.is_file() else []
+    merged = [arg for commit in ("HEAD", *incoming) for arg in ("--merged", commit)]
     tag = git(
-        "tag", "--merged", "HEAD", "--sort=version:refname", "--list", "rust-v[0-9]*"
+        "tag", *merged, "--sort=version:refname", "--list", "rust-v[0-9]*"
     ).split()[-1]
     upstream = frozenset(
         git("ls-tree", "-r", "-z", "--name-only", tag, "--", "codex-rs").split("\0")[

@@ -6,6 +6,7 @@ use super::CodexResult;
 use super::Config;
 use super::EventMsg;
 use super::InitialHistory;
+use super::LocalAgentControl;
 use super::RolloutItem;
 use super::ThreadId;
 use super::ThreadManager;
@@ -13,6 +14,73 @@ use super::ThreadManagerState;
 use crate::agent::control::ProviderAccountSelection;
 use crate::agent::control::ProviderAccountSelections;
 use codex_model_provider_info::ModelProviderAdapter;
+
+/// A live fork freezes committed credentials, never the family's pending retarget.
+pub(crate) struct ForkAccountScope {
+    provider_id: String,
+    provider: codex_model_provider_info::ModelProviderInfo,
+    auth: Arc<AuthManager>,
+    selection: Option<ProviderAccountSelection>,
+}
+
+impl ForkAccountScope {
+    /// The source's settings persistence permit must cover config and account capture.
+    pub(super) async fn capture(
+        source: &crate::session::session::Session,
+        config: &Config,
+    ) -> CodexResult<Self> {
+        let auth = &source.services.auth_manager;
+        let selection = source
+            .services
+            .model_client
+            .provider_account_selection()
+            .or_else(|| {
+                config
+                    .model_provider
+                    .requires_openai_auth
+                    .then(|| auth.selected_account_id())
+                    .flatten()
+                    .map(|id| ProviderAccountSelection::Chatgpt { id })
+            });
+        let auth = match &selection {
+            Some(ProviderAccountSelection::Chatgpt { id }) => {
+                auth.for_account(id).await.map_err(|error| {
+                    CodexErr::InvalidRequest(format!("Cannot capture fork account: {error}"))
+                })?
+            }
+            Some(
+                ProviderAccountSelection::ClaudeSubscription { .. }
+                | ProviderAccountSelection::OpenRouter { .. },
+            )
+            | None => Arc::clone(auth),
+        };
+        Ok(Self {
+            provider_id: config.model_provider_id.clone(),
+            provider: config.model_provider.clone(),
+            auth,
+            selection,
+        })
+    }
+
+    pub(super) fn restore(
+        &self,
+        config: &Config,
+        control: &LocalAgentControl,
+    ) -> CodexResult<Arc<AuthManager>> {
+        if self.provider_id != config.model_provider_id || self.provider != config.model_provider {
+            return Err(CodexErr::InvalidRequest(
+                "fork provider changed after its account scope was captured".into(),
+            ));
+        }
+        if let Some(selection) = &self.selection {
+            control
+                .runtime
+                .account_selection
+                .select(&self.provider_id, selection.clone());
+        }
+        Ok(Arc::clone(&self.auth))
+    }
+}
 
 pub(crate) enum AccountInheritance {
     None,

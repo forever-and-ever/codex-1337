@@ -195,11 +195,18 @@ impl App {
         }
         for (id, input) in retained.threads {
             if Some(id) == thread {
-                self.chat_widget.restore_thread_input_state(
+                let accepted_mode = self
+                    .primary_session_configured
+                    .as_ref()
+                    .filter(|session| session.thread_id == id)
+                    .filter(|session| session.collaboration_mode.is_some())
+                    .map(|_| self.chat_widget.effective_collaboration_mode());
+                self.chat_widget.restore_bound_thread_input_state(
                     Some(input),
                     crate::chatwidget::ThreadInputStateRestoreMode {
                         preserve_in_flight_turn: true,
                     },
+                    crate::chatwidget::ThreadInputSettingsAuthority::Session { accepted_mode },
                 );
                 self.chat_widget
                     .set_queue_autosend_suppressed(/*suppressed*/ true);

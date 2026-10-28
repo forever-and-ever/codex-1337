@@ -71,8 +71,10 @@ impl ExecCell {
             return (Line::default(), None);
         };
         let outcome = call.output.as_ref().map(|output| output.outcome);
-        let marker = if outcome.is_some_and(|outcome| !outcome.is_success()) {
+        let marker = if outcome == Some(CommandOutcome::Declined) {
             "•".red().bold()
+        } else if outcome.is_some_and(|outcome| !outcome.is_success()) {
+            "•".bold()
         } else if self.is_active() {
             activity_indicator(
                 call.start_time,
@@ -86,7 +88,7 @@ impl ExecCell {
         let (verb, suffix) = match outcome {
             Some(CommandOutcome::Declined) => ("Command", " · declined".red()),
             Some(CommandOutcome::Exited(code)) if code != 0 => {
-                ("Command", format!(" · failed (exit {code})").red())
+                ("Command", format!(" · exited (status {code})").into())
             }
             _ if !self.is_active() && call.is_unified_exec_interaction() => {
                 ("Background", " output".bold())

@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
+assertion_line: 635
 expression: "hints.join(\"\\n\")"
 ---
 awaiting measurement

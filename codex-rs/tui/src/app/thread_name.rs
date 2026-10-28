@@ -180,15 +180,10 @@ impl App {
             .counter("codex.thread.fork", /*inc*/ 1, &[("source", source)]);
         self.chat_widget
             .add_plain_history_lines(vec!["/fork".magenta().into()]);
-        let Some(thread_id) = self.chat_widget.thread_id() else {
+        if self.chat_widget.thread_id().is_none() {
             self.chat_widget.add_error_message(
                 "A thread must contain at least one turn before it can be forked.".to_string(),
             );
-            return;
-        };
-        if self.pending_server_profiles.contains_key(&thread_id) {
-            self.chat_widget
-                .add_error_message("Wait for permissions to update before forking.".into());
             return;
         }
 

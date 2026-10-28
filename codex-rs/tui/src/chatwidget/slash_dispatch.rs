@@ -7,7 +7,6 @@
 
 use super::goal_command::GOAL_USAGE_HINT;
 use super::*;
-use crate::app::WindowsSandboxHost;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
@@ -424,6 +423,9 @@ impl ChatWidget {
                     );
                 }
             }
+            SlashCommand::Presets => {
+                self.open_quick_dial_menu();
+            }
             SlashCommand::Plan => {
                 self.apply_plan_slash_command();
             }
@@ -458,16 +460,13 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::OpenAgentPicker);
             }
             SlashCommand::Permissions => {
-                if self.remote_connection.is_some()
-                    || self.windows_sandbox_local_server
-                        && self.windows_sandbox_host != WindowsSandboxHost::Remote
-                        && self.windows_sandbox_config.requirements.is_none()
-                {
-                    self.app_event_tx.send(AppEvent::OpenPermissionsPopup);
-                } else {
-                    self.open_permissions_popup();
+                // Hold queued prompts while the app checks whether it can open the menu.
+                self.set_queue_autosend_suppressed(/*suppressed*/ true);
+                if !self.begin_permission_popup() {
+                    self.add_error_message("A permission selection is already pending.".into());
+                    return;
                 }
-                self.defer_input_until_settings_applied();
+                self.app_event_tx.send(AppEvent::OpenPermissionsPopup);
             }
             SlashCommand::Vim => {
                 self.toggle_vim_mode_and_notify();
@@ -858,6 +857,10 @@ impl ChatWidget {
             source,
         } = prepared;
         let trimmed = args.trim();
+        if trimmed.is_empty() {
+            self.dispatch_command_from_source(cmd, source);
+            return;
+        }
         match cmd {
             SlashCommand::Comms => self.dispatch_comms(trimmed),
             SlashCommand::ContextRole => self.dispatch_context_role(trimmed),
@@ -879,6 +882,24 @@ impl ChatWidget {
                 }
             }
             SlashCommand::Export if trimmed.is_empty() => self.show_transcript_export_popup(),
+            SlashCommand::Model if !trimmed.is_empty() => {
+                self.handle_model_command_args(trimmed);
+                self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
+            }
+            SlashCommand::Title => {
+                self.handle_terminal_title_command_args(trimmed);
+                self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
+            }
+            SlashCommand::Statusline => {
+                self.handle_status_line_command_args(trimmed);
+                self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
+            }
+            SlashCommand::Permissions => {
+                self.set_queue_autosend_suppressed(/*suppressed*/ true);
+                self.app_event_tx.send(AppEvent::ResolvePermissionProfile {
+                    profile_id: trimmed.to_string(),
+                });
+            }
             SlashCommand::Export => {
                 self.set_queue_autosend_suppressed(/*suppressed*/ true);
                 self.app_event_tx.send(AppEvent::ExportTranscript {
@@ -1276,6 +1297,7 @@ impl ChatWidget {
             | SlashCommand::Model
             | SlashCommand::Effort
             | SlashCommand::Account
+            | SlashCommand::Presets
             | SlashCommand::Plan
             | SlashCommand::Alarms
             | SlashCommand::Goal

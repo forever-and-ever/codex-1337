@@ -47,6 +47,9 @@ async fn subagent_mcp_startup_settles_while_cached_servers_remain_deferred() {
             input_state: None,
         },
         /*resume_restored_queue*/ false,
+        crate::chatwidget::ThreadInputSettingsAuthority::Session {
+            accepted_mode: None,
+        },
     );
 
     let mut visible_startup_states = Vec::new();

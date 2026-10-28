@@ -217,12 +217,12 @@ async fn openrouter_status_snapshot() {
         }),
     );
     assert_eq!(
-        chat.status_line_value(StatusLineItem::WeeklyLimit)
+        chat.status_line_value_for_item(StatusLineItem::WeeklyLimit)
             .as_deref(),
         Some("$20.00 left")
     );
     assert_eq!(
-        chat.status_line_value(StatusLineItem::FiveHourLimit)
+        chat.status_line_value_for_item(StatusLineItem::FiveHourLimit)
             .as_deref(),
         Some("$0.42 today")
     );

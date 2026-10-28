@@ -26,9 +26,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-wxc_common = { workspace = true }
-appcontainer_common = { workspace = true }
-learning_mode_windows = { workspace = true }
+mxc-sdk = { workspace = true }
+flatbuffers = { workspace = true }
 # 1.2.4 imports OneCore_apiset, which the GNU Windows toolchain does not ship.
 tracelogging = "=1.2.3"
 windows-sys = { workspace = true, features = [
@@ -36,10 +35,11 @@ windows-sys = { workspace = true, features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_SystemInformation",
+    "Win32_System_WindowsProgramming",
     "Win32_UI_Shell",
 ] }
 
 [dev-dependencies]
-wxc_common = { workspace = true }
+mxc-sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

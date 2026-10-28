@@ -721,6 +721,115 @@ async fn test_control_server(
 #[cfg(unix)]
 #[tokio::test]
 #[ignore = "public auto-updater is disabled in Codex 1337"]
+async fn scheduled_no_op_preserves_daemon_and_hands_off_stale_updater() {
+    let home = TempDir::new().expect("home");
+    let (mut daemon, release) = manual_update_daemon(&home);
+    let root = home.path().join("packages/app-server-daemon");
+    std::fs::rename(home.path().join("packages/standalone"), &root).unwrap();
+    daemon = daemon.current_installation().unwrap();
+    let stale = root
+        .join("releases")
+        .join(release.replace("1.0.0", "0.8.0"));
+    std::fs::create_dir_all(stale.join("bin")).unwrap();
+    std::fs::copy(&daemon.managed_codex_bin, stale.join("bin/codex")).unwrap();
+    std::fs::write(
+        stale.join("codex-package.json"),
+        serde_json::json!({
+            "version": "0.8.0",
+            "target": release.strip_prefix("1.0.0-").unwrap(),
+            "entrypoint": "bin/codex"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    crate::release_pruning::record_selection(&root, /*previous*/ None).unwrap();
+    let settings = crate::settings::DaemonSettings::default();
+    let backend = crate::backend::pid_backend(daemon.backend_paths(&settings));
+    backend.start().await.expect("start daemon");
+    let server = test_control_server(&daemon, home.path()).await;
+    let pid_record = std::fs::read(&daemon.pid_file).expect("daemon PID record");
+    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(
+        b"# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\nexit 0\n".to_vec(),
+    ));
+
+    let outcome = super::update_once(
+        &no_op,
+        &daemon,
+        &executable_identity_from_reader(&b"stale updater"[..]).expect("updater identity"),
+        &mut test_terminate(),
+        super::UpdateTrigger::Scheduled,
+    )
+    .await
+    .expect("scheduled update");
+
+    assert!(matches!(
+        outcome,
+        (
+            super::UpdateLoopControl::Continue,
+            Some(RestartIfRunningOutcome::AlreadyCurrent)
+        )
+    ));
+    assert_eq!(
+        std::fs::read(&daemon.pid_file).expect("daemon PID record"),
+        pid_record
+    );
+    assert!(daemon.managed_codex_bin.is_file());
+    assert!(!stale.exists());
+    backend.stop().await.expect("stop daemon");
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "public auto-updater is disabled in Codex 1337"]
+async fn scheduled_resource_only_update_restarts_daemon() {
+    let home = TempDir::new().expect("home");
+    let (daemon, release) = manual_update_daemon(&home);
+    let settings = crate::settings::DaemonSettings::default();
+    let backend = crate::backend::pid_backend(daemon.backend_paths(&settings));
+    backend.start().await.expect("start daemon");
+    let server = test_control_server(&daemon, home.path()).await;
+    let previous_pid_record = std::fs::read(&daemon.pid_file).expect("daemon PID record");
+    let root = home.path().join("packages/standalone");
+    let next_release = release.replacen("1.0.0", "1.0.1", 1);
+    let installer = FakeInstallerHttp::new(InstallerResponse::Success(
+        format!(
+            "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST\nmkdir -p '{root}/releases/{next_release}'\ncp '{root}/releases/{release}/codex' '{root}/releases/{next_release}/codex'\nln -sfn 'releases/{next_release}' '{root}/current'\nprintf '{next_release}' > '{root}/auto-update-version'\n",
+            root = root.display(),
+        )
+        .into_bytes(),
+    ));
+
+    let outcome = super::update_once(
+        &installer,
+        &daemon,
+        &executable_identity(&daemon.managed_codex_bin)
+            .await
+            .expect("updater identity"),
+        &mut test_terminate(),
+        super::UpdateTrigger::Scheduled,
+    )
+    .await
+    .expect("scheduled update");
+
+    assert!(matches!(
+        outcome,
+        (
+            super::UpdateLoopControl::Continue,
+            Some(RestartIfRunningOutcome::Restarted)
+        )
+    ));
+    assert_ne!(
+        std::fs::read(&daemon.pid_file).expect("daemon PID record"),
+        previous_pid_record
+    );
+    backend.stop().await.expect("stop daemon");
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "public auto-updater is disabled in Codex 1337"]
 async fn manual_update_restarts_managed_daemon_with_automatic_updates_disabled() {
     check_manual_update_restart("standalone").await;
 }
@@ -786,7 +895,7 @@ async fn daemon_start_and_restart_preserve_launch_features() {
         );
         assert_eq!(std::fs::read_to_string(&args_path).unwrap(), expected);
         std::fs::remove_file(&args_path).unwrap();
-        let restarted = daemon.restart().await;
+        let restarted = daemon.restart(&std::collections::BTreeMap::new()).await;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 10);
         while std::fs::read_to_string(&args_path).ok().as_deref() != Some(expected)
             && tokio::time::Instant::now() < deadline

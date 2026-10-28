@@ -26,8 +26,14 @@ fn coalescing_preserves_question_identity_attachments_and_latest_ide_context() {
     use codex_context_fragments::AnsweredQuestion;
     use codex_context_fragments::ContextualUserFragment;
 
-    let first = AnsweredQuestion::new("one", "First?", "Yes").render();
-    let second = AnsweredQuestion::new("two", "Second?", "No").render();
+    let first = AnsweredQuestion::new("one", "First?", "Yes")
+        .render()
+        .into_text()
+        .expect("answered question is textual");
+    let second = AnsweredQuestion::new("two", "Second?", "No")
+        .render()
+        .into_text()
+        .expect("answered question is textual");
     let first = append(&first, &second).unwrap();
     let prefix =
         "# Context from my IDE setup:\n\n## Open tabs:\n- lib.rs\n\n## My request for Codex:\n";

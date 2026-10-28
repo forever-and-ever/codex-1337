@@ -401,6 +401,7 @@ async fn remote_session_persists_values_forwards_delegates_and_controls_cells() 
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: Vec::new(),
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -452,6 +453,7 @@ text([result, result, result], {max_tokens: 7});
                     max_tokens: Some(7)
                 },
             ],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -721,6 +723,7 @@ return;
                 max_tokens: None,
                 text: "hello".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         })
     );
@@ -765,6 +768,7 @@ async fn oversized_execute_request_does_not_close_the_shared_host() {
                 max_tokens: None,
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -816,6 +820,7 @@ try {{
                 max_tokens: None,
                 text: "argument rejected".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -846,6 +851,7 @@ try {
                 max_tokens: None,
                 text: "result rejected".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -865,6 +871,7 @@ try {
                 max_tokens: None,
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -912,6 +919,7 @@ async fn oversized_initial_response_does_not_close_the_shared_host() {
                 max_tokens: None,
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -1104,6 +1112,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
                 max_tokens: None,
                 text: "replacement".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );

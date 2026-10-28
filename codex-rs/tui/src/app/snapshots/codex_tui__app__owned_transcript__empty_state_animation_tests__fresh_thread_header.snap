@@ -1,12 +1,13 @@
 ---
 source: tui/src/app/empty_state_animation_tests.rs
+assertion_line: 212
 expression: "format!(\"enabled:\\n{}\\n---\\ndisabled:\\n{}\", text(after), text(&before))"
 ---
 enabled:
   ? for shortcuts                                                                              ⚠ 1 warning · f2 to view
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-                >_ OpenAI Codex (v0.163.0-1337)
+                >_ OpenAI Codex (v0.164.0-1337)
                    /tmp/project
 
 
@@ -52,7 +53,7 @@ disabled:
   ? for shortcuts                                                                              ⚠ 1 warning · f2 to view
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-                >_ OpenAI Codex (v0.163.0-1337)
+                >_ OpenAI Codex (v0.164.0-1337)
                    /tmp/project
 
 

@@ -119,7 +119,7 @@ mod tests {
             Canvas::Painted
         ));
         unknown.revoke(&mut untouched)?;
-        assert!(untouched.is_empty());
+        assert_eq!(untouched, [] as [u8; 0]);
         Ok(())
     }
 }

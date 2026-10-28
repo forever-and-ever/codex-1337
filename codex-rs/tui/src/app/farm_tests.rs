@@ -281,7 +281,11 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         .snapshot();
     for _ in 0..2 {
         app.transcript_cells.clear();
-        app.replay_thread_snapshot(snapshot.clone(), /*resume_restored_queue*/ false);
+        app.replay_thread_snapshot(
+            snapshot.clone(),
+            /*resume_restored_queue*/ false,
+            crate::chatwidget::ThreadInputSettingsAuthority::Retained,
+        );
         while let Ok(event) = events.try_recv() {
             match event {
                 AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(&mut tui, cell),

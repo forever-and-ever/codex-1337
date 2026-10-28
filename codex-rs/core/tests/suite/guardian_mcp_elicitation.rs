@@ -222,7 +222,6 @@ async fn interrupt_aborts_server_initiated_mcp_guardian_review() -> Result<()> {
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
-
 #[test_case(None, false; "ordinary_absent")]
 #[test_case(Some(false), false; "ordinary_false")]
 #[test_case(Some(true), false; "ordinary_true")]
@@ -382,7 +381,6 @@ async fn server_initiated_mcp_elicitation_can_require_synchronous_auto_review(
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
-
 struct BrowserMcpServer(codex_config::McpServerConfig);
 
 impl McpServerContributor<Config> for BrowserMcpServer {
@@ -746,7 +744,6 @@ async fn node_elicitations_attribute_independent_reviews_without_changing_action
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
-
 #[test_case("connector_openai_browser", None; "missing_correlation")]
 #[test_case("connector_openai_browser", Some("unknown-invocation"); "unknown_correlation")]
 #[test_case("connector_other", Some("eliciting-tool"); "non_browser_registration")]
@@ -952,13 +949,13 @@ async fn user_review_preserves_unsupported_guardian_elicitations(mode: &str) -> 
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(Ok(()), "the MCP fixture requires a host Python interpreter");
 
-    let server = responses::start_mock_server().await;
+    let server = core_test_support::responses::start_mock_server().await;
+    core_test_support::mock_server::run(&[&server], async {
     let meta = json!([{
         "codex_strict_auto_review": true,
         "codex_sensitive_action": true,
@@ -974,6 +971,10 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
         }
     }))?;
     let mut builder = test_codex()
+        .with_model_info_override("gpt-5.2", |model| {
+            model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
+            model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
+        })
         .with_model_info_override("gpt-5.4", |model| {
             model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
             model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
@@ -987,7 +988,12 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
             config.approvals_reviewer = ApprovalsReviewer::User;
             config.mcp_servers.set(mcp_servers).unwrap();
         });
-    let test = builder.build_with_auto_env(&server).await?;
+    let mut test = builder.build_with_auto_env(&server).await?;
+    let mut options = test.start_thread_options().await;
+    options.history_mode = Some(codex_protocol::protocol::ThreadHistoryMode::Legacy);
+    let thread = test.thread_manager.start_thread(options).await?;
+    test.codex.shutdown_and_wait().await?;
+    test.codex = thread.thread;
     wait_for_mcp_server(&test.codex, "node_repl").await?;
     let barrier = r#"await tools.test_sync_tool({barrier: {
         id: "elicitation-origin", participants: 2, timeout_ms: 60000
@@ -1062,10 +1068,16 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
     )
     .await;
     test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Run B and wait for A.".into(),
-            text_elements: Vec::new(),
-        }]))
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run B and wait for A.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                model: Some("gpt-5.2".into()),
+                ..Default::default()
+            }),
+        )
         .await?;
     let mut invocation_id = None;
     let mut assessment_target = None;
@@ -1100,5 +1112,7 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
             .count(),
         1
     );
+    test.codex.shutdown_and_wait().await?;
     Ok(())
+    }).await
 }

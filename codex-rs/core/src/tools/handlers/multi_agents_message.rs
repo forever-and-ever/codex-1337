@@ -21,7 +21,7 @@ pub(super) fn agent_message_parameters(
     parameters.one_of = Some(
         ["message", "plaintext_message"]
             .map(|field| JsonSchema {
-                required: Some(vec![field.into()]),
+                required: Some([field.into()].into()),
                 ..Default::default()
             })
             .into(),

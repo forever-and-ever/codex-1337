@@ -30,11 +30,13 @@ use std::time::Duration;
 
 mod capabilities;
 mod gateway_oauth;
+mod oauth_session;
 mod search_route;
 pub use capabilities::ModelProviderCapabilities;
 pub use capabilities::RemoteCompactionSupport;
 pub use gateway_oauth::GatewayOAuthConfig;
 pub use gateway_oauth::GatewayOAuthDelivery;
+pub use oauth_session::OAuthSessionConfig;
 pub use search_route::SearchRoute;
 
 pub const RESIDENCY_HEADER_NAME: &str = "x-openai-internal-codex-residency";

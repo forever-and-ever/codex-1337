@@ -19,9 +19,19 @@ impl ChatWidget {
     }
 
     pub(crate) fn pause_for_disconnect(&mut self) {
+        self.pause_for_disconnect_inner(/*preserve_startup_input*/ false);
+    }
+
+    pub(crate) fn pause_for_rejected_startup(&mut self) {
+        self.pause_for_disconnect_inner(/*preserve_startup_input*/ true);
+    }
+
+    fn pause_for_disconnect_inner(&mut self, preserve_startup_input: bool) {
         self.permission_discovery = None;
         self.invalidate_permission_discovery();
-        self.cancel_startup_submission();
+        if !preserve_startup_input {
+            self.cancel_startup_submission();
+        }
         self.cancel_image_submission();
         // The app-server transport can fail while the separate WebRTC helper
         // still sends microphone audio. Retire local media before showing offline UI.
@@ -31,9 +41,11 @@ impl ChatWidget {
             questions.delivery_enabled = false;
         }
         self.input_queue_frontend.suppress_queue_autosend = true;
-        self.set_initial_user_message_submit_suppressed(/*suppressed*/ true);
-        if let Some(message) = self.initial_user_message.take() {
-            self.restore_user_message_to_composer(message);
+        if !preserve_startup_input {
+            self.set_initial_user_message_submit_suppressed(/*suppressed*/ true);
+            if let Some(message) = self.initial_user_message.take() {
+                self.restore_user_message_to_composer(message);
+            }
         }
         self.bottom_pane.ensure_status_indicator();
         self.bottom_pane
@@ -50,6 +62,7 @@ impl ChatWidget {
         &mut self,
         input: Option<ThreadInputState>,
         confirmed_message_ids: &[String],
+        authority: ThreadInputSettingsAuthority,
     ) {
         let running = self.turn_lifecycle.agent_turn_running;
         let reconnect_pending = input.as_ref().is_some_and(|input| input.reconnect_pending);
@@ -65,18 +78,10 @@ impl ChatWidget {
             {
                 input.input_queue.queued_user_messages.push_front(message);
             }
-            input.current_collaboration_mode = self.current_collaboration_mode.clone();
-            // Keep the local selection for older servers. Replay reapplies a supplied mode.
-            if let Some(mask) = input.active_collaboration_mask.as_mut() {
-                mask.model = Some(self.current_model().to_string());
-                mask.reasoning_effort = Some(self.effective_reasoning_effort());
-            }
-            self.restore_thread_input_state(
-                Some(input),
-                ThreadInputStateRestoreMode {
-                    preserve_in_flight_turn: false,
-                },
-            );
+            let restore_mode = ThreadInputStateRestoreMode {
+                preserve_in_flight_turn: false,
+            };
+            self.restore_bound_thread_input_state(Some(input), restore_mode, authority);
         }
         if reconnect_pending || self.input_queue.has_unconfirmed_messages() {
             self.reconcile_recovered_messages(confirmed_message_ids);
@@ -155,6 +160,26 @@ impl ChatWidget {
 
     pub(crate) fn handle_restricted_key(&mut self, key: KeyEvent, mode: RestrictedInputMode) {
         if self.external_writer_view {
+            return;
+        }
+        let startup_key_handled = self.input_queue_frontend.startup_submission.is_some()
+            && !self.startup_submission_has_protected_input()
+            && (key.code == KeyCode::Null || self.handle_startup_submission_key(key));
+        if mode == RestrictedInputMode::Disconnected {
+            self.set_footer_hint_override(Some(vec![(
+                crate::key_hint::ctrl(KeyCode::Char('c')).display_label(),
+                "quit".into(),
+            )]));
+        }
+        if startup_key_handled {
+            return;
+        }
+        if self.input_queue_frontend.startup_submission.is_some()
+            && !self.startup_submission_has_protected_input()
+        {
+            // Cursor movement must preserve the confirmed draft's paste provenance.
+            let result = self.bottom_pane.handle_key_event(key);
+            self.handle_composer_input_result(result, /*had_modal_or_popup*/ false);
             return;
         }
         if self.handle_question_key(key) {

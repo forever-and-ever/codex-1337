@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios_skill_catalog_dedup.rs
-assertion_line: 142
+assertion_line: 148
 expression: "context_snapshot::format_request_history_snapshot(\"Cloud skills replace duplicate executor listings before budgeting; unique executor skills retain their descriptions and e1 aliases across turns.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Cloud skills replace duplicate executor listings before budgeting; unique executor skills retain their descriptions and e1 aliases across turns.
@@ -17,10 +17,13 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=5dbd08836b21f668):
-        - namespace/functions; hash=e4dbee77ced72c5e
+00:additional_tools/developer (2; hash=30258d1442d91e48):
+        - namespace/functions; hash=ed6737c96187c578
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
           - function/request_user_input_async
           - function/fence
@@ -69,7 +72,6 @@ Settings:
         ## Skills
         A skill is a `SKILL.md` source of instructions. Entries give each skill's name, description, and source ...or; expand short locators from the skill roots table. [hash=90ab7ded0b920aae]
         ### Skill roots
-        - `e0` = `skill://executor-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` [hash=89039f2551ec08fb]
         - `e1` = `skill://executor-b/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` [hash=aec7776011a3143f]
         Read a skill package directly with `skills.read({"package":"<package>"})` to read its `SKILL.md`; root a...ackage is not provided, use `skills.list` to find it. [hash=25bf84ea2123d647]
         ### Available skills

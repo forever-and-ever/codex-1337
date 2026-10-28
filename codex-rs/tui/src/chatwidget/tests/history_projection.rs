@@ -104,7 +104,10 @@ async fn older_tool_projection_matches_initial_replay() {
                 id: format!("image-{index}"),
                 status: status.into(),
                 revised_prompt: Some("A diagram of the history pages".into()),
-                result: String::new(),
+                image: codex_app_server_protocol::GeneratedImageRef::Inline {
+                    result: String::new(),
+                },
+                input_images: Vec::new(),
                 transparent_background: None,
                 failure: None,
                 saved_path: None,

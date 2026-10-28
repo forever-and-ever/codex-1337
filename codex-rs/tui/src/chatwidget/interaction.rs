@@ -27,12 +27,26 @@ impl ChatWidget {
         self.bottom_pane.end_composer_drag();
     }
 
+    pub(crate) fn cancel_composer_primary(&mut self) {
+        self.bottom_pane.cancel_composer_primary();
+    }
+
     pub(crate) fn copy_composer_selection(
         &mut self,
         event: &crate::tui::TuiEvent,
         copy: impl FnOnce(&str) -> Result<crate::clipboard_copy::CopyStatus, String>,
     ) -> Option<(usize, Result<crate::clipboard_copy::CopyStatus, String>)> {
         self.bottom_pane.copy_composer_selection(event, copy)
+    }
+
+    pub(crate) fn copy_composer_selection_on_release(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        selection_copy: crate::tui::SelectionCopy,
+        copy: impl FnOnce(&str, crate::tui::SelectionCopy) -> (CopyResult, Option<Arc<()>>),
+    ) -> Option<(usize, Option<CopyResult>)> {
+        self.bottom_pane
+            .copy_composer_selection_on_release(event, selection_copy, copy)
     }
 
     pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
@@ -89,6 +103,9 @@ impl ChatWidget {
         key_event: KeyEvent,
         activation_key: Option<crate::key_hint::KeyBinding>,
     ) -> KeyEventAction {
+        if self.handle_quick_dial_menu(key_event) {
+            return KeyEventAction::None;
+        }
         if self.handle_startup_submission_key(key_event) {
             return KeyEventAction::None;
         }
@@ -134,6 +151,14 @@ impl ChatWidget {
         } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'c'))
         {
             self.on_ctrl_c();
+            return KeyEventAction::None;
+        }
+
+        if key_event.kind == KeyEventKind::Press
+            && self.chat_keymap.open_presets.is_pressed(key_event)
+            && self.bottom_pane.no_modal_or_popup_active()
+        {
+            self.open_quick_dial_menu();
             return KeyEventAction::None;
         }
 
@@ -363,6 +388,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
+        self.quick_dial_menu = false;
         if items.is_some() {
             // Active input instructions supersede transient feedback from a previous action.
             self.bottom_pane
@@ -539,6 +565,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {
+        self.cancel_quick_dial_menu();
         if self.external_writer_view && !self.bottom_pane.has_active_view() {
             return;
         }

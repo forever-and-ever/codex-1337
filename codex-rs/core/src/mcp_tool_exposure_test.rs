@@ -105,6 +105,7 @@ fn runtimes_by_name_with_catalog(
         mcp_server_catalog,
         search_tool_enabled,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut registry,
     );
     registry
@@ -255,6 +256,7 @@ async fn cached_app_handlers_still_obey_current_apps_enablement_and_tool_policy(
         &catalog,
         /*search_tool_enabled*/ false,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut allowed_registry,
     );
     let cached_handler = &allowed_registry
@@ -271,6 +273,7 @@ async fn cached_app_handlers_still_obey_current_apps_enablement_and_tool_policy(
         &catalog,
         /*search_tool_enabled*/ false,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut disabled_registry,
     );
     let mut restricted_registry = ToolRegistry::default();
@@ -281,6 +284,7 @@ async fn cached_app_handlers_still_obey_current_apps_enablement_and_tool_policy(
         &catalog,
         /*search_tool_enabled*/ false,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut restricted_registry,
     );
     let mut restored_registry = ToolRegistry::default();
@@ -291,6 +295,7 @@ async fn cached_app_handlers_still_obey_current_apps_enablement_and_tool_policy(
         &catalog,
         /*search_tool_enabled*/ true,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut restored_registry,
     );
     let restored_handler = restored_registry
@@ -435,6 +440,7 @@ async fn app_tool_registration_uses_trusted_catalog_metadata_and_preserves_sourc
         &ResolvedMcpCatalog::default(),
         /*search_tool_enabled*/ false,
         &mut handlers,
+        &SharedMcpDefinitions::default(),
         &mut registry,
     );
 

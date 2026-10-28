@@ -165,6 +165,8 @@ async fn external_writer_fork_opens_editable_thread_without_taking_source_lease(
     app.chat_widget.insert_str("Retained draft");
     app.chat_widget.show_external_writer_thread();
     let retained_input = app.chat_widget.capture_thread_input_state();
+    let retained_model = app.chat_widget.current_model().to_owned();
+    let retained_effort = app.chat_widget.current_reasoning_effort();
     while events.try_recv().is_ok() {}
     requests.lock().expect("request recorder lock").clear();
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -179,7 +181,24 @@ async fn external_writer_fork_opens_editable_thread_without_taking_source_lease(
     assert!(matches!(event, AppEvent::ForkCurrentSession { name: None }));
     Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut server, event)).await?;
 
-    assert_eq!(app.chat_widget.capture_thread_input_state(), retained_input);
+    assert_eq!(
+        app.agents_overview.input_states.get(&thread_id),
+        retained_input.as_ref(),
+    );
+    assert_eq!(app.chat_widget.current_model(), retained_model);
+    assert_eq!(app.chat_widget.current_reasoning_effort(), retained_effort);
+    let mut destination_input = serde_json::to_value(&retained_input)?;
+    let mask = destination_input
+        .get_mut("active_collaboration_mask")
+        .expect("retained Default mode mask");
+    *mask.get_mut("model").expect("serialized mask model") = serde_json::Value::Null;
+    *mask
+        .get_mut("reasoning_effort")
+        .expect("serialized mask effort") = serde_json::Value::Null;
+    assert_eq!(
+        serde_json::to_value(app.chat_widget.capture_thread_input_state())?,
+        destination_input,
+    );
     assert_ne!(app.chat_widget.thread_id(), Some(thread_id));
     assert!(!app.chat_widget.is_external_writer_view());
     assert!(!app.chat_widget.fork_in_progress);

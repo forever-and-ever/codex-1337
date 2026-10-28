@@ -72,7 +72,7 @@ impl Reaper {
 impl Slot {
     pub(super) fn reserve(count: &Arc<AtomicUsize>) -> Option<Self> {
         count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < WORKER_LIMIT).then_some(count + 1)
             })
             .ok()

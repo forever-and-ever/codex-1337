@@ -6,6 +6,7 @@
 use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
+use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Panel;
 use crate::history_cell::invocation::Port;
@@ -418,11 +419,11 @@ fn steps_fold_under_one_header_with_their_figures() {
         .iter()
         .position(|cell| cell.as_any().is::<crate::history_cell::CompactionCell>())
         .unwrap();
-    assert!(
+    assert_eq!(
         view.current_layout(&cells, compacted)
             .unwrap()
-            .fold_targets()
-            .is_empty()
+            .fold_targets(),
+        [] as [FoldTarget; 0]
     );
     assert!(!fresh.contains("<environment_context>"));
     let injection = cells
@@ -882,11 +883,9 @@ fn steps_fold_under_one_header_with_their_figures() {
             }
         }
         assert_eq!(shown.matches("Code Mode").count(), 2, "{shown}");
-        assert!(
-            view.current_layout(&cells, 1)
-                .unwrap()
-                .fold_targets()
-                .is_empty()
+        assert_eq!(
+            view.current_layout(&cells, 1).unwrap().fold_targets(),
+            [] as [FoldTarget; 0]
         );
     }
 }

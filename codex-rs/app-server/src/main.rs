@@ -30,6 +30,9 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
 #[derive(Debug, Parser)]
 #[command(version)]
 struct AppServerArgs {
+    /// Load frozen cloud skills from a JSON snapshot instead of a live skill service.
+    #[arg(long, value_name = "PATH")]
+    cloud_skills_snapshot: Option<PathBuf>,
     #[command(flatten)]
     local_exec: codex_app_server::AppServerLocalExecArgs,
 
@@ -83,6 +86,7 @@ fn main() -> anyhow::Result<()> {
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         let AppServerArgs {
+            cloud_skills_snapshot,
             config_overrides,
             local_exec,
             code_mode_host,
@@ -106,6 +110,7 @@ fn main() -> anyhow::Result<()> {
         let auth = auth.try_into_settings()?;
         let mut runtime_options = AppServerRuntimeOptions {
             linux_sandbox_pid_namespace: local_exec.linux_sandbox_pid_namespace,
+            cloud_skills_snapshot,
             code_mode_host_transport: code_mode_host.into(),
             managed_daemon,
             ..Default::default()

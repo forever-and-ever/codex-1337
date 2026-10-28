@@ -244,8 +244,8 @@ impl ContextualUserFragment for CompactionContinuation {
         )
     }
 
-    fn body(&self) -> String {
-        format!("{REMINDER}{}", self.record())
+    fn body(&self) -> ContentItem {
+        codex_protocol::models::input_text(format!("{REMINDER}{}", self.record()))
     }
 }
 

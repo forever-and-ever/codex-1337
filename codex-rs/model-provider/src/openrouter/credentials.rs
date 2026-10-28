@@ -28,8 +28,9 @@ impl Bearer {
 }
 
 impl AuthProvider for Bearer {
-    fn add_auth_headers(&self, headers: &mut HeaderMap) {
+    fn add_auth_headers(&self, headers: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
         headers.insert(http::header::AUTHORIZATION, self.expose());
+        Ok(())
     }
 }
 
