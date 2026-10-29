@@ -331,10 +331,12 @@ impl crate::IssuingElicitationReviewer for RecordingReviewer {
     ) -> BoxFuture<'static, anyhow::Result<Option<crate::PreparedElicitationReview>>> {
         let authority = self.authority.clone();
         Box::pin(async move {
-            Ok(authority.map(|authority| crate::PreparedElicitationReview {
-                authority,
-                review: Box::pin(async move { self.review(request).await }),
-            }))
+            Ok(
+                authority.map(|authority| crate::PreparedElicitationReview::Issued {
+                    authority,
+                    review: Box::pin(async move { self.review(request).await }),
+                }),
+            )
         })
     }
 }

@@ -9392,12 +9392,15 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         ),
     };
     let prepare = || async {
-        session
+        let Some(codex_mcp::PreparedElicitationReview::Issued { authority, review }) = session
             .mcp_elicitation_reviewer()
             .approval_authority(request.clone())
             .await
             .expect("preparation should succeed")
-            .expect("session-owned authority")
+        else {
+            panic!("session-owned issuing authority");
+        };
+        (authority, review)
     };
     let [
         first_review,
@@ -9416,13 +9419,10 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         &permissions_review,
         &cancelled_review,
     ] {
-        assert_eq!(
-            prepared.authority.approval_policy,
-            AskForApproval::OnRequest
-        );
+        assert_eq!(prepared.0.approval_policy, AskForApproval::OnRequest);
         assert!(
             prepared
-                .authority
+                .0
                 .permission_profile
                 .as_ref()
                 .is_some_and(|profile| !matches!(profile, PermissionProfile::Disabled))
@@ -9460,7 +9460,7 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
 
     assert!(
         first_review
-            .review
+            .1
             .await
             .expect("elicitation review should succeed")
             .is_some()
@@ -9484,7 +9484,7 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         policy_review
-            .review
+            .1
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
@@ -9504,7 +9504,7 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         permissions_review
-            .review
+            .1
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
@@ -9533,7 +9533,7 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
     assert_eq!(
         cancelled_review
-            .review
+            .1
             .await
             .expect("cancelled review")
             .expect("cancel response")
@@ -9616,14 +9616,14 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    assert!(
+    assert!(matches!(
         session
             .mcp_elicitation_reviewer()
             .approval_authority(request)
             .await
-            .is_err(),
-        "a session-bound reviewer without an active turn cannot use connection defaults"
-    );
+            .expect("idle elicitation must retain a human consent route"),
+        Some(codex_mcp::PreparedElicitationReview::Human)
+    ));
 }
 
 #[tokio::test]

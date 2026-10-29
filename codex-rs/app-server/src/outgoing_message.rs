@@ -141,12 +141,16 @@ pub(crate) struct OutgoingMessageSender {
     analytics_events_client: AnalyticsEventsClient,
 }
 
+#[path = "idle_mcp_elicitation.rs"]
+mod idle_mcp_elicitation;
+
 #[derive(Clone)]
 pub(crate) struct ThreadScopedOutgoingMessageSender {
     outgoing: Arc<OutgoingMessageSender>,
     connection_ids: Arc<Vec<ConnectionId>>,
     thread_id: ThreadId,
     code_mode_owner: Option<codex_app_server_protocol::CodeModeOwner>,
+    idle_elicitation_connections: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 struct PendingCallbackEntry {
@@ -170,6 +174,7 @@ impl ThreadScopedOutgoingMessageSender {
             connection_ids: Arc::new(connection_ids),
             thread_id,
             code_mode_owner: None,
+            idle_elicitation_connections: None,
         }
     }
 
@@ -177,6 +182,9 @@ impl ThreadScopedOutgoingMessageSender {
         &self,
         payload: ServerRequestPayload,
     ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
+        if idle_mcp_elicitation::is_idle_request(&payload) {
+            return self.send_idle_mcp_elicitation(payload).await;
+        }
         self.outgoing
             .send_request_to_connections(
                 Some(self.connection_ids.as_slice()),
@@ -1685,6 +1693,42 @@ mod tests {
             .expect("user input waiter should receive a callback");
         assert_eq!(dynamic_tool_result, Err(error.clone()));
         assert_eq!(user_input_result, Err(error));
+
+        // Idle MCP asks cannot pin an unsubscribed thread while nobody can answer.
+        let elicitation = ServerRequestPayload::McpServerElicitationRequest(
+            codex_app_server_protocol::McpServerElicitationRequestParams {
+                thread_id: thread_id.to_string(),
+                turn_id: None,
+                server_name: "test".to_string(),
+                request: codex_app_server_protocol::McpServerElicitationRequest::Url {
+                    meta: None,
+                    message: "Consent".to_string(),
+                    url: "https://example.test/consent".to_string(),
+                    elicitation_id: "consent".to_string(),
+                },
+            },
+        );
+        let detached =
+            ThreadScopedOutgoingMessageSender::new(outgoing.clone(), Vec::new(), thread_id);
+        let (_, no_frontend) = detached.send_request(elicitation.clone()).await;
+        assert!(
+            timeout(Duration::from_secs(1), no_frontend)
+                .await
+                .expect("unattended elicitation must not wait")
+                .is_err()
+        );
+
+        let (connected, connections) = tokio::sync::watch::channel(true);
+        let attached = thread_outgoing.with_idle_elicitation_connections(Some(connections));
+        let (_, pending) = attached.send_request(elicitation).await;
+        connected.send(false).expect("subscription watcher");
+        let declined = timeout(Duration::from_secs(1), pending)
+            .await
+            .expect("last disconnect must release idle elicitation")
+            .expect("decline callback")
+            .expect("client result");
+        assert_eq!(declined["action"], "decline");
+        assert_eq!(declined["content"], serde_json::Value::Null);
         assert!(
             outgoing
                 .pending_requests_for_thread(thread_id)

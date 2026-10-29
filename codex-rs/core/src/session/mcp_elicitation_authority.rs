@@ -13,14 +13,17 @@ impl IssuingElicitationReviewer for GuardianMcpElicitationReviewer {
             let session = session
                 .upgrade()
                 .ok_or_else(|| anyhow::anyhow!("MCP elicitation session is unavailable"))?;
-            let context = issuing_context(&session, &request).await?;
+            // TELOS(idle-mcp-human-consent): no turn means no automated review authority.
+            let Some(context) = issuing_context(&session, &request).await? else {
+                return Ok(Some(codex_mcp::PreparedElicitationReview::Human));
+            };
             anyhow::ensure!(
                 !context.cancellation.is_cancelled(),
                 "MCP elicitation issuing turn was cancelled"
             );
             let authority =
                 project_authority(&context.review, &context.config, &request.server_name);
-            Ok(Some(codex_mcp::PreparedElicitationReview {
+            Ok(Some(codex_mcp::PreparedElicitationReview::Issued {
                 authority,
                 review: Box::pin(review_bound_elicitation(session, request, context)),
             }))
@@ -61,7 +64,7 @@ struct ElicitationReviewContext {
 async fn issuing_context(
     session: &Session,
     request: &ElicitationReviewRequest,
-) -> anyhow::Result<ElicitationReviewContext> {
+) -> anyhow::Result<Option<ElicitationReviewContext>> {
     // Pin the invocation before the first await: the registry is weak and its
     // running-tool guard may be dropped while this request is still waiting.
     let invocation = invocation_call_id(request)?
@@ -73,10 +76,12 @@ async fn issuing_context(
                 })
         })
         .transpose()?;
-    let (turn, active_cancellation) = session
-        .active_turn_context_and_cancellation_token()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("MCP elicitation has no active turn"))?;
+    let Some((turn, active_cancellation)) =
+        session.active_turn_context_and_cancellation_token().await
+    else {
+        anyhow::ensure!(invocation.is_none(), "MCP elicitation has no active turn");
+        return Ok(None);
+    };
     let (review, config, cancellation) = if let Some(invocation) = invocation.as_ref() {
         (
             crate::guardian::GuardianReviewContext::from(&invocation.step_context),
@@ -101,12 +106,12 @@ async fn issuing_context(
             active_cancellation,
         )
     };
-    Ok(ElicitationReviewContext {
+    Ok(Some(ElicitationReviewContext {
         review,
         config,
         invocation,
         cancellation,
-    })
+    }))
 }
 
 fn project_authority(
@@ -146,7 +151,9 @@ pub(super) async fn review_guardian_mcp_elicitation(
     session: Arc<Session>,
     request: ElicitationReviewRequest,
 ) -> anyhow::Result<Option<ElicitationResponse>> {
-    let context = issuing_context(&session, &request).await?;
+    let Some(context) = issuing_context(&session, &request).await? else {
+        return Ok(None);
+    };
     review_bound_elicitation(session, request, context).await
 }
 

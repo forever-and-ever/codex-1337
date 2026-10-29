@@ -17,9 +17,12 @@ pub struct ElicitationApprovalAuthority {
     pub permission_profile: Option<PermissionProfile>,
 }
 
-pub struct PreparedElicitationReview {
-    pub authority: ElicitationApprovalAuthority,
-    pub review: BoxFuture<'static, Result<Option<ElicitationResponse>>>,
+pub enum PreparedElicitationReview {
+    Human,
+    Issued {
+        authority: ElicitationApprovalAuthority,
+        review: BoxFuture<'static, Result<Option<ElicitationResponse>>>,
+    },
 }
 
 pub trait IssuingElicitationReviewer: ElicitationReviewer {
@@ -51,7 +54,7 @@ pub(crate) async fn resolve(
             .cloned(),
     };
     let reviewer = reviewer.cloned();
-    Ok(PreparedElicitationReview {
+    Ok(PreparedElicitationReview::Issued {
         authority,
         review: Box::pin(async move {
             match reviewer {
