@@ -210,6 +210,19 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                             .into(),
                         ))
                         .await?;
+                    socket
+                        .send(Message::Text(
+                            json!({
+                                "method": "item/completed", "params": {
+                                    "threadId": id, "turnId": "fresh", "completedAtMs": 0,
+                                    "item": {"type": "agentMessage", "id": "initial-item",
+                                        "text": "initial-notification-before-reconnect\n"}
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await?;
                 }
                 if connection == 1 && request.method == "thread/resume" {
                     // Keep the recovered turn running: its output must appear without waiting
@@ -220,6 +233,20 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                                 "method": "item/agentMessage/delta", "params": {
                                     "threadId": id, "turnId": "running", "itemId": "live-item",
                                     "delta": "fresh-notification-after-reconnect\n"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await?;
+                    // Fullscreen publishes immutable completed items, not legacy inline deltas.
+                    socket
+                        .send(Message::Text(
+                            json!({
+                                "method": "item/completed", "params": {
+                                    "threadId": id, "turnId": "running", "completedAtMs": 0,
+                                    "item": {"type": "agentMessage", "id": "live-item",
+                                        "text": "fresh-notification-after-reconnect\n"}
                                 }
                             })
                             .to_string()

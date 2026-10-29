@@ -78,15 +78,24 @@ async fn stalled_input_and_stalled_exit_are_reaped_before_returning() {
             .parse()
             .unwrap();
         if stage == "subprocess" {
-            // The grandchild must be stopped; only init can reap it. A zombie is
-            // acceptable here and still responds to kill(pid, 0) until reaped.
-            let output = std::process::Command::new("ps")
-                .args(["-o", "stat=", "-p", &pid.to_string()])
-                .output()
-                .unwrap();
-            let state = String::from_utf8(output.stdout).unwrap();
-            let state = state.trim();
-            assert!(state.is_empty() || state.starts_with('Z'), "state: {state}");
+            // SIGKILL delivery is asynchronous: an orphan can still be in uninterruptible
+            // I/O after its parent is reaped. Only init can reap it, so a zombie is enough.
+            loop {
+                let output = std::process::Command::new("ps")
+                    .args(["-o", "stat=", "-p", &pid.to_string()])
+                    .output()
+                    .unwrap();
+                let state = String::from_utf8(output.stdout).unwrap();
+                let state = state.trim();
+                if state.is_empty() || state.starts_with('Z') {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(/*secs*/ 10),
+                    "grandchild did not stop within cleanup budget: {state}"
+                );
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 10)).await;
+            }
         } else {
             // SAFETY: Signal 0 observes this disposable child without modifying it.
             assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
