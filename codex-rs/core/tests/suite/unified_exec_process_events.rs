@@ -966,7 +966,9 @@ async fn exec_command_consumes_pushed_remote_process_events(
                 ev_function_call(
                     call_id,
                     "write_stdin",
-                    &json!({ "session_id": 1000, "chars": "", "yield_time_ms": 1_000 }).to_string(),
+                    // Exit is already observed, so this input has no stdin authority.
+                    // A nonempty observation keeps the short deadline: empty polls wait at least a minute.
+                    &json!({ "session_id": 1000, "chars": "ignored\n", "yield_time_ms": 1_000 }).to_string(),
                 ),
                 ev_completed(call_id),
             ]));

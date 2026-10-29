@@ -434,12 +434,7 @@ async fn shell_snapshot_v2_returns_before_inherited_output_closes() -> Result<()
         (7, "foreground output".to_string()),
     );
     let output = harness.function_call_stdout("inherited-output").await;
-    assert!(output.contains("Process exited with code 7"), "{output}");
-    assert!(
-        !output.contains("Process running with session ID"),
-        "{output}"
-    );
-    assert!(output.ends_with("foreground output"), "{output}");
+    assert_eq!(output, "Exit 7\nforeground output");
     Ok(())
 }
 

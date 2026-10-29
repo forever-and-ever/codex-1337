@@ -463,50 +463,50 @@ async fn unified_exec_timeouts() -> anyhow::Result<()> {
     skip_if_sandbox!(Ok(()));
 
     const TEST_VAR_VALUE: &str = "unified_exec_var_123";
-
     let (session, turn) = test_session_and_turn().await;
-
     let open_shell = exec_command(
-        &session, &turn, "bash -i", /*yield_time_ms*/ 2_500, /*workdir*/ None,
+        &session,
+        &turn,
+        &format!("CODEX_INTERACTIVE_SHELL_VAR={TEST_VAR_VALUE} bash -i"),
+        /*yield_time_ms*/ 2_500,
+        /*workdir*/ None,
     )
     .await?;
     let process_id = open_shell.process_id.expect("expected process id");
 
-    write_stdin(
+    // The shell cannot emit the value until the next write releases its read.
+    let blocked = write_stdin(
         &session,
         &turn,
         process_id,
-        format!("export CODEX_INTERACTIVE_SHELL_VAR={TEST_VAR_VALUE}\n").as_str(),
-        /*yield_time_ms*/ 2_500,
-    )
-    .await?;
-
-    let out_2 = write_stdin(
-        &session,
-        &turn,
-        process_id,
-        "sleep 5 && echo $CODEX_INTERACTIVE_SHELL_VAR\n",
+        "read -r release && echo \"$CODEX_INTERACTIVE_SHELL_VAR\"\n",
         /*yield_time_ms*/ 10,
     )
     .await?;
+    assert_eq!(blocked.process_id, Some(process_id));
     assert!(
-        !out_2
+        !blocked
             .truncated_output(DEFAULT_MAX_OUTPUT_TOKENS)
             .contains(TEST_VAR_VALUE),
-        "timeout too short should yield incomplete output"
+        "short collection must yield while the shell is blocked"
     );
 
-    tokio::time::sleep(Duration::from_secs(7)).await;
-
-    let out_3 = write_stdin(&session, &turn, process_id, "", /*yield_time_ms*/ 100).await?;
-
+    // Empty polls deliberately wait at least a minute; release and close the fixture instead.
+    let released = write_stdin(
+        &session,
+        &turn,
+        process_id,
+        "release\nexit\n",
+        /*yield_time_ms*/ 1_000,
+    )
+    .await?;
     assert!(
-        out_3
+        released
             .truncated_output(DEFAULT_MAX_OUTPUT_TOKENS)
             .contains(TEST_VAR_VALUE),
-        "subsequent poll should retrieve output"
+        "the next collection should retrieve the released output"
     );
-
+    assert_eq!(released.exit_code, Some(0));
     Ok(())
 }
 
