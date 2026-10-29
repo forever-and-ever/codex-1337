@@ -225,14 +225,22 @@ pub(super) async fn connector_exposure_requests(
         assert_eq!(
             (
                 exec_description.contains(&format!("{namespace}__lookup(")),
-                exec_description.contains(&format!("\n- {namespace}__lookup")),
+                exec_description.contains(&format!("(tools.{namespace}__lookup):")),
             ),
             (
                 false,
-                case.expect_exec && case.mode == ToolMode::CodeModeOnly
+                case.mode == ToolMode::CodeModeOnly && case.expect_exec
+                    || case.mode == ToolMode::CodeMode && !case.expect_direct && !case.expect_exec
             )
         );
-        assert!(!exec_description.contains("mcp__codex_apps__notes__read"));
+        // Deferred tools remain discoverable; omission hides declarations, not capability.
+        assert_eq!(
+            exec_description.contains(
+                "\n- mcp__codex_apps__notes.read (tools.mcp__codex_apps__notes__read): Read notes"
+            ),
+            case.mode != ToolMode::Direct && !case.server_omissions.contains(&"code_mode"),
+            "unexpected deferred roster: {exec_description}",
+        );
         if calls_tool {
             assert!(requests[1].body_contains_text("calendar-lookup-ok"));
         }

@@ -1,8 +1,9 @@
 ---
 source: core/tests/suite/scenarios_indirect_namespace_prefixes.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Function prefixes annotate direct and indirect tools; namespace prefixes annotate embedded namespace docs, loaded namespaces, and flat indirect entries. A model switch clears both without changing dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+assertion_line: 254
+expression: "context_snapshot::format_request_history_snapshot(\"Function and namespace prefixes follow the selected model in declarations and describe_tool contracts; model switches clear them without changing dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: Function prefixes annotate direct and indirect tools; namespace prefixes annotate embedded namespace docs, loaded namespaces, and flat indirect entries. A model switch clears both without changing dispatch.
+Scenario: Function and namespace prefixes follow the selected model in declarations and describe_tool contracts; model switches clear them without changing dispatch.
 
 ## Window 1
 Settings:
@@ -15,16 +16,16 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (9; hash=642e4ce49d146bf7):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=31e0075e7aaadce5
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=0d6841040273c1cc
+  tools (9; hash=3c2de397dccb17b2):
+    - custom/exec: Exec guidance.  Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fen...; hash=ed431b25e298d6d2
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
-    - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.  exec tool decla...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=59f58fe2bb4727ef
+    - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
       - function/wait_agent
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=580b65f59256ee3c
+    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
@@ -49,13 +50,13 @@ Settings:
 
 07:custom_tool_call_output:Script completed
     Output:
-     | {"descriptions":["Functions context.\\n\\nImage guidance.\\n\\nView a local image file from the filesystem w...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=34de0ce5c435f70f]
+     | {"descriptions":["Functions context.\\n\\nCall: await tools.view_image(args).\\nParameters: object\\n  detai...nment data."],"echo":"ECHOING: ping","agent":"/root"} [hash=a706fc15f1a797d6]
 
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (9; hash=beefb45d565a3da2):
-    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=451e61edf9be66ee
+  tools (9; hash=17adfc3c6cf995fe):
+    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=8450aed3ca11d79e
 -- request 3 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
@@ -78,7 +79,7 @@ Settings: relative to window 1
 
 07:custom_tool_call_output:Script completed
     Output:
-     | {"descriptions":["Functions context.\\n\\nImage guidance.\\n\\nView a local image file from the filesystem w...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=34de0ce5c435f70f]
+     | {"descriptions":["Functions context.\\n\\nCall: await tools.view_image(args).\\nParameters: object\\n  detai...nment data."],"echo":"ECHOING: ping","agent":"/root"} [hash=a706fc15f1a797d6]
 08:message/assistant:
     Done.
 09:message/developer:
@@ -95,4 +96,4 @@ Settings: relative to window 1
 
 12:custom_tool_call_output:Script completed
     Output:
-     | {"descriptions":["View a local image file from the filesystem when visual inspection is needed. Use this...t>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=d9b34764d851b54e]
+     | {"descriptions":["Call: await tools.view_image(args).\\nParameters: object\\n  detail (optional): string. ...nment data."],"echo":"ECHOING: ping","agent":"/root"} [hash=396b89c8474dcf48]

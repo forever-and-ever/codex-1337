@@ -297,6 +297,8 @@ pub(crate) mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
 mod tool_input;
+// TELOS(recoverable-output): media preparation preserves its added diagnostic text.
+mod prepared_tool_budget;
 mod tool_output_tokens;
 pub(crate) mod turn;
 pub(crate) mod turn_context;

@@ -41,7 +41,7 @@ fn exec_command_tool_matches_expected_spec() {
         (
             "shell".to_string(),
             JsonSchema::string(Some(
-                    "Shell binary to launch. Defaults to the user's default shell.".to_string(),
+                    "Shell binary to launch. Defaults to Bash on Linux, independent of the user's login shell; remote execution uses the environment's reported shell.".to_string(),
                 )),
         ),
         (
@@ -103,13 +103,13 @@ fn write_stdin_tool_matches_expected_spec() {
         (
             "chars".to_string(),
             JsonSchema::string(Some(
-                "Bytes to write to stdin. Defaults to empty, which polls without writing.".to_string(),
+                "Bytes to write to stdin. Defaults to empty, which waits for output without writing.".to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                "Longest wait for output; returns as soon as the process exits. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 60000-3600000 ms by default.".to_string(),
             )),
         ),
         (

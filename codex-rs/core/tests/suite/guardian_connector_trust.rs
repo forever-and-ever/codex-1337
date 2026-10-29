@@ -183,7 +183,8 @@ async fn extension_owned_apps_cannot_attest_connector_to_guardian(
         .iter()
         .find(|request| request["model"] == "gpt-5.6-luna")
         .expect("Guardian classifier request");
-    assert!(luna.to_string().contains("calendar_list_events"));
+    assert!(luna.to_string().contains(SEARCH_CALENDAR_NAMESPACE));
+    assert!(luna.to_string().contains(SEARCH_CALENDAR_LIST_TOOL));
     for request in guardian_requests.iter().filter(|request| {
         request["model"] == "gpt-5.6-luna"
             || request["client_metadata"]["x-openai-subagent"] == "guardian"

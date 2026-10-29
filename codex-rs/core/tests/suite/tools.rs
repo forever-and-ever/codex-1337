@@ -506,7 +506,7 @@ async fn namespaced_custom_tool_call_preserves_namespace_through_dispatch_and_re
             json!({
                 "type": "custom_tool_call_output",
                 "call_id": call_id,
-                "output": format!("unsupported custom tool call: {namespace}{tool_name}"),
+                "output": format!("unsupported custom tool call: {namespace}.{tool_name}"),
                 "internal_chat_message_metadata_passthrough": {
                     "turn_id": turn_id,
                     "create_time": output_create_time,

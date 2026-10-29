@@ -131,7 +131,7 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
             // The roster glosses each tool with its catalog description; the contract, with its
             // catalog parameter guidance, arrives through `describe_tool`.
             assert!(requests[0].body_contains_text(&format!(
-                "- {name}: {}",
+                "- tools.{name}: {}",
                 message["description"].as_str().expect("description")
             )));
             assert!(requests[1].body_contains_text(&format!("Catalog server for {name}.")));
