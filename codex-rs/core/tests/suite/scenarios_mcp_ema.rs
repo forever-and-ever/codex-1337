@@ -351,20 +351,21 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
         use codex_protocol::protocol::ThreadSettingsOverrides;
         use core_test_support::wait_for_event;
 
-        // Force a new manager while still in full access. A queued settings update
-        // is a barrier before status reads flush the hard refresh.
+        // Force a new ordinary manager while retaining the enterprise authority.
         let requests_before_refresh = mcp.received_requests().await.expect("MCP requests").len();
         test.codex.submit(Op::RefreshMcpServers).await?;
         test.codex
             .update_thread_settings(ThreadSettingsOverrides::default())
             .await?;
-        test.codex
-            .mcp_server_status_snapshot(
-                Some("ordinary"),
-                codex_mcp::McpSnapshotDetail::ToolsAndAuthOnly,
-                /*expected_registration*/ None,
-            )
-            .await?;
+        // Read-only status never flushes a hard refresh. An ordinary host call
+        // exercises runtime readiness without injecting another user instruction.
+        assert_eq!(
+            test.codex
+                .call_mcp_tool("ordinary", "calendar_list_events", None, None)
+                .await?
+                .is_error,
+            Some(false)
+        );
         let discovery_requests = mcp
             .received_requests()
             .await
@@ -576,6 +577,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
                 .map(|call| call["params"]["name"].as_str().expect("tool name"))
                 .collect::<Vec<_>>(),
             [
+                "calendar_list_events",
                 "calendar_list_events",
                 "calendar_list_events",
                 "calendar_create_event"
