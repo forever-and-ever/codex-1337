@@ -100,20 +100,25 @@ async fn loaded_thread_extension_lease_is_idempotent_and_name_exclusive() -> Res
         .send_raw_request("thread/extensionDetach", Some(detach))
         .await?;
     let _: ThreadExtensionDetachResponse = app.read_response(request).await?;
-    let request = app
-        .send_raw_request(
-            "mcpServerStatus/list",
-            Some(json!({ "threadId": thread_id, "detail": "toolsAndAuthOnly" })),
-        )
-        .await?;
-    let detached: ListMcpServerStatusResponse = app.read_response(request).await?;
-    assert_eq!(
-        detached,
-        ListMcpServerStatusResponse {
-            data: Vec::new(),
-            next_cursor: None
+    // Revocation is synchronous; its replacement runtime publication is not.
+    // Status is read-only, so wait for prewarm to retire the cached inventory.
+    timeout(Duration::from_secs(10), async {
+        loop {
+            let request = app
+                .send_raw_request(
+                    "mcpServerStatus/list",
+                    Some(json!({ "threadId": thread_id, "detail": "toolsAndAuthOnly" })),
+                )
+                .await?;
+            let detached: ListMcpServerStatusResponse = app.read_response(request).await?;
+            if detached.data.is_empty() {
+                assert!(detached.next_cursor.is_none());
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    );
+    })
+    .await??;
     Ok(())
 }
 
