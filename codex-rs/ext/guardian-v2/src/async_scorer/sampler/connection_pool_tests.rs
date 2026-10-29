@@ -97,6 +97,7 @@ async fn stalled_handshake_does_not_delay_other_warm_sockets() -> Result<()> {
     ])
     .await;
     let healthy = responses::start_websocket_server(vec![vec![vec![
+        responses::ev_message_item_added("classifier", ""),
         responses::ev_output_text_delta("low"),
         responses::ev_completed("score"),
     ]]])
@@ -183,6 +184,7 @@ async fn cold_pool_uses_http_during_open_timeout_then_recovers_after_cooldown() 
     for uses_codex_backend in [false, true] {
         let http = responses::start_mock_server().await;
         let events = vec![
+            responses::ev_message_item_added("classifier", ""),
             responses::ev_output_text_delta("low"),
             responses::ev_completed("score"),
         ];
@@ -411,7 +413,10 @@ async fn supersession_closes_http_before_headers_and_while_draining_the_body() -
         String::new(),
         format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n{}",
-            responses::sse(vec![responses::ev_output_text_delta("low")]),
+            responses::sse(vec![
+                responses::ev_message_item_added("classifier", ""),
+                responses::ev_output_text_delta("low")
+            ]),
         ),
     ] {
         let has_score = !response.is_empty();

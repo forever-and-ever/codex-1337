@@ -158,6 +158,7 @@ async fn cancellation_preserves_unused_sockets_and_backpressured_completion() ->
     completed["safety_buffering"] = json!({"use_cases": [], "reasons": []});
     let output_events = 2_000;
     let events = std::iter::once(responses::ev_response_created("stale"))
+        .chain([responses::ev_message_item_added("classifier", "")])
         .chain(std::iter::repeat_n(
             responses::ev_output_text_delta("x"),
             output_events,
@@ -189,11 +190,11 @@ async fn cancellation_preserves_unused_sockets_and_backpressured_completion() ->
     let lease = pool.lease().await?;
     assert_eq!(lease.thread_id, thread_id);
     let mut stream = lease.stream_request(&request).await?;
-    // Consume Created and leave exactly a full channel of output before completion.
+    // Consume Created and item admission, leaving a full channel before completion.
     let consumed = output_events
         .checked_sub(stream.rx_event.max_capacity())
         .expect("fixture must fill the response channel")
-        + 1;
+        + 2;
     for _ in 0..consumed {
         stream.rx_event.recv().await.expect("output")?;
     }

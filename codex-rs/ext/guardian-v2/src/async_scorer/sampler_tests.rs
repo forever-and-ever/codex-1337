@@ -431,6 +431,7 @@ async fn sampler_records_token_usage_after_returning_an_early_classification() -
     skip_if_no_network!(Ok(()));
 
     let events = vec![
+        responses::ev_message_item_added("classifier", ""),
         ev_output_text_delta("low"),
         ev_completed_with_tokens("response-1", /*total_tokens*/ 37),
     ];
@@ -646,6 +647,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
 
     let scripted_requests = vec![
         vec![
+            responses::ev_message_item_added("classifier", ""),
             ev_output_text_delta("low"),
             ev_model_verification_metadata("response-1", vec!["trusted_access_for_cyber"]),
             ev_assistant_message("sample-1", "low"),
@@ -940,7 +942,10 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
     skip_if_no_network!(Ok(()));
 
     let config = WebSocketConnectionConfig {
-        requests: vec![vec![ev_output_text_delta("low")]],
+        requests: vec![vec![
+            responses::ev_message_item_added("classifier", ""),
+            ev_output_text_delta("low"),
+        ]],
         response_headers: Vec::new(),
         accept_delay: None,
         close_after_requests: false,
@@ -1005,6 +1010,7 @@ async fn sampler_keeps_first_classification_token_when_later_output_disagrees() 
     skip_if_no_network!(Ok(()));
 
     let events = vec![
+        responses::ev_message_item_added("classifier", ""),
         ev_output_text_delta("low"),
         ev_output_text_delta("high"),
         ev_assistant_message("sample", "lowhigh"),
@@ -1046,7 +1052,10 @@ async fn sampler_replaces_scored_drains_before_unfinished_classifications() -> R
     skip_if_no_network!(Ok(()));
 
     let incomplete_response = WebSocketConnectionConfig {
-        requests: vec![vec![ev_output_text_delta("low")]],
+        requests: vec![vec![
+            responses::ev_message_item_added("classifier", ""),
+            ev_output_text_delta("low"),
+        ]],
         response_headers: Vec::new(),
         accept_delay: None,
         close_after_requests: false,
