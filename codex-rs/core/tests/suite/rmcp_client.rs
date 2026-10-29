@@ -2735,11 +2735,9 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
         use_legacy_landlock: false,
         use_mxc: prefer_mxc && cfg!(windows) && !attachment_owned_permissions,
     })?;
-    let expected_launcher = (remote_aware_environment_id()
-        == codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID)
-        .then_some(fixture.config.codex_self_exe.as_ref())
-        .flatten()
-        .map(|executable| json!({"codexExecutable": executable}));
+    // The core fixture uses codex-exec, which has no sandbox subcommand.
+    // Production uses the codex CLI; codex-mcp's tests own positive launcher evidence.
+    let expected_launcher: Option<Value> = None;
     assert_eq!(
         (
             meta.get(MCP_SANDBOX_STATE_CAPABILITY),

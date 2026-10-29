@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios_code_mode_settled_helpers_tests.rs
-assertion_line: 55
 expression: "context_snapshot::format_request_history_snapshot(\"Settlement helpers deliver fulfilled and rejected records with input indices and map keys.\",\n&requests, &ContextSnapshotOptions::default().rewrite_known_segments(),)"
 ---
 Scenario: Settlement helpers deliver fulfilled and rejected records with input indices and map keys.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=d02bd3ca64f25840):
-        - namespace/functions; hash=120b7caa711746ec
+00:additional_tools/developer (2; hash=460d1989a6473eec):
+        - namespace/functions; hash=597d4ef90fdad8bc
           - custom/exec
           - function/wait
           - custom/python

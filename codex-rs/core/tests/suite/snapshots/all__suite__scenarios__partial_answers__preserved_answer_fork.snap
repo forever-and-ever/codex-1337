@@ -1,13 +1,12 @@
 ---
 source: core/tests/suite/scenarios_partial_answers.rs
-assertion_line: 330
 expression: "context_snapshot::format_request_history_snapshot(\"A worker inherits the parent prefix unchanged and receives its own instructions. Requests are grouped by parent, then child.\",\n&requests, &ContextSnapshotOptions::default().rewrite_known_segments())"
 ---
 Scenario: A worker inherits the parent prefix unchanged and receives its own instructions. Requests are grouped by parent, then child.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=5e0339e86df1f360):
+00:additional_tools/developer (2; hash=6dfe4fbf34208008):
         - namespace/functions; hash=805bd231f7917331
           - custom/exec
           - function/wait
@@ -18,7 +17,7 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
           - function/set_agent_service_tier
           - function/retire_agent
           - function/fence
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=cb647313721b063e
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=a9671f5d576aeec8
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -53,7 +52,7 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 2 (after request 3: input diverged at item 12)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=5e0339e86df1f360):
+00:additional_tools/developer (2; hash=6dfe4fbf34208008):
         - namespace/functions; hash=805bd231f7917331
           - custom/exec
           - function/wait
@@ -64,7 +63,7 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
           - function/set_agent_service_tier
           - function/retire_agent
           - function/fence
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=cb647313721b063e
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=a9671f5d576aeec8
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

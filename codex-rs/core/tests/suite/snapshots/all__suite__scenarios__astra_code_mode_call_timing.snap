@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1163
 expression: "context_snapshot::format_request_history_snapshot(\"Astra receives host and handler timings on completed and failed code-mode calls.\",\n&mock.requests(), &ContextSnapshotOptions::default(),)"
 ---
 Scenario: Astra receives host and handler timings on completed and failed code-mode calls.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=d02bd3ca64f25840):
-        - namespace/functions; hash=120b7caa711746ec
+00:additional_tools/developer (2; hash=460d1989a6473eec):
+        - namespace/functions; hash=597d4ef90fdad8bc
           - custom/exec
           - function/wait
           - custom/python
