@@ -687,7 +687,7 @@ async fn tool_start_is_not_called_when_pre_tool_hook_prevents_execution() -> Res
         ),
         (
             "exec_command",
-            "^Bash$",
+            "^exec_command$",
             json!({ "cmd": "echo original" }),
             json!({
                 "hookSpecificOutput": {
