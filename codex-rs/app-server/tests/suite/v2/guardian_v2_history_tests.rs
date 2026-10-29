@@ -563,9 +563,14 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
                     .as_array()
                     .expect("request input array");
                 let parent_input = serde_json::to_string(parent_items)?;
-                // V2 keeps bounded user history while replacing old tool output with a checkpoint.
+                // TELOS(compaction-is-not-input): bounded authenticated receipts survive the
+                // checkpoint; the original unbounded tool history does not.
                 assert!(parent_input.contains(RESTRICTION));
-                assert!(!parent_input.contains(EVIDENCE));
+                assert!(parent_items.iter().all(|item| {
+                    item["internal_chat_message_metadata_passthrough"]["content_item_kinds"]
+                        == json!(["compaction.continuation.v1"])
+                        || !item.to_string().contains(EVIDENCE)
+                }));
                 assert!(!parent_items.iter().any(|item| {
                     item["type"] == "function_call_output" && item["call_id"] == "inspect-1"
                 }));
