@@ -20,7 +20,7 @@ fn quota(used_percent: i32) -> RateLimitSnapshot {
 async fn usage_notice_preserves_composer_geometry_on_recovery() -> Result<()> {
     let mut snapshots = Vec::new();
     for (width, height, running, queued, used_percent) in [
-        (80, 10, false, false, 92),
+        (80, 13, false, false, 92),
         (80, 12, true, false, 98),
         (32, 10, true, false, 101),
         (18, 10, true, false, 95),

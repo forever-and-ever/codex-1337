@@ -3,6 +3,10 @@ source: tui/src/app/agents_overview_tests.rs
 expression: "format!(\"Inline\\n{inline}\\nPicker\\n{}\",\nrender_bottom_popup(&app.chat_widget,\n90).replace(&root.to_string(),\n\"ROOT_ID\").replace(&child.to_string(),\n\"CHILD_ID\").replace(&unknown.to_string(), \"UNKNOWN_ID\"))"
 ---
 Inline
+  • Ready
+
+──────────────────────────────────────────────────────────────────────────────────────────
+
 › Ask Codex to do anything
                                                                                         󰜗
 ──────────────────────────────────────────────────────────────────────────────────────────

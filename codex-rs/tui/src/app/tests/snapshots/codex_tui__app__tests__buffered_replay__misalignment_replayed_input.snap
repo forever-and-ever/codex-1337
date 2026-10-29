@@ -2,6 +2,9 @@
 source: tui/src/app/tests/buffered_replay.rs
 expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))"
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ keep queued
     ⇧← edit last · ⌥x cancel

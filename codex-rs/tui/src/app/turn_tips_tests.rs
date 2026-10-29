@@ -190,14 +190,14 @@ async fn turn_tip_placements_and_completion_barrier() -> Result<()> {
     for (working, rows, width, height) in [
         (true, 1, 80, 12),
         (true, 1, 80, 6),
-        (false, 1, 80, 12),
+        (false, 1, 80, 15),
         (false, 1, 80, 24),
-        (false, 30, 80, 12),
-        (false, 1, 80, 9),
-        (false, 1, 80, 10),
-        (false, 1, 80, 11),
-        (false, 1, 12, 12),
-        (false, 1, 80, 4),
+        (false, 30, 80, 15),
+        (false, 1, 80, 12),
+        (false, 1, 80, 13),
+        (false, 1, 80, 14),
+        (false, 1, 12, 15),
+        (false, 1, 80, 7),
     ] {
         let (mut app, mut events, _ops) = crate::app::tests::make_test_app_with_channels().await;
         let thread = ThreadId::new();

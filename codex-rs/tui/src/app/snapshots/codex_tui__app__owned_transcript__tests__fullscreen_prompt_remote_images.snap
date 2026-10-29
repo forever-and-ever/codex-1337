@@ -4,12 +4,18 @@ expression: "normalize_snapshot_paths(frames.join(\"\\n\\n\"))"
 ---
 Draft
               History stays visible
+────────────────────────────────────────────────────────────
+
+  • Ready
 
 ────────────────────────────────────────────────────────────
 
-
   [Image #1]
   [Image #2]
+  [Image #3]
+  [Image #4]
+  [Image #5]
+  [Image #6]
 
 › Edit this prompt
                                                           󰜗
@@ -18,10 +24,16 @@ Draft
 
 Up
               History stays visible
+────────────────────────────────────────────────────────────
+
+  • Ready
 
 ────────────────────────────────────────────────────────────
 
-
+  [Image #7]
+  [Image #8]
+  [Image #9]
+  [Image #10]
   [Image #11]
   [Image #12]
 
@@ -32,10 +44,16 @@ Up
 
 Up
               History stays visible
+────────────────────────────────────────────────────────────
+
+  • Ready
 
 ────────────────────────────────────────────────────────────
 
-
+  [Image #6]
+  [Image #7]
+  [Image #8]
+  [Image #9]
   [Image #10]
   [Image #11]
 
@@ -46,10 +64,16 @@ Up
 
 Delete
               History stays visible
+────────────────────────────────────────────────────────────
+
+  • Ready
 
 ────────────────────────────────────────────────────────────
 
-
+  [Image #6]
+  [Image #7]
+  [Image #8]
+  [Image #9]
   [Image #10]
   [Image #11]
 
@@ -60,12 +84,18 @@ Delete
 
 Down
               History stays visible
+────────────────────────────────────────────────────────────
+
+  • Ready
 
 ────────────────────────────────────────────────────────────
 
-
   [Image #1]
   [Image #2]
+  [Image #3]
+  [Image #4]
+  [Image #5]
+  [Image #6]
 
 › Edit this prompt
                                                           󰜗

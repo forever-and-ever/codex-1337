@@ -2,6 +2,10 @@
 source: tui/src/app/tests/session_draft_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
+
 › Keep this draft[Image #1]
                                                                               󰜗
 ────────────────────────────────────────────────────────────────────────────────

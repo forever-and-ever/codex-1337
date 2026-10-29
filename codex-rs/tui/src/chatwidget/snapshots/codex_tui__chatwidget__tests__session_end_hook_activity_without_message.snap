@@ -4,6 +4,9 @@ expression: "format!(\"before reveal:\\n{hidden}\\nrunning:\\n{running}\\ncomple
 ---
 before reveal:
 "                                                                                "
+"  • Ready                                                                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                              󰜗 "
@@ -19,6 +22,9 @@ running:
 "  GPT-5.6-Sol default · /tmp/project                                            "
 completed:
 "                                                                                "
+"  • Ready                                                                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                              󰜗 "

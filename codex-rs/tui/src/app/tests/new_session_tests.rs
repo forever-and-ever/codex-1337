@@ -125,6 +125,7 @@ async fn new_session_preserves_vim_line_yank() -> Result<()> {
     );
     let composer_lines = render_bottom_popup(&app.chat_widget, /*width*/ 80)
         .lines()
+        .skip_while(|line| !line.starts_with('›'))
         .take(2)
         .collect::<Vec<_>>()
         .join("\n");
@@ -370,6 +371,10 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80)
                 .replace(&server_config.cwd.display().to_string(), "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
+              • Ready
+
+            ────────────────────────────────────────────────────────────────────────────────
+
             › Ask Codex to do anything
                                                                                           󰜗
               server-model high · <PROJECT>

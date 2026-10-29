@@ -77,6 +77,8 @@ use std::time::Instant;
 mod action_required_title;
 mod actionable_banner;
 mod activity_inset;
+mod rest;
+pub(crate) use rest::Rest;
 mod app_link_view;
 mod apply_patch_header;
 mod approval_overlay;
@@ -333,6 +335,8 @@ pub(crate) struct BottomPane {
     inline_banner: Option<actionable_banner::InlineBanner>,
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
+    /// How the last turn ended, which the rest row shows between turns.
+    rest: rest::Rest,
     /// Unified exec session summary source.
     ///
     /// When a status row exists, this summary is mirrored inline in that row;
@@ -425,6 +429,7 @@ impl BottomPane {
             hook_status_message: None,
             inline_banner: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
+            rest: rest::Rest::Ready,
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
@@ -2488,6 +2493,8 @@ impl BottomPane {
                         options.working_tip.filter(|_| !has_inline_previews),
                     ),
                 );
+            } else if let Some(rest) = self.rest_row() {
+                flex.push(/*flex*/ 0, activity_inset::inset(rest));
             }
             if self.status.is_none()
                 && let Some(message) = &self.hook_status_message
@@ -2506,6 +2513,8 @@ impl BottomPane {
             // row while the status line is already visible.
             let show_exec_footer =
                 options.composer_gap.is_none() && !self.unified_exec_footer.is_empty();
+            // The rest row carries the footer's summary inline, as the status row does.
+            let show_exec_footer = show_exec_footer && self.rest_row().is_none();
             if self.status_widget().is_none() && show_exec_footer {
                 flex.push(
                     /*flex*/ 0,

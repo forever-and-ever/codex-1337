@@ -2,6 +2,9 @@
 source: tui/src/chatwidget/tests/misalignment_policy_tests.rs
 expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
 ---
+  • Failed
+
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ? 1 question
     ⇧← to answer

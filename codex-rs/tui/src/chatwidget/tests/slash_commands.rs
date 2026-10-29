@@ -2263,7 +2263,7 @@ async fn slash_daybreak_offers_an_application_when_unavailable() {
         "slash_daybreak_help_unavailable",
         render_bottom_popup(&chat, /*width*/ 80)
             .lines()
-            .next()
+            .find(|line| line.starts_with('›'))
             .unwrap()
     );
 
@@ -2311,7 +2311,7 @@ async fn slash_daybreak_offers_an_application_when_unavailable() {
         "slash_daybreak_api_key_help",
         render_bottom_popup(&chat, /*width*/ 80)
             .lines()
-            .next()
+            .find(|line| line.starts_with('›'))
             .unwrap()
     );
     chat.set_daybreak_enabled(/*enabled*/ true);
@@ -2343,7 +2343,7 @@ async fn slash_daybreak_offers_an_application_when_unavailable() {
             name,
             render_bottom_popup(&chat, /*width*/ 80)
                 .lines()
-                .next()
+                .find(|line| line.starts_with('›'))
                 .unwrap()
         );
     }

@@ -2,6 +2,9 @@
 source: tui/src/chatwidget/tests/questions_tests.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
 
   1 of 2

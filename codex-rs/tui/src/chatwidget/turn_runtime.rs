@@ -196,6 +196,7 @@ impl ChatWidget {
         } else {
             crate::terminal_program_status::ProgramStatus::Done
         };
+        self.rest_after_turn(crate::bottom_pane::Rest::Finished);
         self.clear_safety_buffering();
         self.update_task_running_state();
         self.running_commands.clear();
@@ -359,6 +360,7 @@ impl ChatWidget {
         } else {
             crate::terminal_program_status::ProgramStatus::Error
         };
+        self.rest_after_turn(crate::bottom_pane::Rest::Failed);
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();

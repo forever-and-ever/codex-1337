@@ -13,6 +13,9 @@ before interrupt:
 "  GPT-5.6-Sol default · /tmp/project                                            "
 after interrupt:
 "                                                                                "
+"  • Interrupted                                                                 "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                              󰜗 "

@@ -3759,15 +3759,16 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
         .await
         .expect("picker metadata receipts");
     assert_snapshot!(render_bottom_popup(&app.chat_widget, /*width*/ 80), @"
-          Enable subagents?
-    › As  Subagents are disabled in this TUI session.
-                                                                                  󰜗
+      •   Enable subagents?
+          Subagents are disabled in this TUI session.
     ────                                                                        ────
-      ? › 1. Yes, enable  Save on the server for new threads without changing    —
-      Ct                  this thread
-      gp  2. Not now      Keep subagents disabled
 
-          enter select · esc back
+    › As› 1. Yes, enable  Save on the server for new threads without changing
+                          this thread                                             󰜗
+    ────  2. Not now      Keep subagents disabled                               ────
+      ?                                                                          —
+      Ct  enter select · esc back
+      gpt-test default · /tmp/project · Main [default]
     ");
     Ok(())
 }
