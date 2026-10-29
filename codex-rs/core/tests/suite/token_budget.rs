@@ -152,14 +152,14 @@ fn write_token_budget_compact_hooks(home: &Path) {
     let hooks = json!({
         "hooks": {
             "PreCompact": [{
-                "matcher": "manual",
+                "selector": { "type": "event_value", "pattern": "manual" },
                 "hooks": [{
                     "type": "command",
                     "command": python_hook_command(&script_path),
                 }]
             }],
             "PostCompact": [{
-                "matcher": "manual",
+                "selector": { "type": "event_value", "pattern": "manual" },
                 "hooks": [{
                     "type": "command",
                     "command": python_hook_command(&script_path),

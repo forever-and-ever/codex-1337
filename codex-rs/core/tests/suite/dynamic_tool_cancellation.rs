@@ -71,7 +71,7 @@ async fn interrupt_completes_cancelled_dynamic_call(hook: Option<HookEventName>)
                     _ => unreachable!(),
                 };
                 std::fs::write(home.join("hooks.json"), json!({"hooks": {
-                    name: [{"matcher": "^gate$", "hooks": [{"type": "command",
+                    name: [{"selector": { "type": "tool", "name": "^gate$" }, "hooks": [{"type": "command",
                         "command": r#"python3 -c "import threading; threading.Event().wait()""#}]}]
                 }}).to_string()).expect("write blocking hook fixture");
             }

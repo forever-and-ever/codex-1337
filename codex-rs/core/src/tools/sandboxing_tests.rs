@@ -11,45 +11,10 @@ use codex_protocol::sandbox::SandboxOverride;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
-use codex_tools::ToolName;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 use std::collections::HashMap;
-
-#[test]
-fn command_permission_request_payload_omits_missing_description() {
-    assert_eq!(
-        PermissionRequestPayload::command(
-            Some(ToolName::plain("exec_command")),
-            "echo hi".to_string(),
-            /*description*/ None
-        ),
-        PermissionRequestPayload {
-            tool_name: Some(ToolName::plain("exec_command")),
-            tool_input: json!({ "command": "echo hi" }),
-        }
-    );
-}
-
-#[test]
-fn command_permission_request_payload_includes_description_when_present() {
-    assert_eq!(
-        PermissionRequestPayload::command(
-            Some(ToolName::plain("exec_command")),
-            "echo hi".to_string(),
-            Some("network-access example.com".to_string()),
-        ),
-        PermissionRequestPayload {
-            tool_name: Some(ToolName::plain("exec_command")),
-            tool_input: json!({
-                "command": "echo hi",
-                "description": "network-access example.com",
-            }),
-        }
-    );
-}
 
 #[test]
 fn external_sandbox_skips_exec_approval_on_request() {

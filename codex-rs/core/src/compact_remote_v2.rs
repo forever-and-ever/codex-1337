@@ -1316,7 +1316,11 @@ mod tests {
 
         assert!(matches!(result, Err(ref err)
             if matches!(err.details(), CodexErrorDetails::ResponseIncomplete(_))));
-        assert_eq!(sess.token_usage_info().await, None);
+        let usage = sess.token_usage_info().await.expect("reported spending");
+        assert_eq!(usage.total_token_usage.input_tokens, 100);
+        assert_eq!(usage.total_token_usage.output_tokens, 20);
+        assert_eq!(usage.total_token_usage.total_tokens, 120);
+        assert_eq!(usage.last_token_usage, TokenUsage::default());
         assert!(rx.is_empty());
     }
 

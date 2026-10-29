@@ -759,7 +759,7 @@ fn write_pre_tool_hook(home: &Path, matcher: &str, output: &serde_json::Value) -
     let hooks = json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": matcher,
+                "selector": { "type": "tool", "name": matcher },
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),

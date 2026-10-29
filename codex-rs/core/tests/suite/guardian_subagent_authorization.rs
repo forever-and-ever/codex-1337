@@ -713,7 +713,7 @@ async fn run_guardian_subagent_review(
                 return;
             }
             let mut hooks = json!({"hooks": {"PreToolUse": [{
-                "matcher": "^(mcp__codex_apps__user_messag(e|ing)_+send_message|mcp__codex_apps__flat_+send_message)$",
+                "selector": { "type": "tool", "namespace": "^mcp__codex_apps$", "name": "^(user_messag(e|ing)_+send_message|flat_+send_message)$" },
                 "hooks": [{
                     "type": "mcp_tool",
                     "server": configured_messaging_server,
@@ -723,7 +723,7 @@ async fn run_guardian_subagent_review(
             }]}});
             if block_post_hook || cancel_post_hook {
                 hooks["hooks"]["PostToolUse"] = json!([{
-                    "matcher": "^(mcp__codex_apps__user_messag(e|ing)_+send_message|mcp__codex_apps__flat_+send_message)$",
+                    "selector": { "type": "tool", "namespace": "^mcp__codex_apps$", "name": "^(user_messag(e|ing)_+send_message|flat_+send_message)$" },
                     "hooks": [{
                         "type": "mcp_tool", "server": configured_messaging_server,
                         "tool": "post_send", "input": {}

@@ -39,6 +39,7 @@ async fn local_compaction_retries_preserve_instructions_and_tool_metadata(
         Vec::new(),
         move |config| {
             config.model = Some("gpt-5.2".to_string());
+            config.base_instructions = Some("Window A".to_string());
             config.model_provider = provider;
             config.model_provider.supports_websockets = false;
             config

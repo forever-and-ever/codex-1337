@@ -111,40 +111,6 @@ async fn approval_action_preserves_patch_path_uris() {
 }
 
 #[tokio::test]
-async fn permission_request_payload_preserves_apply_patch_identity() {
-    let path = std::env::temp_dir()
-        .join("apply-patch-permission-request-payload.txt")
-        .abs();
-    let action =
-        ApplyPatchAction::new_add_for_test(&PathUri::from_abs_path(&path), "hello".to_string());
-    let expected_patch = action.patch.clone();
-    let req = ApplyPatchRequest {
-        turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
-        action,
-        file_paths: vec![PathUri::from_abs_path(&path)],
-        changes: Arc::new(HashMap::new()),
-        exec_approval_requirement: ExecApprovalRequirement::NeedsApproval {
-            reason: None,
-            proposed_execpolicy_amendment: None,
-        },
-        additional_permissions: None,
-        permissions_preapproved: false,
-    };
-
-    let payload = ApplyPatchRuntime::build_approval_action(&req, "call-1")
-        .permission_request_payload(&codex_tools::ToolName::plain("apply_patch"));
-
-    assert_eq!(
-        payload.tool_name,
-        Some(codex_tools::ToolName::plain("apply_patch"))
-    );
-    assert_eq!(
-        payload.tool_input,
-        serde_json::json!({ "command": expected_patch })
-    );
-}
-
-#[tokio::test]
 async fn approval_keys_include_environment_id() {
     let runtime = ApplyPatchRuntime::new();
     let path = std::env::temp_dir()

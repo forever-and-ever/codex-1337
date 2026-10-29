@@ -886,12 +886,11 @@ async fn ignores_session_prefix_messages_when_truncating() {
     );
     let got_items = truncated.get_rollout_items();
 
-    let expected: Vec<RolloutItem> = vec![
-        RolloutItem::ResponseItem(items[0].clone().into()),
-        RolloutItem::ResponseItem(items[1].clone().into()),
-        RolloutItem::ResponseItem(items[2].clone().into()),
-        RolloutItem::ResponseItem(items[3].clone().into()),
-    ];
+    let expected: Vec<RolloutItem> = items[..items.len() - 2]
+        .iter()
+        .cloned()
+        .map(|item| RolloutItem::ResponseItem(item.into()))
+        .collect();
 
     assert_eq!(
         serde_json::to_value(got_items).unwrap(),

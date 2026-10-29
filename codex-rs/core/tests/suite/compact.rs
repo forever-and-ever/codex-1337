@@ -218,7 +218,7 @@ print(json.dumps({{"decision": "block", "reason": "blocked by policy"}}))
     let hooks = json!({
         "hooks": {
             "PreCompact": [{
-                "matcher": "manual",
+                "selector": { "type": "event_value", "pattern": "manual" },
                 "hooks": [{
                     "type": "command",
                     "command": python_hook_command(&script_path),
@@ -262,14 +262,14 @@ with Path(r"{manual_post_log_path}").open("a", encoding="utf-8") as handle:
     let hooks = json!({
         "hooks": {
             "PreCompact": [{
-                "matcher": "auto",
+                "selector": { "type": "event_value", "pattern": "auto" },
                 "hooks": [{
                     "type": "command",
                     "command": python_hook_command(&auto_script_path),
                 }]
             }],
             "PostCompact": [{
-                "matcher": "manual",
+                "selector": { "type": "event_value", "pattern": "manual" },
                 "hooks": [{
                     "type": "command",
                     "command": python_hook_command(&manual_post_script_path),

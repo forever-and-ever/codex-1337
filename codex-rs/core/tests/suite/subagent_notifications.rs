@@ -287,14 +287,14 @@ print(json.dumps({{"systemMessage": "root stop complete"}}))
     let hooks = serde_json::json!({
         "hooks": {
             "SessionStart": [{
-                "matcher": "startup",
+                "selector": { "type": "event_value", "pattern": "startup" },
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", session_start_script_path.display()),
                 }]
             }],
             "SubagentStart": [{
-                "matcher": "worker|default",
+                "selector": { "type": "event_value", "pattern": "worker|default" },
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", start_script_path.display()),
@@ -307,7 +307,7 @@ print(json.dumps({{"systemMessage": "root stop complete"}}))
                 }]
             }],
             "SubagentStop": [{
-                "matcher": subagent_stop_matcher,
+                "selector": { "type": "event_value", "pattern": subagent_stop_matcher },
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", subagent_stop_script_path.display()),
