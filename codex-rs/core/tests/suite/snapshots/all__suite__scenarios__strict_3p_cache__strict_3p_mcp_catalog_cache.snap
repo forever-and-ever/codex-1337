@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_strict_3p_cache.rs
-assertion_line: 205
 expression: snapshot
 ---
 Scenario: Strict Code Mode Only: MCP config changes between turns, with omit-all and namespace skips. Exec calls the live catalog. One window means the captured prefix stayed stable. The execution environment remains running.
@@ -55,53 +54,59 @@ Settings:
     Output:
      | []
 -- request 3 (turn; turn 2: register MCP with lookup; omit-all, direct-only and excluded) --
-10:additional_tools/developer (1; hash=8ee54e39f501e44c):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=a7abe5c0f4ffa5c2
+10:message/developer:
+    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
+11:additional_tools/developer (1; hash=39b19e3614aea003):
+        - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
-11:message/user:
+12:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 4 (turn; turn 2: exec discovery and call results) --
-12:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+13:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-13:custom_tool_call_output:Script completed
+14:custom_tool_call_output:Script completed
     Output:
      | [{"name":"mcp__environment__lookup","result":"called lookup for  at  with "}]
 -- request 5 (turn; turn 3: same MCP name, new endpoint; replace lookup with resolve and search) --
-14:additional_tools/developer (1; hash=e99b509a6a57cf7c):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=5e5a47840b8a7264
+15:message/developer:
+    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
+16:additional_tools/developer (1; hash=6fc7c5bcb6865301):
+        - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
-15:message/user:
+17:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 6 (turn; turn 3: exec discovery and call results) --
-16:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+18:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-17:custom_tool_call_output:Script completed
+19:custom_tool_call_output:Script completed
     Output:
      | [{"name":"mcp__environment__resolve","result":"called resolve for  at  with "},{"name":"mcp__environment__search","result":"called search for  at  with "}]
 -- request 7 (turn; turn 4: remove MCP server from config) --
-18:additional_tools/developer (1; hash=5c4a6b4e210bb836):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=2542f9d7253b56ee
+20:message/developer:
+    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
+21:additional_tools/developer (1; hash=bb2d5b640e6b0b67):
+        - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
-19:message/user:
+22:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 8 (turn; turn 4: exec discovery and call results) --
-20:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+23:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-21:custom_tool_call_output:Script completed
+24:custom_tool_call_output:Script completed
     Output:
      | []

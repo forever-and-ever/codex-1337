@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1663
 expression: "context_snapshot::format_request_history_snapshot(\"Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.\",\n&mock.requests(),\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=b035cf1d60504144):
-        - namespace/functions; hash=893902d1a09bf38a
+00:additional_tools/developer (2; hash=cef93942f523685c):
+        - namespace/functions; hash=16345a77a37a8b3c
           - custom/exec
           - function/wait
           - custom/python
@@ -107,10 +106,12 @@ Settings:
 -- request 3 (turn) --
 10:message/assistant:
     The Notes tool is not installed yet.
-11:additional_tools/developer (1; hash=a3f3d87c7d326ef4):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=5f8722a7951daa8e
+11:message/developer:
+    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
+12:additional_tools/developer (1; hash=fdb604b4a280ab86):
+        - namespace/functions; hash=bd01ee2f7c0fd158
           - custom/exec
-12:message/developer:
+13:message/developer:
     <skills_instructions>
     ## Skills
     A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, descriptio...; expand the path's alias from the skill roots table. [hash=9b09cf46082eaea7]
@@ -119,9 +120,9 @@ Settings:
     ### Available skills
     - notes:summarize: Summarize team notes (r0/notes/local/skills/summarize/SKILL.md)
     </skills_instructions>
-13:message/user:
-    I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.
 14:message/user:
+    I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.
+15:message/user:
     <skill>
     <name>notes:summarize</name>
     <path><PLUGINS_CACHE>/test/notes/local/skills/summarize/SKILL.md</path>
@@ -133,28 +134,28 @@ Settings:
     State the owner and date from the notes.
 
     </skill>
-15:message/developer:
+16:message/developer:
     Capabilities from the `notes` plugin:
     - Skills from this plugin are prefixed with `notes:`.
     - MCP servers from this plugin available in this session: `notes`.
     Use these plugin-associated capabilities to help solve the task.
 -- request 4 (turn) --
-16:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-17:custom_tool_call_output:Script completed
+17:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
+18:custom_tool_call_output:Script completed
     Output:
      | ["mcp__notes__echo"]
 -- request 5 (turn) --
-18:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
-19:custom_tool_call_output:Script completed
+19:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
+20:custom_tool_call_output:Script completed
     Output:
      | ECHOING: Mira owns the kickoff
 -- request 6 (turn) --
-20:message/assistant:
+21:message/assistant:
     The Notes plugin confirms Mira owns the kickoff.
-21:message/user:
+22:message/user:
     Use the Notes tool again to check that the kickoff is Friday.
 -- request 7 (turn) --
-22:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
-23:custom_tool_call_output:Script completed
+23:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
+24:custom_tool_call_output:Script completed
     Output:
      | ECHOING: The kickoff is Friday

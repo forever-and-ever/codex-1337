@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
-expression: "context_snapshot::format_request_history_snapshot(\"MCP refreshes remove one tool, then its whole namespace, before restoring both tools. Removal notices append alone; restoration appends one developer notice before both namespace declarations. Unchanged turns do not repeat updates.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: MCP refreshes remove one tool, then its whole namespace, before restoring both tools. Removal notices append alone; restoration appends one developer notice before both namespace declarations. Unchanged turns do not repeat updates.
 
@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=a73e7ffa4e951665):
-        - namespace/functions; hash=afc78f633b562cf4
+00:additional_tools/developer (3; hash=f31682731d1ef2c8):
+        - namespace/functions; hash=26bad74a6a9c6b5d
           - custom/python
           - custom/bash
           - function/exec_command
@@ -30,7 +30,7 @@ Settings:
           - custom/apply_patch
           - function/view_image
           - function/fence
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=c6271b261b4fe310
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
           - function/close_agent
           - function/resume_agent
           - function/send_input

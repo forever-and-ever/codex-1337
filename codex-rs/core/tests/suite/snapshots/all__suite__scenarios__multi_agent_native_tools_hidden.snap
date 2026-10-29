@@ -16,14 +16,16 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=d56ea226c3637559):
-        - namespace/functions; hash=fada4a476a3754dd
+00:additional_tools/developer (1; hash=23768a523ac2646e):
+        - namespace/functions; hash=eaeb413bdf2256c2
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
-          - function/sleep
+          - function/fence
 01:message/developer:
     You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
 
@@ -72,7 +74,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
+    <OMITTED 17 LINES; ~172 TOKENS; hash=1880e979c121dc83>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -82,7 +84,7 @@ Settings:
 
     Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
 04:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 05:message/user:
     <environment_context>
       <cwd><CWD></cwd>
@@ -95,5 +97,5 @@ Settings:
     Check which agents are working under /root before delegating more work.
 07:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-08:function_call/collaboration.list_agents:{"path_prefix":"/root"}
-09:function_call_output:unsupported call: collaborationlist_agents
+08:function_call/wrangler_agents.list_agents:{"path_prefix":"/root"}
+09:function_call_output:unsupported call: wrangler_agents.list_agents

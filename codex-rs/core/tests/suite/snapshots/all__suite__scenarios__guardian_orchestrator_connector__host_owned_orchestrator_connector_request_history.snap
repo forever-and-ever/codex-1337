@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_guardian_orchestrator_connector.rs
-assertion_line: 171
 expression: "context_snapshot::normalize_json_lines(&snapshot)"
 ---
 Scenario: Guardian reviews a host-owned orchestrator connector, then the parent uses its calendar tool and continues.
@@ -76,7 +75,7 @@ Scenario: Guardian reviews a host-owned orchestrator connector, then the parent 
 
     [04] {
           "query": "today",
-          "tool": "mcp__codex_apps__calendar_list_events"
+          "tool": "mcp__codex_apps__calendar._list_events"
         }
 
     [05] >>> APPROVAL REQUEST END
@@ -162,6 +161,4 @@ Scenario: Guardian reviews a host-owned orchestrator connector, then the parent 
 03:message/user:
     List today's calendar events.
 04:function_call/mcp__codex_apps__calendar._list_events:{"query":"today"}
-05:function_call_output:Wall time: <DURATION> seconds
-    Output:
-    {"_codex_apps":{"call_id":"connector","connector_id":"calendar","contains_mcp_source":true,"resource_uri...ols/calendar_list_events","root_turn_id":"<UUID 2>"}} [hash=170da249b7060887]
+05:function_call_output:{"_codex_apps":{"call_id":"connector","connector_id":"calendar","contains_mcp_source":true,"resource_uri...ols/calendar_list_events","root_turn_id":"<UUID 2>"}} [hash=170da249b7060887]
