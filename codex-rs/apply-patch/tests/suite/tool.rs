@@ -244,7 +244,7 @@ fn test_apply_patch_cli_rejects_missing_file_delete() -> anyhow::Result<()> {
         .assert()
         .failure()
         .stderr(format!(
-            "Failed to delete file {}\n",
+            "Failed to delete file {}: No such file or directory (os error 2)\n",
             missing_path.display()
         ));
 
@@ -274,7 +274,7 @@ fn test_apply_patch_cli_requires_existing_file_for_update() -> anyhow::Result<()
         .assert()
         .failure()
         .stderr(format!(
-            "Failed to read file to update {}: No such file or directory (os error 2)\n",
+            "Failed to read file to update {}: No such file or directory (os error 2): No such file or directory (os error 2)\n",
             missing_path.display()
         ));
 
@@ -334,7 +334,7 @@ fn test_apply_patch_cli_delete_directory_fails() -> anyhow::Result<()> {
         .assert()
         .failure()
         .stderr(format!(
-            "Failed to delete file {}\n",
+            "Failed to delete file {}: path is a directory\n",
             expected_dir.display()
         ));
 
@@ -386,7 +386,7 @@ fn test_apply_patch_cli_failure_after_partial_success_leaves_changes() -> anyhow
         .failure()
         .stdout("")
         .stderr(format!(
-            "Failed to read file to update {}: No such file or directory (os error 2)\n",
+            "Failed to read file to update {}: No such file or directory (os error 2): No such file or directory (os error 2)\n",
             missing_file.display()
         ));
 

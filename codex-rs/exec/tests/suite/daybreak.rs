@@ -41,6 +41,7 @@ async fn exec_resolves_daybreak_for_api_keys_and_allows_an_off_override() -> any
         let response =
             responses::mount_sse_once(&server, responses::sse_completed("response")).await;
         test.cmd_with_server(&server)
+            .arg("run")
             .env_remove("CODEX_ACCESS_TOKEN")
             .arg("--skip-git-repo-check")
             .args(args)

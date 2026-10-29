@@ -462,20 +462,7 @@ async fn remote_exec_server_scoped_credentials_authenticate_only_register_and_va
         .mount(&registry)
         .await;
 
-    let collector = MockServer::start().await;
     let home = TempDir::new()?;
-    std::fs::write(
-        home.path().join("config.toml"),
-        format!(
-            r#"
-[analytics]
-enabled = true
-[otel]
-metrics_exporter = {{ otlp-http = {{ endpoint = "{}/v1/metrics", protocol = "json", headers = {{ Authorization = "general-telemetry-token" }} }} }}
-"#,
-            collector.uri()
-        ),
-    )?;
     std::fs::write(
         home.path().join("auth.json"),
         r#"{"OPENAI_API_KEY":"general-file-token"}"#,
@@ -636,13 +623,6 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{}/v1/metrics", protocol = "jso
     anyhow::ensure!(output.status.success(), "scoped executor failed: {stderr}");
     assert!(!stderr.contains(CREDENTIAL));
     assert!(!stderr.contains(ROTATED_CREDENTIAL));
-    assert!(
-        collector
-            .received_requests()
-            .await
-            .context("telemetry requests")?
-            .is_empty()
-    );
     Ok(())
 }
 

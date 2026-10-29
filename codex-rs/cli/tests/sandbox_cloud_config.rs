@@ -111,6 +111,7 @@ async fn sandbox_fetches_and_enforces_cloud_managed_permission_profile() -> Resu
         .args(["-c", chatgpt_base_url_override.as_str()])
         .args([
             "sandbox",
+            "run",
             "-P",
             "managed-cloud",
             "--include-managed-config",

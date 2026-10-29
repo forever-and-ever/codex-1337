@@ -17,7 +17,6 @@ use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use tempfile::tempdir;
-use test_case::test_case;
 
 use super::PreparedExecRequest;
 use super::prepare_exec_request_with_telemetry;

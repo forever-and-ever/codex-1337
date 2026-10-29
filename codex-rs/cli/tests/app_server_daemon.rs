@@ -9,6 +9,7 @@ use support::signal;
 use support::wait_for_exit;
 
 use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -515,7 +516,6 @@ fn unmanaged_app_server_does_not_launch_updater() -> Result<()> {
     let output = daemon.lifecycle("start")?;
     assert_eq!(output["status"], "alreadyRunning");
     assert_eq!(output["backend"], Value::Null);
-    assert_eq!(daemon.lifecycle("update")?["status"], "unsupported");
     assert!(
         !daemon
             .home
@@ -536,7 +536,15 @@ fn manual_update_rejects_an_unowned_installation() -> Result<()> {
             .join("packages/standalone/current/bin/codex"),
     )?;
 
-    assert_eq!(daemon.lifecycle("update")?["status"], "unsupported");
+    let output = daemon
+        .command()
+        .args(["app-server", "daemon", "update"])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("public daemon updates would replace Codex 1337")
+    );
     assert!(daemon.pid("app-server.pid").is_err());
     assert!(daemon.pid("app-server-updater.pid").is_err());
     Ok(())

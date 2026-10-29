@@ -47,9 +47,9 @@ impl RotatingAuth {
 impl AuthProvider for RotatingAuth {
     fn add_auth_headers(&self, headers: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
         let token = if self.refreshes.load(Ordering::SeqCst) == 0 {
-            "Bearer old"
+            "Bearer fixture-scoped-credential-before-rotation"
         } else {
-            "Bearer new"
+            "Bearer fixture-scoped-credential-after-rotation"
         };
         headers.insert(AUTHORIZATION, HeaderValue::from_static(token));
         Ok(())
@@ -110,6 +110,7 @@ async fn connect_deadline_covers_initial_auth_refresh_and_retry() -> anyhow::Res
 
 #[tokio::test]
 async fn noise_registry_operations_retry_with_new_credentials() -> anyhow::Result<()> {
+    // Short fake credentials can occur by chance in a random ML-KEM key and trigger leak rejection.
     for (operation, auth_mode) in [
         ("register", RegistryAuthMode::Legacy),
         ("connect", RegistryAuthMode::Legacy),
@@ -119,22 +120,28 @@ async fn noise_registry_operations_retry_with_new_credentials() -> anyhow::Resul
     ] {
         let server = MockServer::start().await;
         let key = NoiseChannelIdentity::generate()?.public_key();
-        Mock::given(header("authorization", "Bearer old"))
-            .respond_with(ResponseTemplate::new(401))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(header("authorization", "Bearer new"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "environment_id": "env", "url": "wss://relay.example/ws",
-                "executor_registration_id": "registration",
-                "security_profile": "noise_hybrid_ik_v1",
-                "executor_public_key": key, "harness_key_authorization": "authorization",
-                "valid": true,
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
+        Mock::given(header(
+            "authorization",
+            "Bearer fixture-scoped-credential-before-rotation",
+        ))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+        Mock::given(header(
+            "authorization",
+            "Bearer fixture-scoped-credential-after-rotation",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "environment_id": "env", "url": "wss://relay.example/ws",
+            "executor_registration_id": "registration",
+            "security_profile": "noise_hybrid_ik_v1",
+            "executor_public_key": key, "harness_key_authorization": "authorization",
+            "valid": true,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
         let provider = Arc::new(RotatingAuth::default());
         let mut client = EnvironmentRegistryClient::new(server.uri(), provider.clone())?;
         client.auth_mode = auth_mode;

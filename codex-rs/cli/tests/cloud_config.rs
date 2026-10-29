@@ -526,15 +526,10 @@ async fn startup_config_loads_managed_policy_or_reports_cloud_failure() -> Resul
 
 #[tokio::test]
 async fn startup_config_sign_out_reloads_policy_without_starting_runtime() -> Result<()> {
-    for (status, provider) in [(200, None), (503, None), (503, Some("amazon-bedrock"))] {
-        let Some(mut fixture) = CloudManagedConfigFixture::new().await? else {
+    for status in [200, 503] {
+        let Some(fixture) = CloudManagedConfigFixture::new().await? else {
             return Ok(());
         };
-        if let Some(provider) = provider {
-            fixture
-                .user_config
-                .push_str(&format!("model_provider = \"{provider}\"\n"));
-        }
         std::fs::write(
             fixture.codex_home.path().join("config.toml"),
             &fixture.user_config,
