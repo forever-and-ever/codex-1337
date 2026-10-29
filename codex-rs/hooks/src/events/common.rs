@@ -41,6 +41,10 @@ pub(crate) fn append_additional_context(
     additional_context: String,
     metadata: &ContentItemMetadata,
 ) {
+    // TELOS(no-vacuous-injections): a blank context says nothing to the model or the user.
+    if additional_context.trim().is_empty() {
+        return;
+    }
     entries.push(HookOutputEntry {
         kind: HookOutputEntryKind::Context,
         text: additional_context.clone(),

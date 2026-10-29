@@ -162,6 +162,10 @@ fn render_diff_restores_the_typed_section_snapshot() {
     };
     let before = state("before");
     let after = state("after");
+    assert!(
+        state("").render_full().1.is_empty(),
+        "a blank section says nothing"
+    );
     let (snapshot, initial) = before.render_full();
     let mut history = crate::context_manager::updates::merge_world_state_updates(initial);
     let original = history.clone();
@@ -185,6 +189,17 @@ fn render_diff_restores_the_typed_section_snapshot() {
             .1
             .is_empty()
     );
+    // Older builds persisted revisions without provenance; adopting it amends nothing.
+    let mut legacy = restored.clone();
+    legacy
+        .sections
+        .get_mut("codex.instruction/test")
+        .and_then(|revision| revision["current"].as_object_mut())
+        .expect("current instruction revision")
+        .remove("metadata");
+    let (adopted, updates) = after.render_history_diff(Some(&legacy), &history);
+    assert!(updates.is_empty());
+    assert_eq!(adopted, restored);
 
     // Replay must retain the complete patch ancestry; a surviving tip alone is not enough.
     let (_, replacement) = after.render_history_diff(Some(&restored), &history[1..]);

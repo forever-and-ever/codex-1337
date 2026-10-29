@@ -151,6 +151,14 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Tripwire: `render_diff_restores_the_typed_section_snapshot`, `catalog_collaboration_messages_refresh_without_mode_or_model_change`, `compaction_preserves_updated_summary`.
 - Pressure: instruction providers must expose a canonical full value without emission side effects; fragment provenance and authority must survive replay. Skills opt in through `WorldStateSectionContribution::with_instruction_amendments`: added/changed/removed summaries use unaliased paths and share the harness's retention and compaction machinery. Bounded catalogs relist rather than amend incomplete membership. Legacy revocations without a canonical predecessor retain explicit notices outside materialization. `production_turn_keeps_host_aliases_and_amends_catalog_changes` covers amendment materialization and cold replay.
 
+### no-vacuous-injections
+
+- Telos: nothing enters the model's context that says nothing.
+- Holds: an instruction amendment exists only when an instruction's authority or text changes: a revision differing only in kind or provenance is adopted silently, and agreeing texts yield no diff. A world-state fragment with a blank body is dropped when nothing precedes it to revoke, so a blank full instruction is no instruction; against known or unknown history it may still revoke. A blank hook additional context reaches neither the model nor the transcript.
+- Owners: `codex-rs/core/src/context/world_state/instruction_diff.rs` (`Entry::render`, `render_eloquent`, `diff`), `codex-rs/hooks/src/events/common.rs` (`append_additional_context`).
+- Tripwire: `render_diff_restores_the_typed_section_snapshot`. Blank hook contexts: none.
+- Pressure: persisted revisions predating content provenance carry default metadata, so an exact comparison amended unchanged text with hunkless diffs after an upgrade; upstream renders permissions instructions even when every catalog message is blank, as in guardian reviews; hook outputs pass `additionalContext` through unfiltered.
+
 ### reminders-not-system
 
 - Telos: an instruction update never rewrites an earlier cached prefix.
@@ -983,3 +991,4 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/tests.rs`: goal-boxes
 - `codex-rs/tui/src/app_event.rs`: goal-boxes
 - `codex-rs/tui/src/chatwidget/tests/slash_commands.rs`: goal-boxes
+- `codex-rs/hooks/src/events/common.rs`: no-vacuous-injections

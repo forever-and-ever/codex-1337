@@ -1,4 +1,5 @@
 //! Full instruction values belong to the harness; amendments alone enter a live window.
+//! Every section renders through here, so a blank fragment with nothing to revoke never enters.
 
 #[path = "instruction_projection.rs"]
 mod projection;
@@ -55,7 +56,7 @@ impl Entry {
         snapshot: &mut WorldStateSnapshot,
     ) -> SectionTransition {
         let Self::Instruction(section, amendment) = self else {
-            return self.renderer().render_diff(previous);
+            return render_eloquent(self.renderer(), previous);
         };
         let instruction_id = match amendment {
             Amendment::Unified(identity) => *identity,
@@ -66,10 +67,10 @@ impl Entry {
             .filter(|revision| revision.retained(retained));
         let (current, state, rendered) = match amendment {
             Amendment::Unified(_) => {
-                let (state, full) = section.render_diff(PreviousSectionState::Absent);
+                let (state, full) = render_eloquent(section.as_ref(), PreviousSectionState::Absent);
                 let Canonical::Instruction(current) = canonical(&full) else {
                     // Native declarations are not replaceable instruction text.
-                    return section.render_diff(previous);
+                    return render_eloquent(section.as_ref(), previous);
                 };
                 if prior.is_none()
                     && current.is_none()
@@ -78,7 +79,7 @@ impl Entry {
                     // Legacy history has no canonical predecessor to revoke by diff.
                     // Keep its explicit revocation outside materialization until a full
                     // instruction value establishes ownership of the older fragments.
-                    return section.render_diff(previous);
+                    return render_eloquent(section.as_ref(), previous);
                 }
                 (current, state, full)
             }
@@ -88,10 +89,11 @@ impl Entry {
                 } else {
                     PreviousSectionState::Absent
                 };
-                let (state, updates) = section.render_diff(previous);
+                let (state, updates) = render_eloquent(section.as_ref(), previous);
                 (
                     current
                         .as_ref()
+                        .filter(|fragment| !vacuous(*fragment))
                         .map(|fragment| Text::from_fragment(fragment)),
                     state,
                     updates,
@@ -99,25 +101,27 @@ impl Entry {
             }
         };
         let (mut revision, updates) = match prior {
-            Some(prior) if prior.current == current => (prior, Vec::new()),
+            // Kind and provenance are host bookkeeping the model never reads: a revision that
+            // differs only there is adopted silently instead of amended by an empty patch.
+            Some(mut prior) if reading(prior.current.as_ref()) == reading(current.as_ref()) => {
+                prior.current = current;
+                (prior, Vec::new())
+            }
             Some(mut prior) => {
                 let updates = match amendment {
                     Amendment::Unified(_) => {
-                        vec![WorldStateUpdate::fragment(diff(
-                            instruction_id,
-                            prior.current.as_ref(),
-                            current.as_ref(),
-                        ))]
+                        diff(instruction_id, prior.current.as_ref(), current.as_ref())
+                            .map(WorldStateUpdate::fragment)
+                            .into_iter()
+                            .collect()
                     }
                     Amendment::Semantic(_) => rendered,
                 };
-                if updates.is_empty() {
-                    // A semantic renderer may intentionally suppress a budget-only change.
-                    (prior, updates)
-                } else {
+                // A semantic renderer may intentionally suppress a budget-only change.
+                if !updates.is_empty() {
                     prior.current = current;
-                    (prior, updates)
                 }
+                (prior, updates)
             }
             None => {
                 let mut revision = Revision {
@@ -317,8 +321,8 @@ pub(super) fn retire_missing(
         let was_retained = prior.retained(retained);
         if let Some(before) = prior.current.take()
             && was_retained
+            && let Some(removal) = diff(id, Some(&before), None)
         {
-            let removal = diff(id, Some(&before), None);
             prior.lineage.push(removal.fingerprint());
             updates.push(WorldStateUpdate::fragment(removal));
         }
@@ -357,11 +361,34 @@ fn canonical(updates: &[WorldStateUpdate]) -> Canonical {
     }
 }
 
-fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Text {
-    let Some(endpoint) = after.or(before) else {
-        unreachable!("instruction change has no endpoint: {id}");
-    };
-    let authority = endpoint.authority.clone();
+/// Renders a section. A blank fragment can only revoke an earlier one, so with nothing before it
+/// the fragment says nothing and is dropped; a blank full instruction is no instruction at all.
+fn render_eloquent(
+    section: &dyn ErasedWorldStateSection,
+    previous: PreviousSectionState<'_, serde_json::Value>,
+) -> SectionTransition {
+    let first = matches!(previous, PreviousSectionState::Absent);
+    let (state, mut updates) = section.render_diff(previous);
+    if first {
+        updates.retain(|update| match &update.content {
+            WorldStateUpdateContent::Fragment(fragment) => !vacuous(fragment.as_ref()),
+            WorldStateUpdateContent::Item(_) => true,
+        });
+    }
+    (state, updates)
+}
+
+fn vacuous(fragment: &dyn ContextualUserFragment) -> bool {
+    matches!(fragment.body(), ContentItem::InputText { text } if text.trim().is_empty())
+}
+
+/// The model reads an instruction's authority and text, nothing more.
+fn reading(text: Option<&Text>) -> Option<(&Authority, &str)> {
+    text.map(|text| (&text.authority, text.text.as_str()))
+}
+
+/// Patches `before` into `after`; agreeing texts need no amendment.
+fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Option<Text> {
     if let (Some(before), Some(after)) = (before, after) {
         assert_eq!(
             before.authority, after.authority,
@@ -370,6 +397,13 @@ fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Text {
     }
     let old = before.map_or("", |text| text.text.as_str());
     let new = after.map_or("", |text| text.text.as_str());
+    if old == new {
+        return None;
+    }
+    let Some(endpoint) = after.or(before) else {
+        unreachable!("instruction change has no endpoint: {id}");
+    };
+    let authority = endpoint.authority.clone();
     let from = before.map_or_else(|| "absent".to_string(), |text| text.fingerprint().0);
     let to = after.map_or_else(|| "removed".to_string(), |text| text.fingerprint().0);
     let patch = TextDiff::from_lines(old, new)
@@ -377,14 +411,14 @@ fn diff(id: &str, before: Option<&Text>, after: Option<&Text>) -> Text {
         .context_radius(3)
         .header(&format!("{id}/{from}"), &format!("{id}/{to}"))
         .to_string();
-    Text {
+    Some(Text {
         authority,
         metadata: endpoint.metadata.clone(),
         kind: ContentItemKind(format!("{DIFF_KIND_PREFIX}{id}")),
         text: format!(
             "{OPEN}\nApply this update to the previously supplied {id} instructions; unchanged instructions remain in force.\n{patch}{CLOSE}"
         ),
-    }
+    })
 }
 
 fn fingerprint(role: &str, kind: &ContentItemKind, text: &str) -> WorldStateHash {

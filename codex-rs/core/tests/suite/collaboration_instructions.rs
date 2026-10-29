@@ -381,10 +381,20 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
             .context_inventory()
             .await
             .map_err(anyhow::Error::msg)?;
-        assert!(inventory.raw.contains(ORIGINAL));
+        // The inventory retains superseded instructions beside their amendments.
+        let retained = inventory
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                codex_protocol::ContextSource::Prompt { text, .. } => Some(text.as_str()),
+                codex_protocol::ContextSource::ToolDeclarations { .. } => None,
+            })
+            .collect::<String>();
+        assert!(retained.contains(ORIGINAL), "{turn}");
         assert_eq!(
-            inventory.raw.matches("<instruction_diff>").count(),
-            amendments
+            retained.matches("<instruction_diff>").count(),
+            amendments,
+            "{turn}"
         );
         requests.push(request);
     }
