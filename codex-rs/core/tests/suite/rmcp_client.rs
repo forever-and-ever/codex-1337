@@ -2521,7 +2521,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
             // The real CLI is explicitly provided; the test harness is not a CLI.
             config.codex_self_exe = Some(
                 AbsolutePathBuf::from_absolute_path_checked(
-                    cargo_bin("codex-exec").expect("codex-exec binary"),
+                    cargo_bin("codex").expect("codex binary"),
                 )
                 .expect("absolute codex binary path")
                 .into_path_buf(),
@@ -2735,9 +2735,11 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
         use_legacy_landlock: false,
         use_mxc: prefer_mxc && cfg!(windows) && !attachment_owned_permissions,
     })?;
-    // The core fixture uses codex-exec, which has no sandbox subcommand.
-    // Production uses the codex CLI; codex-mcp's tests own positive launcher evidence.
-    let expected_launcher: Option<Value> = None;
+    let expected_launcher = (remote_aware_environment_id()
+        == codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID)
+        .then_some(fixture.config.codex_self_exe.as_ref())
+        .flatten()
+        .map(|executable| json!({"codexExecutable": executable}));
     assert_eq!(
         (
             meta.get(MCP_SANDBOX_STATE_CAPABILITY),
