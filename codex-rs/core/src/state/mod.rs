@@ -4,6 +4,8 @@ mod service;
 mod session;
 mod turn;
 mod turn_token_usage;
+// TELOS(interleaved-turn-accounting): turn-owned subtotals survive late background responses.
+pub(crate) mod token_accounting;
 
 pub(crate) use crate::tools::ExecutedToolCalls;
 pub(crate) use additional_context::AdditionalContextStore;

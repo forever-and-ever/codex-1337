@@ -77,6 +77,8 @@ pub(crate) struct SessionState {
     pub(crate) history_reset: CancellationToken,
     pub(crate) latest_rate_limits: Option<RateLimitSnapshot>,
     pub(crate) latest_token_usage_record: Option<TokenUsageRecord>,
+    // TELOS(interleaved-turn-accounting): cold replay seeds only the recoverable last turn.
+    pub(crate) turn_usage_seed: Option<TokenUsageRecord>,
     pub(crate) server_reasoning_included: bool,
     pub(crate) mcp_dependency_prompted: HashSet<String>,
     pub(crate) additional_context: AdditionalContextStore,
@@ -135,6 +137,7 @@ impl SessionState {
             history_reset: CancellationToken::new(),
             latest_rate_limits: None,
             latest_token_usage_record: None,
+            turn_usage_seed: None,
             server_reasoning_included: false,
             mcp_dependency_prompted: HashSet::new(),
             additional_context: AdditionalContextStore::default(),
@@ -239,34 +242,19 @@ impl SessionState {
         root_turn_id: String,
         response_id: String,
         usage: &TokenUsage,
+        subtotal: &super::token_accounting::TurnSubtotal,
     ) -> TokenUsageRecord {
-        let mut turn_token_usage = self
-            .latest_token_usage_record
-            .as_ref()
-            .filter(|record| record.turn_id == turn_id)
-            .map_or_else(TokenUsage::default, |record| {
-                record.turn_token_usage.clone()
-            });
-        turn_token_usage.add_assign(usage);
-        let mut thread_token_usage = self
-            .latest_token_usage_record
-            .as_ref()
-            .map_or_else(TokenUsage::default, |record| {
-                record.thread_token_usage.clone()
-            });
-        thread_token_usage.add_assign(usage);
-        let record = TokenUsageRecord {
+        // TELOS(interleaved-turn-accounting): one subtotal belongs to one live turn, not the latest response.
+        super::token_accounting::record(
+            self,
+            subtotal,
             thread_id,
-            turn_id: turn_id.to_string(),
+            turn_id,
             session_id,
             root_turn_id,
             response_id,
-            usage: usage.clone(),
-            turn_token_usage,
-            thread_token_usage,
-        };
-        self.latest_token_usage_record = Some(record.clone());
-        record
+            usage,
+        )
     }
 
     pub(crate) fn set_reference_context_item(&mut self, item: Option<TurnContextItem>) {

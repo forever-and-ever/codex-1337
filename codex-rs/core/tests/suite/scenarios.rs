@@ -3132,7 +3132,7 @@ async fn async_compaction_reuses_pending_work(
     if !manual {
         responses.push(immediate(response(
             "second",
-            ev_function_call_with_namespace("team", "collaboration", "list_agents", "{}"),
+            ev_function_call_with_namespace("team", "wrangler_agents", "list_agents", "{}"),
             /*tokens*/ if over_budget { 9_000 } else { 91_000 },
         )));
     }
@@ -3280,9 +3280,23 @@ async fn async_compaction_reuses_pending_work(
             })
             .expect("persisted usage")
     };
-    assert!(history.items.iter().all(|item| !matches!(item,
-        RolloutItem::TokenUsageRecord(record) if record.response_id == "background"
-    )));
+    // 40de654f41 charges completed speculation even when its checkpoint is discarded.
+    assert_eq!(
+        history
+            .items
+            .iter()
+            .filter(|item| matches!(item,
+                RolloutItem::TokenUsageRecord(record) if record.response_id == "background"
+            ))
+            .count(),
+        usize::from(has_background)
+    );
+    let speculative_tokens = if has_background {
+        assert_eq!(usage("background").usage.total_tokens, 3_000);
+        3_000
+    } else {
+        0
+    };
     let continuation = usage("continuation");
     assert_eq!(
         (
@@ -3290,13 +3304,16 @@ async fn async_compaction_reuses_pending_work(
             continuation.thread_token_usage.total_tokens,
         ),
         if over_budget {
-            (12_010, 14_010)
+            (12_010, 14_010 + speculative_tokens)
         } else if manual {
-            (3_000, seed_tokens + if succeeds { 3_000 } else { 6_000 })
+            (
+                3_000,
+                seed_tokens + if succeeds { 3_000 } else { 6_000 } + speculative_tokens,
+            )
         } else if succeeds {
-            (94_000, 164_000)
+            (94_000, 164_000 + speculative_tokens)
         } else {
-            (97_000, 167_000)
+            (97_000, 167_000 + speculative_tokens)
         },
     );
 

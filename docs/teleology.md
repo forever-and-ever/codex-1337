@@ -380,6 +380,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 ## Accounts
 
+### interleaved-turn-accounting
+
+- Telos: every completed inference is charged without moving its tokens into another turn.
+- Holds: completed speculative compaction is charged once even when its checkpoint is discarded. A persisted turn subtotal accumulates only that turn's responses; a late background response from an older turn cannot reset the foreground subtotal. The thread total remains cumulative. Foreground and background contexts share a turn-owned subtotal cell, released with the last context; cold replay retains at most one seed for the last started turn and never searches past a compaction checkpoint.
+- Owners: `codex-rs/core/src/state/token_accounting.rs`; seams in `state/session.rs`, `state/mod.rs`, `session/turn_context.rs` and `session/mod.rs` under `codex-rs/core/src/`.
+- Tripwire: `async_compaction_reuses_pending_work` (`codex-rs/core/tests/suite/scenarios.rs`); `record_token_usage_continues_restored_totals` (`codex-rs/core/src/state/session_tests.rs`).
+- Pressure: speculative requests can complete after a newer turn reports usage. Deriving the turn subtotal from the latest thread record loses the newer turn's earlier responses; an unbounded turn-indexed map instead leaks closed turns.
+- Evidence: 40de654f41 charges completed background responses; test-suite repair, 2026-10-29, exposed the interleaving defect.
+
 ### pinned-accounts
 
 - Telos: each conversation bills the account the human chose, and switching never breaks work in progress.
@@ -1008,3 +1017,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode-runtime/src/session_runtime/types.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode/src/remote_session/delegate.rs`: code-mode-cell-outcomes
+- `codex-rs/core/src/state/token_accounting.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/state/session.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/state/mod.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/session/turn_context.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/session/mod.rs`: interleaved-turn-accounting
