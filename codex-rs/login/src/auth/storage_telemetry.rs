@@ -106,6 +106,7 @@ impl AuthStorageBackend for ObservedStorage {
     }
 
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        // TELOS(credential-backend-authority): Keep the backend's storage effects, not trait defaults.
         let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
         let result = self.inner.save(auth);
         telemetry.record_save_attempt(self.store(), &result);
@@ -122,6 +123,7 @@ impl AuthStorageBackend for ObservedStorage {
         previous: &AuthDotJson,
         updated: &AuthDotJson,
     ) -> std::io::Result<bool> {
+        // TELOS(credential-backend-authority): Keep the backend's atomic transaction, not default read/write.
         let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
         let result = self.inner.compare_exchange(previous, updated);
         if !matches!(result, Ok(false)) {

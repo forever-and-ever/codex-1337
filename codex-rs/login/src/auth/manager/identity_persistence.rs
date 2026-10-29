@@ -14,6 +14,7 @@ pub(super) fn persist(
     storage: &Arc<dyn AuthStorageBackend>,
     record: AgentIdentityAuthRecord,
 ) -> io::Result<()> {
+    // TELOS(pinned-accounts): Commit to the captured account; never reload changed grants into its cache.
     let _commit = auth_storage_commit_guard()?;
     let mut guard = auth_dot_json
         .lock()

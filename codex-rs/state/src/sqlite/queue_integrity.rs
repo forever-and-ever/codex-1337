@@ -28,6 +28,7 @@ impl SqliteConfig {
         spec: Option<RuntimeDbSpec>,
         telemetry_override: Option<&dyn DbTelemetry>,
     ) -> anyhow::Result<QuickCheckOutcome> {
+        // TELOS(authoritative-queue-integrity): Share queue verdicts, not upstream's attempt-only cache.
         let budget = Duration::from_millis(100);
         if !matches!(spec.map(|spec| spec.kind), Some(DbKind::Queue)) {
             return self
