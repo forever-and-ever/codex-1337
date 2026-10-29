@@ -4,8 +4,10 @@ use pretty_assertions::assert_eq;
 #[test]
 fn top_cli_parses_resume_prompt_after_config_flag() {
     const PROMPT: &str = "echo resume-with-global-flags-after-subcommand";
-    let cli = TopCli::parse_from([
+    let cli = command_args::try_parse_from([
         "codex-exec",
+        "-c",
+        "openai_base_url=\"http://127.0.0.1:1234/v1\"",
         "resume",
         "--strict-config",
         "--last",
@@ -17,7 +19,8 @@ fn top_cli_parses_resume_prompt_after_config_flag() {
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
         PROMPT,
-    ]);
+    ])
+    .expect("parse scoped overrides");
     let mut inner = cli.inner;
     inner
         .config_overrides
@@ -34,10 +37,13 @@ fn top_cli_parses_resume_prompt_after_config_flag() {
         }
     });
     assert_eq!(effective_prompt.as_deref(), Some(PROMPT));
-    assert_eq!(inner.config_overrides.raw_overrides.len(), 1);
+    // Global flags on both sides of the verb must not lose a mock/provider route.
     assert_eq!(
-        inner.config_overrides.raw_overrides[0],
-        "reasoning_level=xhigh"
+        inner.config_overrides.raw_overrides,
+        [
+            "openai_base_url=\"http://127.0.0.1:1234/v1\"",
+            "reasoning_level=xhigh"
+        ]
     );
     assert!(inner.strict_config);
 }

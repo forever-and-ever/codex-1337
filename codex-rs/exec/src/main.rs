@@ -20,6 +20,9 @@ use codex_exec::Cli;
 use codex_exec::run_main;
 use codex_utils_cli::CliConfigOverrides;
 
+// TELOS(scoped-config-overrides): preserve flags before and after the verb.
+mod command_args;
+
 #[derive(Parser, Debug)]
 struct TopCli {
     #[clap(flatten)]
@@ -32,7 +35,8 @@ struct TopCli {
 fn main() -> anyhow::Result<()> {
     codex_app_server::install_embedded_runtime();
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
-        let top_cli = TopCli::parse();
+        let top_cli =
+            command_args::try_parse_from(std::env::args_os()).unwrap_or_else(|error| error.exit());
         // Merge root-level overrides into inner CLI struct so downstream logic remains unchanged.
         let mut inner = top_cli.inner;
         inner
