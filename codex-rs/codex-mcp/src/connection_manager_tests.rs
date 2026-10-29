@@ -4407,7 +4407,9 @@ async fn later_tool_list_retries_after_failed_reconnect_and_keeps_cached_tools()
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     let failed_binding = capture_binding(&manager).await;
-    assert_eq!(failed_binding.tools(), tools);
+    let mut expected = tools.clone();
+    expected[0].annotation_source = crate::AnnotationSource::Withheld;
+    assert_eq!(failed_binding.tools(), expected);
     assert!(
         manager
             .prepare_call_for_tool(
@@ -4546,7 +4548,9 @@ async fn tool_lists_do_not_block_and_share_codex_apps_startup_reconnect() {
     let pending_step = tokio::time::timeout(Duration::from_millis(10), capture_binding(&manager))
         .await
         .expect("step capture should not wait for reconnect");
-    assert_eq!(pending_step.tools(), first_tools);
+    let mut expected = first_tools.clone();
+    expected[0].annotation_source = crate::AnnotationSource::Withheld;
+    assert_eq!(pending_step.tools(), expected);
     // Readiness joins the retry that discovery started before call preparation.
     let mut ready = Box::pin(manager.wait_for_server_startup(CODEX_APPS_MCP_SERVER_NAME));
     assert!(futures::poll!(&mut ready).is_pending());

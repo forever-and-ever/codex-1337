@@ -3167,10 +3167,10 @@ async fn plugin_defaults_resolve_remote_enablement_and_separate_cache_entries() 
             "[plugins._default]\nenabled = false\n[plugins.\"sample@openai-curated-remote\".mcp_servers.example]\ndefault_tools_approval_mode = 'approve'",
             Vec::new(),
         ),
-        // Without the new default, legacy remote account enablement still wins.
+        // An explicit user disable vetoes remote account enablement.
         (
             "[plugins.\"sample@openai-curated-remote\"]\nenabled = false",
-            vec![other, sample],
+            vec![other],
         ),
     ] {
         write_file(&config_path, policy);

@@ -1887,7 +1887,6 @@ fn bundled_cleanup_trust_does_not_extend_to_other_handlers() {
             (HookTrustStatus::Untrusted, false),
             (HookTrustStatus::Untrusted, false),
             (HookTrustStatus::Untrusted, false),
-            (HookTrustStatus::Untrusted, false),
         ]
     );
 }
