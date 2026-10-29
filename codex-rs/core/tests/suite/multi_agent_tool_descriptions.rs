@@ -248,10 +248,20 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     let bundled = expected_tool["description"]
                         .as_str()
                         .expect("bundled description");
-                    let declaration = bundled
-                        .find("\n\nCall: await ")
-                        .map(|index| &bundled[index..])
-                        .unwrap_or_default();
+                    // TELOS(compact-contracts): the invocation and schema precede extended prose.
+                    let declaration =
+                        if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
+                            let marker = "\nReturns:";
+                            let start = bundled.find(marker).unwrap_or_else(|| {
+                                panic!("Code Mode return contract for {name}: {bundled}")
+                            });
+                            let end = bundled[start..]
+                                .find("\n\n")
+                                .map_or(bundled.len(), |offset| start + offset);
+                            &bundled[..end]
+                        } else {
+                            ""
+                        };
                     if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
                         assert!(
                             declaration.contains(&format!("delegation__{name}")),
@@ -275,13 +285,17 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         );
                         assert!(
                             actual_description
-                                .strip_suffix(declaration)
+                                .strip_prefix(declaration)
                                 .expect("unchanged declaration")
                                 .ends_with("Local delegation hint.")
                         );
                         actual_description.to_string()
+                    } else if declaration.is_empty() {
+                        description.to_string()
+                    } else if description.is_empty() {
+                        declaration.to_string()
                     } else {
-                        format!("{description}{declaration}")
+                        format!("{declaration}\n\n{description}")
                     };
                     expected_tool["description"] = json!(replacement);
                 }
@@ -432,15 +446,20 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
                     .expect(name);
                 let bundled = tool["description"].as_str().expect("bundled description");
                 if let Some(description) = message["multi_agent"][name]["description"].as_str() {
-                    let declaration = if matches!(exposure, Exposure::CodeMode) {
-                        let offset = bundled
-                            .find("\n\nCall: await ")
-                            .expect("Code Mode declaration");
-                        &bundled[offset..]
+                    let description = if matches!(exposure, Exposure::CodeMode) {
+                        let marker = "\nReturns: no declared shape.";
+                        let end =
+                            bundled.find(marker).expect("Code Mode return contract") + marker.len();
+                        let declaration = &bundled[..end];
+                        if description.is_empty() {
+                            declaration.to_string()
+                        } else {
+                            format!("{declaration}\n\n{description}")
+                        }
                     } else {
-                        ""
+                        description.to_string()
                     };
-                    tool["description"] = json!(format!("{description}{declaration}"));
+                    tool["description"] = json!(description);
                 }
             }
             assert_eq!(request.body_json()["tools"], expected);

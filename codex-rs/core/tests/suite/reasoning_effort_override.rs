@@ -17,7 +17,6 @@ use codex_login::CodexAuth;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
-use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::Op;
@@ -577,6 +576,11 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
             .set_body_json(serde_json::json!({"error": {"code": "server_is_overloaded"}})),
     )
     .await;
+    let recovered = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![responses::ev_completed("recovered")]),
+    )
+    .await;
     let retried = responses::mount_sse_once(
         &server,
         responses::sse(vec![responses::ev_completed("retried")]),
@@ -614,12 +618,21 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
     let EventMsg::TurnComplete(completed) = completed else {
         unreachable!("waited for turn completion");
     };
+    // TELOS(backpressure-waits): interactive overload recovers without spending retry budget.
+    assert!(completed.error.is_none());
     assert_eq!(
-        completed.error.and_then(|error| error.codex_error_info),
-        Some(CodexErrorInfo::ServerOverloaded)
+        recovered.single_request().input(),
+        failed.single_request().input()
+    );
+    assert_eq!(
+        effort_updates(&recovered.single_request()),
+        [
+            effort_update(ReasoningEffort::Medium),
+            effort_update(ReasoningEffort::High)
+        ]
     );
 
-    // The app's capacity Retry action uses current settings without adding a user message.
+    // Continuing with current settings adds no user message and replaces the adjacent update.
     test.codex
         .start_or_steer_turn(
             TurnInputRequest::user_input(Vec::new()).with_thread_settings(

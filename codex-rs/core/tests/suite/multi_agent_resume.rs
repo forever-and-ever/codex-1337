@@ -287,6 +287,24 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     });
     let initial = initial_builder.build_with_auto_env(&server).await?;
     let root_thread_id = initial.session_configured.thread_id;
+    // Completion mail can wake the idle root independently of the explicit test prompts.
+    let _root_mail = wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(move |request: &wiremock::Request| {
+            decoded_body(request)
+                .and_then(|body| serde_json::from_slice::<Value>(&body).ok())
+                .is_some_and(|body| {
+                    body["client_metadata"]["thread_id"] == json!(root_thread_id)
+                        && body["input"]
+                            .as_array()
+                            .and_then(|input| input.last())
+                            .is_some_and(|item| item["type"] == "agent_message")
+                })
+        })
+        .respond_with(sse_response(sse(vec![ev_completed("root-mail")])))
+        .with_priority(10)
+        .mount_as_scoped(&server)
+        .await;
     let root_session_id = initial.session_configured.session_id;
     initial
         .codex
@@ -618,6 +636,20 @@ openai_base_url = "{redirected_base_url}"
         ]),
     )
     .await;
+    // Idle ordinary mail wakes the restored worker (643f434477), without replacing its task.
+    let queued_child_request = mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            request_has_model(request, ROLE_MODEL)
+                && body_contains(request, QUEUED_MESSAGE)
+                && !body_contains(request, FOLLOWUP_TASK)
+        },
+        sse(vec![
+            ev_assistant_message("msg-queued-worker", "ordinary message handled"),
+            ev_completed("resp-queued-worker"),
+        ]),
+    )
+    .await;
     resumed.submit_turn(QUEUE_PROMPT).await?;
 
     let reloaded_worker = resumed
@@ -630,9 +662,13 @@ openai_base_url = "{redirected_base_url}"
         resumed.codex.config().await.model_provider,
         "cold reload must preserve the parent's complete model provider",
     );
+    wait_for_event(reloaded_worker.as_ref(), |event| {
+        matches!(event, EventMsg::TurnComplete(completed) if queued_child_request.requests().iter().any(|request| request.body_json()["client_metadata"]["turn_id"] == completed.turn_id))
+    })
+    .await;
     resumed.submit_turn(FOLLOWUP_PROMPT).await?;
     wait_for_event(reloaded_worker.as_ref(), |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        matches!(event, EventMsg::TurnComplete(completed) if followup_child_request.requests().iter().any(|request| request.body_json()["client_metadata"]["turn_id"] == completed.turn_id))
     })
     .await;
     tokio::time::timeout(Duration::from_secs(10), analytics_client.flush()).await?;
@@ -710,11 +746,14 @@ openai_base_url = "{redirected_base_url}"
         .received_requests()
         .await
         .expect("captured response requests");
-    assert!(!followup_child_request.requests().iter().any(|request| {
-        request.body_json()["client_metadata"]["thread_id"] == json!(worker_thread_id)
-            && request.body_contains_text(QUEUED_MESSAGE)
-            && !request.body_contains_text(FOLLOWUP_TASK)
-    }));
+    let queued_request = queued_child_request.single_request();
+    assert_eq!(
+        queued_request.body_json()["client_metadata"]["thread_id"],
+        json!(worker_thread_id)
+    );
+    assert!(queued_request.body_contains_text(QUEUED_MESSAGE));
+    assert!(!queued_request.body_contains_text(FOLLOWUP_TASK));
+    assert!(queued_request.body_contains_text(ROLE_DEVELOPER_INSTRUCTIONS));
     let body_for = |text: &str, thread: codex_protocol::ThreadId| {
         requests
             .iter()
