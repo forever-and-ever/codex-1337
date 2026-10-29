@@ -47,6 +47,8 @@ static NEXT_ELICITATION_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
 const STRICT_AUTO_REVIEW_DECLINE_MESSAGE: &str = "Automated review of this operation failed. Do not proceed without asking the user for explicit approval.";
 
+#[path = "elicitation_policy.rs"]
+mod issuing_policy;
 #[path = "user_verification_elicitation.rs"]
 mod user_verification_elicitation;
 
@@ -537,106 +539,18 @@ impl ElicitationRequestManager {
                     }
                     Err(error) => return Err(error),
                 };
-                let approval_policy = issued_authority.authority.approval_policy;
-                let Some(permission_profile) =
-                    issued_authority.authority.permission_profile.as_ref()
-                else {
-                    return Ok(ElicitationResponse {
-                        action: ElicitationAction::Decline,
-                        content: None,
-                        meta: None,
-                    });
-                };
-
-                match elicitation
-                    .meta()
-                    .and_then(|meta| meta.get(STRICT_AUTO_REVIEW_KEY))
+                if let Some(response) = issuing_policy::resolve(
+                    issued_authority,
+                    config,
+                    &server_name,
+                    &elicitation,
+                    &router,
+                    reviewer.is_some(),
+                    lifecycle.as_ref(),
+                )
+                .await?
                 {
-                    Some(Value::Bool(true)) => {
-                        if matches!(
-                            approval_policy,
-                            AskForApproval::Granular(config) if !config.allows_mcp_elicitations()
-                        ) {
-                            return Ok(strict_auto_review_decline());
-                        }
-                        if reviewer.is_none() {
-                            return Ok(strict_auto_review_decline());
-                        }
-                        let _active_elicitation =
-                            lifecycle.as_ref().map(ElicitationLifecycle::start);
-                        return Ok(match issued_authority.review.await {
-                            Ok(Some(response))
-                                if (response.action == ElicitationAction::Accept
-                                    && response.content == Some(serde_json::json!({}))
-                                    || matches!(
-                                        response.action,
-                                        ElicitationAction::Decline | ElicitationAction::Cancel
-                                    ) && response.content.is_none())
-                                    && response
-                                        .meta
-                                        .as_ref()
-                                        .and_then(Value::as_object)
-                                        .and_then(|meta| meta.get(APPROVALS_REVIEWER_KEY))
-                                        .and_then(Value::as_str)
-                                        == Some("auto_review") =>
-                            {
-                                response
-                            }
-                            Ok(Some(_)) | Ok(None) | Err(_) => strict_auto_review_decline(),
-                        });
-                    }
-                    None | Some(Value::Bool(false)) => {}
-                    Some(_) => return Ok(strict_auto_review_decline()),
-                }
-
-                let permission_prompt_is_auto_approved = mcp_permission_prompt_is_auto_approved(
-                    approval_policy,
-                    permission_profile,
-                    McpPermissionPromptAutoApproveContext::default(),
-                );
-                if permission_prompt_is_auto_approved && can_auto_accept_elicitation(&elicitation) {
-                    return Ok(ElicitationResponse {
-                        action: ElicitationAction::Accept,
-                        content: Some(serde_json::json!({})),
-                        meta: None,
-                    });
-                }
-
-                let should_surface_form_in_full_access = router.full_access_form_input_enabled()
-                    && permission_prompt_is_auto_approved
-                    && !elicitation
-                        .meta()
-                        .is_some_and(|meta| meta.contains_key(APPROVAL_KIND_KEY))
-                    && match &elicitation {
-                        Elicitation::Mcp(
-                            rmcp::model::ElicitRequestParams::FormElicitationParams {
-                                requested_schema,
-                                ..
-                            },
-                        ) => !requested_schema.properties.is_empty(),
-                        Elicitation::OpenAiElicitationForm {
-                            requested_schema, ..
-                        } => requested_schema
-                            .get("properties")
-                            .and_then(Value::as_object)
-                            .is_some_and(|properties| !properties.is_empty()),
-                        Elicitation::Mcp(_)
-                        | Elicitation::OpenAiForm { .. }
-                        | Elicitation::UserVerification { .. } => false,
-                    };
-
-                if !should_surface_form_in_full_access {
-                    if elicitation_is_rejected_by_policy(approval_policy) {
-                        return Ok(ElicitationResponse {
-                            action: ElicitationAction::Decline,
-                            content: None,
-                            meta: None,
-                        });
-                    }
-
-                    if let Some(response) = issued_authority.review.await? {
-                        return Ok(response);
-                    }
+                    return Ok(response);
                 }
 
                 let request = match elicitation {
