@@ -90,7 +90,10 @@ impl<S: Subscriber> Layer<S> for McpCacheCounters {
     fn on_new_span(&self, attributes: &Attributes<'_>, _id: &Id, _context: LayerContext<'_, S>) {
         let metadata = attributes.metadata();
         match (metadata.target(), metadata.name()) {
-            ("codex_mcp::connection_manager::tool_catalog", "capture_binding_with_metadata") => {
+            (
+                "codex_mcp::connection_manager::tool_catalog::boundary",
+                "capture_binding_with_mode",
+            ) => {
                 self.binding_captures.fetch_add(1, Ordering::SeqCst);
             }
             ("codex_core::tools::handlers::tool_search", "new") => {

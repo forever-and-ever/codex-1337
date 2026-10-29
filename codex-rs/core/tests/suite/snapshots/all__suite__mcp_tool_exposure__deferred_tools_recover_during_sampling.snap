@@ -22,7 +22,20 @@ Scenario: Deferred namespaces appear after Apps recovers between sampling reques
 04:function_call/request_user_input:{"questions":[{"header":"Continue","id":"continue","options":[{"description":"Continue the test.","label...:"No"}],"question":"Continue after Apps recovers?"}]} [hash=31004ebd8cd711b2]
 05:function_call_output:{"answers":{"continue":{"answers":["Yes (Recommended)"]}}}
 06:message/developer[2]:
-    [01] <APPS_INSTRUCTIONS>
+    [01] <instruction_diff>
+        Apply this update to the previously supplied apps_instructions instructions; unchanged instructions remain in force.
+        --- apps_instructions/absent
+        +++ apps_instructions/a143238c43562c66fabdc8c36a8d04773b5502f5
+        @@ -0,0 +1,7 @@
+        +<apps_instructions>
+        +## Apps (Connectors)
+        +Apps (Connectors) can be explicitly triggered in user messages in the format `[$app-name](app://{connec...long as the context suggests usage of available apps. [hash=bb778523e8529bb0]
+        +An app is equivalent to a set of MCP tools within the `codex_apps` MCP.
+        +An installed app's MCP tools are either provided to you already, or can be lazy-loaded through the `too...re searchable by `tools_search` will be listed by it. [hash=9d071ce7c05db918]
+        +Do not additionally call list_mcp_resources or list_mcp_resource_templates for apps.
+        +</apps_instructions>
+        \\ No newline at end of file
+        </instruction_diff>
     [02] <tools>
         Added deferred tool namespaces:
         - mcp__codex_apps__calendar: Plan events and manage your calendar.

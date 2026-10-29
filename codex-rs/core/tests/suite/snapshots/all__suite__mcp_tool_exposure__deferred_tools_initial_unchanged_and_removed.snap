@@ -46,11 +46,25 @@ Scenario: Initially available deferred tools remain unchanged until disabling Ca
     inspect unchanged deferred tools
 06:message/assistant:
     done
-07:message/developer:
-    <tools>
-    Removed deferred tool namespaces:
-    - mcp__codex_apps__calendar: Plan events and manage your calendar.
-    No deferred tool namespaces remain.
-    </tools>
+07:message/developer[2]:
+    [01] <instruction_diff>
+        Apply this update to the previously supplied apps_instructions instructions; unchanged instructions remain in force.
+        --- apps_instructions/a143238c43562c66fabdc8c36a8d04773b5502f5
+        +++ apps_instructions/removed
+        @@ -1,7 +0,0 @@
+        -<apps_instructions>
+        -## Apps (Connectors)
+        -Apps (Connectors) can be explicitly triggered in user messages in the format `[$app-name](app://{connec...long as the context suggests usage of available apps. [hash=81e6be09fa24d7da]
+        -An app is equivalent to a set of MCP tools within the `codex_apps` MCP.
+        -An installed app's MCP tools are either provided to you already, or can be lazy-loaded through the `too...re searchable by `tools_search` will be listed by it. [hash=a43a08a2be24c0aa]
+        -Do not additionally call list_mcp_resources or list_mcp_resource_templates for apps.
+        -</apps_instructions>
+        \\ No newline at end of file
+        </instruction_diff>
+    [02] <tools>
+        Removed deferred tool namespaces:
+        - mcp__codex_apps__calendar: Plan events and manage your calendar.
+        No deferred tool namespaces remain.
+        </tools>
 08:message/user:
     inspect removed deferred tools
