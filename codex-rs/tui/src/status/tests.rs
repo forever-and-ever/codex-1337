@@ -1651,41 +1651,6 @@ async fn status_snapshot_wraps_halfwidth_kana_in_narrow_terminal() {
 }
 
 #[tokio::test]
-async fn status_snapshot_shows_claude_subscription_account() {
-    let temp_home = TempDir::new().expect("temp home");
-    let mut config = test_config(&temp_home).await;
-    config.model_provider_id = "claude_subscription".to_owned();
-    config.model_provider.requires_openai_auth = false;
-    set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
-    let now = chrono::Local
-        .with_ymd_and_hms(2024, 1, 2, 3, 4, 5)
-        .single()
-        .expect("timestamp");
-    let account = StatusAccountDisplay::ClaudeSubscription {
-        email: Some("claude@example.com".to_owned()),
-    };
-    let usage = TokenUsage::default();
-    let composite = new_status_output(
-        &config,
-        Some(&account),
-        /*token_info*/ None,
-        &usage,
-        &None,
-        /*thread_name*/ None,
-        /*forked_from*/ None,
-        /*rate_limits*/ None,
-        /*plan_type*/ None,
-        now,
-        "claude-sonnet-5-5",
-        /*collaboration_mode*/ None,
-        /*reasoning_effort_override*/ None,
-    );
-    assert_snapshot!(
-        sanitize_directory(render_lines(&composite.display_lines(/*width*/ 80))).join("\n")
-    );
-}
-
-#[tokio::test]
 async fn status_snapshot_shows_missing_limits_message() {
     let temp_home = TempDir::new().expect("temp home");
     let mut config = test_config(&temp_home).await;

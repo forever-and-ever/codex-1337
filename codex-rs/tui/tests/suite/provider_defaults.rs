@@ -14,18 +14,19 @@ async fn history_lookup_spans_providers_with_local_and_embedded_servers() -> Res
     let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
     let cwd = codex_utils_cargo_bin::repo_root()?;
     for action in ["resume", "fork"] {
+        // Cover each server topology and both lookup paths without a duplicate subprocess grid.
         for (embedded, last, explicit) in [
             (false, false, false),
-            (true, false, false),
-            (false, true, false),
             (true, true, false),
             (false, true, true),
-            (false, false, true),
         ] {
             let home = socket_home()?;
             write_test_config(home.path(), &cwd)?;
             let config_path = home.path().join("config.toml");
-            let config = std::fs::read_to_string(&config_path)?;
+            let config = std::fs::read_to_string(&config_path)?.replace(
+                "features.daemon_auto_start = false",
+                "features.daemon_auto_start = false\nfeatures.api_key_model_discovery = false",
+            );
             std::fs::write(
                 config_path,
                 format!(

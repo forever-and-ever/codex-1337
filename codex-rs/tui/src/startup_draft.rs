@@ -157,6 +157,7 @@ impl StartupDraft {
                 .set_owned_screen(screen.transcript_mode.is_owned())?;
             draft.pump.redraw_if_visible(&mut draft.tui)
         })??;
+        crate::custom_terminal::output::preserve_pending_frame()?;
         Ok(draft)
     }
 

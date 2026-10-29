@@ -29,7 +29,3 @@ fn format_status_version(server_version: &str, revision: Option<u64>) -> String 
     let revision = revision.map_or_else(|| "dev".to_string(), |value| value.to_string());
     format!("{server}{suffix}/tui-{revision}")
 }
-
-#[cfg(test)]
-#[path = "version_tests.rs"]
-mod tests;

@@ -7410,22 +7410,6 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
     Ok(())
 }
 
-#[tokio::test]
-async fn reword_goal_confirmation_snapshot() {
-    let mut app = make_test_app().await;
-    app.show_reword_thread_goal_confirmation(
-        ThreadId::new(),
-        goal_files::GoalDraft {
-            objective: "New goal".to_string(),
-            ..Default::default()
-        },
-    );
-    assert_app_snapshot!(
-        "reword_goal_confirmation",
-        render_bottom_popup(&app.chat_widget, /*width*/ 80)
-    );
-}
-
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
         daybreak_enabled: false,

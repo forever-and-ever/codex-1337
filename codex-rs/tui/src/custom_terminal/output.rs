@@ -662,6 +662,14 @@ pub(crate) fn restoration_barrier() -> io::Result<()> {
     }
 }
 
+/// Preserve the preceding frame against coalescing without waiting for terminal I/O.
+pub(crate) fn preserve_pending_frame() -> io::Result<()> {
+    if let Some(shared) = active() {
+        enqueue(&shared, Job::Barrier)?;
+    }
+    Ok(())
+}
+
 /// Exceptional ownership transfer: every preceding byte has reached the terminal.
 pub(crate) fn barrier() -> io::Result<()> {
     if IS_WRITER.get() {
@@ -1107,6 +1115,10 @@ mod tests {
             !paint_ready(),
             "the UI skips paint instead of joining blocked I/O"
         );
+        // Startup's screen-entry bytes and first complete frame must stay one update even
+        // when a blocked writer lets later frames supersede ordinary pending paints.
+        submit("old", 3)?;
+        preserve_pending_frame()?;
         submit("xbc", 2)?;
         let skipped = submitted_frame().expect("pending frame");
         stdout().write_all(b"\x1b]0;middle\x07")?;
@@ -1132,8 +1144,8 @@ mod tests {
                     .iter()
                     .filter(|entry| matches!(entry.job, Job::Frame(_)))
                     .count(),
-                1,
-                "latest-wins slot never queues stale frames across controls"
+                2,
+                "the protected first frame and latest ordinary frame survive controls"
             );
         }
         stdout().write_all(b"\x1b]0;after\x07")?;
@@ -1193,6 +1205,10 @@ mod tests {
             .expect("middle title");
         assert!(before < middle && middle < after);
         let frame_output = &output[before..after];
+        assert!(
+            frame_output.windows(3).any(|part| part == b"old"),
+            "a required first frame cannot be replaced before it is painted"
+        );
         assert!(frame_output.windows(8).any(|part| part == b"\x1b[?2026h"));
         assert!(frame_output.windows(8).any(|part| part == b"\x1b[?2026l"));
         let mut parser = vt100::Parser::new(1, 3, 0);
@@ -1200,7 +1216,7 @@ mod tests {
         assert_eq!(
             parser.screen().contents(),
             "xby",
-            "diff against written abc, not skipped xbc"
+            "diff against the written required frame, not skipped xbc"
         );
         drop(owner);
 

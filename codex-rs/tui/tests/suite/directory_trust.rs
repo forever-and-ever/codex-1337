@@ -170,7 +170,8 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
             ("Untrusted saved task", b"\r"),
             ("Open existing task", b"\r"),
             ("moved-folder", b"\x1b"),
-            ("Agent command center", b"\x0e"),
+            // Re-select the launch-folder task before testing its distinct trust decision.
+            ("Agent command center", b"\x1b[A\x0e"),
             (prompt, b"\r"),
         ]
         .into_iter()
@@ -193,7 +194,7 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
                         .skip_while(|line| *line != "Folder access")
                         .skip(/*n*/ 1)
                         .find(|line| !line.is_empty()),
-                    Some(repo_root.to_string_lossy().as_ref())
+                    Some(repo_root.join("other-folder").to_string_lossy().as_ref())
                 );
             }
             if is_consent {

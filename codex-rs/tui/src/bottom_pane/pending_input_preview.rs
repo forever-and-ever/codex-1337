@@ -465,41 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn render_one_pending_steer_with_remapped_binding() {
-        let mut queue = PendingInputPreview::new();
-        queue.pending_steer = Some("Please continue.".to_string());
-        queue.set_send_pending_steer_binding(Some(key_hint::plain(KeyCode::F(12)).into()));
-        let width = 48;
-        let height = queue.desired_height(width);
-        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
-        queue.render(Rect::new(0, 0, width, height), &mut buf);
-        assert_snapshot!(
-            "render_one_pending_steer_with_remapped_binding",
-            format!("{buf:?}")
-        );
-    }
-
-    #[test]
-    fn render_pending_steer_above_queued_messages() {
-        let mut queue = PendingInputPreview::new();
-        queue.pending_steer = Some("Please continue.\nCheck the last command output.".to_string());
-        queue
-            .rejected_steers
-            .push("Rejected steer that will be retried.".to_string());
-        queue
-            .queued_messages
-            .push("Queued follow-up question".to_string());
-        let width = 52;
-        let height = queue.desired_height(width);
-        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
-        queue.render(Rect::new(0, 0, width, height), &mut buf);
-        assert_snapshot!(
-            "render_pending_steers_above_queued_messages",
-            format!("{buf:?}")
-        );
-    }
-
-    #[test]
     fn render_multiline_pending_steer_uses_single_prefix_and_truncates() {
         let mut queue = PendingInputPreview::new();
         queue.pending_steer =

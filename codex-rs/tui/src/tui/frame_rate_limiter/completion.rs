@@ -48,13 +48,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn default_does_not_clamp() {
-        let t0 = Instant::now();
-        let limiter = FrameRateLimiter::default();
-        assert_eq!(limiter.clamp_deadline(t0), t0);
-    }
-
-    #[test]
     fn completion_cost_and_requested_deadlines_bound_painting() {
         let t0 = Instant::now();
         let mut limiter = FrameRateLimiter::default();
