@@ -409,7 +409,8 @@ pub fn sandbox_network_env_var() -> &'static str {
 }
 
 pub fn format_with_current_shell(command: &str) -> Vec<String> {
-    codex_core::shell::default_user_shell().derive_exec_args(command, /*use_login_shell*/ true)
+    codex_core::shell::Shell::from(codex_shell_command::agent_shell::default_shell())
+        .derive_exec_args(command, /*use_login_shell*/ true)
 }
 
 pub fn format_with_current_shell_display(command: &str) -> String {
