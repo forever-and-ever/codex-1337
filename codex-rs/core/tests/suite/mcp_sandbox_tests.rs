@@ -192,7 +192,13 @@ impl Respond for SandboxMcpServer {
                     .env_remove("OPENAI_API_KEY")
                     .env("CODEX_TEST_WRITE_PATH", target_path)
                     .stdin(Stdio::null())
-                    .args(["sandbox", "--sandbox-state-json", &state.to_string(), "--"]);
+                    .args([
+                        "sandbox",
+                        "run",
+                        "--sandbox-state-json",
+                        &state.to_string(),
+                        "--",
+                    ]);
                 #[cfg(not(windows))]
                 command.args([
                     "/bin/sh",
