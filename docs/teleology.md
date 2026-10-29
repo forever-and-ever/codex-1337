@@ -167,6 +167,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/code-mode-protocol/src/session.rs` (`CodeModeSessionDelegate`), `codex-rs/code-mode-runtime/src/session_runtime/types.rs` (`SessionRuntimeDelegate`), `codex-rs/code-mode/src/remote_session/delegate.rs` (`TracedCellDelegate`), `codex-rs/core/src/tools/code_mode/delegate.rs` (`CodeModeCellDelegate`).
 - Tripwire: `remote_session_persists_values_forwards_delegates_and_controls_cells` (`codex-rs/code-mode-host/tests/stdio.rs`).
 - Pressure: 0.165 wraps stdio-host callbacks in `TracedCellDelegate`, which forwarded only upstream methods, so the then-defaulted fork callback reported every cell interrupted. Each new upstream delegate must implement `cell_finished`.
+- Evidence: 3b3b175874.
 
 ### reminders-not-system
 
