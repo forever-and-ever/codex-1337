@@ -36,6 +36,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
 use core_test_support::skip_if_sandbox;
 use core_test_support::skip_if_target_windows;
+use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
@@ -72,6 +73,22 @@ async fn harness(builder: TestCodexBuilder) -> Result<TestCodexHarness> {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     }))
     .await
+}
+
+// Empty polls now wait at least a minute; a steer ends observation without changing
+// the terminal or its grant. Synchronize on the response, not a wall-clock delay.
+async fn wake_empty_poll(test: &TestCodex) -> Result<()> {
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::RawResponseCompleted(response) if response.response_id == "poll")
+    })
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Continue checking terminal input permissions.".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -151,6 +168,7 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
             text_elements: Vec::new(),
         }]))
         .await?;
+    wake_empty_poll(test).await?;
     for (id, decision) in [
         ("denied", ReviewDecision::denied("blocked input")),
         ("allowed", ReviewDecision::Approved),
@@ -427,6 +445,7 @@ async fn strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled() ->
             },
         })
         .await?;
+    wake_empty_poll(test).await?;
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
