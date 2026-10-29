@@ -448,7 +448,7 @@ async fn empty_configured_mode_hint_emits_no_mode_message(effort: ReasoningEffor
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn changing_configured_mode_hint_to_empty_emits_no_update() -> Result<()> {
+async fn clearing_configured_mode_hint_appends_revocation() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -492,6 +492,27 @@ async fn changing_configured_mode_hint_to_empty_emits_no_update() -> Result<()> 
                 count_containing(&resumed_texts, CUSTOM_MODE_HINT_TEXT),
             ),
             (1, 1, 1)
+        );
+        let amendments = resumed_texts
+            .iter()
+            .copied()
+            .filter(|text| {
+                text.starts_with("<instruction_diff>") && text.contains("multi_agent_mode/")
+            })
+            .collect::<Vec<_>>();
+        let [revocation] = amendments.as_slice() else {
+            panic!("expected one mode-hint revocation: {amendments:?}")
+        };
+        assert!(revocation.contains("+++ multi_agent_mode/removed"));
+        assert!(
+            revocation
+                .lines()
+                .any(|line| line.starts_with('-') && line.contains(CUSTOM_MODE_HINT_TEXT))
+        );
+        assert!(
+            !revocation
+                .lines()
+                .any(|line| line.starts_with('+') && !line.starts_with("+++"))
         );
 
         Ok(())
