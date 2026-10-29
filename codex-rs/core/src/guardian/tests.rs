@@ -2429,11 +2429,11 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
         .collect::<Vec<_>>();
     assert_eq!(guardian_declared_tool_names, vec!["exec_command"]);
-    // Roster entries read `- name` or `- name: purpose`; guidance bullets never start lowercase.
+    // The roster uses canonical tool addresses; guidance bullets do not.
     let guardian_rostered_tool_names = guardian_exec_description
         .lines()
         .filter_map(|line| {
-            let entry = line.strip_prefix("- ")?;
+            let entry = line.strip_prefix("- tools.")?;
             let name = entry.split_once(": ").map_or(entry, |(name, _)| name);
             name.chars()
                 .all(|ch| ch == '_' || ch.is_ascii_lowercase())

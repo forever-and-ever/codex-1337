@@ -68,8 +68,8 @@ struct McpBindingCaptureCounter(Arc<AtomicUsize>);
 
 impl<S: Subscriber> Layer<S> for McpBindingCaptureCounter {
     fn on_new_span(&self, attributes: &Attributes<'_>, _id: &Id, _context: LayerContext<'_, S>) {
-        if attributes.metadata().target() == "codex_mcp::connection_manager::tool_catalog"
-            && attributes.metadata().name() == "capture_binding_with_metadata"
+        if attributes.metadata().target() == "codex_mcp::connection_manager::tool_catalog::boundary"
+            && attributes.metadata().name() == "capture_binding_with_mode"
         {
             self.0.fetch_add(1, Ordering::SeqCst);
         }

@@ -583,7 +583,9 @@ fn spawn_failure_context_distinguishes_registry_rejections() {
     };
     let path = agent_path("/root/worker");
     reservation.reserve_agent_path(&path).expect("first path");
-    let duplicate_error = reservation
+    let duplicate_error = registry
+        .reserve_spawn_slot(/*max_threads*/ None)
+        .expect("second reservation")
         .reserve_agent_path(&path)
         .expect_err("duplicate path");
     let nickname_error = reservation

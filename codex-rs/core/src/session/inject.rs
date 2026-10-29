@@ -160,6 +160,12 @@ impl Session {
             image_preparations.extend(prepared_images);
 
             let mut metadata = envelope.metadata;
+            // TELOS(recoverable-output): preparation can replace zero-text-cost media with diagnostics.
+            super::prepared_tool_budget::retain_growth(
+                &envelope.item,
+                &prepared_items,
+                &mut metadata,
+            );
             annotated_items.extend(prepared_items.into_owned().into_iter().map(|item| {
                 ResponseItemEnvelope {
                     item,

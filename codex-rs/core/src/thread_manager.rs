@@ -1711,12 +1711,16 @@ impl ThreadManager {
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
         };
+        // Accounts and instructions must use the same live source if it unloads during setup.
+        let source = match source_thread_id {
+            Some(source_id) => self.get_thread(source_id).await.ok(),
+            None => None,
+        };
         let mut account_scope = options
             .thread_extension_init
             .get::<accounts::ForkAccountScope>();
         if account_scope.is_none()
-            && let Some(source_id) = source_thread_id
-            && let Ok(source) = self.get_thread(source_id).await
+            && let Some(source) = source.as_ref()
         {
             let _settings =
                 crate::session::thread_settings::acquire_persistence_lock(&source.session).await;
@@ -1748,6 +1752,7 @@ impl ThreadManager {
                     .unwrap_or(&self.state.session_source),
                 /*parent_thread_id*/ None,
                 source_thread_id,
+                source.as_deref(),
                 options.thread_instructions_provider.clone(),
             )
             .await;
@@ -2023,6 +2028,7 @@ impl ThreadManagerState {
         session_source: &SessionSource,
         parent_thread_id: Option<ThreadId>,
         forked_from_thread_id: Option<ThreadId>,
+        captured_source: Option<&CodexThread>,
         thread_provider: Option<Arc<dyn ThreadInstructionsProvider>>,
     ) -> SessionInstructions {
         let inherited_thread_id = match session_source {
@@ -2032,10 +2038,15 @@ impl ThreadManagerState {
             _ => parent_thread_id.or(forked_from_thread_id),
         };
         let inherited = match inherited_thread_id {
-            Some(thread_id) => match self.get_thread(thread_id).await {
-                Ok(thread) => thread.session.inherited_instructions().await,
-                Err(_) => SessionInstructions::default(),
-            },
+            Some(thread_id) => {
+                match captured_source.filter(|source| source.session.thread_id == thread_id) {
+                    Some(source) => source.session.inherited_instructions().await,
+                    None => match self.get_thread(thread_id).await {
+                        Ok(thread) => thread.session.inherited_instructions().await,
+                        Err(_) => SessionInstructions::default(),
+                    },
+                }
+            }
             None => SessionInstructions::default(),
         };
         if session_source.is_non_root_agent() {
@@ -2478,6 +2489,7 @@ impl ThreadManagerState {
                                 &session_source,
                                 parent_thread_id,
                                 forked_from_thread_id,
+                                /*captured_source*/ None,
                                 thread_instructions_provider,
                             )
                             .await

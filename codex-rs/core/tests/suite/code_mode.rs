@@ -1001,7 +1001,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
     );
     assert!(
         exec_description.contains(
-            "\n- view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n"
+            "\n- tools.view_image: View a local image file from the filesystem when visual inspection is needed.\n"
         ),
         "other nested tools are rostered beside the purpose ALL_TOOLS reports: {exec_description}"
     );
@@ -6415,20 +6415,19 @@ text("token one token two token three token four token five token six token seve
 
     let second_request = second_completion.single_request();
     let second_items = function_tool_output_items(&second_request, "call-2");
-    assert_eq!(second_items.len(), 2, "wait output: {second_items:?}");
+    assert_eq!(second_items.len(), 3, "wait output: {second_items:?}");
     assert_regex_match(
         concat!(r"(?s)\A", r"Script completed\nOutput:\n\z"),
         text_item(&second_items, /*index*/ 0),
     );
-    let expected_pattern = r#"(?sx)
-\A
-Warning:\ truncated\ output\ \(original\ token\ count:\ \d+\)\n
-Total\ output\ lines:\ 1\n
-\n
-.*…\d+\ tokens\ truncated….*
-\z
-"#;
-    assert_regex_match(expected_pattern, text_item(&second_items, /*index*/ 1));
+    let notice = text_item(&second_items, /*index*/ 1);
+    assert!(notice.contains("truncated 1 text sections under a shared 24-byte"));
+    assert!(notice.contains("Truncated emitted text: "));
+    let output = text_item(&second_items, /*index*/ 2);
+    assert!(output.starts_with("token one "));
+    assert!(output.ends_with("token seven"));
+    assert!(output.contains('…'));
+    assert!(output.len() <= 24);
 
     Ok(())
 }
@@ -6763,7 +6762,7 @@ async fn code_mode_replaces_malformed_image() -> Result<()> {
     let (_test, second_mock) = run_code_mode_turn(
         &server,
         "use exec to return an image",
-        r#"image("data:image/png;base64,AAA");"#,
+        r#"text("before"); image("data:image/png;base64,AAA"); text("after");"#,
     )
     .await?;
 
@@ -6771,9 +6770,13 @@ async fn code_mode_replaces_malformed_image() -> Result<()> {
     let items = custom_tool_output_items(&req, "call-1");
     let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(success, Some(false));
-    assert_eq!(items.len(), 2);
+    // The pre-preparation allowance charged no text for the image. Its replacement
+    // must survive history truncation without displacing adjacent emitted sections.
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[1]["text"], "before");
+    assert_eq!(items[3]["text"], "after");
     assert_eq!(
-        items[1],
+        items[2],
         serde_json::json!({
             "type": "input_text",
             "text": "image content omitted because it could not be processed"
@@ -6897,10 +6900,7 @@ image({{
         .and_then(|tools| tools.iter().find(|tool| tool["name"] == "exec"))
         .and_then(|tool| tool["description"].as_str())
         .expect("the model request should contain the code-mode exec tool");
-    assert!(
-        exec_description
-            .contains("`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`")
-    );
+    assert!(exec_description.contains("`image(value)`"));
     assert!(!exec_description.contains("codex/imageDetail"));
     assert!(
         !exec_description
@@ -6949,7 +6949,7 @@ async fn code_mode_unified_image_budget_preserves_legacy_contract_for_unsupporte
         .and_then(|tool| tool["description"].as_str())
         .expect("the model request should contain the code-mode exec tool");
     assert!(exec_description.contains("codex/imageDetail"));
-    assert!(exec_description.contains("detail?:"));
+    assert!(exec_description.contains("`image(value, detail?)`"));
 
     Ok(())
 }
@@ -8156,7 +8156,7 @@ text(JSON.stringify({
 
     let declaration = "Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.\nReturns: no declared shape.";
     let description =
-        |generation| format!("Apply a raw editor patch (step {generation}).\n\n{declaration}");
+        |generation| format!("{declaration}\n\nApply a raw editor patch (step {generation}).");
     let first_body = requests[0].body_json();
     let namespaced_custom_tool = namespace_child_tool(&first_body, "editor", "apply_patch")
         .expect("namespaced custom tool should be included in the model request");
@@ -8208,7 +8208,7 @@ text(JSON.stringify({
         exec_output,
         serde_json::json!({
             "name": "editor__apply_patch",
-            "description": second_description.split("\n\n").next().unwrap(),
+            "description": "Apply a raw editor patch (step 2).",
             "result": {
                 "namespace": "editor",
                 "name": "apply_patch",
@@ -8317,7 +8317,7 @@ text(JSON.stringify(tool));
         parsed,
         serde_json::json!({
             "name": "view_image",
-            "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+            "description": "View a local image file from the filesystem when visual inspection is needed.",
         })
     );
 
@@ -8555,11 +8555,11 @@ text(JSON.stringify({
                 (
                     "foo-bar",
                     concat!(
-                        "First normalized dynamic tool.\n\n",
                         "Call: await tools.foo_bar(args).\n",
                         "Parameters: object\n",
                         "  Other fields forbidden.\n",
-                        "Returns: no declared shape.",
+                        "Returns: no declared shape.\n\n",
+                        "First normalized dynamic tool.",
                     ),
                 ),
                 ("foo_bar", "Shadowed normalized dynamic tool."),
@@ -8682,7 +8682,10 @@ async fn code_mode_renders_local_refs_in_outbound_exec_description() -> Result<(
                 .flatten()
         })
         .expect("Code Mode exec should remain available");
-    assert!(exec_description.contains("query?: string | { clauses?: Array<"));
+    assert!(exec_description.contains("#/$defs/Clause:"));
+    assert!(exec_description.contains("query (optional): value"));
+    assert!(exec_description.contains("exactly one, variant 1: string"));
+    assert!(exec_description.contains("each item: value; see #/$defs/Clause"));
 
     Ok(())
 }
@@ -8911,7 +8914,7 @@ text(
     assert_eq!(
         parsed["description"],
         if namespace == "functions" {
-            "Function guidance.\n\nA hidden dynamic tool."
+            "Function guidance."
         } else {
             "A hidden dynamic tool."
         }

@@ -120,6 +120,29 @@ async fn mount_completed_worker(
     .await
 }
 
+async fn mount_root_completion_mail(
+    server: &wiremock::MockServer,
+    root_id: codex_protocol::ThreadId,
+) {
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(move |request: &wiremock::Request| {
+            serde_json::from_slice::<serde_json::Value>(&request.body).is_ok_and(|body| {
+                body["client_metadata"]["thread_id"] == json!(root_id)
+                    && body["input"]
+                        .as_array()
+                        .and_then(|items| items.last())
+                        .is_some_and(|item| item["type"] == "agent_message")
+            })
+        })
+        .respond_with(core_test_support::responses::sse_response(sse(vec![
+            ev_completed("ordinary-mail"),
+        ])))
+        .with_priority(10)
+        .mount(server)
+        .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()> {
     let server = start_mock_server().await;
@@ -226,7 +249,7 @@ async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()>
 #[tracing_test::traced_test]
 async fn child_turn_start_preserves_root_attribution() -> Result<()> {
     let server = start_mock_server().await;
-    mount_root_collaboration_call(
+    let root = mount_root_collaboration_call(
         &server,
         FIRST_PROMPT,
         "first-call",
@@ -251,7 +274,13 @@ async fn child_turn_start_preserves_root_attribution() -> Result<()> {
         })
         .build_with_auto_env(&server)
         .await?;
+    let root_id = test.session_configured.thread_id;
+    mount_root_completion_mail(&server, root_id).await;
     test.submit_turn(FIRST_PROMPT).await?;
+    let root_turn = root.single_request().body_json()["client_metadata"]["turn_id"]
+        .as_str()
+        .expect("root turn")
+        .to_string();
     let thread_ids = test.thread_manager.list_thread_ids().await;
     assert_eq!(thread_ids.len(), 2);
     let mut starts = Vec::new();
@@ -270,7 +299,11 @@ async fn child_turn_start_preserves_root_attribution() -> Result<()> {
             .await?;
         for item in history.items {
             if let codex_history::RolloutItem::EventMsg(EventMsg::TurnStarted(event)) = item {
-                starts.push((thread_id, event));
+                // Idle completion mail may start another root turn (643f434477); this case
+                // checks attribution of the original root request and its delegated child.
+                if thread_id != root_id || event.turn_id == root_turn {
+                    starts.push((thread_id, event));
+                }
             }
         }
     }
@@ -291,7 +324,12 @@ async fn child_turn_start_preserves_root_attribution() -> Result<()> {
     logs_assert(|lines: &[&str]| {
         let logs: Vec<_> = lines
             .iter()
-            .filter(|line| line.contains("codex.agent_response"))
+            .filter(|line| {
+                line.contains("codex.agent_response")
+                    && starts
+                        .iter()
+                        .any(|(_, turn)| line.contains(&format!(" turn.id={:?}", turn.turn_id)))
+            })
             .collect();
         assert_eq!(logs.len(), 2);
         for (id, turn) in &starts {
@@ -412,6 +450,8 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools(
                 .expect("thread permissions should allow workspace writes");
         });
     let test = builder.build_with_remote_and_local_env(&server).await?;
+    // Ordinary completion mail wakes the idle owner independently of the next test prompt.
+    mount_root_completion_mail(&server, test.session_configured.thread_id).await;
     let mut child_environment = test.executor_environment().selection().clone();
     let (child_permissions, parent_permissions) = match reload {
         ResidencyReload::Sender

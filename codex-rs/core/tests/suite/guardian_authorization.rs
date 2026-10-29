@@ -226,7 +226,7 @@ async fn guardian_revalidates_owning_session_before_allow(
         .send(())
         .expect("release parent completion");
     if matches!(change, PendingReviewChange::VerifiedAnswer) {
-        let request = wait_for_event_match(&test.codex, |event| match event {
+        let request = wait_for_event_match(&test.codex, |event| match event.native_event() {
             EventMsg::RequestUserInput(request) => Some(request.clone()),
             _ => None,
         })
@@ -256,7 +256,7 @@ async fn guardian_revalidates_owning_session_before_allow(
     if matches!(change, PendingReviewChange::Compaction) {
         test.codex.submit(Op::Compact).await?;
         loop {
-            match test.codex.next_event().await?.msg {
+            match test.codex.next_event().await?.msg.native_event() {
                 EventMsg::GuardianAssessment(assessment)
                     if assessment.status != GuardianAssessmentStatus::InProgress =>
                 {
@@ -275,7 +275,7 @@ async fn guardian_revalidates_owning_session_before_allow(
     let status = match completed_status {
         Some(status) => status,
         None => {
-            wait_for_event_match(&test.codex, |event| match event {
+            wait_for_event_match(&test.codex, |event| match event.native_event() {
                 EventMsg::GuardianAssessment(assessment)
                     if assessment.status != GuardianAssessmentStatus::InProgress =>
                 {

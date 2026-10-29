@@ -206,7 +206,19 @@ async fn compressed_shared_fork_resume_preserves_checkpoint_and_frozen_history()
     assert!(input.contains("INHERITED_COMPRESSION_REPLY"));
     assert!(input.contains("CHILD_COMPRESSION_REPLY"));
     assert!(!input.contains("POST_FORK_COMPRESSION_REPLY"));
-    assert!(!input.contains("OBSOLETE_PRE_CHECKPOINT_REPLY"));
+    // TELOS(compaction-is-not-input): the prior report survives only as handling evidence.
+    assert!(
+        !request
+            .message_input_texts("assistant")
+            .iter()
+            .any(|text| text.contains("OBSOLETE_PRE_CHECKPOINT_REPLY"))
+    );
+    let continuation = request
+        .message_input_texts("developer")
+        .into_iter()
+        .find(|text| text.starts_with("<compaction_continuation>"))
+        .context("persisted handling evidence")?;
+    assert!(continuation.contains("OBSOLETE_PRE_CHECKPOINT_REPLY"));
     assert!(
         !parent_path.exists(),
         "reading the ancestor must not materialize it"

@@ -478,10 +478,15 @@ async fn record_initial_history_restores_world_state_baseline(input: BaselineTur
     let turn_context = Arc::new(turn_context);
     let world_state = build_world_state_from_turn_context(&session, &turn_context).await;
     let expected_history = world_state
-        .render_full_fragments()
+        .render_full()
         .1
         .into_iter()
-        .map(ContextualUserFragment::into_boxed_response_item)
+        .map(|update| match update.content {
+            crate::context::world_state::WorldStateUpdateContent::Fragment(fragment) => {
+                fragment.into_boxed_response_item()
+            }
+            crate::context::world_state::WorldStateUpdateContent::Item(item) => *item,
+        })
         .collect::<Vec<_>>();
     let mut world_state_items = expected_history
         .iter()

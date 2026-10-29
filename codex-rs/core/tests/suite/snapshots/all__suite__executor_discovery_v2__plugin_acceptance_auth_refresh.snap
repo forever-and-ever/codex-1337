@@ -23,8 +23,26 @@ Scenario: Mid-turn auth refresh preserves skill context and executor access. Rev
 -- request 3 (request) --
 06:function_call/skills.read:{"package":"skill://inert-sentinel@market/inert-sentinel"}
 07:function_call_output:{"contents":"# Sentinel instructions from the captured executor","installations":[{"environment_id":"rem...ill://inert-sentinel@market/inert-sentinel/SKILL.md"} [hash=4b2e6fc42721d90a]
-08:message/developer:
-    <SKILLS_INSTRUCTIONS>
+08:message/developer[2]:
+    [01] <instruction_diff>
+        Apply this update to the previously supplied plugins_instructions instructions; unchanged instructions remain in force.
+        --- plugins_instructions/fc8a7f0d8f2186a80b0e17a51b301dc5cd7a967d
+        +++ plugins_instructions/removed
+        @@ -1,11 +0,0 @@
+        -<plugins_instructions>
+        -## Plugins
+        -A plugin is a local bundle of skills, MCP servers, and apps.
+        -### How to use plugins
+        -- Skill naming: If a plugin contributes skills, those skill entries are prefixed with `plugin_name:` in the Skills list.
+        -- MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as `mcp__server__tool`; use tool provenance to tell which plugin they come from.
+        -- Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.
+        -- Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.
+        -- Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associ..., MCP tools, and apps exposed elsewhere in this turn. [hash=02103c3c709520f1]
+        -- Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for ..., say so briefly and continue with the best fallback. [hash=e08c80b401240d31]
+        -</plugins_instructions>
+        \\ No newline at end of file
+        </instruction_diff>
+    [02] <SKILLS_INSTRUCTIONS>
 -- request 4 (request) --
 09:function_call/skills.read:{"package":"skill://inert-sentinel@market/inert-sentinel"}
 10:function_call_output:skill package is not available

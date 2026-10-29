@@ -193,13 +193,12 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
         if index == 0 {
             for tool in &mut tools {
                 if tool["name"] == "view_image" {
-                    tool["description"] = json!(
-                        tool["description"]
-                            .as_str()
-                            .expect("tool description")
-                            .strip_prefix("Image guidance.\n\n")
-                            .expect("function prefix")
-                    );
+                    let (contract, purpose) = tool["description"]
+                        .as_str()
+                        .expect("tool description")
+                        .split_once("\n\nImage guidance.\n\n")
+                        .expect("function guidance follows the contract");
+                    tool["description"] = json!(format!("{contract}\n\n{purpose}"));
                 }
             }
         }
@@ -230,10 +229,17 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
     }
     let mut expected = outputs[1].clone();
     expected["descriptions"][0] = json!(format!(
-        "Image guidance.\n\n{}",
+        "{}\n\nImage guidance.\n\n{}",
         expected["descriptions"][0]
             .as_str()
             .expect("tool description")
+            .split_once("\n\n")
+            .expect("invocation and purpose").0,
+        expected["descriptions"][0]
+            .as_str()
+            .expect("tool description")
+            .split_once("\n\n")
+            .expect("invocation and purpose").1
     ));
     for (index, prefix) in prefixes.iter().enumerate() {
         expected["descriptions"][index] = json!(format!(

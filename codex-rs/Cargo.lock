@@ -5053,6 +5053,7 @@ dependencies = [
  "codex-model-provider-info",
  "codex-models-manager",
  "codex-protocol",
+ "codex-shell-command",
  "codex-thread-store",
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",

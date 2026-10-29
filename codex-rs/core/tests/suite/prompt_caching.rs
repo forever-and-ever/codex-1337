@@ -6,7 +6,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use codex_core::TurnInputRequest;
-use codex_core::shell::default_user_shell;
 use codex_features::Feature;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
@@ -77,7 +76,12 @@ fn assert_default_env_context(text: &str, cwd: &str) {
         "expected cwd in environment context: {text}"
     );
     assert!(
-        text.contains(&format!("<shell>{}</shell>", default_user_shell().name())),
+        text.contains(&format!(
+            "<shell>{}</shell>",
+            codex_shell_command::agent_shell::default_shell()
+                .shell_type
+                .name()
+        )),
         "expected shell in environment context: {text}"
     );
 }

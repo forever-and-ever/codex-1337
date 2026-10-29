@@ -603,6 +603,8 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
             .map(|mut line| {
                 if let RolloutItem::WorldState(world_state) = &mut line.item {
                     let state = &mut world_state.state;
+                    // Legacy rollouts predate canonical instruction revisions as well as the usage-hint section.
+                    state.retain(|key, _| !key.starts_with("codex.instruction/"));
                     removed_recorded_usage_hint |= state.remove("multi_agent_usage_hint").is_some();
                     if let Some(mode) = state
                         .get_mut("multi_agent_mode")
@@ -676,8 +678,18 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
                 })
                 .expect("resumed context should include an active multi-agent mode");
             assert!(
-                current_usage_hint_positions[0] < active_mode_position,
-                "active mode must follow the current usage hint: {developer_messages:?}"
+                developer_messages[active_mode_position]
+                    .iter()
+                    .any(|text| text.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
+            );
+            assert_eq!(
+                developer_messages
+                    .iter()
+                    .flatten()
+                    .filter(|text| text.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
+                    .count(),
+                1,
+                "an unchanged active mode is retained, not reinjected after a usage-hint update"
             );
             let wait_guidance_count = developer_messages
                 .iter()
@@ -756,6 +768,7 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
         initial_wait_agent_enabled
     );
 
+    let initial_usage_hint = resolved_root_usage_hint(&initial.config, &initial_request);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -795,28 +808,16 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
 
     let requests = resumed_responses.requests();
     assert_eq!(requests.len(), 2);
-    let current_usage_hint = resolved_root_usage_hint(&resumed.config, &requests[0]);
     for request in &requests {
         let developer_messages = request.message_input_text_groups("developer");
-        let current_usage_hint_positions = developer_messages
-            .iter()
-            .enumerate()
-            .filter_map(|(index, group)| {
-                (group.len() == 1 && group[0] == current_usage_hint).then_some(index)
-            })
+        assert_eq!(developer_messages.iter().flatten().filter(|text| text.as_str() == initial_usage_hint).count(), 1,
+            "the original usage-hint prefix must remain intact");
+        let amendments = developer_messages.iter().flatten()
+            .filter(|text| text.starts_with("<instruction_diff>") && text.contains("multi_agent_usage_hint/"))
             .collect::<Vec<_>>();
-        assert_eq!(
-            current_usage_hint_positions.len(),
-            1,
-            "current usage hint should refresh earlier guidance exactly once: \
-             {developer_messages:?}"
-        );
-        let current_usage_hint_position = current_usage_hint_positions[0];
-        let current_usage_message = &developer_messages[current_usage_hint_position][0];
-        assert_eq!(
-            current_usage_message.contains(wait_guidance),
-            resumed_wait_agent_enabled
-        );
+        let [amendment] = amendments.as_slice() else { panic!("expected one usage-hint amendment: {amendments:?}") };
+        let sign = if resumed_wait_agent_enabled { '+' } else { '-' };
+        assert!(amendment.lines().any(|line| line.strip_prefix(sign) == Some(wait_guidance)), "{amendment}");
         let active_mode_position = developer_messages
             .iter()
             .rposition(|group| {
@@ -825,10 +826,9 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
                     .any(|message| message.contains(MULTI_AGENT_MODE_OPEN_TAG))
             })
             .expect("resumed context should include an active multi-agent mode");
-        assert!(
-            current_usage_hint_position < active_mode_position,
-            "active mode must follow updated usage instructions: {developer_messages:?}"
-        );
+        assert!(developer_messages[active_mode_position].iter().any(|text| text.starts_with(MULTI_AGENT_MODE_OPEN_TAG)));
+        assert_eq!(developer_messages.iter().flatten().filter(|text| text.starts_with(MULTI_AGENT_MODE_OPEN_TAG)).count(), 1,
+            "tool availability changes usage guidance, not the active delegation mode");
 
         assert_eq!(
             namespace_child_tool(&request.body_json(), MULTI_AGENT_V2_NAMESPACE, "wait_agent")

@@ -547,7 +547,7 @@ async fn allowed_tools_filter_sources_before_code_mode_and_discovery() {
                 assert_eq!(plan.code_mode_tool_names, BTreeMap::new());
             }
             Some(_) => {
-                assert_eq!(plan.registered_names, vec!["exec", "wait", "keptlookup"]);
+                assert_eq!(plan.registered_names, vec!["exec", "wait", "kept.lookup"]);
                 assert_eq!(
                     plan.code_mode_tool_names
                         .values()
@@ -1496,7 +1496,11 @@ async fn dynamic_tool_search_does_not_enable_ranked_search_guidance() {
             panic!("expected code mode exec tool");
         };
         assert!(exec.description.contains("tool_search dynamic tool"));
-        assert!(!exec.description.contains("await tools.tool_search("));
+        assert!(
+            !exec
+                .description
+                .contains(codex_code_mode::TOOL_SEARCH_GUIDANCE)
+        );
     }
 }
 
@@ -2241,12 +2245,16 @@ async fn code_mode_uses_the_first_normalized_tool_identity() {
             panic!("expected code mode exec tool");
         };
         assert!(!exec.description.contains("lookup dynamic tool"));
-        // Code Mode Only names an MCP tool in `exec`'s roster and never declares it.
-        assert!(!exec.description.contains("lookup test tool"));
+        // The canonical winner stays rostered even when its contract is deferred.
         assert_eq!(
-            exec.description.contains("\n- normalized_alias__lookup"),
-            code_mode_only && winner_exposure == ToolExposure::Direct,
+            exec.description.contains(
+                "\n- normalized-alias.lookup (tools.normalized_alias__lookup): lookup test tool"
+            ),
+            code_mode_only || winner_exposure == ToolExposure::Deferred,
+            "unexpected roster: {}",
+            exec.description,
         );
+        assert!(!exec.description.contains("### `normalized_alias__lookup`"));
     }
 }
 
@@ -2603,7 +2611,7 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
 #[tokio::test]
 async fn code_mode_config_updates_exec_description() {
     for (configured_yield_time_ms, expected_yield_time_ms) in
-        [(None, 600_000), (Some(10_000), 10_000)]
+        [(None, 3_600_000), (Some(10_000), 10_000)]
     {
         let plan = probe(|turn| {
             set_features(turn, &[Feature::CodeMode]);
@@ -2623,7 +2631,7 @@ async fn code_mode_config_updates_exec_description() {
             panic!("expected code mode wait tool");
         };
         for description in [&exec.description, &wait.description] {
-            assert!(description.contains(&format!("after {expected_yield_time_ms} ms;")));
+            assert!(description.contains(&format!("{expected_yield_time_ms} ms;")));
         }
     }
 }

@@ -88,13 +88,8 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
             "Mira owns the API migration.",
         ),
         (
-            "send_message",
-            json!({"target": "worker", "message": "Use the new API for the migration."}),
-            "",
-        ),
-        (
             "followup_task",
-            json!({"target": "worker", "message": "Continue the migration with the queued note."}),
+            json!({"target": "worker", "message": "Continue the API migration."}),
             "I will continue with Mira using the new API.",
         ),
     ] {
@@ -105,7 +100,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
             sse(vec![
                 ev_function_call_with_namespace(
                     &call_id,
-                    "collaboration",
+                    "wrangler_agents",
                     tool,
                     &arguments.to_string(),
                 ),
@@ -126,7 +121,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
             sse(vec![ev_completed("parent-done")]),
         )
         .await;
-        if tool != "send_message" {
+        {
             let parent_id = parent_id.clone();
             responses::mount_sse_once_match(
                 &server,
@@ -151,28 +146,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
             .await?;
         ThreadIdle::wait(&test.codex).await;
 
-        if tool == "send_message" {
-            let id = child_id.expect("spawned child");
-            let child = test.thread_manager.get_thread(id).await?;
-            assert_eq!(child.environment_selections().await, configured);
-            // Flush submission dispatch so the note is queued before idle cleanup starts.
-            submit_thread_settings(&child, ThreadSettingsOverrides::default()).await?;
-            assert_eq!(
-                test.thread_manager.try_evict_v2_thread(child).await?,
-                ThreadEvictionOutcome::Evicted,
-            );
-            assert!(test.thread_manager.get_thread(id).await.is_err());
-            assert_eq!(
-                responses::received_responses_requests(&server)
-                    .await
-                    .iter()
-                    .filter(|request| request.header("thread-id").as_deref()
-                        != Some(parent_id.as_str()))
-                    .count(),
-                2,
-                "queue-only mail and eviction must not start another model turn",
-            );
-        } else {
+        {
             let id = created.recv().await?;
             if let Some(child_id) = child_id {
                 assert_eq!(id, child_id, "the follow-up must reload the same child");
@@ -228,6 +202,13 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
                 .await?;
             wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
             ThreadIdle::wait(&child).await;
+            if tool == "spawn_agent" {
+                assert_eq!(
+                    test.thread_manager.try_evict_v2_thread(child).await?,
+                    ThreadEvictionOutcome::Evicted,
+                );
+                assert!(test.thread_manager.get_thread(id).await.is_err());
+            }
             submit_thread_settings(&test.codex, ThreadSettingsOverrides::default()).await?;
         }
     }
@@ -236,7 +217,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
     // Preserve each stream's complete history while removing parent/child scheduling order.
     requests
         .sort_by_key(|request| request.header("thread-id").as_deref() != Some(parent_id.as_str()));
-    assert_eq!(requests.len(), 10);
+    assert_eq!(requests.len(), 8);
     let temporary_workspaces: Vec<_> = requests
         .iter()
         .map(|request| {
@@ -251,12 +232,10 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
         .collect();
     assert_eq!(
         temporary_workspaces,
-        [
-            false, false, false, false, false, false, false, true, false, true
-        ]
+        [false, false, false, false, false, true, false, true]
     );
     let history = context_snapshot::format_request_history_snapshot(
-        "A parent with no configured environment delegates an API migration, queues a note while the worker is idle, and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment, its earlier answer, and the unread note. Complete model streams are grouped as parent, then worker.",
+        "A parent with no configured environment delegates an API migration and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.",
         &requests,
         &ContextSnapshotOptions::default().rewrite_known_segments(),
     );

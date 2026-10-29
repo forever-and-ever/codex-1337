@@ -36,6 +36,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
 use core_test_support::skip_if_sandbox;
 use core_test_support::skip_if_target_windows;
+use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
@@ -72,6 +73,22 @@ async fn harness(builder: TestCodexBuilder) -> Result<TestCodexHarness> {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     }))
     .await
+}
+
+// Empty polls now wait at least a minute; a steer ends observation without changing
+// the terminal or its grant. Synchronize on the response, not a wall-clock delay.
+async fn wake_empty_poll(test: &TestCodex) -> Result<()> {
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::RawResponseCompleted(response) if response.response_id == "poll")
+    })
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Continue checking terminal input permissions.".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -151,6 +168,7 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
             text_elements: Vec::new(),
         }]))
         .await?;
+    wake_empty_poll(test).await?;
     for (id, decision) in [
         ("denied", ReviewDecision::denied("blocked input")),
         ("allowed", ReviewDecision::Approved),
@@ -427,6 +445,7 @@ async fn strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled() ->
             },
         })
         .await?;
+    wake_empty_poll(test).await?;
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -632,6 +651,10 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
         )
         .await?;
     let mut grant_scopes = grants.into_iter().map(|(_, scope)| scope);
+    // A short write may return only PTY echo. Execution is witnessed by the
+    // expanded marker in the process stream, independently of turn completion.
+    let mut terminal_output = String::new();
+    let mut turn_complete = false;
     let mut approvals = 0;
     loop {
         match wait_for_event(&test.codex, |_| true).await {
@@ -662,8 +685,14 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
                     })
                     .await?;
             }
-            EventMsg::TurnComplete(_) => break,
+            EventMsg::ExecCommandOutputDelta(event) if event.call_id == "open" => {
+                terminal_output.push_str(&String::from_utf8_lossy(&event.chunk));
+            }
+            EventMsg::TurnComplete(_) => turn_complete = true,
             _ => {}
+        }
+        if turn_complete && terminal_output.contains("CURRENT_GRANT_OK") {
+            break;
         }
     }
     assert_eq!(grant_scopes.next(), None);
@@ -674,7 +703,10 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
     let output = writes
         .function_call_output_text("allowed")
         .expect("stdin output");
-    assert!(output.contains("CURRENT_GRANT_OK"), "{output}");
+    assert!(
+        terminal_output.contains("CURRENT_GRANT_OK"),
+        "{terminal_output}; poll: {output}"
+    );
     if matches!(reviewer, StdinReviewer::Guardian) {
         assert_eq!(
             writes
@@ -712,6 +744,7 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
     let later_input_allowed = matches!(scope, PermissionGrantScope::Session)
         && !turn_grant_expires
         && matches!(later_policy, LaterApprovalPolicy::Inherit);
+    turn_complete = false;
     let mut later_approvals = 0;
     loop {
         match wait_for_event(&test.codex, |_| true).await {
@@ -730,8 +763,14 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
                     })
                     .await?;
             }
-            EventMsg::TurnComplete(_) => break,
+            EventMsg::ExecCommandOutputDelta(event) if event.call_id == "open" => {
+                terminal_output.push_str(&String::from_utf8_lossy(&event.chunk));
+            }
+            EventMsg::TurnComplete(_) => turn_complete = true,
             _ => {}
+        }
+        if turn_complete && (!later_input_allowed || terminal_output.contains("LATER_GRANT_OK")) {
+            break;
         }
     }
     assert_eq!(later_approvals, usize::from(later_input_allowed));
@@ -745,7 +784,10 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
             "{output}"
         );
     } else if later_input_allowed {
-        assert!(output.contains("LATER_GRANT_OK"), "{output}");
+        assert!(
+            terminal_output.contains("LATER_GRANT_OK"),
+            "{terminal_output}; poll: {output}"
+        );
     } else {
         assert!(
             output.contains("AskForApproval::Granular.sandbox_approval is false"),
@@ -772,6 +814,7 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
                 }),
             )
             .await?;
+        turn_complete = false;
         loop {
             match wait_for_event(&test.codex, |_| true).await {
                 EventMsg::ExecApprovalRequest(request) => {
@@ -787,15 +830,24 @@ async fn stdin_reviews_current_grants_with_sandbox_prompts_disabled(
                         })
                         .await?;
                 }
-                EventMsg::TurnComplete(_) => break,
+                EventMsg::ExecCommandOutputDelta(event) if event.call_id == "open" => {
+                    terminal_output.push_str(&String::from_utf8_lossy(&event.chunk));
+                }
+                EventMsg::TurnComplete(_) => turn_complete = true,
                 _ => {}
+            }
+            if turn_complete && terminal_output.contains("REJECTED_INPUT_OK") {
+                break;
             }
         }
         let output = probe
             .completion
             .function_call_output_text("probe")
             .expect("probe output");
-        assert!(output.contains("REJECTED_INPUT_OK"), "{output}");
+        assert!(
+            terminal_output.contains("REJECTED_INPUT_OK"),
+            "{terminal_output}; poll: {output}"
+        );
     }
     Ok(())
 }

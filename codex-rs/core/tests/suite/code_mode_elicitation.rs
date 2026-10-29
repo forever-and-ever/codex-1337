@@ -166,7 +166,7 @@ async fn code_mode_holds_yielded_result_during_command_approval() -> Result<()> 
         |_| {},
     )
     .await?;
-    let approval = wait_for_event_match(&harness.test.codex, |event| match event {
+    let approval = wait_for_event_match(&harness.test.codex, |event| match event.native_event() {
         EventMsg::ExecApprovalRequest(approval) => Some(approval.clone()),
         _ => None,
     })

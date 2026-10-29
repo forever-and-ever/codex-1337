@@ -19,7 +19,23 @@ Scenario: Second turn changes cwd and approval policy while keeping model consta
 04:message/assistant:
     turn one complete
 05:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <instruction_diff>
+    Apply this update to the previously supplied permissions instructions; unchanged instructions remain in force.
+    --- permissions/4f6f947aa5c846169a1513092e52491cf8340636
+    +++ permissions/f907247ac78588f8d51d9480070283ca20d14f13
+    @@ -1,4 +1,59 @@
+     <permissions instructions>
+     Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sa... permits reading files. Network access is restricted. [hash=80308a5911dbf386]
+    -Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+    <OMITTED 51 LINES; ~792 TOKENS; hash=2d257c62ab46ec14>
+    +### Examples
+    +Good examples of prefixes:
+    +- ["npm", "run", "dev"]
+    +- ["gh", "pr", "check"]
+    +- ["cargo", "test"]
+     </permissions instructions>
+    \\ No newline at end of file
+    </instruction_diff>
 06:message/user:
     <ENVIRONMENT_CONTEXT>
 07:message/user:

@@ -5,6 +5,7 @@ use codex_core::TurnInputRequest;
 use codex_core::TurnInputSubmission;
 use codex_features::Feature;
 use codex_protocol::AgentPath;
+use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
@@ -558,7 +559,19 @@ async fn finish_mailbox_preemption(test: TestCodex) -> anyhow::Result<()> {
         );
         match event {
             EventMsg::ItemStarted(item) => started_items.push(item.item.id()),
-            EventMsg::ItemCompleted(item) => completed_items.push(item.item.id()),
+            EventMsg::ItemCompleted(item)
+                if !matches!(
+                    item.item,
+                    TurnItem::Preamble(_)
+                        | TurnItem::StepAdmission(_)
+                        | TurnItem::Arrival(_)
+                        | TurnItem::ToolInput(_)
+                        | TurnItem::ToolOutputTokens(_)
+                        | TurnItem::FunctionCallOutput(_)
+                ) =>
+            {
+                completed_items.push(item.item.id());
+            }
             EventMsg::ReasoningContentDelta(delta) => assert_ne!(delta.item_id, "discarded"),
             _ => {}
         }

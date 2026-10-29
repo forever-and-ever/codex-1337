@@ -297,6 +297,8 @@ pub(crate) mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
 mod tool_input;
+// TELOS(recoverable-output): media preparation preserves its added diagnostic text.
+mod prepared_tool_budget;
 mod tool_output_tokens;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
@@ -1948,6 +1950,8 @@ impl Session {
                 reviewer_compaction_hash.as_deref(),
             );
             state.last_started_turn_id = last_started_turn_id;
+            // TELOS(interleaved-turn-accounting): late old-turn usage must not hide the resumed turn's subtotal.
+            crate::state::token_accounting::restore(&mut state, rollout_items);
             state.step_mark = step_admission::StepMark::orphaned(rollout_items);
             state.turn_attribution = turn_attribution;
             if let Some(world_state) = world_state_baseline {
@@ -5262,6 +5266,8 @@ impl Session {
                 .unwrap_or_else(|| turn_context.sub_id.clone()),
             response_id.to_string(),
             usage,
+            // TELOS(interleaved-turn-accounting): the request retains its turn's accounting owner.
+            &turn_context.token_subtotal,
         );
         self.persist_rollout_items(&[RolloutItem::TokenUsageRecord(record)])
             .await;

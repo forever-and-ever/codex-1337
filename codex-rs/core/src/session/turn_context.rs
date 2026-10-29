@@ -371,6 +371,8 @@ pub struct TurnContext {
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) extension_data: Arc<codex_extension_api::ExtensionData>,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
+    // TELOS(interleaved-turn-accounting): background contexts retain their originating turn's subtotal.
+    pub(crate) token_subtotal: Arc<crate::state::token_accounting::TurnSubtotal>,
     pub(crate) terminal_error: Arc<Mutex<Option<ErrorEvent>>>,
     /// Shares the session-owned store; session approvals remain live across turns.
     session_grants: Arc<StdMutex<HashMap<String, AdditionalPermissionProfile>>>,
@@ -455,6 +457,7 @@ impl TurnContext {
             turn_metadata_state,
             extension_data,
             turn_timing_state: Arc::new(TurnTimingState::default()),
+            token_subtotal: Arc::default(),
             terminal_error: Arc::new(Mutex::new(None)),
             session_grants: Arc::clone(&self.session_grants),
             turn_grants: Arc::default(),
@@ -874,6 +877,7 @@ impl TurnContext {
             turn_metadata_state: self.turn_metadata_state.clone(),
             extension_data: Arc::clone(&self.extension_data),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
+            token_subtotal: Arc::clone(&self.token_subtotal),
             terminal_error: Arc::clone(&self.terminal_error),
             session_grants: Arc::clone(&self.session_grants),
             turn_grants: Arc::clone(&self.turn_grants),
@@ -1159,6 +1163,7 @@ impl Session {
             turn_metadata_state,
             extension_data,
             turn_timing_state: Arc::new(TurnTimingState::default()),
+            token_subtotal: Arc::default(),
             terminal_error: Arc::new(Mutex::new(None)),
             session_grants,
             turn_grants: Arc::default(),

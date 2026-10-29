@@ -766,6 +766,8 @@ async fn response_item_ids_are_sent_for_all_remote_v2_compaction_requests() -> a
 
         let requests = response_mock.requests();
         assert_eq!(requests.len(), 3);
+        // Materialized compaction instructions are fresh items: clearing their historical
+        // identity must be followed by assigning a request identity before serialization.
         for (request_index, request) in requests.iter().enumerate() {
             let input = request.input();
             assert!(!input.is_empty(), "request {request_index} input is empty");

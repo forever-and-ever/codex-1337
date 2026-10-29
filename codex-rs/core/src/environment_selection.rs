@@ -1488,9 +1488,19 @@ mod tests {
         environment_manager: Arc<EnvironmentManager>,
         selections: &[TurnEnvironmentSelection],
     ) -> Arc<ThreadEnvironments> {
+        let local_shell = Shell::from_environment_shell_info(
+            environment_manager
+                .get_environment("local")
+                .expect("local environment")
+                .info()
+                .await
+                .expect("local environment info")
+                .shell,
+        )
+        .expect("fixture shell");
         let turn_environments = Arc::new(ThreadEnvironments::new(
             environment_manager,
-            crate::shell::default_user_shell(),
+            local_shell,
             ThreadEnvironmentDefaults::new(test_environment_config(), SandboxType::None),
             ShellSnapshot::disabled(),
             TurnEnvironmentSnapshot::default(),

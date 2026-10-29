@@ -15,7 +15,30 @@ Scenario: First request after fork when startup preserves the parent baseline, t
 03:message/user:
     fork seed
 04:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
+    [01] <instruction_diff>
+        Apply this update to the previously supplied permissions instructions; unchanged instructions remain in force.
+        --- permissions/f907247ac78588f8d51d9480070283ca20d14f13
+        +++ permissions/4f6f947aa5c846169a1513092e52491cf8340636
+        @@ -1,59 +1,4 @@
+         <permissions instructions>
+         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sa... permits reading files. Network access is restricted. [hash=80308a5911dbf386]
+        -# Escalation Requests
+        <OMITTED 51 LINES; ~790 TOKENS; hash=1f177f381a17d6fe>
+        -Good examples of prefixes:
+        -- ["npm", "run", "dev"]
+        -- ["gh", "pr", "check"]
+        -- ["cargo", "test"]
+        +Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+         </permissions instructions>
+        \\ No newline at end of file
+        </instruction_diff>
+    [02] <instruction_diff>
+        Apply this update to the previously supplied collaboration_mode instructions; unchanged instructions remain in force.
+        --- collaboration_mode/absent
+        +++ collaboration_mode/36a599a55b9f432c1036377d8152dbd49dd305b0
+        @@ -0,0 +1 @@
+        +<collaboration_mode>Fork turn collaboration instructions.</collaboration_mode>
+        \\ No newline at end of file
+        </instruction_diff>
 05:message/user:
     after fork

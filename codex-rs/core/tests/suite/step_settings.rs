@@ -78,6 +78,7 @@ use codex_tools::ToolOutput;
 use codex_tools::ToolSpec;
 use codex_utils_image::data_url_from_bytes;
 use codex_utils_output_truncation::TruncationPolicy;
+use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_text;
 use core_test_support::apps_test_server::AppsTestServer;
@@ -706,11 +707,20 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.history_truncation_token_limit),
-        Some(480)
+        Some(
+            live_output["output"]
+                .as_array()
+                .expect("bounded custom output items")
+                .iter()
+                .map(|item| approx_token_count(
+                    item["text"].as_str().expect("text output")
+                ))
+                .sum()
+        )
     );
     assert_eq!(
-        serde_json::to_value(&saved.item)?["output"][1]["text"],
-        text
+        serde_json::to_value(&saved.item)?["output"],
+        live_output["output"]
     );
 
     let mut replay_config = test.config.clone();
@@ -2468,7 +2478,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     "async_description": tool("request_user_input_async")["description"],
                     "async_parameters": tool("request_user_input_async")["parameters"],
                     "multi_agent_messages": multi_agent_messages,
-                    "channel_post_description": channel_post["description"].as_str().expect("post description").lines().next(),
+                    "channel_post_description": channel_post["description"].as_str().expect("post description").split("\n\n").last(),
                     "channel_post_required": channel_post["parameters"]["required"],
                     "exec_description": tool("exec")["description"].as_str().expect("exec description").lines().next(),
                     "wait_description": tool("wait")["description"],

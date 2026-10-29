@@ -36,6 +36,7 @@ async fn record_token_usage_continues_restored_totals() {
         "root-turn".to_string(),
         "response-d".to_string(),
         &usage(20),
+        &crate::state::token_accounting::TurnSubtotal::default(),
     );
     assert_eq!(
         after_resume,
@@ -49,6 +50,37 @@ async fn record_token_usage_continues_restored_totals() {
             turn_token_usage: usage(50),
             thread_token_usage: usage(250),
         }
+    );
+    // A late record from an older turn can be the thread's latest record on cold resume.
+    let mut late = after_resume.clone();
+    late.turn_id = "turn-a".to_string();
+    late.usage = usage(5);
+    late.turn_token_usage = usage(205);
+    late.thread_token_usage = usage(255);
+    restored.latest_token_usage_record = Some(late.clone());
+    restored.last_started_turn_id = Some("turn-b".to_string());
+    crate::state::token_accounting::restore(
+        &mut restored,
+        &[
+            codex_history::RolloutItem::TokenUsageRecord(after_resume),
+            codex_history::RolloutItem::TokenUsageRecord(late),
+        ],
+    );
+    let continued = restored.record_token_usage(
+        thread_id,
+        "turn-b",
+        session_id,
+        "root-turn".to_string(),
+        "response-e".to_string(),
+        &usage(20),
+        &crate::state::token_accounting::TurnSubtotal::default(),
+    );
+    assert_eq!(
+        (
+            continued.turn_token_usage.total_tokens,
+            continued.thread_token_usage.total_tokens
+        ),
+        (70, 275)
     );
 }
 

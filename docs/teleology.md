@@ -27,9 +27,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### recoverable-output
 
 - Telos: batching must not erase a middle command or require re-running work to recover emitted text.
-- Holds: each nonempty text emission is a section; native execution arrays and `sh` preserve indexed result or coalesced-empty sections. An emission cap covers its entire batch, and a shared observation budget is fairly apportioned across all sections after model-policy reduction. Every reduced requested cap is disclosed. Truncated sections keep UTF-8-safe heads and tails; tiny budgets keep an omission marker rather than erasing section identity. Media, bounded notices and minimum markers are outside the text payload allowance. A finite allowance derived from the finished output prevents history recording or replay from truncating it again. Only truncated emitted text is retained, never unprinted variables or bytes a nested tool already discarded. Recovery uses private leased Codex-runtime artifacts, at most 16 MiB each and 64 MiB / 32 artifacts per thread, FIFO-evicted and removed on thread-service shutdown; abandoned artifacts require the owned lease marker before reaping. Storage failure is disclosed. Host-local paths do not grant a remote executor access.
-- Owners: `codex-rs/core/src/tools/code_mode/output_sections.rs`, `output.rs` and `response_adapter.rs`; `codex-rs/code-mode-runtime/src/runtime/native_result.rs` and `sh.rs`; `codex-rs/code-mode-protocol/src/response.rs` and `grpc/codex.code_mode.v1.proto`; `codex-rs/protocol/src/native_execution_result.rs`.
-- Tripwire: `truncated_sections_share_the_budget_and_recover_only_truncated_text` (`codex-rs/core/src/tools/code_mode/mod.rs`), `completed_timing_preserves_content_and_distinguishes_zero_from_unavailable` (`output_tests.rs`), `code_mode_exec_outer_limit_truncates_emitted_output` and the nested-limit cases (`codex-rs/core/tests/suite/code_mode.rs`); native presentation and host gRPC/stdio round trips cover the grouped wire shape.
+- Holds: each nonempty text emission is a section; native execution arrays and `sh` preserve indexed result or coalesced-empty sections. An emission cap covers its entire batch, and a shared observation budget is fairly apportioned across all sections after model-policy reduction. Every reduced requested cap is disclosed. Truncated sections keep UTF-8-safe heads and tails; tiny budgets keep an omission marker rather than erasing section identity. Media, bounded notices and minimum markers are outside the text payload allowance. A finite allowance derived from the finished output prevents history recording or replay from truncating it again. Media preparation increases an explicit allowance only by the text tokens it introduces, so a failed image retains its diagnostic without relaxing the original output cap. Only truncated emitted text is retained, never unprinted variables or bytes a nested tool already discarded. Recovery uses private leased Codex-runtime artifacts, at most 16 MiB each and 64 MiB / 32 artifacts per thread, FIFO-evicted and removed on thread-service shutdown; abandoned artifacts require the owned lease marker before reaping. Storage failure is disclosed. Host-local paths do not grant a remote executor access.
+- Owners: `codex-rs/core/src/tools/code_mode/output_sections.rs`, `output.rs` and `response_adapter.rs`; `codex-rs/core/src/session/prepared_tool_budget.rs`, with its call in `session/inject.rs`; `codex-rs/code-mode-runtime/src/runtime/native_result.rs` and `sh.rs`; `codex-rs/code-mode-protocol/src/response.rs` and `grpc/codex.code_mode.v1.proto`; `codex-rs/protocol/src/native_execution_result.rs`.
+- Tripwire: `truncated_sections_share_the_budget_and_recover_only_truncated_text` (`codex-rs/core/src/tools/code_mode/mod.rs`), `completed_timing_preserves_content_and_distinguishes_zero_from_unavailable` (`output_tests.rs`), `code_mode_replaces_malformed_image`, `code_mode_exec_outer_limit_truncates_emitted_output` and the nested-limit cases (`codex-rs/core/tests/suite/code_mode.rs`); native presentation and host gRPC/stdio round trips cover the grouped wire shape.
 - Pressure: flattening batches before budgeting, prefix-only history truncation and lost transport metadata silently undo recoverability; temporary files without custody leak data or delete another session's live output.
 - Evidence: owner implementation decision, 2026-10-18.
 
@@ -146,9 +146,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### instruction-amendments
 
 - Telos: ordinary instruction changes append amendments rather than rewrite the Preamble.
-- Holds: managed instructions retain their original authority and use literal unified diffs. The harness keeps canonical full values and requires complete, kind-aligned retained ancestry before suppressing a reinjection. Compaction receives a disposable view with current full instructions substituted for their older versions and amendments; conversation evidence and opaque provider checkpoints remain intact. Only successful compaction replaces live history and starts a new window. Model/capability changes, local tip repairs and unsupported incremental tool protocols retain their existing behavior; rollback has no special optimization.
+- Holds: managed instructions retain their original authority and use literal unified diffs. The harness keeps canonical full values and requires complete, kind-aligned retained ancestry before suppressing a reinjection. Compaction receives a disposable view with current full instructions substituted for their older versions and amendments; changed and inserted items receive fresh request identities, while conversation evidence and opaque provider checkpoints remain intact. Only successful compaction replaces live history and starts a new window. Model/capability changes, local tip repairs and unsupported incremental tool protocols retain their existing behavior; rollback has no special optimization.
 - Owners: `codex-rs/core/src/context/world_state/instruction_diff.rs`, `codex-rs/core/src/context/world_state/instruction_projection.rs`, `codex-rs/core/src/context_manager/instruction_projection.rs`, `codex-rs/core/src/context/base_instructions.rs`.
-- Tripwire: `render_diff_restores_the_typed_section_snapshot`, `catalog_collaboration_messages_refresh_without_mode_or_model_change`, `compaction_preserves_updated_summary`.
+- Tripwire: `render_diff_restores_the_typed_section_snapshot`, `catalog_collaboration_messages_refresh_without_mode_or_model_change`, `compaction_preserves_updated_summary`; request identities: `response_item_ids_are_sent_for_all_remote_v2_compaction_requests` (`codex-rs/core/tests/suite/client.rs`).
 - Pressure: instruction providers must expose a canonical full value without emission side effects; fragment provenance and authority must survive replay. Skills opt in through `WorldStateSectionContribution::with_instruction_amendments`: added/changed/removed summaries use unaliased paths and share the harness's retention and compaction machinery. Bounded catalogs relist rather than amend incomplete membership. Legacy revocations without a canonical predecessor retain explicit notices outside materialization. `production_turn_keeps_host_aliases_and_amends_catalog_changes` covers amendment materialization and cold replay.
 
 ### no-vacuous-injections
@@ -398,6 +398,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 ## Accounts
 
+### interleaved-turn-accounting
+
+- Telos: every completed inference is charged without moving its tokens into another turn.
+- Holds: completed speculative compaction is charged once even when its checkpoint is discarded. A persisted turn subtotal accumulates only that turn's responses; a late background response from an older turn cannot reset the foreground subtotal. The thread total remains cumulative. Foreground and background contexts share a turn-owned subtotal cell, released with the last context; cold replay retains at most one seed for the last started turn and never searches past a compaction checkpoint.
+- Owners: `codex-rs/core/src/state/token_accounting.rs`; seams in `state/session.rs`, `state/mod.rs`, `session/turn_context.rs` and `session/mod.rs` under `codex-rs/core/src/`.
+- Tripwire: `async_compaction_reuses_pending_work` (`codex-rs/core/tests/suite/scenarios.rs`); `record_token_usage_continues_restored_totals` (`codex-rs/core/src/state/session_tests.rs`).
+- Pressure: speculative requests can complete after a newer turn reports usage. Deriving the turn subtotal from the latest thread record loses the newer turn's earlier responses; an unbounded turn-indexed map instead leaks closed turns.
+- Evidence: 40de654f41 charges completed background responses; test-suite repair, 2026-10-29, exposed the interleaving defect.
+
 ### pinned-accounts
 
 - Telos: each conversation bills the account the human chose, and switching never breaks work in progress.
@@ -630,7 +639,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 Upstream files, where merge conflicts arise:
 
 - `codex-rs/tui/src/markdown_render/local_links.rs`: literal-local-paths
-- `codex-rs/tui/src/markdown_render.rs`: literal-local-paths
+- `codex-rs/tui/src/markdown_render.rs`: literal-local-paths, warpaint
 - `codex-rs/clippy.toml`: fork-lint-posture
 - `codex-rs/tui/src/app/transcript_export.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/thread_settings.rs`: fast-ui-thread
@@ -775,7 +784,6 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/bottom_pane/status_line_style.rs`: warpaint
 - `codex-rs/tui/src/chatwidget/rendering_tests.rs`: warpaint
 - `codex-rs/tui/src/key_hint_label_tests.rs`: warpaint
-- `codex-rs/tui/src/markdown_render.rs`: warpaint
 - `codex-rs/tui/src/markdown_render_tests.rs`: warpaint
 - `codex-rs/tui/src/resume_picker_color_tests.rs`: warpaint
 - `codex-rs/tui/src/app.rs`: warpaint, attention-gated-painting
@@ -810,7 +818,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`: idle-mcp-human-consent
 
 Fork-owned files, absent upstream:
-- `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread, attention-gated-painting
 - `codex-rs/tui/src/tui/frame_rate_limiter/completion.rs`: fast-ui-thread
 - `codex-rs/tui/src/tui/event_stream/preparation.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/text/preparation.rs`: fast-ui-thread
@@ -922,6 +930,9 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/session/preamble.rs`: token-bills
 - `codex-rs/core/src/session/context_inventory.rs`: token-bills
 - `codex-rs/core/src/session/tool_output_tokens.rs`: token-bills
+- `codex-rs/core/src/session/inject.rs`: recoverable-output
+- `codex-rs/core/src/session/mod.rs`: recoverable-output, interleaved-turn-accounting
+- `codex-rs/core/src/session/prepared_tool_budget.rs`: recoverable-output
 - `codex-rs/core/src/tools/code_mode/output_sections.rs`: recoverable-output
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
 - `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor
@@ -972,7 +983,6 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/presentation.rs`: attention-gated-painting
 - `codex-rs/tui/src/tui/glint.rs`: attention-gated-painting
 - `codex-rs/tui/src/tui/frame_requester/beat.rs`: attention-gated-painting
-- `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: attention-gated-painting
 - `codex-rs/tui/src/custom_terminal/patch.rs`: attention-gated-painting
 - `codex-rs/tui/src/status_indicator_widget/glint.rs`: attention-gated-painting
 - `codex-rs/tui/src/bottom_pane/glint.rs`: attention-gated-painting
@@ -1064,6 +1074,10 @@ Fork-owned files, absent upstream:
 - `codex-rs/state/src/sqlite/queue_integrity.rs`: authoritative-queue-integrity
 - `codex-rs/login/src/auth/manager/identity_persistence.rs`: pinned-accounts
 - `codex-rs/login/src/auth/manager/account_scope.rs`: pinned-accounts
+- `codex-rs/core/src/state/token_accounting.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/state/session.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/state/mod.rs`: interleaved-turn-accounting
+- `codex-rs/core/src/session/turn_context.rs`: interleaved-turn-accounting
 - `codex-rs/core/src/session/mcp_elicitation_authority.rs`: idle-mcp-human-consent
 - `codex-rs/codex-mcp/src/elicitation_authority.rs`: idle-mcp-human-consent
 - `codex-rs/codex-mcp/src/elicitation_policy.rs`: idle-mcp-human-consent

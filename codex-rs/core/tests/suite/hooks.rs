@@ -5245,8 +5245,8 @@ async fn pre_tool_use_blocks_apply_patch_before_execution() -> Result<()> {
             .and_then(Value::as_str)
             .expect("apply_patch output string");
         assert!(
-            output.contains("Command blocked by PreToolUse hook: blocked apply_patch"),
-            "blocked apply_patch output should surface the hook reason",
+            output.contains("Tool call blocked by PreToolUse hook: blocked apply_patch"),
+            "blocked apply_patch output should surface the hook reason: {output}",
         );
         assert!(
             !test.workspace_path(file_name).exists(),
@@ -5404,8 +5404,8 @@ async fn pre_tool_use_blocks_apply_patch_with_name_only_selector() -> Result<()>
             .and_then(Value::as_str)
             .expect("apply_patch output string");
         assert!(
-            output.contains("Command blocked by PreToolUse hook: blocked name-only selector"),
-            "blocked apply_patch output should surface the hook reason",
+            output.contains("Tool call blocked by PreToolUse hook: blocked name-only selector"),
+            "blocked apply_patch output should surface the hook reason: {output}",
         );
         assert!(
             !test.workspace_path(file_name).exists(),

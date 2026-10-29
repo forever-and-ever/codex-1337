@@ -71,7 +71,7 @@ async fn interrupt_completes_cancelled_dynamic_call(hook: Option<HookEventName>)
                     _ => unreachable!(),
                 };
                 std::fs::write(home.join("hooks.json"), json!({"hooks": {
-                    name: [{"matcher": "^gate$", "hooks": [{"type": "command",
+                    name: [{"selector": { "type": "tool", "name": "^gate$" }, "hooks": [{"type": "command",
                         "command": r#"python3 -c "import threading; threading.Event().wait()""#}]}]
                 }}).to_string()).expect("write blocking hook fixture");
             }
@@ -225,7 +225,7 @@ async fn terminated_cell_persists_failure_and_excludes_late_reply_from_context()
     let mut calls = Vec::new();
     for _ in 0..2 {
         calls.push(
-            wait_for_event_match(&thread, |event| match event {
+            wait_for_event_match(&thread, |event| match event.native_event() {
                 EventMsg::DynamicToolCallRequest(request) => Some(request.call_id.clone()),
                 _ => None,
             })
@@ -279,7 +279,7 @@ async fn terminated_cell_persists_failure_and_excludes_late_reply_from_context()
     let mut completed = None;
     let mut after = false;
     wait_for_event(&thread, |event| {
-        match event {
+        match event.native_event() {
             EventMsg::ItemCompleted(event) if event.item.id() == original => {
                 completed = Some(event.clone())
             }
@@ -339,10 +339,13 @@ async fn terminated_cell_persists_failure_and_excludes_late_reply_from_context()
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter_map(|line| match line.item {
-            RolloutItem::EventMsg(EventMsg::ItemCompleted(event))
-                if event.item.id() == original =>
+            RolloutItem::EventMsg(event)
+                if matches!(event.native_event(), EventMsg::ItemCompleted(item) if item.item.id() == original) =>
             {
-                Some(event)
+                let EventMsg::ItemCompleted(item) = event.native_event() else {
+                    unreachable!("completion selected above")
+                };
+                Some(item.clone())
             }
             _ => None,
         })

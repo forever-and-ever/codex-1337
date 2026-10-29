@@ -452,12 +452,6 @@ async fn board_notifications_do_not_reopen_a_final_answer(
             "create_channel",
             json!({"channel_name":"design"}),
         )),
-        response(tool(
-            "spawn",
-            "spawn_agent",
-            json!({"task_name":"worker","message":"Say ready.","fork_turns":"none"}),
-        )),
-        response(done()),
         response(done()),
         vec![
             StreamingSseChunk {
@@ -484,7 +478,7 @@ async fn board_notifications_do_not_reopen_a_final_answer(
     .await;
     let server = responses::start_mock_server().await;
     let base_url = format!("{}/v1", streaming.uri());
-    let root = test_codex()
+    let mut root = test_codex()
         .with_config(move |config| {
             configure(config);
             config.model_provider.base_url = Some(base_url);
@@ -498,17 +492,28 @@ async fn board_notifications_do_not_reopen_a_final_answer(
         })
         .build_with_auto_env(&server)
         .await?;
-    root.submit_turn("Create the channel and spawn a worker.")
-        .await?;
-    let child_id = root
+    // An independent writer has no completion mail. A spawned worker's initial
+    // completion can otherwise race the root turn and consume its gated response.
+    let storage = tempfile::tempdir()?;
+    let board = codex_message_board::LocalBoard::new(
+        codex_state::SqliteConfig::new_for_testing(storage.path().to_path_buf().try_into()?),
+        codex_protocol::SessionId::new(),
+    );
+    let mut root_options = root.start_thread_options().await;
+    root_options
+        .thread_extension_init
+        .insert(board.read_write());
+    root.codex = root.thread_manager.start_thread(root_options).await?.thread;
+    let mut writer_options = root.start_thread_options().await;
+    writer_options
+        .thread_extension_init
+        .insert(board.read_write());
+    let child = root
         .thread_manager
-        .list_thread_ids()
-        .await
-        .into_iter()
-        .find(|id| *id != root.session_configured.thread_id)
-        .context("child runtime")?;
-    let child = root.thread_manager.get_thread(child_id).await?;
-    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        .start_thread(writer_options)
+        .await?
+        .thread;
+    root.submit_turn("Create the channel.").await?;
 
     root.codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
@@ -543,7 +548,7 @@ async fn board_notifications_do_not_reopen_a_final_answer(
         }]))
         .await?;
     // The child's follow-up confirms fanout completed, but its final would separately notify root.
-    streaming.wait_for_request_count(/*count*/ 7).await;
+    streaming.wait_for_request_count(/*count*/ 5).await;
     let requests = streaming.requests().await;
     let request: Value = serde_json::from_slice(requests.last().context("child follow-up")?)?;
     let post = request["input"]
@@ -553,7 +558,12 @@ async fn board_notifications_do_not_reopen_a_final_answer(
         .find(|item| item["type"] == "function_call_output" && item["call_id"] == "worker-post")
         .context("child post result")?;
     let post: PostMetadata = serde_json::from_str(post["output"].as_str().context("post output")?)?;
-    assert_eq!(post.author.as_str(), "/root/worker");
+    assert_eq!(
+        post.author,
+        board
+            .read_write()
+            .caller_path(child.startup_metadata().thread_id)?
+    );
     release_final.send(()).expect("release root response");
     wait_for_event(&root.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -1059,7 +1069,7 @@ async fn codex_instances_share_board_with_fixed_access() -> anyhow::Result<()> {
                 .features
                 .disable(Feature::EnableRequestCompression)
                 .expect("capture gated requests");
-            config.multi_agent_v2.tool_namespace = Some("collaboration".into());
+            config.multi_agent_v2.tool_namespace = Some("wrangler_agents".into());
             config.current_time_reminder = Some(codex_core::config::CurrentTimeReminderConfig {
                 clock_source: codex_features::CurrentTimeSource::External,
                 ..Default::default()
@@ -1115,7 +1125,7 @@ async fn codex_instances_share_board_with_fixed_access() -> anyhow::Result<()> {
                 "search_posts",
                 "subscribe",
             ]
-            .map(|name| ToolName::namespaced("collaboration", name)),
+            .map(|name| ToolName::namespaced("wrangler_agents", name)),
         );
         options.thread_extension_init.insert(policy);
         options.thread_extension_init.insert(connection);

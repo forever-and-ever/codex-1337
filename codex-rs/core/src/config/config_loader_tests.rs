@@ -2713,7 +2713,7 @@ async fn load_config_layers_includes_cloud_hook_requirements() -> anyhow::Result
 managed_dir = '{}'
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = {{ type = "tool", name = "^exec_command$" }}
 
 [[hooks.PreToolUse.hooks]]
 type = "command"

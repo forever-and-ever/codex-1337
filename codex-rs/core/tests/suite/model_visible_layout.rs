@@ -490,19 +490,29 @@ async fn snapshot_model_visible_layout_cwd_change_refreshes_agents() -> Result<(
     );
     assert_eq!(
         user_instructions_wrapper_count(&requests[1]),
-        2,
-        "expected second request to retain the original AGENTS.md item and append its replacement"
+        1,
+        "expected second request to retain the original AGENTS.md item and append an amendment"
     );
-    insta::assert_snapshot!(
-        "model_visible_layout_cwd_change_refreshes_agents",
-        format_labeled_requests_snapshot(
-            "Second turn changes cwd to a directory with different AGENTS.md and refreshes the model-visible instructions.",
-            &[
-                ("First Request (agents_one)", &requests[0]),
-                ("Second Request (agents_two cwd)", &requests[1]),
-            ]
-        )
-    );
+    let amendments = requests[1].message_input_texts("user").into_iter()
+        .filter(|text| text.starts_with("<instruction_diff>") && text.contains("agents_md/"))
+        .collect::<Vec<_>>();
+    let [amendment] = amendments.as_slice() else { panic!("expected one AGENTS.md amendment: {amendments:?}") };
+    assert!(amendment.lines().any(|line| line.starts_with('-') && line.contains("Turn one agents instructions.")));
+    assert!(amendment.lines().any(|line| line.starts_with('+') && line.contains("Turn two agents instructions.")));
+    let mut snapshot = format_labeled_requests_snapshot(
+        "Second turn changes cwd to a directory with different AGENTS.md and refreshes the model-visible instructions.",
+        &[
+            ("First Request (agents_one)", &requests[0]),
+            ("Second Request (agents_two cwd)", &requests[1]),
+        ],
+    ).replace(&test.cwd_path().display().to_string(), "<WORKSPACE>");
+    // The patch identity includes the temporary checkout path; normalize only that entropy.
+    for (prefix, label) in [("--- ", "agents_md/<BEFORE>"), ("+++ ", "agents_md/<AFTER>")] {
+        let header = amendment.lines().find_map(|line| line.strip_prefix(prefix))
+            .expect("AGENTS.md patch endpoint");
+        snapshot = snapshot.replace(header, label);
+    }
+    insta::assert_snapshot!("model_visible_layout_cwd_change_refreshes_agents", snapshot);
 
     Ok(())
     })
@@ -691,6 +701,15 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
     .await;
 
     let resumed_request = resumed_mock.single_request();
+    assert!(
+        !resumed_request
+            .message_input_texts("developer")
+            .iter()
+            .any(|text| {
+                text.contains("<model_switch>") || text.contains("<model_instructions>")
+            }),
+        "restoring the rollout model must not inject a model-switch update"
+    );
     assert!(
         resumed_request
             .message_input_texts("user")

@@ -1241,7 +1241,7 @@ async fn child_completion_wakes_parent_after_final_answer() -> Result<()> {
         sse(vec![
             ev_function_call_with_namespace(
                 "spawn-worker",
-                "collaboration",
+                "wrangler_agents",
                 "spawn_agent",
                 r#"{"task_name":"worker","fork_turns":"none","message":"Check whether the release is ready."}"#,
             ),
@@ -2802,7 +2802,7 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
             compaction_chunk(
                 Some(foreground_gate),
                 vec![
-                    ev_function_call_with_namespace("team", "collaboration", "list_agents", "{}"),
+                    ev_function_call_with_namespace("team", "wrangler_agents", "list_agents", "{}"),
                     ev_completed_with_tokens(
                         "team-response",
                         /*total_tokens*/ if over_budget { 9_000 } else { 75_000 },
@@ -2978,17 +2978,41 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
         let positions = input
             .iter()
             .enumerate()
-            .filter_map(|(i, item)| item.to_string().contains(text).then_some(i))
+            .filter_map(|(i, item)| {
+                if item["type"] == "compaction" || item["type"] == "function_call_output" {
+                    return item.to_string().contains(text).then_some(i);
+                }
+                let content = item["content"].as_array()?;
+                content
+                    .iter()
+                    .any(|part| {
+                        part["text"].as_str().is_some_and(|body| {
+                            !body.starts_with("<compaction_continuation>")
+                                && if body.starts_with("<instruction_diff>") {
+                                    body.lines().any(|line| {
+                                        line.starts_with('+')
+                                            && !line.starts_with("+++")
+                                            && line.contains(text)
+                                    })
+                                } else {
+                                    body.contains(text)
+                                }
+                        })
+                    })
+                    .then_some(i)
+            })
             .collect::<Vec<_>>();
         assert_eq!(positions.len(), 1, "{text}");
         positions[0]
     };
-    let default = position("# Collaboration Mode: Default");
+    // A second compaction materializes the current Plan instructions, retiring Default.
+    let default = (!over_budget).then(|| position("# Collaboration Mode: Default"));
     let draft = position("Draft the launch notes.");
     let compaction = position("ASYNC_LAUNCH_CHECKPOINT");
     let plan = position("Plan Mode");
     if matches!(suffix, LiveSuffix::User) {
         let user = position("Check who can finish the notes.");
+        let default = default.expect("single compaction retains cutoff mode");
         assert!(draft < compaction && compaction < default && default < plan && plan < user);
         let entries = requests.iter().map(SnapshotEntry::body).collect::<Vec<_>>();
         insta::assert_snapshot!(
@@ -3005,8 +3029,15 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
             suffix,
             LiveSuffix::RetainedTool | LiveSuffix::OverBudgetRetainedTool
         ) {
-            assert!(draft < compaction && compaction < default && default < plan && plan < tool);
+            if let Some(default) = default {
+                assert!(
+                    draft < compaction && compaction < default && default < plan && plan < tool
+                );
+            } else {
+                assert!(draft < compaction && compaction < plan && plan < tool);
+            }
         } else {
+            let default = default.expect("single compaction retains cutoff mode");
             assert!(default < draft && draft < compaction && compaction < plan && plan < tool);
         }
         let assistant = position("I will check who is available.");
@@ -3101,7 +3132,7 @@ async fn async_compaction_reuses_pending_work(
     if !manual {
         responses.push(immediate(response(
             "second",
-            ev_function_call_with_namespace("team", "collaboration", "list_agents", "{}"),
+            ev_function_call_with_namespace("team", "wrangler_agents", "list_agents", "{}"),
             /*tokens*/ if over_budget { 9_000 } else { 91_000 },
         )));
     }
@@ -3249,9 +3280,23 @@ async fn async_compaction_reuses_pending_work(
             })
             .expect("persisted usage")
     };
-    assert!(history.items.iter().all(|item| !matches!(item,
-        RolloutItem::TokenUsageRecord(record) if record.response_id == "background"
-    )));
+    // 40de654f41 charges completed speculation even when its checkpoint is discarded.
+    assert_eq!(
+        history
+            .items
+            .iter()
+            .filter(|item| matches!(item,
+                RolloutItem::TokenUsageRecord(record) if record.response_id == "background"
+            ))
+            .count(),
+        usize::from(has_background)
+    );
+    let speculative_tokens = if has_background {
+        assert_eq!(usage("background").usage.total_tokens, 3_000);
+        3_000
+    } else {
+        0
+    };
     let continuation = usage("continuation");
     assert_eq!(
         (
@@ -3259,13 +3304,16 @@ async fn async_compaction_reuses_pending_work(
             continuation.thread_token_usage.total_tokens,
         ),
         if over_budget {
-            (12_010, 14_010)
+            (12_010, 14_010 + speculative_tokens)
         } else if manual {
-            (3_000, seed_tokens + if succeeds { 3_000 } else { 6_000 })
+            (
+                3_000,
+                seed_tokens + if succeeds { 3_000 } else { 6_000 } + speculative_tokens,
+            )
         } else if succeeds {
-            (94_000, 164_000)
+            (94_000, 164_000 + speculative_tokens)
         } else {
-            (97_000, 167_000)
+            (97_000, 167_000 + speculative_tokens)
         },
     );
 

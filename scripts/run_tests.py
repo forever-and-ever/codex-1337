@@ -67,8 +67,8 @@ FIXTURE_BINARIES = (
             "core_test_support",
         ),
     ),
-    # Core-side suites take `codex-exec`, which serves the same arg0 helpers
-    # without compiling the TUI.
+    # Core suites use codex-exec's arg0 helpers, except the RMCP sandbox
+    # integration, which drives the full codex sandbox CLI.
     (
         "codex-cli",
         "codex",
@@ -77,6 +77,7 @@ FIXTURE_BINARIES = (
             "codex-app-server",
             "codex-cli",
             "codex-rmcp-client",
+            "codex-core",
             "codex-tui",
         ),
     ),

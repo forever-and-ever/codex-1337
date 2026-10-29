@@ -615,8 +615,13 @@ async fn resume_replays_permissions_messages() -> Result<()> {
 
     let permissions = permissions_texts(&req3.single_request());
     assert_eq!(permissions.len(), 3);
-    let unique = permissions.into_iter().collect::<HashSet<String>>();
-    assert_eq!(unique.len(), 2);
+    // TELOS(instruction-amendments): resume replays both directional amendments, not full copies.
+    assert!(permissions[0].starts_with("<permissions instructions>"));
+    assert!(permissions[1].starts_with("<instruction_diff>"));
+    assert!(permissions[1].contains("+Approval policy is currently never."));
+    assert!(permissions[2].starts_with("<instruction_diff>"));
+    assert!(permissions[2].contains("-Approval policy is currently never."));
+    assert!(permissions[2].contains("+# Escalation Requests"));
 
     Ok(())
 }

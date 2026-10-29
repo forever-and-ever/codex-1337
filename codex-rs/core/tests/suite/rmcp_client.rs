@@ -1081,6 +1081,11 @@ pub(super) async fn mcp_tool_discovery_scenario(
                     .features
                     .enable(Feature::McpToolListChanged)
                     .expect("enable tool-list refresh");
+            } else {
+                config
+                    .features
+                    .disable(Feature::McpToolListChanged)
+                    .expect("disable tool-list refresh");
             }
             let mut env = HashMap::from([
                 ("MCP_TEST_DISCOVER_TOOLS".to_string(), "1".to_string()),
@@ -1107,14 +1112,20 @@ pub(super) async fn mcp_tool_discovery_scenario(
         .build_with_auto_env(&server)
         .await?;
     wait_for_mcp_server(&test.codex, "discovery").await?;
+    let deferred_refresh = matches!(invalidation, Some("discovery" | "pagination"));
+    let mut calls = vec![("discover", "search_tools", r#"{"message":"find echo"}"#)];
+    if deferred_refresh {
+        // A notification racing a listing remains dirty for the next model boundary;
+        // acknowledge discovery without calling a tool the first listing withheld.
+        calls.push((
+            "catalog_boundary",
+            "search_tools",
+            r#"{"message":"find echo"}"#,
+        ));
+    }
+    calls.push(("invoke", "echo", r#"{"message":"hello"}"#));
     let mut mocks = Vec::new();
-    for (call_id, tool, arguments) in [
-        ("discover", "search_tools", r#"{"message":"find echo"}"#),
-        ("invoke", "echo", r#"{"message":"hello"}"#),
-    ] {
-        if !enabled && tool == "echo" {
-            break;
-        }
+    for (call_id, tool, arguments) in calls {
         let call = if tool_mode == ToolMode::CodeModeOnly {
             responses::ev_custom_tool_call(
                 call_id,
@@ -1153,29 +1164,39 @@ pub(super) async fn mcp_tool_discovery_scenario(
             requests[0].tool_by_name("mcp__discovery", "echo").is_some(),
             invalidation == Some("startup")
         );
-        if !enabled {
-            assert_eq!(
-                requests[1].body_json()["tools"],
-                requests[0].body_json()["tools"]
-            );
-            return Ok(requests);
-        }
-        assert!(requests[1].tool_by_name("mcp__discovery", "echo").is_some());
-        let output = requests[2]
+        let declares_echo = |request: &responses::ResponsesRequest| {
+            request.tool_by_name("mcp__discovery", "echo").is_some()
+                || request.body_json()["input"]
+                    .as_array()
+                    .expect("input")
+                    .iter()
+                    .filter(|item| item["type"] == "additional_tools")
+                    .any(|item| {
+                        responses::namespace_child_tool(item, "mcp__discovery", "echo").is_some()
+                    })
+        };
+        let invoke_request = if deferred_refresh {
+            // docs/teleology.md: catalog-at-model-boundaries preserves notifications
+            // received during a refresh for the following boundary, without recursion.
+            assert!(!declares_echo(&requests[1]));
+            2
+        } else {
+            1
+        };
+        // Ordinary refresh is independent of the experimental list-changed flag.
+        assert!(declares_echo(&requests[invoke_request]));
+        let payload = requests[invoke_request + 1]
             .function_call_output_text("invoke")
             .expect("echo output");
-        let (_, payload) = output
-            .split_once("\nOutput:\n")
-            .expect("wrapped MCP output");
         assert_eq!(
-            serde_json::from_str::<Value>(payload)?,
+            serde_json::from_str::<Value>(&payload)?,
             json!({
                 "echo": "ECHOING: hello", "env": "discovered",
             })
         );
     } else {
         assert!(
-            requests[2]
+            requests[if deferred_refresh { 3 } else { 2 }]
                 .custom_tool_call_output("invoke")
                 .to_string()
                 .contains("ECHOING: hello")

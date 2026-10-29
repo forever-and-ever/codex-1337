@@ -687,7 +687,7 @@ async fn tool_start_is_not_called_when_pre_tool_hook_prevents_execution() -> Res
         ),
         (
             "exec_command",
-            "^Bash$",
+            "^exec_command$",
             json!({ "cmd": "echo original" }),
             json!({
                 "hookSpecificOutput": {
@@ -759,7 +759,7 @@ fn write_pre_tool_hook(home: &Path, matcher: &str, output: &serde_json::Value) -
     let hooks = json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": matcher,
+                "selector": { "type": "tool", "name": matcher },
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),

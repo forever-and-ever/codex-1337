@@ -161,6 +161,24 @@ fn thread_manager() -> ThreadManager {
     )
 }
 
+async fn durable_thread_manager(config: &crate::config::Config) -> ThreadManager {
+    let mut config = config.clone();
+    config
+        .features
+        .enable(Feature::Sqlite)
+        .expect("enable sqlite");
+    let state_db = init_state_db(&config)
+        .await
+        .expect("initialize queue database");
+    ThreadManager::with_models_provider_home_and_state_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        Some(state_db),
+    )
+}
+
 async fn install_role_with_model_override(turn: &mut TurnContext) -> String {
     let role_name = "fork-context-role".to_string();
     tokio::fs::create_dir_all(&turn.config.codex_home)
@@ -1099,7 +1117,7 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
     }
 
     let (mut session, mut turn) = make_session_and_context().await;
-    let manager = thread_manager();
+    let manager = durable_thread_manager(&turn.config).await;
     let root = manager
         .start_thread(StartThreadOptions::new((*turn.config).clone()))
         .await
@@ -1670,7 +1688,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string(fork_turns: &str
 #[tokio::test]
 async fn multi_agent_v2_send_message_accepts_root_target_from_child() {
     let (mut session, mut turn) = make_session_and_context().await;
-    let manager = thread_manager();
+    let manager = durable_thread_manager(&turn.config).await;
     let mut config = (*turn.config).clone();
     config
         .features
@@ -2265,7 +2283,7 @@ async fn multi_agent_v2_send_message_rejects_interrupt_parameter() {
 #[tokio::test]
 async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn() {
     let (mut session, mut turn) = make_session_and_context().await;
-    let manager = thread_manager();
+    let manager = durable_thread_manager(&turn.config).await;
     let mut config = turn.config.as_ref().clone();
     let _ = config.features.enable(Feature::MultiAgentV2);
     set_turn_config(&mut turn, config);

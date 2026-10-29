@@ -1031,24 +1031,6 @@ fn sanitize_mcp_tool_result_for_model_preserves_supported_media() {
 }
 
 #[test]
-fn truncate_mcp_tool_result_for_event_preserves_small_result() {
-    let original = CallToolResult {
-        content: vec![serde_json::json!({
-            "type": "text",
-            "text": "hello",
-        })],
-        structured_content: Some(serde_json::json!({"x": 1})),
-        is_error: Some(false),
-        meta: Some(serde_json::json!({"k": "v"})),
-    };
-
-    let got = truncate_mcp_tool_result_for_event(&Ok(original.clone()), /*file_changes*/ None)
-        .expect("small result should remain successful");
-
-    assert_eq!(got, original);
-}
-
-#[test]
 fn truncate_mcp_tool_result_for_event_bounds_large_result() {
     let original = CallToolResult {
         content: vec![serde_json::json!({

@@ -215,12 +215,7 @@ unified_exec_zsh_fork = true
     let output = mock
         .function_call_output_text("shell-migration")
         .expect("shell tool output");
-    assert!(output.contains("Process exited with code 0\n"), "{output}");
-    assert_eq!(
-        output
-            .split_once("Output:\n")
-            .map(|(_, stdout)| stdout.trim()),
-        Some("migrated-shell")
-    );
+    // TELOS(terse-exec-envelope): successful native execution returns stdout alone.
+    assert_eq!(output.trim(), "migrated-shell");
     Ok(())
 }

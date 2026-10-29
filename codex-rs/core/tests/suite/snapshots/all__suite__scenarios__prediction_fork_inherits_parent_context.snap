@@ -16,13 +16,17 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=44f4cad2ce4ab17d):
-        - namespace/functions; hash=101d32aa59ea258b
+00:additional_tools/developer (2; hash=70cf560d900a97f2):
+        - namespace/functions; hash=69754f4116ee673a
+          - custom/python
+          - custom/bash
           - function/exec_command
           - function/write_stdin
+          - function/update_work_status
           - function/request_user_input
           - custom/apply_patch
           - function/view_image
+          - function/fence
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     You are Codex, a coding agent based on GPT-5. You and the user share one workspace, and your job is to c...rate with them until their goal is genuinely handled. [hash=2a3efec66e7f8963]
@@ -51,7 +55,7 @@ Settings:
 
     - Pipes: |
     - Logical operators: &&, ||
-    <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+    <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
     NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
     ### Examples
@@ -89,13 +93,17 @@ Settings:
 ## Window 2 (after request 3: input repeated)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=44f4cad2ce4ab17d):
-        - namespace/functions; hash=101d32aa59ea258b
+00:additional_tools/developer (2; hash=70cf560d900a97f2):
+        - namespace/functions; hash=69754f4116ee673a
+          - custom/python
+          - custom/bash
           - function/exec_command
           - function/write_stdin
+          - function/update_work_status
           - function/request_user_input
           - custom/apply_patch
           - function/view_image
+          - function/fence
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     You are Codex, a coding agent based on GPT-5. You and the user share one workspace, and your job is to c...rate with them until their goal is genuinely handled. [hash=2a3efec66e7f8963]
@@ -124,7 +132,7 @@ Settings: same as window 1
 
     - Pipes: |
     - Logical operators: &&, ||
-    <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+    <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
     NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
     ### Examples

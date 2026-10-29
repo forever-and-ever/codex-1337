@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=6f4a735b32039de0):
-        - namespace/functions; hash=02646fadfb0b847c
+00:additional_tools/developer (2; hash=7a60f6bec51ab368):
+        - namespace/functions; hash=245c6863d0b678f6
           - custom/exec
           - function/wait
           - custom/python
@@ -57,8 +57,8 @@ Settings:
 ## Window 2 (after request 2: input diverged at item 03)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=6f4a735b32039de0):
-        - namespace/functions; hash=02646fadfb0b847c
+00:additional_tools/developer (2; hash=7a60f6bec51ab368):
+        - namespace/functions; hash=245c6863d0b678f6
           - custom/exec
           - function/wait
           - custom/python
@@ -100,8 +100,9 @@ Settings: same as window 1
 -- request 5 (turn) --
 09:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-10:additional_tools/developer (1; hash=845cf7662dc8512b):
-        - namespace/functions; hash=0c787fbffa4d7ddf
+10:additional_tools/developer (1; hash=95e863940f4bb64c):
+        - namespace/functions; hash=0dc79281f2519ab4
+          - custom/exec
           - function/update_plan
 11:message/developer:
     The following tools are no longer available. Do not call them:
