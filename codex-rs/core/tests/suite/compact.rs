@@ -751,7 +751,17 @@ async fn summarize_context_three_requests_and_instructions(
                 let summary_item = ci
                     .replacement_history
                     .as_ref()
-                    .and_then(|history| history.last())
+                    .and_then(|history| history.iter().find(|item| {
+                        expected_summary_message == match &item.item {
+                            codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "user" => {
+                                match content.as_slice() {
+                                    [codex_protocol::models::ContentItem::InputText { text }] => text.as_str(),
+                                    _ => "",
+                                }
+                            }
+                            _ => "",
+                        }
+                    }))
                     .expect("compacted history should retain its summary");
                 let summary_item =
                     serde_json::to_value(&summary_item.item).expect("serialize compacted summary");

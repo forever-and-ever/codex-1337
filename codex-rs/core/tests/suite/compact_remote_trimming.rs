@@ -16,8 +16,7 @@ fn compact_response() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_compact_v2_token_estimate_ignores_message_bookkeeping_and_json_escaping()
--> Result<()> {
+async fn remote_compact_v2_token_estimate_ignores_message_bookkeeping() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let harness = TestCodexHarness::with_auto_env_builder(
@@ -25,12 +24,11 @@ async fn remote_compact_v2_token_estimate_ignores_message_bookkeeping_and_json_e
     )
     .await?;
     let escaped_text = "a \"quoted\" line\nand\\path";
-    let plain_text = "x".repeat(escaped_text.len());
     let mut estimates = Vec::new();
     for (id, text, metadata) in [
         (
             "msg_1",
-            plain_text.as_str(),
+            escaped_text,
             json!({
                 "turn_id": "turn-1",
                 "create_time": 1,

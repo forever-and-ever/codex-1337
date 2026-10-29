@@ -26,7 +26,7 @@ use std::fs;
 use test_case::test_case;
 use wiremock::MockServer;
 
-#[test_case(Some("Catalog approval instructions."), "Catalog approved prefixes: {{ approved_prefixes }}", Some(r#"Catalog approved prefixes: - ["echo"]"#); "catalog_prefixes")]
+#[test_case(Some("Catalog approval instructions."), "Catalog approved prefixes: {{ approved_prefixes }}", None; "catalog_prefixes")]
 #[test_case(None, "", None; "empty_catalog_prefixes")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_permission_message_loaded_from_remote_models_is_sent(

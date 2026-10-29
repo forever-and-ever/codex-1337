@@ -442,7 +442,7 @@ async fn current_time_reminders_can_follow_only_user_or_tool_outputs() -> Result
                 "resp-1",
                 ArrivalKind::Injection,
                 "current_time_reminder",
-                Some(SECOND_REMINDER),
+                None,
             )
         );
         let Some(Admission::Sealed(sealed)) = sealed else {

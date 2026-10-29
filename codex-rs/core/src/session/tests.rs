@@ -2013,7 +2013,7 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
     let mut expected_item = communication.to_model_input_item();
     let mut expected = serde_json::to_value(&expected_item).unwrap();
     expected["internal_chat_message_metadata_passthrough"] = json!({
-        "content_item_metadata": [{"harness_injected": true, "source_tool_namespace": "collaboration"}],
+        "content_item_metadata": [{"harness_injected": true, "source_tool_namespace": "wrangler_agents"}],
     });
     expected_item = serde_json::from_value(expected).unwrap();
     expected_item.set_turn_id_if_missing(&turn_context.sub_id);
@@ -11046,10 +11046,15 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
     let previous_context = Arc::new(turn_context);
     let world_state = build_world_state_from_turn_context(&session, &previous_context).await;
     let retained_world_state = world_state
-        .render_full_fragments()
+        .render_full()
         .1
         .into_iter()
-        .map(ContextualUserFragment::into_boxed_response_item)
+        .map(|update| match update.content {
+            crate::context::world_state::WorldStateUpdateContent::Fragment(fragment) => {
+                fragment.into_boxed_response_item()
+            }
+            crate::context::world_state::WorldStateUpdateContent::Item(item) => *item,
+        })
         .collect::<Vec<_>>();
     session
         .replace_history(
@@ -11314,7 +11319,15 @@ async fn build_initial_context_prepends_model_switch_message() {
     let turn_context = Arc::new(turn_context);
     let initial_context = build_initial_context(&session, &turn_context).await;
 
-    let ResponseItem::Message { role, content, .. } = &initial_context[0] else {
+    let model_switch = initial_context
+        .iter()
+        .find(|item| {
+            matches!(item, ResponseItem::Message { content, .. } if content.iter().any(|part| {
+                matches!(part, ContentItem::InputText { text } if text.contains("<model_switch>"))
+            }))
+        })
+        .expect("model-switch instructions after the base prefix");
+    let ResponseItem::Message { role, content, .. } = model_switch else {
         panic!("expected developer message");
     };
     assert_eq!(role, "developer");
@@ -13004,7 +13017,7 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
 }
 
 #[tokio::test]
-async fn fatal_tool_error_stops_turn_and_reports_error() {
+async fn mismatched_tool_input_returns_recoverable_feedback() {
     let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
     let (registry, hosted_specs) = tool_registry_for_test_step(step_context.as_ref());
@@ -13041,16 +13054,16 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
         )
         .await
         .err()
-        .expect("expected fatal error");
+        .expect("expected model-recoverable input-kind error");
 
     match err {
-        FunctionCallError::Fatal(message) => {
+        FunctionCallError::RespondToModel(message) => {
             assert_eq!(
                 message,
-                "tool exec_command invoked with incompatible payload"
+                "exec_command expects JSON arguments, not freeform text input"
             );
         }
-        other => panic!("expected FunctionCallError::Fatal, got {other:?}"),
+        other => panic!("expected FunctionCallError::RespondToModel, got {other:?}"),
     }
 }
 

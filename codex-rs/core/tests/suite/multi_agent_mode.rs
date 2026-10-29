@@ -105,7 +105,18 @@ fn developer_texts(input: &[Value]) -> Vec<&str> {
 }
 
 fn count_containing(texts: &[&str], target: &str) -> usize {
-    texts.iter().filter(|text| text.contains(target)).count()
+    texts
+        .iter()
+        .filter(|text| {
+            if text.starts_with("<instruction_diff>") {
+                text.lines().any(|line| {
+                    line.starts_with('+') && !line.starts_with("+++") && line.contains(target)
+                })
+            } else {
+                text.contains(target)
+            }
+        })
+        .count()
 }
 
 async fn submit_turn(
@@ -296,97 +307,96 @@ async fn model_switch_refreshes_catalog_role_and_mode(
 
     let server = start_mock_server().await;
     mock_server::run(&[&server], async {
-    let responses = mount_sse_sequence(
-        &server,
-        (1..=2)
-            .map(|index| {
-                sse(vec![
-                    ev_response_created(&format!("resp-{index}")),
-                    ev_completed(&format!("resp-{index}")),
-                ])
-            })
-            .collect(),
-    )
-    .await;
-    let test = test_codex()
-        .with_model_info_override("gpt-5.2", |model_info| {
-            add_ultra_reasoning(model_info);
-            set_multi_agent_mode(
-                model_info,
-                SECOND_MODEL_EXPLICIT_TEXT,
-                Some(SECOND_MODEL_PROACTIVE_TEXT),
-                /*hint_text*/ None,
-                Some(SECOND_MODEL_ROOT_ROLE_TEXT),
-            );
-        })
-        .with_model_info_override("gpt-5.4", |model_info| {
-            add_ultra_reasoning(model_info);
-            set_multi_agent_mode(
-                model_info,
-                CATALOG_EXPLICIT_TEXT,
-                Some(CATALOG_PROACTIVE_TEXT),
-                /*hint_text*/ None,
-                Some(FIRST_MODEL_ROOT_ROLE_TEXT),
-            );
-        })
-        .with_config(configure_multi_agent_v2)
-        .build_with_auto_env(&server)
-        .await?;
-    submit_turn(&test.codex, "first model", Some(effort.clone())).await?;
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some("gpt-5.2".to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    submit_turn(&test.codex, "second model", Some(effort)).await?;
-
-    let requests = responses.requests();
-    for (index, request) in requests.iter().enumerate() {
-        let input = request.input();
-        let texts = developer_texts(&input);
-        assert_eq!(
-            (
-                count_containing(&texts, expected_hints[0]),
-                count_containing(&texts, expected_hints[1]),
-                count_containing(&texts, NO_SPAWN_TEXT),
-                count_containing(&texts, PROACTIVE_TEXT),
-            ),
-            (1, usize::from(index == 1), 0, 0)
-        );
-    }
-
-    let developer_messages = requests[1].message_input_text_groups("developer");
-    let [first_role_position, second_role_position] =
-        [FIRST_MODEL_ROOT_ROLE_TEXT, SECOND_MODEL_ROOT_ROLE_TEXT].map(|role| {
-            developer_messages
-                .iter()
-                .position(|group| {
-                    matches!(
-                        group.as_slice(),
-                        [text] if text.starts_with("<multi_agent_role>")
-                            && text.ends_with("</multi_agent_role>")
-                            && text.contains(role)
-                    )
+        let responses = mount_sse_sequence(
+            &server,
+            (1..=2)
+                .map(|index| {
+                    sse(vec![
+                        ev_response_created(&format!("resp-{index}")),
+                        ev_completed(&format!("resp-{index}")),
+                    ])
                 })
-                .expect("catalog root role should be a standalone marked developer message")
-        });
-    let active_mode_position = developer_messages
-        .iter()
-        .rposition(|group| {
-            group
-                .iter()
-                .any(|text| text.contains(MULTI_AGENT_MODE_OPEN_TAG))
-        })
-        .expect("active multi-agent mode should be present");
-    assert!(
-        first_role_position < second_role_position && second_role_position < active_mode_position,
-        "catalog root roles should remain ordered before the active mode: {developer_messages:?}"
-    );
+                .collect(),
+        )
+        .await;
+        let test = test_codex()
+            .with_model_info_override("gpt-5.2", |model_info| {
+                add_ultra_reasoning(model_info);
+                set_multi_agent_mode(
+                    model_info,
+                    SECOND_MODEL_EXPLICIT_TEXT,
+                    Some(SECOND_MODEL_PROACTIVE_TEXT),
+                    /*hint_text*/ None,
+                    Some(SECOND_MODEL_ROOT_ROLE_TEXT),
+                );
+            })
+            .with_model_info_override("gpt-5.4", |model_info| {
+                add_ultra_reasoning(model_info);
+                set_multi_agent_mode(
+                    model_info,
+                    CATALOG_EXPLICIT_TEXT,
+                    Some(CATALOG_PROACTIVE_TEXT),
+                    /*hint_text*/ None,
+                    Some(FIRST_MODEL_ROOT_ROLE_TEXT),
+                );
+            })
+            .with_config(configure_multi_agent_v2)
+            .build_with_auto_env(&server)
+            .await?;
+        submit_turn(&test.codex, "first model", Some(effort.clone())).await?;
+        core_test_support::submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                model: Some("gpt-5.2".to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        submit_turn(&test.codex, "second model", Some(effort)).await?;
 
-    Ok(())
+        let requests = responses.requests();
+        for (index, request) in requests.iter().enumerate() {
+            let input = request.input();
+            let texts = developer_texts(&input);
+            assert_eq!(
+                (
+                    count_containing(&texts, expected_hints[0]),
+                    count_containing(&texts, expected_hints[1]),
+                    count_containing(&texts, NO_SPAWN_TEXT),
+                    count_containing(&texts, PROACTIVE_TEXT),
+                ),
+                (1, usize::from(index == 1), 0, 0)
+            );
+        }
+
+        let developer_messages = requests[1].message_input_texts("developer");
+        let [first_role_position, second_role_position] =
+            [FIRST_MODEL_ROOT_ROLE_TEXT, SECOND_MODEL_ROOT_ROLE_TEXT].map(|role| {
+                developer_messages
+                    .iter()
+                    .position(|text| {
+                        (text.starts_with("<multi_agent_role>") && text.contains(role))
+                            || (text.starts_with("<instruction_diff>")
+                                && text.contains("multi_agent_usage_hint/")
+                                && text.lines().any(|line| {
+                                    line.starts_with('+')
+                                        && !line.starts_with("+++")
+                                        && line.contains(role)
+                                }))
+                    })
+                    .expect("catalog root role or its amendment")
+            });
+        let active_mode_position = developer_messages
+            .iter()
+            .rposition(|text| text.contains(MULTI_AGENT_MODE_OPEN_TAG))
+            .expect("active multi-agent mode should be present");
+        assert!(
+            first_role_position < second_role_position
+                && second_role_position < active_mode_position,
+            "catalog root-role amendments must precede the active-mode amendment"
+        );
+
+        Ok(())
     })
     .await
 }
