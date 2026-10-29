@@ -10,6 +10,7 @@ use pretty_assertions::assert_eq;
 async fn retained_websocket_requests_preserve_model_output_and_ids() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let events = vec![
+        responses::ev_message_item_added("classifier", ""),
         ev_output_text_delta("low"),
         json!({"type":"response.output_item.done", "item":{"type":"reasoning", "id":"rs_score", "summary":[], "encrypted_content":"opaque reasoning"}}),
         ev_assistant_message("msg_score", "low"),
@@ -120,7 +121,7 @@ async fn retention_overflow_or_incomplete_stream_keeps_early_score() -> Result<(
         })
     }) {
         let mut events = if early_delta {
-            vec![ev_output_text_delta("low")]
+            vec![responses::ev_message_item_added("classifier", ""), ev_output_text_delta("low")]
         } else {
             Vec::new()
         };

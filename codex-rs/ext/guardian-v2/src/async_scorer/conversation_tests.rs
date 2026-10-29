@@ -543,6 +543,7 @@ async fn preflight_skips_only_after_score_and_history_are_superseded() -> Result
         set_cached_score(store, cached);
         let server = responses::start_mock_server().await;
         let mut events = vec![responses::sse(vec![
+            responses::ev_message_item_added("classifier", ""),
             responses::ev_output_text_delta("low"),
             ev_assistant_message("newer", if retain_newer { "low" } else { "lowhigh" }),
             ev_completed("newer"),
@@ -637,6 +638,7 @@ async fn delayed_classification_skips_after_newer_score_and_history_complete() -
     let mock = responses::mount_sse_once(
         &server,
         responses::sse(vec![
+            responses::ev_message_item_added("classifier", ""),
             responses::ev_output_text_delta("low"),
             ev_assistant_message("newer", "low"),
             ev_completed("newer"),
@@ -753,6 +755,7 @@ async fn concurrent_requests_retain_only_the_newest_completed_history() -> Resul
                 vec![StreamingSseChunk {
                     gate: None,
                     body: responses::sse(vec![
+                        responses::ev_message_item_added("classifier", ""),
                         responses::ev_output_text_delta("low"),
                         ev_assistant_message(
                             label,
@@ -773,7 +776,10 @@ async fn concurrent_requests_retain_only_the_newest_completed_history() -> Resul
         streams[1] = vec![
             StreamingSseChunk {
                 gate: None,
-                body: responses::sse(vec![responses::ev_output_text_delta("low")]),
+                body: responses::sse(vec![
+                    responses::ev_message_item_added("classifier", ""),
+                    responses::ev_output_text_delta("low"),
+                ]),
             },
             StreamingSseChunk {
                 gate: Some(older_completion),
@@ -954,6 +960,7 @@ async fn expiry_preserves_the_completed_checkpoint_and_transcript_cursor() -> Re
                 gate: None,
                 body: responses::sse(vec![
                     responses::ev_response_created("expired"),
+                    responses::ev_message_item_added("classifier", ""),
                     responses::ev_output_text_delta("low"),
                     ev_assistant_message("uncommitted", "low"),
                 ]),
@@ -1056,6 +1063,7 @@ async fn expiry_discards_a_queued_score_without_recording_success() -> Result<()
     responses::mount_sse_once(
         &server,
         responses::sse(vec![
+            responses::ev_message_item_added("classifier", ""),
             responses::ev_output_text_delta("low"),
             ev_assistant_message("score", "low"),
             ev_completed("score"),

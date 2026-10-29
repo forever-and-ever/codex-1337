@@ -17,6 +17,7 @@ async fn stale_classifications_close_the_transport_without_invalidating_scores()
             .await?;
             let mut events = vec![responses::ev_response_created("stale")];
             if early_score {
+                events.push(responses::ev_message_item_added("classifier", ""));
                 events.push(responses::ev_output_text_delta("low"));
             }
             let server =

@@ -96,14 +96,14 @@ fn augment_tool_spec_for_code_mode_augments_function_tools() {
         })),
         ToolSpec::Function(ResponsesApiTool {
             name: "lookup_order".to_string(),
-            description: r#"Look up an order
-
-Call: await tools.lookup_order(args).
+            description: r#"Call: await tools.lookup_order(args).
 Parameters: object
   order_id (required): string
   Other fields forbidden.
 Returns: object
-  ok (required): boolean"#
+  ok (required): boolean
+
+Look up an order"#
                 .to_string(),
             strict: false,
             defer_loading: Some(true),
@@ -174,11 +174,12 @@ fn tool_spec_to_code_mode_tool_definition_returns_augmented_nested_tools() {
             summary: "Apply a patch".to_string(),
             name: "apply_patch".to_string(),
             tool_name: ToolName::plain("apply_patch"),
-            description: r#"Apply a patch
+            description:
+                r#"Call: await tools.apply_patch(input). Input is a raw string, not a JSON envelope.
+Returns: no declared shape.
 
-Call: await tools.apply_patch(input). Input is a raw string, not a JSON envelope.
-Returns: no declared shape."#
-                .to_string(),
+Apply a patch"#
+                    .to_string(),
             kind: codex_code_mode::CodeModeToolKind::Freeform,
             input_schema: None,
             output_schema: None,
@@ -209,10 +210,10 @@ fn tool_spec_to_code_mode_tool_definition_supports_namespaced_custom_tools() {
             summary: "Apply a patch".to_string(),
             name: "editor__apply_patch".to_string(),
             tool_name: ToolName::namespaced("editor", "apply_patch"),
-            description: r#"Apply a patch
+            description: r#"Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.
+Returns: no declared shape.
 
-Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.
-Returns: no declared shape."#
+Apply a patch"#
                 .to_string(),
             kind: codex_code_mode::CodeModeToolKind::Freeform,
             input_schema: None,
@@ -229,7 +230,7 @@ Returns: no declared shape."#
     assert!(
         metadata
             .description
-            .starts_with("Editing tools\n\nApply a patch")
+            .starts_with("Editing tools\n\nCall: await tools.editor__apply_patch(input)")
     );
     assert!(
         metadata
