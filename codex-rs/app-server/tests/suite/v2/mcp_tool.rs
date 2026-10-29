@@ -885,11 +885,17 @@ async fn mcp_server_elicitation_survives_environment_runtime_refresh() -> Result
     let mut filesystem_request_rx = filesystem_request_rx;
     timeout(DEFAULT_READ_TIMEOUT, async {
         loop {
-            let status_request_id = mcp
-                .send_raw_request("mcpServerStatus/list", Some(json!({"threadId": thread.id})))
+            // Status inspection is read-only; a real call refreshes the runtime.
+            let refresh_request_id = mcp
+                .send_mcp_server_tool_call_request(McpServerToolCallParams {
+                    thread_id: thread.id.clone(),
+                    server: TEST_SERVER_NAME.to_string(),
+                    tool: TEST_TOOL_NAME.to_string(),
+                    arguments: Some(json!({"message": "refresh-probe"})),
+                    meta: None,
+                })
                 .await?;
-            mcp.read_stream_until_response_message(RequestId::Integer(status_request_id))
-                .await?;
+            let _: McpServerToolCallResponse = mcp.read_response(refresh_request_id).await?;
             if filesystem_request_rx.try_recv().is_ok() {
                 return Ok::<_, anyhow::Error>(());
             }

@@ -378,6 +378,9 @@ pub(super) async fn ensure_listener_task_running(
                         outgoing_for_task.clone(),
                         subscribed_connection_ids,
                         conversation_id,
+                    )
+                    .with_idle_elicitation_connections(
+                        thread_state_manager.subscribe_to_has_connections(conversation_id).await,
                     );
 
                     // Publish the committed receipt before turn/completed so completion
