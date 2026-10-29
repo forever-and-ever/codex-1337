@@ -1,3 +1,5 @@
+mod identity_persistence;
+
 mod workspace_routing;
 
 #[path = "account_grant.rs"]
@@ -925,34 +927,7 @@ fn persist_agent_identity_record(
     storage: &Arc<dyn AuthStorageBackend>,
     record: AgentIdentityAuthRecord,
 ) -> std::io::Result<()> {
-    let _commit = auth_storage_commit_guard()?;
-    let mut guard = auth_dot_json
-        .lock()
-        .map_err(|_| std::io::Error::other("failed to lock auth state"))?;
-    let previous = storage
-        .load()?
-        .ok_or_else(|| std::io::Error::other("auth data is not available"))?;
-    if let Some(cached) = guard.as_ref() {
-        let mut credentials = previous.clone();
-        credentials.agent_identity = cached.agent_identity.clone();
-        if &credentials != cached {
-            return Err(std::io::Error::other(
-                "Account changed during agent identity registration.",
-            ));
-        }
-    }
-    let mut auth = previous.clone();
-    auth.agent_identity = Some(AgentIdentityStorage::Record(record));
-    if !storage.compare_exchange(&previous, &auth)? {
-        return Err(std::io::Error::other(
-            "Account changed during agent identity registration.",
-        ));
-    }
-    // Identity metadata never publishes another on-disk credential snapshot.
-    if let Some(cached) = guard.as_mut() {
-        cached.agent_identity = auth.agent_identity;
-    }
-    Ok(())
+    identity_persistence::persist(auth_dot_json, storage, record)
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
