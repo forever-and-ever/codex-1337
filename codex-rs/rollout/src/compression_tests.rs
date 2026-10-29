@@ -754,17 +754,29 @@ async fn worker_preserves_alternate_group_through_materialization() -> anyhow::R
     let original_group = fs::metadata(&path)?.gid();
     let groups = Command::new("id").arg("-G").output()?;
     assert!(groups.status.success());
-    let Some(group) = std::str::from_utf8(&groups.stdout)?
+    let mut alternate_group = None;
+    for group in std::str::from_utf8(&groups.stdout)?
         .split_whitespace()
         .map(str::parse::<u32>)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .find(|group| *group != original_group)
-    else {
-        eprintln!("skipping ownership regression: no alternate supplementary group");
+        .filter(|group| *group != original_group)
+    {
+        match std::os::unix::fs::chown(&path, /*uid*/ None, Some(group)) {
+            Ok(()) => {
+                alternate_group = Some(group);
+                break;
+            }
+            // User namespaces report unmapped supplementary groups as the overflow
+            // GID, but chown cannot use them. They are not an available fixture.
+            Err(error) if error.raw_os_error() == Some(libc::EINVAL) => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let Some(group) = alternate_group else {
+        eprintln!("skipping ownership regression: no usable alternate supplementary group");
         return Ok(());
     };
-    std::os::unix::fs::chown(&path, /*uid*/ None, Some(group))?;
     assert_eq!(fs::metadata(&path)?.gid(), group);
 
     worker::run(home.path().to_path_buf(), Startup).await?;
