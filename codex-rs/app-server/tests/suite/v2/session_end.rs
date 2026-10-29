@@ -190,7 +190,7 @@ with Path(r"{}").open("a", encoding="utf-8") as handle:
         .enable_feature(Feature::CodexHooks)
         .with_extra_config(&format!(
             r#"[[hooks.SessionEnd]]
-matcher = "other"
+selector = {{ type = "event_value", pattern = "other" }}
 
 [[hooks.SessionEnd.hooks]]
 type = "command"

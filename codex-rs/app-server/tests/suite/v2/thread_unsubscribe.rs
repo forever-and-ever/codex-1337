@@ -657,7 +657,7 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
             responses::sse(vec![
                 responses::ev_function_call_with_namespace(
                     &call_id,
-                    "collaboration",
+                    "wrangler_agents",
                     tool,
                     &args.to_string(),
                 ),
@@ -673,7 +673,7 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
             responses::sse(vec![responses::ev_completed("parent-done")]),
         )
         .await;
-        if tool != "send_message" {
+        {
             let parent_id = parent.id.clone();
             let _child = responses::mount_sse_once_match(
                 &server,
@@ -706,7 +706,7 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
         )
         .await??;
 
-        if tool != "send_message" {
+        {
             let completed = timeout(
                 DEFAULT_READ_TIMEOUT,
                 mcp.read_stream_until_matching_notification(
@@ -728,9 +728,10 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
             } else {
                 child_id = Some(completed_child);
             }
-        } else {
-            // Mail is queued while subscribed. Unsubscribe lets the actual child listener
-            // evict it; the parent stays loaded so the follow-up uses the same agent tree.
+        }
+        if tool == "send_message" {
+            // Ordinary mail wakes idle recipients (643f434477). Evict only after that
+            // turn completes; the follow-up must restore both its mail and history.
             let child_id = child_id.clone().expect("spawned child");
             let unsubscribed: ThreadUnsubscribeResponse = mcp
                 .request(|request_id| ClientRequest::ThreadUnsubscribe {
@@ -764,8 +765,8 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
                         |request| request.header("thread-id").as_deref() == Some(child_id.as_str())
                     )
                     .count(),
-                1,
-                "queue-only mail must not start another child turn",
+                2,
+                "ordinary mail must wake the idle child once",
             );
         }
     }
@@ -775,21 +776,24 @@ async fn v2_child_idle_eviction_preserves_mail_and_followup_context() -> Result<
         .iter()
         .filter(|request| request.header("thread-id").as_deref() == Some(child_id.as_str()))
         .collect();
-    assert_eq!(child_requests.len(), 2);
+    assert_eq!(child_requests.len(), 3);
     assert_eq!(
-        child_requests[1]
+        child_requests[2]
             .inputs_of_type("message")
             .into_iter()
             .filter(|item| item["role"] == "assistant")
             .collect::<Vec<_>>(),
-        vec![json!({
-            "type": "message", "role": "assistant",
-            "content": [{"type": "output_text", "text": "Remember the initial child result"}],
-        })],
+        vec![
+            json!({
+                "type": "message", "role": "assistant",
+                "content": [{"type": "output_text", "text": "Remember the initial child result"}],
+            });
+            2
+        ],
     );
     for message in ["Unread note for later", "Continue the child task"] {
         assert_eq!(
-            child_requests[1]
+            child_requests[2]
                 .inputs_of_type("agent_message")
                 .iter()
                 .filter(|item| item.to_string().contains(message))
