@@ -133,7 +133,7 @@ const QUEUE_DB: RuntimeDbSpec = RuntimeDbSpec {
     open_phase: "open_queue",
     migrate_phase: "migrate_queue",
     background_reclamation: false,
-    // Accepted mail and queued input have no rebuildable canonical copy.
+    // TELOS(authoritative-queue-integrity): Accepted mail has no rebuildable canonical copy.
     recovery: RecoveryMode::Unavailable,
 };
 
@@ -430,6 +430,7 @@ impl SqliteConfig {
         // Each failed attempt closes its pool before initialization is retried.
         let connect = || async { connect_once(&options).await.map_err(anyhow::Error::from) };
         let pool = retry_on_busy(connect).await?;
+        // TELOS(authoritative-queue-integrity): A cached check attempt cannot admit known corruption.
         let validation_result = self
             .check_runtime_integrity(&pool, path, recover_spec, telemetry_override)
             .await;

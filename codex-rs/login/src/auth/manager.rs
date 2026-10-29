@@ -927,6 +927,7 @@ fn persist_agent_identity_record(
     storage: &Arc<dyn AuthStorageBackend>,
     record: AgentIdentityAuthRecord,
 ) -> std::io::Result<()> {
+    // TELOS(pinned-accounts): Registration adds metadata without publishing another login's credentials.
     identity_persistence::persist(auth_dot_json, storage, record)
 }
 

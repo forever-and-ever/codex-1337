@@ -331,6 +331,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 edits `core/src/agent/control.rs` with #51415 (turn lineage), #51329 (no partial-history subagent forks), #50087 (queued agent mail across eviction), #49814 and #51515 (coordinated agent-tree shutdown); #51415 also edits `thread_queue_processor.rs`. Path allocation and replay must not mistake an uncertain accepted request for a fresh reservation.
 - Evidence: fa1cf4ce29, 8e8bb48075, c8dec1e3eb, 217bcce455, db62274156, eb8132ec04, f4588c72c6, e373b1520b, e331fec3c1, 2d9abac7cf.
 
+### authoritative-queue-integrity
+
+- Telos: corruption cannot silently erase accepted mail or reopen its authoritative queue as usable.
+- Holds: a corrupt queue database rejects initialization and remains untouched, without backup-and-rebuild. Repeated and concurrent initializers sharing a configuration observe the same integrity verdict for that file identity; a cached attempt alone never authorizes acceptance. Other runtime databases retain their own recovery policies.
+- Owners: `codex-rs/state/src/sqlite.rs` (`QUEUE_DB`, `SqliteConfig::open_read_write_pool_with_spec`), `codex-rs/state/src/sqlite/queue_integrity.rs` (`QueueIntegrity`, `SqliteConfig::check_runtime_integrity`).
+- Tripwire: `runtime_opens_recover_or_report_corruption_by_database_policy` (`codex-rs/state/src/sqlite/validation_tests.rs`) checks repeated rejection, unchanged corrupt bytes and no recovery backup. Concurrent initialization is serialized by the shared result cell; no separate concurrency witness.
+- Pressure: upstream's `SqliteQuickCheckManager::quick_check_once` caches attempts, including corruption, and later returns `Skipped`; restoring that call admits a queue already rejected by the fork. Upstream's queue recovery policy rebuilds the database, which has no canonical source for accepted mail.
+- Evidence: 387ab6b20b.
+
 ### durable-approvals-and-queues
 
 - Telos: a reconnect loses no pending decision or queued edit.
@@ -383,11 +392,20 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### pinned-accounts
 
 - Telos: each conversation bills the account the human chose, and switching never breaks work in progress.
-- Holds: every conversation and family is pinned to an account; a switch applies per session at the next safe request boundary without interrupting tools or inference; quota snapshots are shared through the server, coalesced, and honor per-account cooldowns; a fresh draft reads quota for the account it displays.
-- Owners: `codex-rs/core/src/session/account.rs`, `codex-rs/app-server/src/request_processors/thread_accounts.rs`, `codex-rs/app-server/src/request_processors/account_processor/quota.rs`, `codex-rs/app-server/src/request_processors/account_processor/quota_cache.rs`, `codex-rs/app-server/src/request_processors/account_processor/account_scope.rs`, `codex-rs/tui/src/app_server_session/account.rs`.
-- Tripwire: `conversation_accounts_survive_selection_login_and_fork` (`codex-rs/app-server/tests/suite/v2/thread_accounts.rs`), `cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns` (`codex-rs/app-server/src/request_processors/account_processor/quota_cache_tests.rs`). Draft quota scope: none.
-- Pressure: 0.162 #50199 (account email in `/status`) and #49715 (account security reminders) edit the TUI account paths in `app.rs`, `reconnect.rs` and `lib.rs`.
-- Evidence: 8bc33e5acd, 0ec65fe8c4, df24f7a816, 9733575fc3.
+- Holds: every conversation and family is pinned to an account; a switch applies per session at the next safe request boundary without interrupting tools or inference; quota snapshots are shared through the server, coalesced, and honor per-account cooldowns; a fresh draft reads quota for the account it displays. Agent registration compare/exchanges metadata into the captured account and publishes only identity metadata to its cached auth, never changed stored credentials.
+- Owners: `codex-rs/core/src/session/account.rs`, `codex-rs/app-server/src/request_processors/thread_accounts.rs`, `codex-rs/app-server/src/request_processors/account_processor/quota.rs`, `codex-rs/app-server/src/request_processors/account_processor/quota_cache.rs`, `codex-rs/app-server/src/request_processors/account_processor/account_scope.rs`, `codex-rs/tui/src/app_server_session/account.rs`, `codex-rs/login/src/auth/manager.rs` (`persist_agent_identity_record`), `codex-rs/login/src/auth/manager/identity_persistence.rs`.
+- Tripwire: `conversation_accounts_survive_selection_login_and_fork` (`codex-rs/app-server/tests/suite/v2/thread_accounts.rs`), `cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns` (`codex-rs/app-server/src/request_processors/account_processor/quota_cache_tests.rs`). `chatgpt_auth_registers_agent_identity_when_enabled` (`codex-rs/login/src/auth/auth_tests.rs`) checks registration when a legacy client omits login metadata; changed-grant registration has no separate witness. Draft quota scope: none.
+- Pressure: 0.162 #50199 (account email in `/status`) and #49715 (account security reminders) edit the TUI account paths in `app.rs`, `reconnect.rs` and `lib.rs`. Registration persistence must retain account-scoped compare/exchange and identity-only cache publication instead of restoring a store save/reload.
+- Evidence: 8bc33e5acd, 0ec65fe8c4, df24f7a816, 9733575fc3, 901f783aff.
+
+### credential-backend-authority
+
+- Telos: credential instrumentation cannot replace a backend's storage and transaction authority.
+- Holds: `ObservedStorage` delegates `save` and `compare_exchange` to the inner backend while recording logical telemetry. Ephemeral transactions remain atomic and entirely in memory: they create neither a Codex home nor lock files. An inherited trait default cannot substitute filesystem locking or a split read/write for a backend override.
+- Owners: `codex-rs/login/src/auth/storage_telemetry.rs` (`ObservedStorage`), `codex-rs/login/src/auth/storage.rs` (`AuthStorageBackend`, `EphemeralAuthStorage`).
+- Tripwire: `ephemeral_storage_save_load_delete_is_in_memory_only` (`codex-rs/login/src/auth/storage_tests.rs`) checks successful and stale compare/exchange through the observed backend and that an absent home remains absent.
+- Pressure: the fork's transactional storage methods have defaults; adding or restoring a trait method without forwarding its backend override can silently reintroduce disk effects or bypass atomicity. Review the decorator whenever `AuthStorageBackend` gains an operation, not only when telemetry changes.
+- Evidence: 8b8b30b3c4.
 
 ## Repository policy
 
@@ -753,6 +771,11 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/pager_overlay.rs`: attention-gated-painting
 - `codex-rs/tui/src/pager_overlay/transcript.rs`: attention-gated-painting
 
+- `codex-rs/state/src/sqlite.rs`: authoritative-queue-integrity
+- `codex-rs/login/src/auth/storage.rs`: credential-backend-authority
+- `codex-rs/login/src/auth/storage_telemetry.rs`: credential-backend-authority
+- `codex-rs/login/src/auth/manager.rs`: pinned-accounts
+
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread
 - `codex-rs/tui/src/tui/frame_rate_limiter/completion.rs`: fast-ui-thread
@@ -1005,3 +1028,5 @@ Fork-owned files, absent upstream:
 - `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode-runtime/src/session_runtime/types.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode/src/remote_session/delegate.rs`: code-mode-cell-outcomes
+- `codex-rs/state/src/sqlite/queue_integrity.rs`: authoritative-queue-integrity
+- `codex-rs/login/src/auth/manager/identity_persistence.rs`: pinned-accounts
