@@ -61,6 +61,7 @@ async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<
         } else {
             vec!["-c", "features.api_key_model_discovery=true"]
         };
+        // The PTY grants emergency embedded mode; a disabled reason must not veto that grant.
         let mut terminal = PtyCodex::start(&cwd, home, &args)?;
         terminal.wait_for_screen("Background server has incompatible feature settings")?;
         terminal.write_input(b"1")?;
