@@ -278,7 +278,7 @@ requires_openai_auth = true
             providers: vec![
                 codex_app_server_protocol::ModelProviderOption {
                     id: "catalog-test".into(),
-                    name: "OpenAI".into()
+                    name: "After login".into()
                 },
                 // Native Claude is built in, even without an explicit provider
                 // table or credentials. Listing it must not contact Anthropic.

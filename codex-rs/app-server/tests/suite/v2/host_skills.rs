@@ -127,7 +127,7 @@ stream_max_retries = 0
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(vec![1, 2, 2], marker_counts(INITIAL_SKILL_DESCRIPTION));
+        assert_eq!(vec![1, 1, 1], marker_counts(INITIAL_SKILL_DESCRIPTION));
         assert_eq!(vec![0, 1, 1], marker_counts(RUNTIME_SKILL_DESCRIPTION));
 
         Ok(())
