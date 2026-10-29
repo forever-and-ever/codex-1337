@@ -214,10 +214,9 @@ fn actor_authorization(
         CodexAuth::PersonalAccessToken(_) => {
             AuthenticatedActorAuthorization::PersonalAccessToken { credential }
         }
-        CodexAuth::Headers(_)
-        | CodexAuth::AgentIdentity(_)
-        | CodexAuth::BedrockApiKey(_)
-        | CodexAuth::BedrockAccessKeys(_) => return Err(RuntimeAuthError::Unsupported),
+        CodexAuth::Headers(_) | CodexAuth::AgentIdentity(_) => {
+            return Err(RuntimeAuthError::Unsupported);
+        }
     })
 }
 
