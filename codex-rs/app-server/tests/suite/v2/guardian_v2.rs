@@ -485,6 +485,17 @@ async fn parent_response(
             .pointer("/client_metadata/x-codex-parent-thread-id")
             .is_none()
     {
+        // Completion mail may wake the root before the next explicit user turn.
+        // It must not advance the scripted authorization handoff.
+        if request["client_metadata"]["turn_id"]
+            .as_str()
+            .is_some_and(|turn_id| turn_id.starts_with("amsg_mail_"))
+        {
+            return (
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                responses::sse(vec![responses::ev_completed("root-mail-complete")]),
+            );
+        }
         let root_request = state.root_requests.fetch_add(1, Ordering::SeqCst);
         if state.compact_root_after_answer && root_request == 4 {
             let input = request["input"].as_array().expect("root model input");
@@ -662,6 +673,7 @@ async fn luna_response(state: &MockResponsesState, request: Value) -> Vec<Value>
     let message_id = format!("msg_luna-score-{completion}");
     vec![
         responses::ev_response_created(&response_id),
+        responses::ev_message_item_added(&message_id, ""),
         responses::ev_output_text_delta(classification),
         responses::ev_assistant_message(&message_id, classification),
         if state.fail_after_classification {
@@ -1231,7 +1243,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             let retained = input.iter().any(|item| {
                 item["id"]
                     .as_str()
-                    .is_some_and(|id| id.starts_with("luna-score-message-"))
+                    .is_some_and(|id| id.starts_with("msg_luna-score-"))
             });
             // An early score can release the next action before its history is committed.
             assert!(!retained || retention_allowed);
@@ -1513,7 +1525,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             let retained_ids = input
                 .iter()
                 .filter_map(|item| item["id"].as_str())
-                .filter(|id| id.starts_with("luna-score-message-"))
+                .filter(|id| id.starts_with("msg_luna-score-"))
                 .collect::<Vec<_>>();
             if classifier_mode == codex_protocol::openai_models::AsyncClassifierMode::Conversation
                 && !fail_after_classification
@@ -1521,8 +1533,8 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             {
                 // Either earlier request may be the last committed fork when this starts.
                 let previous_request = match *latest {
-                    "luna-score-message-0" => &luna_request,
-                    "luna-score-message-1" => &second_sample,
+                    "msg_luna-score-0" => &luna_request,
+                    "msg_luna-score-1" => &second_sample,
                     _ => panic!("retained an unknown classifier response"),
                 };
                 let previous = previous_request["input"]
@@ -1532,7 +1544,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 let expected_ids = previous
                     .iter()
                     .filter_map(|item| item["id"].as_str())
-                    .filter(|id| id.starts_with("luna-score-message-"))
+                    .filter(|id| id.starts_with("msg_luna-score-"))
                     .chain(std::iter::once(*latest))
                     .collect::<Vec<_>>();
                 assert_eq!(retained_ids, expected_ids);
