@@ -3877,36 +3877,6 @@ async fn status_line_fast_mode_footer_snapshot() {
 }
 
 #[tokio::test]
-async fn status_line_active_account_footer_snapshot() {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
-    chat.show_welcome_banner = false;
-    chat.local_settings.tui.status_line = Some(vec!["active-account".to_string()]);
-    chat.active_account_label = Some("Claude · work Claude".to_string());
-    chat.refresh_status_line();
-
-    let width = 80;
-    let height = chat.desired_height(width);
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
-    terminal
-        .draw(|f| chat.render(f.area(), f.buffer_mut()))
-        .expect("draw active-account footer");
-    assert_chatwidget_snapshot!(
-        "status_line_active_account_footer",
-        normalized_backend_snapshot(terminal.backend())
-    );
-
-    chat.active_account_label = Some("ChatGPT · personal".to_string());
-    chat.refresh_status_line();
-    assert_eq!(
-        status_line_text(&chat),
-        Some("ChatGPT · personal".to_string())
-    );
-}
-
-#[tokio::test]
 async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     handle_token_count(

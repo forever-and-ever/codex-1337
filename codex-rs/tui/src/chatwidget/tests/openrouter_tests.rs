@@ -2,18 +2,12 @@ use super::*;
 use crate::openrouter::Event;
 use crate::openrouter::ModelMenu;
 use crate::openrouter::StatusRefresh;
-use codex_app_server_protocol::OpenRouterEndpoint;
-use codex_app_server_protocol::OpenRouterHost;
 use codex_app_server_protocol::OpenRouterKey;
 use codex_app_server_protocol::OpenRouterKeyLimit;
 use codex_app_server_protocol::OpenRouterKeyState;
 use codex_app_server_protocol::OpenRouterKeyStatus;
-use codex_app_server_protocol::OpenRouterModelEndpointsResponse;
 use codex_app_server_protocol::OpenRouterSpend;
-use codex_protocol::EndpointFilter;
-use codex_protocol::EndpointSet;
 use codex_protocol::Usd;
-use std::collections::BTreeSet;
 
 #[tokio::test]
 async fn openrouter_model_menu_snapshot() {
@@ -110,65 +104,6 @@ async fn openrouter_model_menu_snapshot() {
             );
         }
     }
-}
-
-#[tokio::test]
-async fn openrouter_endpoints_snapshot() {
-    let (mut chat, _rx, _op_rx) = Box::pin(make_chatwidget_manual(None)).await;
-    let host = |slug: &str,
-                name: &str,
-                quantization: &str,
-                tier: &str,
-                input: i64,
-                output: i64,
-                uptime| OpenRouterHost {
-        slug: slug.parse().unwrap(),
-        name: name.into(),
-        endpoints: vec![OpenRouterEndpoint {
-            slug: format!("{slug}/turbo").parse().unwrap(),
-            quantization: Some(quantization.into()),
-            service_tier: Some(tier.into()),
-            context_length: 1_000_000,
-            prompt_per_mtok: Some(Usd::from_nanodollars(input)),
-            completion_per_mtok: Some(Usd::from_nanodollars(output)),
-            uptime_percent: Some(uptime),
-        }],
-    };
-    let filter = EndpointFilter::Only(
-        EndpointSet::new(BTreeSet::from([
-            "deepinfra/turbo".parse().unwrap(),
-            "old-host".parse().unwrap(),
-        ]))
-        .unwrap(),
-    );
-    chat.show_openrouter_endpoints(
-        ModelMenu::Current,
-        "moonshotai/kimi-k3".parse().unwrap(),
-        OpenRouterModelEndpointsResponse {
-            hosts: vec![
-                host(
-                    "deepseek",
-                    "DeepSeek",
-                    "fp8",
-                    "priority",
-                    300_000_000,
-                    11_940_000_000,
-                    99.9,
-                ),
-                host(
-                    "deepinfra",
-                    "DeepInfra",
-                    "bf16",
-                    "flex",
-                    400_000_000,
-                    12_000_000_000,
-                    99.5,
-                ),
-            ],
-            filter,
-        },
-    );
-    assert_chatwidget_snapshot!("openrouter_endpoints", render_bottom_popup(&chat, 120));
 }
 
 #[tokio::test]

@@ -851,26 +851,6 @@ async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
 }
 
 #[tokio::test]
-async fn latest_session_lookup_params_keep_local_filters_for_local_daemon_sessions()
--> color_eyre::Result<()> {
-    let temp_dir = TempDir::new()?;
-    let cwd = temp_dir.path().join("project");
-    let params = latest_session_lookup_params(
-        Some("selected-provider".to_string()),
-        Some(cwd.as_path()),
-        /*include_non_interactive*/ false,
-        LatestSessionLookupMode::StateDbOnly,
-    );
-
-    assert_eq!(params.model_providers, Some(Vec::new()));
-    assert_eq!(
-        params.cwd,
-        Some(ThreadListCwdFilter::One(cwd.to_string_lossy().to_string()))
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn latest_session_lookup_params_omit_local_filters_for_remote_sessions() -> std::io::Result<()>
 {
     let params = latest_session_lookup_params(

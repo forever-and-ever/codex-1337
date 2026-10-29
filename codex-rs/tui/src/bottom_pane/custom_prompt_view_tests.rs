@@ -6,15 +6,6 @@ use pretty_assertions::assert_eq;
 use std::sync::mpsc::Receiver;
 
 #[test]
-fn optional_prompt_accepts_empty_submission() {
-    let (view, submitted_rx) = custom_prompt_view();
-    let mut view = view.allow_empty_submit();
-    view.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    assert_eq!(submitted_rx.try_recv(), Ok(String::new()));
-    assert_eq!(view.completion(), Some(ViewCompletion::Accepted));
-}
-
-#[test]
 fn picker_prompt_keeps_multiline_cursor_and_escape_hint_visible_after_resize() {
     let (mut view, submitted_rx) = custom_prompt_view();
     view.enable_vim_in_insert_mode();

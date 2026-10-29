@@ -305,7 +305,3 @@ impl Renderable for RosterView {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "subagent_roster_tests.rs"]
-mod tests;

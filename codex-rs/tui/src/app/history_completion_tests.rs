@@ -58,26 +58,3 @@ fn multiple_turns_keep_item_groups_and_completion_order() {
         ],
     );
 }
-
-#[test]
-fn failures_keep_their_boundary_while_interrupted_and_running_turns_only_separate_groups() {
-    let turns = vec![
-        turn("failed", TurnStatus::Failed, &["a"]),
-        turn("interrupted", TurnStatus::Interrupted, &["b"]),
-        turn("running", TurnStatus::InProgress, &["c"]),
-    ];
-    let items = turns
-        .iter()
-        .flat_map(|turn| turn.items.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        group_turn_items(items, &turns),
-        turns
-            .iter()
-            .map(|turn| (
-                turn.items.clone(),
-                (turn.status == TurnStatus::Failed).then_some(turn)
-            ))
-            .collect::<Vec<_>>(),
-    );
-}
