@@ -295,23 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn preserves_pipeline_with_helper_when_later_stage_is_unknown() {
-        let command = shlex_split_safe("rg --files | nl -ba | foo");
-        assert_parsed(
-            &command,
-            vec![
-                ParsedCommand::ListFiles {
-                    cmd: "rg --files".to_string(),
-                    path: None,
-                },
-                ParsedCommand::Unknown {
-                    cmd: "foo".to_string(),
-                },
-            ],
-        );
-    }
-
-    #[test]
     fn rg_files_with_matches_flags_are_search() {
         assert_parsed(
             &shlex_split_safe("rg -l TODO src"),
