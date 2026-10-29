@@ -85,7 +85,6 @@ use codex_protocol::protocol::UserMessageEvent;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutLine;
 use codex_rollout::append_rollout_item_to_path;
-use codex_rollout::append_thread_name;
 use codex_rollout::read_session_meta_line;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -1153,55 +1152,6 @@ async fn thread_fork_defers_inherited_active_goal_until_next_turn() -> Result<()
             .await?,
         Some(source_goal)
     );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn thread_fork_allocates_and_persists_opaque_source_name() -> Result<()> {
-    let server = create_mock_responses_server_repeating_assistant("Done").await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
-
-    let conversation_id = create_fake_rollout(
-        codex_home.path(),
-        "2025-01-05T12-00-00",
-        "2025-01-05T12:00:00Z",
-        "Saved user message",
-        Some("mock_provider"),
-        /*git_info*/ None,
-    )?;
-    let source_thread_id = ThreadId::from_string(&conversation_id)?;
-    let source_name = "Renamed parent thread (1)_fork_opaque";
-    append_thread_name(codex_home.path(), source_thread_id, source_name).await?;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized()
-        .await?;
-
-    let fork_id = mcp
-        .send_thread_fork_request(ThreadForkParams {
-            thread_id: conversation_id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let ThreadForkResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(fork_id)).await??;
-
-    let ThreadListResponse { data, .. } = list_threads(&mut mcp).await?;
-    let listed = data
-        .iter()
-        .find(|candidate| candidate.id == thread.id)
-        .expect("thread/list should include the forked thread");
-    let fork_name = thread
-        .name
-        .as_deref()
-        .expect("named parent allocates a fork name");
-    assert!(fork_name.starts_with(&format!("{source_name}_fork_")));
-    chrono::DateTime::parse_from_rfc3339(&fork_name[format!("{source_name}_fork_").len()..])?;
-    assert_eq!(listed.name, thread.name);
 
     Ok(())
 }

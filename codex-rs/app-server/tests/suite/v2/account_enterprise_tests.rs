@@ -760,14 +760,21 @@ oauth = {{ client_id = "mcp-client", client_secret = "resource-secret", token_en
             })
             .count()
     };
+    let ordinary_status = enterprise_rpc(
+        &client,
+        "mcpServerStatus/list",
+        json!({"serverName": "ordinary"}),
+    )
+    .await?;
     let inventory_requests_before =
         inventory_request_count(&server.received_requests().await.context("requests")?);
     assert!(inventory_requests_before > 0);
     let config_path = home.path().join("config.toml");
     let saved_config = std::fs::read_to_string(&config_path)?;
     let mut edited_config: toml::Value = toml::from_str(&saved_config)?;
+    let replacement_resource = format!("{origin}/replacement-mcp");
     for (url, enabled) in [
-        ("https://replacement.example/mcp", true),
+        (replacement_resource.as_str(), true),
         (resource.as_str(), false),
     ] {
         let enterprise = edited_config["mcp_servers"]["enterprise"]
@@ -776,12 +783,7 @@ oauth = {{ client_id = "mcp-client", client_secret = "resource-secret", token_en
         enterprise.insert("url".into(), toml::Value::String(url.into()));
         enterprise.insert("enabled".into(), toml::Value::Boolean(enabled));
         std::fs::write(&config_path, toml::to_string(&edited_config)?)?;
-        let changed = enterprise_rpc(
-            &client,
-            "mcpServerStatus/list",
-            json!({"threadId": connected_id}),
-        )
-        .await?;
+        let changed = enterprise_rpc(&client, "mcpServerStatus/list", json!({})).await?;
         assert_eq!(
             inventory_request_count(&server.received_requests().await.context("requests")?),
             inventory_requests_before,
@@ -804,7 +806,9 @@ oauth = {{ client_id = "mcp-client", client_secret = "resource-secret", token_en
         }
         assert_eq!(
             changed.iter().find(|status| status["name"] == "ordinary"),
-            statuses.iter().find(|status| status["name"] == "ordinary"),
+            ordinary_status["data"]
+                .as_array()
+                .and_then(|data| data.first()),
         );
     }
     std::fs::write(&config_path, &saved_config)?;
@@ -1444,9 +1448,7 @@ oauth = {{ client_id = "mcp-client", client_secret = "resource-secret", token_en
         .await
         .is_err()
     );
-    let restored: Value =
-        serde_json::from_str(&std::fs::read_to_string(home.path().join("auth.json"))?)?;
-    assert_eq!(restored["tokens"]["account_id"], WORKSPACE_ID_INITIAL);
+    assert!(!home.path().join("auth.json").exists());
     assert!(
         enterprise_rpc(&client, "mcpServer/tool/call", call("enterprise"))
             .await

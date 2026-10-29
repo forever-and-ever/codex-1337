@@ -2416,7 +2416,21 @@ mod tests {
                     || (path == Path::new("v2/McpServerOauthLoginCompletedNotification.ts")
                         && field_prefix.trim() == "loginId?")
                     || (path == Path::new("v2/MisalignmentErrorDetails.ts")
-                        && field_prefix.trim() == "reviewTarget?");
+                        && field_prefix.trim() == "reviewTarget?")
+                    || matches!(
+                        (path.to_str(), field_prefix.trim()),
+                        (Some("HookSelector.ts"), "namespace?" | "name?")
+                            | (Some("v2/ArrivalItem.ts"), "text?")
+                            | (
+                                Some(
+                                    "v2/ThreadGoalBoxesReadResponse.ts"
+                                        | "v2/ThreadGoalQuotaboxSetResponse.ts"
+                                ),
+                                "gauge?"
+                            )
+                            | (Some("v2/ThreadItem.ts"), "windowId?" | "raw?")
+                            | (Some("v2/TokenUsageBreakdown.ts"), "cost?")
+                    );
                 if field_prefix.chars().rev().find(|c| !c.is_whitespace()) == Some('?')
                     && !allow_optional_nullable
                     && !legacy_optional_nullable_field

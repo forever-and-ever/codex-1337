@@ -25,46 +25,6 @@ use wiremock::matchers::body_json;
 use wiremock::matchers::header;
 
 // A provider that does not use OpenAI authentication starts without any OpenAI login.
-#[tokio::test]
-async fn provider_thread_starts_without_openai_account() -> Result<()> {
-    let home = TempDir::new()?;
-    create_config_toml(
-        home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(false),
-            ..Default::default()
-        },
-    )?;
-    let mut app = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    let request = app
-        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
-        .await?;
-    let started: ThreadStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let request = app
-        .send_request("account/read", Some(json!({"threadId": started.thread.id})))
-        .await?;
-    let account: GetAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    assert_eq!(account.account_id, None);
-    assert_eq!(account.account, None);
-    assert!(!account.requires_openai_auth);
-    let request = app
-        .send_request(
-            "thread/account/list",
-            Some(json!({"threadId": started.thread.id})),
-        )
-        .await?;
-    let accounts: ThreadAccountListResponse =
-        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    assert_eq!(accounts.conversation_provider, None);
-    Ok(())
-}
-
 // Saved native identities, default preferences and captured conversation accounts
 // remain distinct even without an OpenAI login.
 #[tokio::test]

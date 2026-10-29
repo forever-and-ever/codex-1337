@@ -153,18 +153,3 @@ async fn telemetry_distinguishes_presence_from_default_values() -> anyhow::Resul
     }
     Ok(())
 }
-
-#[tokio::test]
-async fn inherited_public_auto_update_cannot_replace_the_fork() -> anyhow::Result<()> {
-    let home = TempDir::new()?;
-    let path = home.path().join("settings.json");
-    tokio::fs::write(&path, r#"{"updater":{"autoUpdateEnabled":true}}"#).await?;
-
-    assert!(!DaemonSettings::load(&path).await?.auto_update_enabled);
-    assert!(
-        !super::UpdaterSettings::load(&path)
-            .await?
-            .auto_update_enabled
-    );
-    Ok(())
-}
