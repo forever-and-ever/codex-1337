@@ -39,7 +39,7 @@ pub(crate) async fn supports_sandbox_state(executable: &AbsolutePathBuf) -> bool
 /// or loading configuration; only its exit status matters, not the help text.
 async fn probe_sandbox_state(executable: &AbsolutePathBuf) -> std::io::Result<bool> {
     let status = tokio::process::Command::from(background_command(executable.as_os_str()))
-        .args(["sandbox", "--sandbox-state-json", "{}", "--help"])
+        .args(["sandbox", "run", "--sandbox-state-json", "{}", "--help"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
