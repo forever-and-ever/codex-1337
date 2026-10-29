@@ -2,11 +2,11 @@
 source: tui/src/app/tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
-      Reword goal?
-› As  New objective: New goal
-                                                                              󰜗
-  GP
-    › 1. Reword current goal  Keep usage and boxes; start the new objective
-      2. Cancel               Keep the current goal
+  •   Reword goal?
+      New objective: New goal
+────                                                                        ────
 
+› As› 1. Reword current goal  Keep usage and boxes; start the new objective
+      2. Cancel               Keep the current goal                           󰜗
+  GP
       enter select · esc back

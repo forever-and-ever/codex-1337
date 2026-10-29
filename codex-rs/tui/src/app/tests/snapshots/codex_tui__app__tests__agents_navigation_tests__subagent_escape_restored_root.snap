@@ -2,6 +2,10 @@
 source: tui/src/app/tests/agents_navigation_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
+
 › Preserve this root draft
                                                                               󰜗
 ────────────────────────────────────────────────────────────────────────────────

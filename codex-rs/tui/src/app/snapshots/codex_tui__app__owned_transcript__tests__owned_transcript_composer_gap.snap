@@ -3,13 +3,13 @@ source: tui/src/app/owned_transcript_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Latest
-
-────────────────────────────────────────────────────────────────────────────────
-              Transcript row 38
               Transcript row 39
               Transcript row 40
 ────────────────────────────────────────────────────────────────────────────────
 
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 
 › draft
                                                                               󰜗
@@ -17,13 +17,13 @@ Latest
   gpt-test default · /tmp/project
 
 Reading
-  esc latest
-────────────────────────────────────────────────────────────────────────────────
-              Transcript row 36
-              Transcript row 37
               Transcript row 38
+              Transcript row 39
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 
 › draft
                                                                               󰜗
@@ -32,10 +32,13 @@ Reading
 
 Resized multiline composer
   esc latest
-              Transcript row 36
-              Transcript row 37
+              Transcript row 38
+              Transcript row 39
 ────────────────────────────────────────
          ↓ Back to bottom · esc
+  • Ready
+
+────────────────────────────────────────
 
 › draft
   second line
@@ -52,13 +55,13 @@ Tiny terminal
   gpt-test default · /tmp/project
 
 Detailed
-
-────────────────────────────────────────────────────────────────────────────────
               • Viewed image assets/detail-image.png
 
-
 ────────────────────────────────────────────────────────────────────────────────
 
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 
 › preserved draft
                                                                               󰜗

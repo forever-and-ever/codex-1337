@@ -665,6 +665,10 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80)
                 .replace(&displayed_directory, "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
+              • Ready
+
+            ────────────────────────────────────────────────────────────────────────────────
+
             › Ask Codex to do anything
                                                                                           󰜗
               GPT-6.1-Sol high · <PROJECT>

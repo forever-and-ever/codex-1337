@@ -119,7 +119,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
             );
         }
         // Leave history visible for the return-control interaction; short resizes below may hide it.
-        let size = Size::new(width, if running { 14 } else { 12 });
+        let size = Size::new(width, if running { 14 } else { 15 });
         tui.screen_size_for_event(&TuiEvent::Resize(size))?;
         app.transcript_view.jump_to_latest();
         let bottom = app.render_owned_transcript(&mut tui, size)?;

@@ -198,12 +198,13 @@ pub(crate) fn follow_thread(thread: Option<ThreadId>, running: bool) {
 
 /// Replaces the status row's lead in `spans`, turning the upstream header into a caption.
 /// Leaves `spans` alone when nothing is engaged, nothing moves, or colors are unknown.
+/// True when the engaged shimmer painted the spans.
 pub(crate) fn dress_status(
     spans: &mut Vec<Span<'static>>,
     caption: &str,
     mark: MotionMode,
     letters: MotionMode,
-) {
+) -> bool {
     let mut live = live();
     live.row = Row::default();
     let (mark, letters) = (
@@ -211,18 +212,19 @@ pub(crate) fn dress_status(
         letters == MotionMode::Animated,
     );
     if !(mark || letters) {
-        return;
+        return false;
     }
     let Some(palette) = palette() else {
-        return;
+        return false;
     };
     let Some(shimmer) = live.current() else {
-        return;
+        return false;
     };
     shimmer.show(caption);
     let row = shimmer.status(palette, Motion { mark, letters });
     *spans = row.spans();
     live.row = row;
+    true
 }
 
 /// Lays the dressed status row's backdrop under the row rendered at the top of `area`.

@@ -7,6 +7,9 @@ empty (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      loading
 
+  • Ready
+
+────────────────────────────────────────────────
 
 › Ask Codex to do anything
                                               󰜗
@@ -17,6 +20,9 @@ configured (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      workspace
 
+  • Ready
+
+────────────────────────────────────────────────
 
 › Ask Codex to do anything
                                               󰜗
@@ -27,6 +33,9 @@ resuming (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      loading
   Resuming session…
+  • Ready
+
+────────────────────────────────────────────────
 
 › Ask Codex to do anything
                                               󰜗
@@ -37,6 +46,9 @@ forking (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      loading
   Forking session…
+  • Ready
+
+────────────────────────────────────────────────
 
 › draft while loading
                                               󰜗
@@ -47,6 +59,9 @@ multiline (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      loading
 
+  • Ready
+
+────────────────────────────────────────────────
 
 › first startup line
   second startup line
@@ -58,6 +73,9 @@ narrow (18 columns):
   >_ OpenAI Codex…
      loading
 
+  • Ready
+
+──────────────────
 
 › first startup
   line

@@ -82,6 +82,10 @@ qualified forms.
   cells that changed; a full frame repaints the whole screen. A peripheral window is
   visible but unfocused: its content coalesces and only its status row moves, glinting
   every third beat.
+- rest row: the status row's place between turns, kept up so that the composer never jumps.
+  It says how the last turn in view ended (Finished, Interrupted or Failed, and Ready before
+  one, as on a resumed thread) and carries the engaged shimmer's idle paint, glinting as the
+  status row does.
 - goal box, timebox, quotabox, halt, reword: a goal box is a limit the user sets
   on a root agent's unfinished goal. A timebox ends at a wall-clock deadline and
   reminds the agent each time its time left halves while at least ten minutes

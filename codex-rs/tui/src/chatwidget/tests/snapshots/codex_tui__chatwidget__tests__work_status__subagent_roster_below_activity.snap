@@ -3,6 +3,9 @@ source: tui/src/chatwidget/tests/work_status.rs
 expression: "panels.join(\"\\n\\n\")"
 ---
 "                                                                                "
+"  • Ready                                                                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                              󰜗 "
@@ -18,6 +21,9 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                              "
+"  • Ready                     "
+"                              "
+"──────────────────────────────"
 "                              "
 "› Ask Codex to do anything    "
 "                            󰜗 "
@@ -43,6 +49,9 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                                                                                "
+"  • Ready                                                                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "  Viewing sub-agent — direct input is disabled · Esc main · Ctrl+C interrupt    "
 "────────────────────────────────────────────────────────────────────────────────"
 "  ● gpt-6.1-sol xhigh worker-8  Checking the parser and its integration … 1.5M  "
@@ -56,6 +65,9 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                              "
+"  • Ready                     "
+"                              "
+"──────────────────────────────"
 "  Viewing sub-agent — direct  "
 "  input is disabled · Esc main"
 "  · Ctrl+C interrupt          "

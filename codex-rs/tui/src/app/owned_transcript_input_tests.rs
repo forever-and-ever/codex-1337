@@ -420,7 +420,7 @@ async fn empty_enter_returns_to_latest_with_contextual_hints() -> Result<()> {
         app.keymap = RuntimeKeymap::from_config(&config).expect("valid default bindings");
         app.local_settings.tui.keymap = config.clone();
         app.chat_widget.apply_keymap_update(config, &app.keymap);
-        let size = Size::new(width, /*height*/ 12);
+        let size = Size::new(width, /*height*/ 15);
         tui.terminal.resize(size)?;
         app.transcript_view = Default::default();
         app.transcript_view
@@ -618,7 +618,7 @@ async fn escape_returns_to_latest_without_changing_the_composer_draft() -> Resul
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
-    let size = Size::new(/*width*/ 80, /*height*/ 12);
+    let size = Size::new(/*width*/ 80, /*height*/ 15);
     app.chat_widget
         .apply_external_edit("draft preserved".to_string());
     app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(
@@ -671,7 +671,7 @@ async fn escape_returns_to_latest_without_changing_the_composer_draft() -> Resul
 
     app.render_owned_transcript(&mut tui, size)?;
     app.transcript_view
-        .scroll(&app.transcript_cells, /*rows*/ -9);
+        .scroll(&app.transcript_cells, /*rows*/ -6);
     app.transcript_cells
         .push(Arc::new(PlainHistoryCell::new(vec![
             "visible after resize".into(),

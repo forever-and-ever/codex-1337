@@ -2,6 +2,10 @@
 source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: snapshot
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
+
 › Google Drive  [App] Connected files
 
   enter insert · esc close

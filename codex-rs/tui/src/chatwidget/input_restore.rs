@@ -324,6 +324,7 @@ impl ChatWidget {
         self.requeue_image_submission();
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
+        self.rest_after_turn(crate::bottom_pane::Rest::Interrupted);
         // Cancellation means idle in the program-status protocol, not a failed task.
         if reason == TurnAbortReason::Interrupted {
             self.status_state.program_status_after_turn =

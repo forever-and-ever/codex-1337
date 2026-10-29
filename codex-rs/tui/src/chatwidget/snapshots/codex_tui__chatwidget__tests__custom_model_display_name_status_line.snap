@@ -3,6 +3,9 @@ source: tui/src/chatwidget/tests/model_display_name_tests.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
+"  • Ready                                                                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                              󰜗 "

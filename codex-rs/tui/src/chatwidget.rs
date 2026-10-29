@@ -263,6 +263,7 @@ mod dynamic_activity;
 mod empty_state_policy;
 mod glint;
 mod live_work;
+mod rest;
 pub(crate) use self::connectors::ConnectorScopeGeneration;
 use self::connectors::ConnectorsState;
 mod exec_state;

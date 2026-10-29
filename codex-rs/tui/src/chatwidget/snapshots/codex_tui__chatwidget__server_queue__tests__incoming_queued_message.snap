@@ -2,6 +2,9 @@
 source: tui/src/chatwidget/server_queue_tests.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
+  • Ready
+
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ From SYSADMIN: Check the service after your current turn.
     ⇧← edit last · ⌥x cancel

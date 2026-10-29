@@ -57,13 +57,16 @@ async fn voice_composer_preserves_normal_colors_across_microphone_states() {
             let rows = buffer
                 .content
                 .chunks(/*chunk_size*/ 47)
-                .take(/*n*/ 5)
-                .enumerate()
-                .map(|(index, cells)| {
-                    let row = cells
+                .map(|cells| {
+                    cells
                         .iter()
                         .map(ratatui::buffer::Cell::symbol)
-                        .collect::<String>();
+                        .collect::<String>()
+                })
+                .skip_while(|row| !row.contains("voice"))
+                .take(/*n*/ 4)
+                .enumerate()
+                .map(|(index, row)| {
                     format!("{index}: {}", row.trim_end())
                         .trim_end()
                         .to_string()
@@ -71,11 +74,10 @@ async fn voice_composer_preserves_normal_colors_across_microphone_states() {
                 .collect::<Vec<_>>()
                 .join("\n");
             insta::assert_snapshot!(rows, @"
-            0:
-            1:  voice ● listening     f9 mute     /voice stop
-            2:    mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁
-            3:
-            4: › typed
+            0:  voice ● listening     f9 mute     /voice stop
+            1:    mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁
+            2:
+            3: › typed
             ");
         }
         buffer
@@ -134,10 +136,7 @@ async fn voice_preserves_the_normal_composer_prompt() {
         .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(prompt(&mut chat), Some('›'));
     chat.reset_realtime_conversation();
-    assert_eq!(
-        render_bottom_popup(&chat, /*width*/ 80).chars().next(),
-        Some('›')
-    );
+    assert_eq!(prompt(&mut chat), Some('›'));
 }
 
 #[tokio::test]

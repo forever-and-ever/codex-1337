@@ -246,7 +246,7 @@ async fn older_page_loading_uses_the_header_without_moving_content_or_cursor() -
     tui.set_owned_screen(/*owned*/ true)?;
     let mut snapshots = Vec::new();
     for width in [80, 40, 28] {
-        let size = Size::new(width, /*height*/ 12);
+        let size = Size::new(width, /*height*/ 15);
         tui.terminal.resize(size)?;
         app.transcript_view.history = TranscriptHistoryState::Partial;
         app.render_owned_transcript(&mut tui, size)?;
@@ -297,11 +297,11 @@ async fn older_page_loading_uses_the_header_without_moving_content_or_cursor() -
 async fn recap_spacing_belongs_to_the_transcript_tail() -> Result<()> {
     let mut snapshots = Vec::new();
     for (width, height, next_action) in [
-        (80, 10, None),
-        (80, 12, Some("Review the changes.")),
-        (32, 12, Some("Review the changes.")),
-        (80, 7, Some("Review the changes.")),
-        (32, 6, Some("Review the changes.")),
+        (80, 13, None),
+        (80, 15, Some("Review the changes.")),
+        (32, 15, Some("Review the changes.")),
+        (80, 10, Some("Review the changes.")),
+        (32, 9, Some("Review the changes.")),
     ] {
         let mut app = crate::app::test_support::make_test_app().await;
         attach_thread(&mut app, ThreadId::new());
@@ -374,7 +374,7 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
         (
             "Resized multiline composer",
             40,
-            12,
+            15,
             "draft\nsecond line\nthird line",
         ),
         ("Tiny terminal", 40, 5, "draft"),
@@ -462,7 +462,7 @@ async fn owned_drag_stops_when_focus_or_input_ownership_is_lost() -> Result<()> 
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
-    let size = Size::new(/*width*/ 40, /*height*/ 12);
+    let size = Size::new(/*width*/ 40, /*height*/ 15);
     app.chat_widget
         .apply_external_edit("retained draft 界".into());
     app.chat_widget.handle_key_event(KeyCode::Left.into());
@@ -1424,7 +1424,7 @@ async fn fullscreen_composer_scrolls_without_moving_caret_or_transcript() -> Res
     frames.push(format!("Paste at caret\n{rendered}"));
 
     // A shorter screen still leaves a usable composer.
-    let small = Size::new(/*width*/ 40, /*height*/ 10);
+    let small = Size::new(/*width*/ 40, /*height*/ 13);
     tui.terminal.resize(small)?;
     app.render_owned_transcript(&mut tui, small)?;
     let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
@@ -1443,7 +1443,7 @@ async fn fullscreen_composer_remote_images_leave_an_editable_prompt_row() -> Res
     let mut app = crate::app::test_support::make_test_app().await;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
-    let size = Size::new(/*width*/ 60, /*height*/ 12);
+    let size = Size::new(/*width*/ 60, /*height*/ 18);
     tui.terminal.resize(size)?;
     app.transcript_cells = vec![Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
         "History stays visible".into(),

@@ -2,10 +2,10 @@
 source: tui/src/app/daemon_menu_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
-      Daemon
-› As  Local shared service: v0.156.0
-                                                                              󰜗
-  GP
-    › 1. Close
+  •   Daemon
+      Local shared service: v0.156.0
+────                                                                        ────
 
-      enter select · esc back
+› As› 1. Close
+                                                                              󰜗
+  GP  enter select · esc back
