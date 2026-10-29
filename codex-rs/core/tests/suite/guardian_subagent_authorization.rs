@@ -991,6 +991,15 @@ async fn run_guardian_subagent_review(
     .await;
     ThreadIdle::wait(worker_thread.as_ref()).await;
     if !cancel_call {
+        // Ordinary completion mail wakes an idle parent (643f434477). Drain that
+        // turn before raw injection: otherwise injection may queue behind the
+        // next human input instead of recording the earlier assistant first.
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+    }
+    if !cancel_call {
         ThreadIdle::wait(&test.codex).await;
     }
     worker_server.shutdown().await;
@@ -1219,6 +1228,14 @@ async fn run_guardian_subagent_review(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    // The reviewed worker's completion also wakes the parent. Finish that model
+    // boundary before injecting the intentionally unanswered call; otherwise the
+    // model request can prune it, or injection can queue behind an active turn.
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    ThreadIdle::wait(&test.codex).await;
     let answer_message = match root_answer {
         RootAnswer::Complete => Some(GuardianRootMessage::UserInput(format!(
             "assistant: {ROOT_QUESTION}\nuser: {ROOT_ANSWER}\n"
@@ -1257,7 +1274,11 @@ async fn run_guardian_subagent_review(
             if delayed_delivery {
                 messages.push(GuardianRootMessage::User(USER_BEFORE_DELIVERY.to_owned()));
             }
-            if question_delivered {
+            // 456f91603f keeps only complete, accepted assistant evidence. Direct
+            // messages whose retained role framing exceeds the record budget, or
+            // whose result was rejected by a post hook, are omitted whole.
+            let retained_question = question_delivered && (!messaging_case || code_mode);
+            if retained_question {
                 messages.push(GuardianRootMessage::Assistant(root_assistant_reply.clone()));
             }
             if code_mode_batch {
@@ -1370,6 +1391,9 @@ async fn run_guardian_subagent_review(
             "oversized retained answers are omitted whole"
         );
     }
+    if matches!(root_context, RootContext::RetainedAtMessageLimit) {
+        assert!(!snapshot.authorization_version.retained_context_complete);
+    }
     assert!(guardian_transcript.contains(&format!("user: {USER_APPROVAL}")));
     for text in [
         ROOT_ASSISTANT_REPLY,
@@ -1377,7 +1401,9 @@ async fn run_guardian_subagent_review(
     ] {
         assert_eq!(
             guardian_transcript.contains(&format!("assistant: {text}")),
-            !matches!(root_context, RootContext::RetainedAtMessageLimit) && question_delivered,
+            !matches!(root_context, RootContext::RetainedAtMessageLimit)
+                && question_delivered
+                && (!messaging_case || code_mode),
         );
     }
     assert!(!guardian_transcript.contains(ROOT_ASSISTANT_COMMENTARY));
@@ -1730,7 +1756,7 @@ async fn run_guardian_subagent_review(
             let approval = GuardianRootMessage::User(USER_APPROVAL.to_owned());
             assert_eq!(
                 exchange,
-                if !question_delivered {
+                if !question_delivered || (messaging_case && !code_mode) {
                     vec![approval]
                 } else if preserve_acceptance_order || !retained.is_null() {
                     vec![

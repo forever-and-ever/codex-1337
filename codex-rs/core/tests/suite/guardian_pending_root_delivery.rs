@@ -467,7 +467,7 @@ async fn confirmed_delivery_refreshes_pending_local_allow(
     release_refreshed_review
         .send(())
         .expect("release fresh Guardian decision");
-    let status = wait_for_event_match(&test.codex, |event| match event {
+    let status = wait_for_event_match(&test.codex, |event| match event.native_event() {
         EventMsg::GuardianAssessment(assessment)
             if assessment.status != GuardianAssessmentStatus::InProgress
                 && matches!(assessment.action, GuardianAssessmentAction::Command { .. }) =>
