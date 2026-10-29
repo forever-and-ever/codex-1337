@@ -281,4 +281,24 @@ mod tests {
             [0_i64; 0]
         );
     }
+
+    #[test]
+    fn embedded_box_prompts_render() {
+        let timebox = GoalTimebox {
+            set_at: 0,
+            deadline: 3_600,
+        };
+        let goal = ThreadGoal {
+            thread_id: ThreadId::new(),
+            objective: "Ship <it> & check".to_string(),
+            status: codex_protocol::protocol::ThreadGoalStatus::Paused,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        assert!(timebox_reminder_item(timebox, 1_800).is_some());
+        assert!(halt_item(&goal, Halt::TimeboxEnded { deadline: 3_600 }).is_some());
+    }
 }
