@@ -158,6 +158,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/core/src/context/world_state/instruction_diff.rs` (`Entry::render`, `render_eloquent`, `diff`), `codex-rs/hooks/src/events/common.rs` (`append_additional_context`).
 - Tripwire: `render_diff_restores_the_typed_section_snapshot`. Blank hook contexts: none.
 - Pressure: persisted revisions predating content provenance carry default metadata, so an exact comparison amended unchanged text with hunkless diffs after an upgrade; upstream renders permissions instructions even when every catalog message is blank, as in guardian reviews; hook outputs pass `additionalContext` through unfiltered.
+- Evidence: 5dbeefa6a3.
 
 ### reminders-not-system
 
