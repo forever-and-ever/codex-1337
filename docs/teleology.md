@@ -331,6 +331,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 edits `core/src/agent/control.rs` with #51415 (turn lineage), #51329 (no partial-history subagent forks), #50087 (queued agent mail across eviction), #49814 and #51515 (coordinated agent-tree shutdown); #51415 also edits `thread_queue_processor.rs`. Path allocation and replay must not mistake an uncertain accepted request for a fresh reservation.
 - Evidence: fa1cf4ce29, 8e8bb48075, c8dec1e3eb, 217bcce455, db62274156, eb8132ec04, f4588c72c6, e373b1520b, e331fec3c1, 2d9abac7cf.
 
+### idle-mcp-human-consent
+
+- Telos: direct client MCP calls retain human consent while their thread is idle, without inventing automated review authority.
+- Holds: an elicitation with no invocation identity and no active turn routes to the attached human, never Guardian or automatic acceptance. Current MCP runtime policy may reject it, and normal frontend form eligibility still applies; saved future-turn settings supply no review authority. An empty subscription snapshot declines immediately; loss of the last subscriber declines a pending idle request and releases its permission guard. Invocation-backed and active-turn requests retain their issuing authority and cancellation checks.
+- Owners: `codex-rs/core/src/session/mcp_elicitation_authority.rs`, `codex-rs/codex-mcp/src/elicitation_authority.rs`, `codex-rs/codex-mcp/src/elicitation_policy.rs`, `codex-rs/app-server/src/idle_mcp_elicitation.rs`; seams in `codex-rs/codex-mcp/src/elicitation.rs`, `codex-rs/app-server/src/outgoing_message.rs` and `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`.
+- Tripwire: the ten idle elicitation cases in `codex-rs/app-server/tests/suite/v2/mcp_tool.rs`, `mcp_elicitation_reviewer_keeps_issuing_step_authority` (`codex-rs/core/src/session/tests.rs`), and `cancel_requests_for_thread_cancels_all_thread_requests` (`codex-rs/app-server/src/outgoing_message.rs`).
+- Pressure: MCP review-policy changes must distinguish missing turn authority from refusal of human consent; frontend loss must never imply approval or an unanswerable wait.
+- Evidence: owner decision during the 2026-10-29 test-suite repair campaign.
+
 ### durable-approvals-and-queues
 
 - Telos: a reconnect loses no pending decision or queued edit.
@@ -753,6 +762,10 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/pager_overlay.rs`: attention-gated-painting
 - `codex-rs/tui/src/pager_overlay/transcript.rs`: attention-gated-painting
 
+- `codex-rs/codex-mcp/src/elicitation.rs`: idle-mcp-human-consent
+- `codex-rs/app-server/src/outgoing_message.rs`: idle-mcp-human-consent
+- `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`: idle-mcp-human-consent
+
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread
 - `codex-rs/tui/src/tui/frame_rate_limiter/completion.rs`: fast-ui-thread
@@ -1005,3 +1018,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode-runtime/src/session_runtime/types.rs`: code-mode-cell-outcomes
 - `codex-rs/code-mode/src/remote_session/delegate.rs`: code-mode-cell-outcomes
+- `codex-rs/core/src/session/mcp_elicitation_authority.rs`: idle-mcp-human-consent
+- `codex-rs/codex-mcp/src/elicitation_authority.rs`: idle-mcp-human-consent
+- `codex-rs/codex-mcp/src/elicitation_policy.rs`: idle-mcp-human-consent
+- `codex-rs/app-server/src/idle_mcp_elicitation.rs`: idle-mcp-human-consent
