@@ -31,7 +31,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/core/src/tools/code_mode/output_sections.rs`, `output.rs` and `response_adapter.rs`; `codex-rs/core/src/session/prepared_tool_budget.rs`, with its call in `session/inject.rs`; `codex-rs/code-mode-runtime/src/runtime/native_result.rs` and `sh.rs`; `codex-rs/code-mode-protocol/src/response.rs` and `grpc/codex.code_mode.v1.proto`; `codex-rs/protocol/src/native_execution_result.rs`.
 - Tripwire: `truncated_sections_share_the_budget_and_recover_only_truncated_text` (`codex-rs/core/src/tools/code_mode/mod.rs`), `completed_timing_preserves_content_and_distinguishes_zero_from_unavailable` (`output_tests.rs`), `code_mode_replaces_malformed_image`, `code_mode_exec_outer_limit_truncates_emitted_output` and the nested-limit cases (`codex-rs/core/tests/suite/code_mode.rs`); native presentation and host gRPC/stdio round trips cover the grouped wire shape.
 - Pressure: flattening batches before budgeting, prefix-only history truncation and lost transport metadata silently undo recoverability; temporary files without custody leak data or delete another session's live output.
-- Evidence: owner implementation decision, 2026-10-18.
+- Evidence: owner implementation decision, 2026-10-18; 2b9c80d3aa (prepared-media allowance).
 
 ### mcp-roster
 
@@ -347,7 +347,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/core/src/session/mcp_elicitation_authority.rs`, `codex-rs/codex-mcp/src/elicitation_authority.rs`, `codex-rs/codex-mcp/src/elicitation_policy.rs`, `codex-rs/app-server/src/idle_mcp_elicitation.rs`; seams in `codex-rs/codex-mcp/src/elicitation.rs`, `codex-rs/app-server/src/outgoing_message.rs` and `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`.
 - Tripwire: the ten idle elicitation cases in `codex-rs/app-server/tests/suite/v2/mcp_tool.rs`, `mcp_elicitation_reviewer_keeps_issuing_step_authority` (`codex-rs/core/src/session/tests.rs`), and `cancel_requests_for_thread_cancels_all_thread_requests` (`codex-rs/app-server/src/outgoing_message.rs`).
 - Pressure: MCP review-policy changes must distinguish missing turn authority from refusal of human consent; frontend loss must never imply approval or an unanswerable wait.
-- Evidence: owner decision during the 2026-10-29 test-suite repair campaign.
+- Evidence: 55bfd34783; owner decision during the 2026-10-29 test-suite repair campaign.
 
 ### durable-approvals-and-queues
 
@@ -405,7 +405,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/core/src/state/token_accounting.rs`; seams in `state/session.rs`, `state/mod.rs`, `session/turn_context.rs` and `session/mod.rs` under `codex-rs/core/src/`.
 - Tripwire: `async_compaction_reuses_pending_work` (`codex-rs/core/tests/suite/scenarios.rs`); `record_token_usage_continues_restored_totals` (`codex-rs/core/src/state/session_tests.rs`).
 - Pressure: speculative requests can complete after a newer turn reports usage. Deriving the turn subtotal from the latest thread record loses the newer turn's earlier responses; an unbounded turn-indexed map instead leaks closed turns.
-- Evidence: 40de654f41 charges completed background responses; test-suite repair, 2026-10-29, exposed the interleaving defect.
+- Evidence: 21441bcbc0; 40de654f41 charges completed background responses; test-suite repair, 2026-10-29, exposed the interleaving defect.
 
 ### pinned-accounts
 
@@ -519,7 +519,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/utils/cli/src/scoped_config.rs`, `codex-rs/cli/src/config_override_args.rs`, `codex-rs/exec/src/command_args.rs`; entry-point seams in `codex-rs/cli/src/main.rs` and `codex-rs/exec/src/main.rs`.
 - Tripwire: `preserves_scoped_overrides_and_forwarded_arguments` (`codex-rs/cli/src/config_override_args_tests.rs`), `top_cli_parses_resume_prompt_after_config_flag` (`codex-rs/exec/src/main_tests.rs`).
 - Pressure: Clap's global Append propagation replaces parent values with the deepest scope instead of concatenating them; both entry points must retain the shared collection when parser trees change.
-- Evidence: platform-suite endpoint-isolation failures and parser reproduction, 2026-10-29.
+- Evidence: 1b9664cd4b; platform-suite endpoint-isolation failures and parser reproduction, 2026-10-29.
 
 ### helper-image-read-roots
 
@@ -528,7 +528,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/exec-server/src/fs_sandbox/helper_roots.rs`; seam in `codex-rs/exec-server/src/fs_sandbox.rs`.
 - Tripwire: `helper_permissions_include_only_the_helper_executable` (`codex-rs/exec-server/src/fs_sandbox.rs`); restricted copy profiles in `codex-rs/ext/multi-env-copy-file/tests/suite/mod.rs` exercise the assembled helper chain.
 - Pressure: arg0 aliases, sandbox re-exec and filesystem helper policy must agree on executable identity without granting its parent.
-- Evidence: restricted-copy helper-path reproduction, 2026-10-29.
+- Evidence: 532a6c6cf3; restricted-copy helper-path reproduction, 2026-10-29.
 
 ### fullscreen-only
 
