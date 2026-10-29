@@ -1,10 +1,10 @@
 codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI only
 
 ## gate
-- Tests: `just test`, never bare `cargo test`; narrowest named test plus `--lib` or `--test <target>`; no whole-crate runs, even for common, core, protocol
+- Tests: `just test`, never bare `cargo test`; narrowest filter while iterating; whole-crate and full-workspace runs for validation
 - `codex-tui` changes land only after full `just test -p codex-tui --lib` passes
 - Fork-owned Rust changes land only after `scripts/check_fork_lints.py` passes; policy `codex-rs/fork-lints.toml`, never relaxed to pass
-- Full-workspace run: last resort, explicit user approval first; no `--all-features` unless that matrix is needed
+- No `--all-features` unless that matrix is needed
 - Install: `scripts/install-local` (`local` profile); focused checks on default dev/test profiles; no ad hoc profiles
 - Never rerun broad suites to chase timing failures on loaded machine
 - Consequential agent-logic change: extend an existing integration case before adding a test
