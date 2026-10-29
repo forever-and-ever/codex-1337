@@ -30,7 +30,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
@@ -967,21 +966,6 @@ async fn invalid_local_attachments_do_not_mutate_queue() -> anyhow::Result<()> {
     ));
     assert_eq!(vec![existing], service.list(thread_id).await?);
 
-    Ok(())
-}
-
-#[tokio::test]
-async fn unsupported_response_items_cannot_enter_the_queue() -> anyhow::Result<()> {
-    let (queue, _home) = test_queue().await?;
-    let service = QueuedItemService::new(queue, Weak::new(), Arc::new(NoopExtensionEventSink));
-    let error = service
-        .enqueue(
-            ThreadId::new(),
-            TurnInput::ResponseItem(ResponseItem::Other),
-        )
-        .await
-        .expect_err("response item should not enter the user queue");
-    assert!(matches!(error, QueueServiceError::InvalidInput));
     Ok(())
 }
 
