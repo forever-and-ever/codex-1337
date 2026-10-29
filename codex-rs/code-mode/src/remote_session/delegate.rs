@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use codex_code_mode_protocol::CellId;
+use codex_code_mode_protocol::CellOutcome;
 use codex_code_mode_protocol::CodeModeNestedToolCall;
 use codex_code_mode_protocol::CodeModeSessionDelegate;
 use codex_code_mode_protocol::NotificationFuture;
@@ -65,6 +66,11 @@ impl CodeModeSessionDelegate for TracedCellDelegate {
             }
             .instrument(span),
         )
+    }
+
+    // TELOS(code-mode-cell-outcomes): the committed outcome reaches the wrapped delegate.
+    fn cell_finished(&self, cell_id: &CellId, outcome: CellOutcome) {
+        self.delegate.cell_finished(cell_id, outcome);
     }
 
     fn cell_closed(&self, cell_id: &CellId) {

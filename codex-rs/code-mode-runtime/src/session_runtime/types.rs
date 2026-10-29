@@ -123,7 +123,8 @@ pub(crate) struct NestedToolCall {
 /// Implementations must honor cancellation tokens. `cell_closed` is called
 /// after the runtime has stopped routing requests to the cell.
 pub(crate) trait SessionRuntimeDelegate: Send + Sync + 'static {
-    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
+    // TELOS(code-mode-cell-outcomes): required, so no wrapper can drop the outcome.
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome);
     fn invoke_tool(
         &self,
         invocation: NestedToolCall,

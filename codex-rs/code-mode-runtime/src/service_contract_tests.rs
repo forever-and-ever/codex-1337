@@ -83,6 +83,8 @@ impl CodeModeSessionDelegate for HeldNotificationDelegate {
         })
     }
 
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
+
     fn cell_closed(&self, cell_id: &CellId) {
         let _ = self
             .events_tx
@@ -146,6 +148,8 @@ impl CodeModeSessionDelegate for BlockingDelegate {
             Err("cancelled".to_string())
         })
     }
+
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
 
     fn cell_closed(&self, cell_id: &CellId) {
         let _ = self

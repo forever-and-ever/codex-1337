@@ -87,6 +87,8 @@ impl CodeModeSessionDelegate for PanickingDelegate {
         panic!("synchronous notification delegate panic")
     }
 
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode::CellOutcome) {}
+
     fn cell_closed(&self, _cell_id: &CellId) {}
 }
 
@@ -109,6 +111,8 @@ impl CodeModeSessionDelegate for SelfCancellingToolDelegate {
     ) -> NotificationFuture<'a> {
         Box::pin(async { Ok(()) })
     }
+
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode::CellOutcome) {}
 
     fn cell_closed(&self, _cell_id: &CellId) {}
 }

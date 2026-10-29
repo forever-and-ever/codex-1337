@@ -74,6 +74,8 @@ impl CodeModeSessionDelegate for OversizedResultDelegate {
         Box::pin(async { Ok(()) })
     }
 
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode::CellOutcome) {}
+
     fn cell_closed(&self, _cell_id: &CellId) {}
 }
 
@@ -156,6 +158,8 @@ impl CodeModeSessionDelegate for CancellationDelegate {
     ) -> NotificationFuture<'a> {
         Box::pin(async { Ok(()) })
     }
+
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode::CellOutcome) {}
 
     fn cell_closed(&self, cell_id: &CellId) {
         let _ = self
@@ -526,6 +530,21 @@ text([result, result, result], {max_tokens: 7});
             .lock()
             .expect("closed cells lock"),
         vec![cell_id("1")]
+    );
+    // Every wrapper forwards committed outcomes; a cell closed without one reads as interrupted.
+    assert_eq!(
+        *delegate.finished_cells.lock().expect("finished cells lock"),
+        vec![
+            (cell_id("2"), codex_code_mode::CellOutcome::Completed),
+            (cell_id("3"), codex_code_mode::CellOutcome::Terminated),
+        ]
+    );
+    assert_eq!(
+        *first_delegate
+            .finished_cells
+            .lock()
+            .expect("finished cells lock"),
+        vec![(cell_id("1"), codex_code_mode::CellOutcome::Completed)]
     );
 }
 

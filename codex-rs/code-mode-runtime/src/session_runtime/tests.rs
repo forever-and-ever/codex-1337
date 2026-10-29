@@ -36,6 +36,8 @@ impl SessionRuntimeDelegate for RecordingDelegate {
         Ok(())
     }
 
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
+
     fn cell_closed(&self, _cell_id: &CellId) {}
 }
 
@@ -57,6 +59,8 @@ impl SessionRuntimeDelegate for PanickingClosedDelegate {
     ) -> Result<(), String> {
         Ok(())
     }
+
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
 
     fn cell_closed(&self, _cell_id: &CellId) {
         panic!("cell close panic probe");

@@ -514,6 +514,8 @@ impl CodeModeSessionDelegate for ReleasableToolDelegate {
         Box::pin(async { Ok(()) })
     }
 
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: codex_code_mode_protocol::CellOutcome) {}
+
     fn cell_closed(&self, _cell_id: &CellId) {
         self.cell_closed.cancel();
     }

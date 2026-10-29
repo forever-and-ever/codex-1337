@@ -160,6 +160,14 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: persisted revisions predating content provenance carry default metadata, so an exact comparison amended unchanged text with hunkless diffs after an upgrade; upstream renders permissions instructions even when every catalog message is blank, as in guardian reviews; hook outputs pass `additionalContext` through unfiltered.
 - Evidence: 5dbeefa6a3.
 
+### code-mode-cell-outcomes
+
+- Telos: a code-mode cell's reported terminal status is its runtime outcome.
+- Holds: the fork's `cell_finished` callback is required on `CodeModeSessionDelegate` and `SessionRuntimeDelegate`, so every delegate, wrapper included, forwards or explicitly ignores the committed outcome; `cell_closed` without a prior outcome reports interruption.
+- Owners: `codex-rs/code-mode-protocol/src/session.rs` (`CodeModeSessionDelegate`), `codex-rs/code-mode-runtime/src/session_runtime/types.rs` (`SessionRuntimeDelegate`), `codex-rs/code-mode/src/remote_session/delegate.rs` (`TracedCellDelegate`), `codex-rs/core/src/tools/code_mode/delegate.rs` (`CodeModeCellDelegate`).
+- Tripwire: `remote_session_persists_values_forwards_delegates_and_controls_cells` (`codex-rs/code-mode-host/tests/stdio.rs`).
+- Pressure: 0.165 wraps stdio-host callbacks in `TracedCellDelegate`, which forwarded only upstream methods, so the then-defaulted fork callback reported every cell interrupted. Each new upstream delegate must implement `cell_finished`.
+
 ### reminders-not-system
 
 - Telos: an instruction update never rewrites an earlier cached prefix.
@@ -993,3 +1001,6 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app_event.rs`: goal-boxes
 - `codex-rs/tui/src/chatwidget/tests/slash_commands.rs`: goal-boxes
 - `codex-rs/hooks/src/events/common.rs`: no-vacuous-injections
+- `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
+- `codex-rs/code-mode-runtime/src/session_runtime/types.rs`: code-mode-cell-outcomes
+- `codex-rs/code-mode/src/remote_session/delegate.rs`: code-mode-cell-outcomes

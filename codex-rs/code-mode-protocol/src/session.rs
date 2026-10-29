@@ -101,7 +101,8 @@ impl StartedCell {
 /// including across yields, and releases it through its existing close/cancel paths.
 pub trait CodeModeSessionDelegate: Send + Sync {
     /// Observes the runtime's committed terminal outcome, without consuming returned output.
-    fn cell_finished(&self, _cell_id: &CellId, _outcome: CellOutcome) {}
+    // TELOS(code-mode-cell-outcomes): required, so no wrapper can drop the outcome.
+    fn cell_finished(&self, cell_id: &CellId, outcome: CellOutcome);
     fn invoke_tool<'a>(
         &'a self,
         invocation: CodeModeNestedToolCall,
@@ -152,6 +153,8 @@ impl CodeModeSessionDelegate for NoopCodeModeSessionDelegate {
     ) -> NotificationFuture<'a> {
         Box::pin(async { Ok(()) })
     }
+
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: CellOutcome) {}
 
     fn cell_closed(&self, _cell_id: &CellId) {}
 }
