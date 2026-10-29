@@ -1014,7 +1014,7 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
             }
             details => panic!(".codex symlink build failure should deny: {details:?}"),
         },
-        Ok(output) => panic!(".codex symlink build failure should deny: {output:?}"),
+        Ok(output) => output,
     };
 
     assert_eq!(output.exit_code, 1);

@@ -167,12 +167,11 @@ async fn quota_keeps_accounts_independent_without_switching_login() -> Result<()
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "plan_type":"pro", "rate_limit": {"allowed":true,"limit_reached":false,
                 "secondary_window":{"used_percent":27,"limit_window_seconds":604800,"reset_after_seconds":60,"reset_at":1800000000}}
-        }))).expect(1).mount(&server).await;
+        }))).mount(&server).await;
     Mock::given(method("GET"))
         .and(path("/backend-api/wham/usage"))
         .and(header("authorization", "Bearer alt"))
         .respond_with(ResponseTemplate::new(400))
-        .expect(1)
         .mount(&server)
         .await;
     let mut app_server = tokio::process::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
@@ -224,6 +223,22 @@ async fn quota_keeps_accounts_independent_without_switching_login() -> Result<()
     );
     assert_eq!(result["accounts"][1]["remainingPercent"], Value::Null);
     assert!(result["accounts"][1]["error"].is_string());
+    // Verify only after success: a mock Drop panic must not hide an earlier startup error.
+    let requests = server.received_requests().await.context("quota requests")?;
+    let mut authorization = requests
+        .iter()
+        .filter(|request| request.url.path() == "/backend-api/wham/usage")
+        .map(|request| {
+            assert_eq!(request.method.as_str(), "GET");
+            assert_eq!(request.url.path(), "/backend-api/wham/usage");
+            request.headers["authorization"]
+                .to_str()
+                .expect("authorization")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    authorization.sort();
+    assert_eq!(authorization, ["Bearer alt", "Bearer main"]);
     assert_eq!(read_auth_json(home.path())?, before);
     app_server.kill().await?;
     startup.await??;

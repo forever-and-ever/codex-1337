@@ -488,7 +488,8 @@ async fn copy_file_uses_each_environments_permissions(use_grants: bool) -> Resul
         return Ok(());
     }
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&copy)?,
+        serde_json::from_str::<serde_json::Value>(&copy)
+            .with_context(|| format!("expected successful copy, got {copy}"))?,
         json!({"bytes_copied": bytes.len()})
     );
     assert!(read_error.contains("could not open copy source"));

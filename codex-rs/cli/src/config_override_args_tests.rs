@@ -34,4 +34,14 @@ fn preserves_scoped_overrides_and_forwarded_arguments() {
         add.transport_args.stdio.expect("stdio transport").command,
         ["program", "-c", "payload"],
     );
+    let cli = try_parse_from([
+        "codex", "-c", "a=1", "exec", "-c", "b=2", "run", "-c", "a=3", "prompt",
+    ])
+    .expect("parse exec overrides across all scopes");
+    let Some(Subcommand::Exec(mut exec)) = cli.subcommand else {
+        panic!("expected exec");
+    };
+    exec.config_overrides
+        .prepend_root_overrides(cli.config_overrides);
+    assert_eq!(exec.config_overrides.raw_overrides, ["a=1", "b=2", "a=3"]);
 }

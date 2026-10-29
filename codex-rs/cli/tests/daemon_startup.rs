@@ -275,7 +275,8 @@ async fn daemon_startup(command: &str) -> Result<()> {
             let input: &[u8] = match command {
                 "mismatch-cancel" => b"\x03",
                 "mismatch-embedded" => b"1",
-                "mismatch-restart" | "mismatch-disable" | "mismatch-disable-persisted" => b"2\r",
+                // Disabled embedded fallback has no numeric shortcut; restart is the first enabled row.
+                "mismatch-restart" | "mismatch-disable" | "mismatch-disable-persisted" => b"1\r",
                 _ => unreachable!(),
             };
             steps.push_back(("Backgroundserverhasincompatiblefeaturesettings", input));

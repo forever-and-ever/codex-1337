@@ -3,6 +3,8 @@ mod config_override;
 pub(crate) mod format_env_display;
 mod resume_command;
 mod sandbox_mode_cli_arg;
+// TELOS(scoped-config-overrides): global config flags retain all command scopes.
+mod scoped_config;
 mod shared_options;
 
 pub use approval_mode_cli_arg::ApprovalModeCliArg;
@@ -12,4 +14,5 @@ pub use format_env_display::format_env_display;
 pub use resume_command::resume_command;
 pub use resume_command::resume_hint;
 pub use sandbox_mode_cli_arg::SandboxModeCliArg;
+pub use scoped_config::scoped_config_overrides;
 pub use shared_options::SharedCliOptions;

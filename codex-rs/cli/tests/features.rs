@@ -33,12 +33,19 @@ fn strict_config_rejects_unknown_config_override() -> Result<()> {
     ] {
         let codex_home = TempDir::new()?;
         let mut cmd = codex_command(codex_home.path())?;
-        cmd.args(["--strict-config", "-c", config_override, "exec", "hello"])
-            .assert()
-            .failure()
-            .stderr(contains(format!(
-                "unknown configuration field `{ignored_path}`"
-            )));
+        cmd.args([
+            "--strict-config",
+            "-c",
+            config_override,
+            "exec",
+            "run",
+            "hello",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains(format!(
+            "unknown configuration field `{ignored_path}`"
+        )));
     }
 
     Ok(())

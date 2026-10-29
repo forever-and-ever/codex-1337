@@ -165,6 +165,7 @@ async fn human_output_prints_unchanged_turn_diff_once() -> anyhow::Result<()> {
     .await;
     let result = test
         .cmd_with_server(&server)
+        .arg("run")
         .args([
             "--ephemeral",
             "--color",

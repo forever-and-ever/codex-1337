@@ -366,7 +366,7 @@ async fn copy_hooks_follow_source_and_target(swap_endpoints: bool) -> Result<()>
             } else {
                 format!("echo run >> {marker}; printf '%s' '{output}'")
             };
-            json!([{"matcher":"multi_env_copy_file","hooks":[{"type":"command","command": command}]}])
+            json!([{"selector":{"type":"tool","namespace":"functions","name":"multi_env_copy_file"},"hooks":[{"type":"command","command": command}]}])
         };
         let pass = json!({});
         config.environment_hooks = serde_json::from_value(json!({

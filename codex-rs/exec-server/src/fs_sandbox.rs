@@ -233,13 +233,7 @@ fn native_workspace_root(root: &PathUri) -> Result<AbsolutePathBuf, JSONRPCError
 }
 
 fn helper_read_roots(runtime_paths: &ExecServerRuntimeOptions) -> Vec<AbsolutePathBuf> {
-    let mut roots = vec![runtime_paths.codex_self_exe.clone()];
-    if let Some(path) = &runtime_paths.codex_linux_sandbox_exe
-        && !roots.contains(path)
-    {
-        roots.push(path.clone());
-    }
-    roots
+    helper_roots::read_roots(runtime_paths)
 }
 
 fn add_helper_runtime_permissions(
@@ -1016,6 +1010,28 @@ mod tests {
         );
         assert!(!policy.can_read_local_path_with_cwd(parent.as_path(), cwd.as_path()));
         assert!(!policy.can_read_local_path_with_cwd(sibling.as_path(), cwd.as_path()));
+        #[cfg(target_os = "linux")]
+        {
+            // Arg0 aliases become the canonical image during the sandbox's inner re-exec.
+            let fixture = tempfile::tempdir().expect("helper alias directory");
+            let alias = fixture.path().join("sandbox-alias");
+            std::os::unix::fs::symlink(runtime_paths.codex_self_exe.as_path(), &alias)
+                .expect("helper alias");
+            let aliased_runtime =
+                ExecServerRuntimeOptions::new(alias, None).expect("aliased runtime");
+            let mut policy = restricted_policy(Vec::new());
+            add_helper_runtime_permissions(
+                &mut policy,
+                &helper_read_roots(&aliased_runtime),
+                cwd.as_path(),
+            );
+            assert!(policy.can_read_local_path_with_cwd(
+                runtime_paths.codex_self_exe.as_path(),
+                cwd.as_path(),
+            ));
+            assert!(!policy.can_read_local_path_with_cwd(parent.as_path(), cwd.as_path()));
+            assert!(!policy.can_read_local_path_with_cwd(sibling.as_path(), cwd.as_path()));
+        }
     }
 
     #[test]
@@ -1095,3 +1111,6 @@ mod tests {
         }
     }
 }
+
+// TELOS(helper-image-read-roots): sandbox re-exec resolves arg0 aliases.
+mod helper_roots;

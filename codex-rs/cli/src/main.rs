@@ -3945,54 +3945,12 @@ enabled = true
     }
 
     #[test]
-    fn resume_last_accepts_prompt_flag() {
-        let interactive = finalize_resume_from_args(
-            [
-                "codex",
-                "resume",
-                "--last",
-                "--prompt",
-                "/compact focus on auth",
-            ]
-            .as_ref(),
-        );
-
-        assert!(!interactive.resume_picker);
-        assert!(interactive.resume_last);
-        assert_eq!(interactive.resume_session_id, None);
-        assert_eq!(
-            interactive.prompt.as_deref(),
-            Some("/compact focus on auth")
-        );
-    }
-
-    #[test]
-    fn resume_last_rejects_explicit_session() {
-        let err = MultitoolCli::try_parse_from(["codex", "resume", "--last", "1234"])
-            .expect_err("--last with an explicit session should be rejected");
-
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
-    }
-
-    #[test]
     fn resume_picker_logic_with_session_id() {
         let interactive = finalize_resume_from_args(["codex", "resume", "1234"].as_ref());
         assert!(!interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
         assert!(!interactive.resume_show_all);
-    }
-
-    #[test]
-    fn resume_with_session_id_accepts_prompt_flag() {
-        let interactive = finalize_resume_from_args(
-            ["codex", "resume", "1234", "--prompt", "continue here"].as_ref(),
-        );
-
-        assert!(!interactive.resume_picker);
-        assert!(!interactive.resume_last);
-        assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
-        assert_eq!(interactive.prompt.as_deref(), Some("continue here"));
     }
 
     #[test]
@@ -4115,54 +4073,12 @@ enabled = true
     }
 
     #[test]
-    fn fork_last_accepts_prompt_flag() {
-        let interactive = finalize_fork_from_args(
-            [
-                "codex",
-                "fork",
-                "--last",
-                "--prompt",
-                "/compact focus on auth",
-            ]
-            .as_ref(),
-        );
-
-        assert!(!interactive.fork_picker);
-        assert!(interactive.fork_last);
-        assert_eq!(interactive.fork_session_id, None);
-        assert_eq!(
-            interactive.prompt.as_deref(),
-            Some("/compact focus on auth")
-        );
-    }
-
-    #[test]
-    fn fork_last_rejects_explicit_session() {
-        let err = MultitoolCli::try_parse_from(["codex", "fork", "--last", "1234"])
-            .expect_err("--last with an explicit session should be rejected");
-
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
-    }
-
-    #[test]
     fn fork_picker_logic_with_session_id() {
         let interactive = finalize_fork_from_args(["codex", "fork", "1234"].as_ref());
         assert!(!interactive.fork_picker);
         assert!(!interactive.fork_last);
         assert_eq!(interactive.fork_session_id.as_deref(), Some("1234"));
         assert!(!interactive.fork_show_all);
-    }
-
-    #[test]
-    fn fork_with_session_id_accepts_prompt_flag() {
-        let interactive = finalize_fork_from_args(
-            ["codex", "fork", "1234", "--prompt", "continue here"].as_ref(),
-        );
-
-        assert!(!interactive.fork_picker);
-        assert!(!interactive.fork_last);
-        assert_eq!(interactive.fork_session_id.as_deref(), Some("1234"));
-        assert_eq!(interactive.prompt.as_deref(), Some("continue here"));
     }
 
     #[test]

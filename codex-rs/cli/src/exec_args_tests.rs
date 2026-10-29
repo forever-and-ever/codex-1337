@@ -21,7 +21,7 @@ fn exec_help_documents_cyber_access_program() {
         .join("\n");
     insta::assert_snapshot!(program_help.trim(), @r"
     --cyber-access-program <PROGRAM>
-              Request an experimental Cyber access program for this turn (OpenAI
+              Request an experimental Cyber access program for this turn (`OpenAI`
               provider only). Omit to use server defaults. Not supported with
               review; fork requires a prompt
 
