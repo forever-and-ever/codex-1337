@@ -51,6 +51,7 @@ use ratatui::widgets::WidgetRef;
 
 mod cursor;
 mod patch;
+mod underline;
 
 pub(crate) mod output;
 
@@ -676,6 +677,7 @@ where
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
     let mut modifier = Modifier::empty();
+    let mut underline = underline::UnderlineColor::default();
     let mut last_pos: Option<Position> = None;
     let mut active_hyperlink: Option<String> = None;
     for command in commands {
@@ -718,6 +720,9 @@ where
                     fg = cell.fg;
                     bg = cell.bg;
                 }
+                if color_enabled {
+                    underline.set(writer, cell.underline_color)?;
+                }
 
                 if hyperlink_changed && let Some(destination) = destination {
                     queue!(writer, Print(format!("\x1b]8;;{destination}\x07")))?;
@@ -728,6 +733,7 @@ where
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
                 queue!(writer, SetAttribute(crossterm::style::Attribute::Reset))?;
                 modifier = Modifier::empty();
+                underline = underline::UnderlineColor::default();
                 queue!(writer, SetBackgroundColor((*clear_bg).into_crossterm()))?;
                 bg = *clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
