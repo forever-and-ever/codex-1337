@@ -485,6 +485,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: Clap's global Append propagation replaces parent values with the deepest scope instead of concatenating them; both entry points must retain the shared collection when parser trees change.
 - Evidence: platform-suite endpoint-isolation failures and parser reproduction, 2026-10-29.
 
+### helper-image-read-roots
+
+- Telos: a restricted filesystem can run its sandbox helpers without exposing their neighboring files.
+- Holds: helper read grants include the configured arg0 aliases and their resolved executable images, never the containing directories. The inner Linux sandbox re-execs `current_exe`, which names the image rather than the alias.
+- Owners: `codex-rs/exec-server/src/fs_sandbox/helper_roots.rs`; seam in `codex-rs/exec-server/src/fs_sandbox.rs`.
+- Tripwire: `helper_permissions_include_only_the_helper_executable` (`codex-rs/exec-server/src/fs_sandbox.rs`); restricted copy profiles in `codex-rs/ext/multi-env-copy-file/tests/suite/mod.rs` exercise the assembled helper chain.
+- Pressure: arg0 aliases, sandbox re-exec and filesystem helper policy must agree on executable identity without granting its parent.
+- Evidence: restricted-copy helper-path reproduction, 2026-10-29.
+
 ### fullscreen-only
 
 - Telos: the fork maintains one frontend, the owned screen.
@@ -616,6 +625,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility, scoped-config-overrides
 - `codex-rs/exec/src/main.rs`: scoped-config-overrides
 - `codex-rs/utils/cli/src/lib.rs`: scoped-config-overrides
+- `codex-rs/exec-server/src/fs_sandbox.rs`: helper-image-read-roots
 - `codex-rs/exec/src/cli.rs`: explicit-command-verbs
 - `codex-rs/exec/src/lib.rs`: explicit-command-verbs
 - `codex-rs/tui/src/cli.rs`: explicit-command-verbs
