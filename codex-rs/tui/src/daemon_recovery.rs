@@ -183,11 +183,12 @@ fn recovery_view(
                 SelectionItem {
                     name: "Run without daemon this time".to_string(),
                     dismiss_on_select: true,
-                    is_disabled: std::env::var_os("CODEX_ALLOW_EMBEDDED_SERVER").is_none(),
-                    disabled_reason: Some(
-                        "Emergency embedded mode requires CODEX_ALLOW_EMBEDDED_SERVER=1."
-                            .to_string(),
-                    ),
+                    disabled_reason: std::env::var_os("CODEX_ALLOW_EMBEDDED_SERVER")
+                        .is_none()
+                        .then(|| {
+                            "Emergency embedded mode requires CODEX_ALLOW_EMBEDDED_SERVER=1."
+                                .to_string()
+                        }),
                     ..Default::default()
                 },
                 SelectionItem {
@@ -199,7 +200,6 @@ fn recovery_view(
                     .to_string(),
                     dismiss_on_select: true,
                     require_explicit_confirmation: true,
-                    is_disabled: !can_restart,
                     disabled_reason: if !managed_daemon {
                         Some("This server is not managed by Codex.".to_string())
                     } else if issue.restart_features.is_none() {
