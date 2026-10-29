@@ -273,7 +273,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
                     content,
                     ..
                 }) => {
-                    assert!(content.is_empty());
+                    assert_eq!(content, Vec::<ContentItem>::new());
                     assert!(reconstructed.insert(id, String::new()).is_none());
                 }
                 ResponseEvent::OutputItemAdded(ResponseItem::Reasoning {
@@ -281,7 +281,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
                     summary,
                     ..
                 }) => {
-                    assert!(summary.is_empty());
+                    assert_eq!(summary, Vec::<ReasoningItemReasoningSummary>::new());
                     assert!(reconstructed.insert(id, String::new()).is_none());
                 }
                 ResponseEvent::OutputItemDone(item) => {
@@ -400,14 +400,31 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
 
     // A truncated response still reports incurred usage. The runtime
     // adapter must classify failure only after accounting for these counts.
-    for (reason, expected) in [
-        ("model_context_window_exceeded", (true, false, false)),
-        ("max_tokens", (false, true, false)),
-        ("refusal", (false, false, true)),
+    // A classifier decline can also cut off an open block, which is never committed.
+    for (reason, cut_off_block, expected) in [
+        ("model_context_window_exceeded", false, (true, false, None)),
+        ("max_tokens", false, (false, true, None)),
+        (
+            "refusal",
+            true,
+            (
+                false,
+                false,
+                Some("The model refused the request (cyber): Declined."),
+            ),
+        ),
     ] {
         let mut decoder = Decoder::new(&[]);
         decoder.decode(&json!({"type":"message_start","message":{"id":"limited","usage":{"input_tokens":45,"output_tokens":0}}}).to_string()).unwrap();
-        decoder.decode(&json!({"type":"message_delta","delta":{"stop_reason":reason},"usage":{"output_tokens":2}}).to_string()).unwrap();
+        if cut_off_block {
+            decoder.decode(&json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"cut","name":"exec","input":{}}}).to_string()).unwrap();
+            decoder.decode(&json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"text("}}).to_string()).unwrap();
+        }
+        let delta = decoder.decode(&json!({"type":"message_delta","delta":{"stop_reason":reason,"stop_details":{"category":"cyber","explanation":"Declined."}},"usage":{"output_tokens":2}}).to_string()).unwrap();
+        assert!(
+            delta.is_empty(),
+            "{reason}: nothing commits at message_delta"
+        );
         let completed = decoder
             .decode(&json!({"type":"message_stop"}).to_string())
             .unwrap();
@@ -426,7 +443,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
             (
                 anthropic_context_window_exceeded(metadata),
                 anthropic_output_limit_exceeded(metadata),
-                anthropic_refused(metadata)
+                anthropic_refusal(metadata).as_deref()
             ),
             expected
         );

@@ -37,12 +37,26 @@ pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool
         Some(AnthropicStopReason::MaxTokens)
     )
 }
-/// Reports a native refusal after upstream usage is recorded.
-pub fn anthropic_refused(metadata: &ResponseUsageMetadata) -> bool {
-    matches!(
-        anthropic_stop_reason(metadata),
-        Some(AnthropicStopReason::Refusal)
-    )
+/// Describes a native refusal after upstream usage is recorded, with the policy area and
+/// explanation Anthropic reports for it.
+pub fn anthropic_refusal(metadata: &ResponseUsageMetadata) -> Option<String> {
+    const REFUSED: &str = "The model refused the request";
+    if anthropic_stop_reason(metadata)? != AnthropicStopReason::Refusal {
+        return None;
+    }
+    let details = metadata.metadata.as_ref()?.get("stop_details");
+    let field = |name| {
+        details
+            .and_then(|details| details.get(name))
+            .and_then(Value::as_str)
+            .map(|value| value.chars().take(1024).collect::<String>())
+    };
+    Some(match (field("category"), field("explanation")) {
+        (Some(category), Some(explanation)) => format!("{REFUSED} ({category}): {explanation}"),
+        (Some(category), None) => format!("{REFUSED} ({category})"),
+        (None, Some(explanation)) => format!("{REFUSED}: {explanation}"),
+        (None, None) => REFUSED.to_string(),
+    })
 }
 
 /// Returns native termination only for valid Anthropic completion metadata.
@@ -83,6 +97,8 @@ struct NativeError {
 #[derive(Deserialize)]
 struct MessageDelta {
     stop_reason: Option<AnthropicStopReason>,
+    /// A classifier decline's policy `category` and `explanation`.
+    stop_details: Option<Value>,
 }
 
 /// Native Messages termination, without inferring completion from output text.
@@ -153,6 +169,8 @@ pub(super) struct Decoder<'a> {
     call_ids: BTreeSet<String>,
     next_index: usize,
     reason: Option<AnthropicStopReason>,
+    /// Reported with a refusal's stop reason.
+    stop_details: Option<Value>,
     usage: Usage,
     raw_usage: Map<String, Value>,
     finished: bool,
@@ -170,6 +188,7 @@ impl<'a> Decoder<'a> {
             call_ids: BTreeSet::new(),
             next_index: 0,
             reason: None,
+            stop_details: None,
             usage: Usage::default(),
             raw_usage: Map::new(),
             finished: false,
@@ -411,13 +430,24 @@ impl<'a> Decoder<'a> {
                 events.push(ResponseEvent::OutputItemDone(item));
             }
             Frame::MessageDelta { delta, usage } => {
-                if self.id.is_none() || !self.blocks.is_empty() || self.reason.is_some() {
-                    return Err(ApiError::NativeStream(
-                        "invalid Anthropic message_delta order".into(),
-                    ));
+                // Anthropic returns a classifier decline that fires inside a block, such as a
+                // tool-use block it will not retry on a fallback model, without closing it. The
+                // unfinished block (partial input or text, unsigned thinking) is never committed.
+                let declined = delta.stop_reason == Some(AnthropicStopReason::Refusal);
+                if self.id.is_none()
+                    || self.reason.is_some()
+                    || (!declined && !self.blocks.is_empty())
+                {
+                    return Err(ApiError::NativeStream(format!(
+                        "invalid Anthropic message_delta order (stop reason {:?}, {} open blocks)",
+                        delta.stop_reason,
+                        self.blocks.len()
+                    )));
                 }
+                self.blocks.clear();
                 self.update_usage(&usage)?;
                 self.reason = delta.stop_reason;
+                self.stop_details = delta.stop_details;
             }
             Frame::MessageStop => {
                 let response_id = self.id.clone().ok_or_else(|| {
@@ -433,17 +463,21 @@ impl<'a> Decoder<'a> {
                 }
                 let token_usage = self.usage.finish()?;
                 self.finished = true;
+                let mut metadata = json!({
+                    "provider": "anthropic",
+                    "stop_reason": reason,
+                    "usage": self.raw_usage,
+                });
+                if let Some(details) = self.stop_details.take() {
+                    metadata["stop_details"] = details;
+                }
                 events.push(ResponseEvent::Completed {
                     response_id,
                     token_usage: Some(token_usage),
                     usage_metadata: Some(ResponseUsageMetadata {
                         amount: None,
                         reported_reasoning_tokens: self.usage.reported_reasoning_tokens(),
-                        metadata: Some(json!({
-                            "provider": "anthropic",
-                            "stop_reason": reason,
-                            "usage": self.raw_usage,
-                        })),
+                        metadata: Some(metadata),
                     }),
                     end_turn: Some(matches!(
                         reason,

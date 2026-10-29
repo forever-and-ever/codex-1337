@@ -37,7 +37,7 @@ pub use crate::anthropic::AnthropicWarmingRequest;
 pub use crate::anthropic::anthropic_context_window_exceeded;
 pub use crate::anthropic::anthropic_function_input_schema;
 pub use crate::anthropic::anthropic_output_limit_exceeded;
-pub use crate::anthropic::anthropic_refused;
+pub use crate::anthropic::anthropic_refusal;
 pub use crate::anthropic::anthropic_stop_reason;
 pub use crate::anthropic::encode_anthropic_request;
 pub use crate::anthropic::salvage_anthropic_history;

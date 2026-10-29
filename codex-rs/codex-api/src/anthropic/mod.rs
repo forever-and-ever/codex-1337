@@ -38,7 +38,7 @@ pub use client::AnthropicStreamOptions;
 pub use decoder::AnthropicStopReason;
 pub use decoder::anthropic_context_window_exceeded;
 pub use decoder::anthropic_output_limit_exceeded;
-pub use decoder::anthropic_refused;
+pub use decoder::anthropic_refusal;
 pub use decoder::anthropic_stop_reason;
 pub use stream_error::AnthropicStreamError;
 pub use stream_error::AnthropicStreamProgress;

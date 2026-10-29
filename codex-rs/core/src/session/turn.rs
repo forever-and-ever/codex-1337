@@ -3409,11 +3409,11 @@ async fn try_run_sampling_request(
                 }
                 if turn_context.provider.info().adapter
                     == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
-                    && usage_metadata
+                    && let Some(refusal) = usage_metadata
                         .as_ref()
-                        .is_some_and(codex_api::anthropic_refused)
+                        .and_then(codex_api::anthropic_refusal)
                 {
-                    break Err(CodexErr::Fatal("The model refused the request".into()));
+                    break Err(CodexErr::Fatal(refusal));
                 }
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
