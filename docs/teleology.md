@@ -226,7 +226,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/codex-api/src/anthropic/decoder.rs` (`AnthropicStopReason`), `codex-rs/protocol/src/models.rs` (`ToolCallRejection`), `codex-rs/core/src/stream_events_utils.rs`, `codex-rs/codex-api/src/anthropic/limits.rs` (`parse_usage_limit`), `codex-rs/core/src/session/turn.rs`, `codex-rs/core/src/compact_native_request.rs`.
 - Tripwire: `undeclared_tool_preserves_stream_and_replays_as_a_paired_rejection`, `malformed_declared_tool_preserves_later_blocks_and_usage` and `interleaved_tools_signed_blocks_and_cumulative_usage` (`codex-rs/codex-api/src/anthropic/decoder_tests.rs`), `rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume` (`codex-rs/core/src/stream_events_utils_tests.rs`), `map_api_error_distinguishes_anthropic_subscription_exhaustion` (`codex-rs/codex-api/src/api_bridge_tests.rs`). Usage before rejection in the sampling path: none.
 - Pressure: 0.162 #51241 and #51249 add a partial-answer message phase in `protocol/src/models.rs` and `stream_events_utils.rs`; `session/turn.rs` takes 16 upstream commits.
-- Evidence: df7be75a07, f21241bd52, 6fa07b94ea, e12016f164, d54b293a72.
+- Evidence: df7be75a07, f21241bd52, 6fa07b94ea, e12016f164, d54b293a72, 148c4ae73a.
 
 ### adapter-not-transport
 
