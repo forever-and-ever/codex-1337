@@ -94,7 +94,13 @@ impl AuthManager {
     /// The active login's personal account, read from storage rather than any manager's cache or
     /// scope: the account last chosen with `/account`, or the first one logged in.
     pub fn active_account_id(&self) -> std::io::Result<Option<String>> {
-        if self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
+        // TELOS(pinned-accounts): Managed workspace auth cannot select personal accounts;
+        // do not block thread creation on a store whose result would be discarded.
+        if self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral
+            || self
+                .auth_cached()
+                .is_some_and(|auth| auth.is_workspace_account())
+        {
             return Ok(None);
         }
         Ok(create_auth_storage(

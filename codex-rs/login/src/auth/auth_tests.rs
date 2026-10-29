@@ -3045,6 +3045,15 @@ async fn plan_type_maps_enterprise_cbp_usage_based_plan() {
         auth.account_plan_type(),
         Some(AccountPlanType::EnterpriseCbpUsageBased)
     );
+
+    // Managed workspaces cannot select personal accounts. Reconsulting an
+    // unavailable credential store here would block unrelated thread creation.
+    let manager =
+        AuthManager::from_auth_for_testing_with_home(auth, codex_home.path().to_path_buf());
+    let auth_file = codex_home.path().join("auth.json");
+    std::fs::remove_file(&auth_file).unwrap();
+    std::fs::create_dir(&auth_file).unwrap();
+    assert_eq!(manager.active_account_id().unwrap(), None);
 }
 
 #[tokio::test]
