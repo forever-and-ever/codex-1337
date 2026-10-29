@@ -154,7 +154,7 @@ async fn command_start_receives_rewritten_command_and_executor_workdir(
         .with_extensions(Arc::new(extensions.build()))
         .with_config(configure_command_test_permissions)
         .with_pre_build_hook(move |home| {
-            super::write_pre_tool_hook(home, "^Bash$", &hook_output)
+            super::write_pre_tool_hook(home, "^exec_command$", &hook_output)
                 .expect("write command-rewriting hook");
         })
         .with_config(trust_discovered_hooks)
