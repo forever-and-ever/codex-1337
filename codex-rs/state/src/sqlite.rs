@@ -31,6 +31,7 @@ use std::time::Instant;
 use tokio::sync::OnceCell;
 
 mod busy_retry;
+mod queue_integrity;
 mod validation;
 
 pub use busy_retry::SqlitePoolWriteExt;
@@ -172,6 +173,7 @@ pub struct SqliteConfig {
     is_nfs: Arc<OnceCell<bool>>,
     logs_is_nfs: Arc<OnceCell<bool>>,
     quick_check_manager: SqliteQuickCheckManager,
+    queue_integrity: queue_integrity::QueueIntegrity,
 }
 
 // Directory locks, cached filesystem information, and validation history are operational state,
@@ -194,6 +196,7 @@ impl SqliteConfig {
             is_nfs: Arc::new(OnceCell::new()),
             logs_is_nfs: Arc::new(OnceCell::new()),
             quick_check_manager: SqliteQuickCheckManager::new(),
+            queue_integrity: queue_integrity::QueueIntegrity::default(),
         }
     }
 
@@ -428,13 +431,7 @@ impl SqliteConfig {
         let connect = || async { connect_once(&options).await.map_err(anyhow::Error::from) };
         let pool = retry_on_busy(connect).await?;
         let validation_result = self
-            .quick_check_manager
-            .quick_check_once(
-                &pool,
-                path,
-                // Limit startup validation to 100 ms.
-                Duration::from_millis(/*millis*/ 100),
-            )
+            .check_runtime_integrity(&pool, path, recover_spec, telemetry_override)
             .await;
 
         let Ok(result) = validation_result else {
@@ -445,10 +442,6 @@ impl SqliteConfig {
         if result == validation::QuickCheckOutcome::CorruptedNeedsFixed {
             tracing::error!(database = %path.display(), "SQLite quick check detected corruption");
             telemetry::record_corruption(telemetry_override, recover_spec.map(|spec| spec.kind));
-            if matches!(recover_spec.map(|spec| spec.kind), Some(DbKind::Queue)) {
-                return Err(anyhow::Error::new(libsqlite3_sys::Error::new(libsqlite3_sys::SQLITE_CORRUPT))
-                    .context(format!("authoritative queue database at {} is corrupt; preserve it and restore it explicitly before accepting mail or queued input", path.display())));
-            }
             if recovery == RecoveryMode::BackupAndRebuild {
                 pool.close().await;
                 let backups = crate::backup_runtime_db_for_fresh_start(path).await?;

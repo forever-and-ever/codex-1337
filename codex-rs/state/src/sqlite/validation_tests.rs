@@ -74,6 +74,22 @@ async fn runtime_opens_recover_or_report_corruption_by_database_policy() -> anyh
         pool.close().await;
         tokio::fs::rename(&fixture, &path).await?;
 
+        if path == sqlite.queue_db_path() {
+            // Accepted mail has no rebuildable copy. Reopening the same configuration
+            // must not turn a cached corruption check into permission to erase it.
+            let corrupted = tokio::fs::read(&path).await?;
+            for _ in 0..2 {
+                let error = StateRuntime::init(sqlite.clone(), "openai".to_string())
+                    .await
+                    .err()
+                    .expect("corrupt authoritative queue must reject initialization");
+                assert!(crate::is_sqlite_corruption_error(&error));
+                assert_eq!(tokio::fs::read(&path).await?, corrupted);
+                assert!(!home.join("db-backups").exists());
+            }
+            continue;
+        }
+
         if path == sqlite.thread_history_db_path() {
             let telemetry = CorruptionTelemetry::default();
             // Unrelated corruption must not disable lazy history reads when the

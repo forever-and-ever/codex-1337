@@ -276,8 +276,9 @@ fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
 #[test]
 fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> {
     let dir = tempdir()?;
+    let home = dir.path().join("ephemeral");
     let storage = create_auth_storage(
-        dir.path().to_path_buf(),
+        home.clone(),
         AuthCredentialsStoreMode::Ephemeral,
         AuthKeyringBackendKind::default(),
     );
@@ -292,13 +293,22 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
 
     storage.save(&auth_dot_json)?;
     let loaded = storage.load()?;
-    assert_eq!(Some(auth_dot_json), loaded);
+    assert_eq!(Some(auth_dot_json.clone()), loaded);
+    // The telemetry decorator must delegate transactional operations; inheriting
+    // filesystem-backed defaults creates auth.lock even for an in-memory store.
+    let updated = AuthDotJson {
+        openai_api_key: Some("sk-replaced".to_string()),
+        ..auth_dot_json.clone()
+    };
+    assert!(storage.compare_exchange(&auth_dot_json, &updated)?);
+    assert!(!storage.compare_exchange(&auth_dot_json, &updated)?);
+    assert_eq!(storage.load()?, Some(updated));
 
     let removed = storage.delete()?;
     assert!(removed);
     let loaded = storage.load()?;
     assert_eq!(None, loaded);
-    assert!(!get_auth_file(dir.path()).exists());
+    assert!(!home.exists());
     Ok(())
 }
 

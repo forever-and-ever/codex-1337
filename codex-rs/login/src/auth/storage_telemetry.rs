@@ -1,6 +1,7 @@
 //! Observes logical Codex credential operations without inspecting authentication material.
 
 use super::AuthDocument;
+use super::AuthDotJson;
 use super::AuthStorageBackend;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::AuthKeyringBackendKind;
@@ -96,6 +97,36 @@ impl AuthStorageBackend for ObservedStorage {
         let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
         let result = self.inner.write(auth);
         telemetry.record_save_attempt(self.store(), &result);
+        if self.mode == AuthCredentialsStoreMode::Keyring
+            && let Err(error) = &result
+        {
+            telemetry.record_secure_error(error);
+        }
+        result
+    }
+
+    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
+        let result = self.inner.save(auth);
+        telemetry.record_save_attempt(self.store(), &result);
+        if self.mode == AuthCredentialsStoreMode::Keyring
+            && let Err(error) = &result
+        {
+            telemetry.record_secure_error(error);
+        }
+        result
+    }
+
+    fn compare_exchange(
+        &self,
+        previous: &AuthDotJson,
+        updated: &AuthDotJson,
+    ) -> std::io::Result<bool> {
+        let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
+        let result = self.inner.compare_exchange(previous, updated);
+        if !matches!(result, Ok(false)) {
+            telemetry.record_save_attempt(self.store(), &result.as_ref().map(|_| ()));
+        }
         if self.mode == AuthCredentialsStoreMode::Keyring
             && let Err(error) = &result
         {
