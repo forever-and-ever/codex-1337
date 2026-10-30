@@ -1316,6 +1316,14 @@ impl UnifiedExecProcessManager {
         );
         // Install the watcher before cancellable cleanup, and outside the process-store lock.
         if let Some(pruned_entry) = pruned_entry {
+            if !pruned_entry.process.has_exited() {
+                tracing::warn!(
+                    process_id = pruned_entry.process_id,
+                    idle_secs = pruned_entry.last_used.elapsed().as_secs(),
+                    command = %pruned_entry.hook_context.command.chars().take(256).collect::<String>(),
+                    "terminating the least recently used live unified exec process at the process cap"
+                );
+            }
             unregister_network_approval_for_entry(&pruned_entry).await;
             pruned_entry.process.terminate();
         }
@@ -1641,6 +1649,8 @@ impl UnifiedExecProcessManager {
         let mut meta: Vec<(i32, Instant, bool)> = store
             .processes
             .iter()
+            // TELOS(alarm-watched-sessions): an armed alarm watch exempts its session from pruning.
+            .filter(|(_, entry)| !entry.process.output_handles().terminal_watches.armed())
             .map(|(id, entry)| (*id, entry.last_used, entry.process.has_exited()))
             .collect();
         let mut found_locked_exited_process = false;

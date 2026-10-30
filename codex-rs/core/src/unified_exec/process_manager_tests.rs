@@ -722,3 +722,91 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
         (None, MAX_UNIFIED_EXEC_PROCESSES)
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn armed_terminal_watch_exempts_its_session_from_pruning() {
+    let (_, turn) = crate::session::tests::make_session_and_context().await;
+    let cwd = PathUri::parse("file:///tmp").expect("test cwd should be valid");
+    let process = || async {
+        Arc::new(
+            crate::unified_exec::process_tests::remote_process(
+                codex_exec_server::WriteStatus::Accepted,
+                /*terminate_error*/ None,
+                codex_sandboxing::SandboxType::None,
+            )
+            .await,
+        )
+    };
+    let entry = |process_id: i32,
+                 process: &Arc<crate::unified_exec::process::UnifiedExecProcess>,
+                 last_used: Instant| ProcessEntry {
+        process: Arc::clone(process),
+        plugin_metrics_sidecar: None,
+        call_id: format!("call-{process_id}"),
+        process_id,
+        cwd: cwd.clone(),
+        initial_exec_command_active: Arc::new(AtomicBool::new(false)),
+        hook_context: crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::namespaced("functions", "exec_command"),
+            command: format!("command-{process_id}"),
+        },
+        tty: false,
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+        permissions: super::super::TerminalPermissions::for_launch(
+            turn.initial_environments
+                .primary()
+                .expect("turn environment"),
+            &turn,
+            super::super::TerminalSandboxSource::Native,
+            crate::sandboxing::SandboxPermissions::UseDefault,
+            /*additional_permissions*/ None,
+            /*internal_permissions*/ None,
+        ),
+        network_approval: None,
+        session: std::sync::Weak::new(),
+        last_used,
+    };
+    let watched = process().await;
+    let idle = process().await;
+    let start = Instant::now();
+    let used_at =
+        |process_id: i32| start + Duration::from_secs(u64::from(process_id.unsigned_abs()));
+    let cap = i32::try_from(MAX_UNIFIED_EXEC_PROCESSES).expect("process cap should fit in i32");
+    let mut store = ProcessStore::default();
+    store.processes.insert(1, entry(1, &watched, start));
+    for process_id in 2..=cap {
+        store
+            .processes
+            .insert(process_id, entry(process_id, &idle, used_at(process_id)));
+    }
+    let watch = super::super::terminal_watch::TerminalWatch::arm(
+        Arc::clone(&watched),
+        std::sync::Weak::new(),
+        /*session_id*/ 1,
+        "aeon_runner.py wait".to_string(),
+        /*pattern*/ None,
+    )
+    .await
+    .expect("a live session accepts a watch");
+
+    // The watched session stays the least recently used through twice the cap in spawns.
+    for process_id in cap + 1..=3 * cap {
+        let pruned = UnifiedExecProcessManager::prune_processes_if_needed(&mut store)
+            .map(|entry| entry.process_id);
+        assert!(
+            pruned.is_some_and(|pruned| pruned != 1),
+            "pruned {pruned:?}"
+        );
+        store
+            .processes
+            .insert(process_id, entry(process_id, &idle, used_at(process_id)));
+    }
+
+    drop(watch);
+    assert_eq!(
+        UnifiedExecProcessManager::prune_processes_if_needed(&mut store)
+            .map(|entry| entry.process_id),
+        Some(1)
+    );
+}

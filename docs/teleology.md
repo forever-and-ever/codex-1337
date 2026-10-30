@@ -396,6 +396,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #51117 edits `compact_model_fallback.rs` and `compact_remote_v2.rs`.
 - Evidence: a8b367fbfe.
 
+### alarm-watched-sessions
+
+- Telos: a background session that an alarm watches lives until the alarm resolves; idle pruning never decides the outcome an alarm is waiting for.
+- Holds: at the unified-exec process cap, a process with an armed terminal watch is never pruned, however long it has been idle; disarming, a match or the process's exit releases the exemption, and watched sessions may push the store past its soft cap. Pruning a live process logs its id, idle time and command.
+- Owners: `codex-rs/core/src/unified_exec/terminal_watch.rs` (`TerminalWatches::armed`, `TerminalWatch::arm`), `codex-rs/core/src/unified_exec/process_manager.rs` (filter seam in `prune_processes_if_needed`, prune log in `store_process`).
+- Tripwire: `armed_terminal_watch_exempts_its_session_from_pruning` (`codex-rs/core/src/unified_exec/process_manager_tests.rs`).
+- Pressure: upstream's LRU pruning (`prune_processes_if_needed`, `process_id_to_prune_from_meta`) ranks candidates by `last_used`; a silent waiter is never touched, so restoring upstream's candidate list makes it the first live process terminated, as `alarm.set` recommends exactly that pattern for long waits.
+- Evidence: libgrid sessions 25101 and 27493 terminated with exit 143, 2026-10-29.
+
 ## Accounts
 
 ### interleaved-turn-accounting
@@ -704,7 +713,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/parallel.rs`: response-order-fences
 - `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor
 - `codex-rs/core/src/tools/spec_plan.rs`: mcp-roster, standing-context-trims, turn-economy, local-coprocessor, response-order-fences
-- `codex-rs/core/src/unified_exec/process_manager.rs`: local-coprocessor
+- `codex-rs/core/src/unified_exec/process_manager.rs`: local-coprocessor, alarm-watched-sessions
 - `codex-rs/ext/goal/src/extension.rs`: retained-goal-rules, goal-boxes
 - `codex-rs/ext/goal/src/runtime.rs`: retained-goal-rules, goal-boxes
 - `codex-rs/ext/goal/src/spec.rs`: standing-context-trims
@@ -1082,3 +1091,4 @@ Fork-owned files, absent upstream:
 - `codex-rs/codex-mcp/src/elicitation_authority.rs`: idle-mcp-human-consent
 - `codex-rs/codex-mcp/src/elicitation_policy.rs`: idle-mcp-human-consent
 - `codex-rs/app-server/src/idle_mcp_elicitation.rs`: idle-mcp-human-consent
+- `codex-rs/core/src/unified_exec/terminal_watch.rs`: alarm-watched-sessions

@@ -103,6 +103,11 @@ impl TerminalWatches {
         self.watchers.lock().expect("terminal watches poisoned")
     }
 
+    /// TELOS(alarm-watched-sessions): an armed watch is a standing request that its session outlive idleness.
+    pub(super) fn armed(&self) -> bool {
+        matches!(&*self.lock(), WatchState::Open(watchers) if !watchers.is_empty())
+    }
+
     fn feed(&self, chunk: &[u8]) {
         let at = timestamp();
         let mut watchers = self.lock();
@@ -195,6 +200,34 @@ impl CodexThread {
                     .collect::<String>(),
             )
         };
+        TerminalWatch::arm(
+            process,
+            Arc::downgrade(&self.session),
+            session_id,
+            command,
+            pattern,
+        )
+        .await
+    }
+}
+
+impl Drop for TerminalWatch {
+    fn drop(&mut self) {
+        if let WatchState::Open(watchers) = &mut *self.watches.lock() {
+            watchers.remove(&self.id);
+        }
+    }
+}
+
+impl TerminalWatch {
+    /// Arms at an exact output boundary: `retained` is the transcript the watch has already seen.
+    pub(super) async fn arm(
+        process: Arc<UnifiedExecProcess>,
+        runtime: std::sync::Weak<crate::session::session::Session>,
+        session_id: i32,
+        command: String,
+        pattern: Option<Regex>,
+    ) -> Result<Self, TerminalWatchError> {
         let output = process.output_handles().output_buffer.lock().await;
         if process.has_exited() {
             return Err(TerminalWatchError::Exited {
@@ -236,9 +269,9 @@ impl CodexThread {
             }
         }
         drop(output);
-        Ok(TerminalWatch {
+        Ok(Self {
             process,
-            runtime: Arc::downgrade(&self.session),
+            runtime,
             watches,
             id,
             signal,
@@ -247,17 +280,6 @@ impl CodexThread {
             pattern,
         })
     }
-}
-
-impl Drop for TerminalWatch {
-    fn drop(&mut self) {
-        if let WatchState::Open(watchers) = &mut *self.watches.lock() {
-            watchers.remove(&self.id);
-        }
-    }
-}
-
-impl TerminalWatch {
     pub fn command(&self) -> &str {
         &self.command
     }
