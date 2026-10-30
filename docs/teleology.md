@@ -403,7 +403,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/core/src/unified_exec/terminal_watch.rs` (`TerminalWatches::armed`, `TerminalWatch::arm`), `codex-rs/core/src/unified_exec/process_manager.rs` (filter seam in `prune_processes_if_needed`, prune log in `store_process`).
 - Tripwire: `armed_terminal_watch_exempts_its_session_from_pruning` (`codex-rs/core/src/unified_exec/process_manager_tests.rs`).
 - Pressure: upstream's LRU pruning (`prune_processes_if_needed`, `process_id_to_prune_from_meta`) ranks candidates by `last_used`; a silent waiter is never touched, so restoring upstream's candidate list makes it the first live process terminated, as `alarm.set` recommends exactly that pattern for long waits.
-- Evidence: libgrid sessions 25101 and 27493 terminated with exit 143, 2026-10-29.
+- Evidence: d160c7469e; libgrid sessions 25101 and 27493 terminated with exit 143, 2026-10-29.
 
 ## Accounts
 
