@@ -226,7 +226,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/codex-api/src/anthropic/mod.rs` (`AnthropicRequest::from_body`), `codex-rs/codex-api/src/anthropic/history.rs`, `codex-rs/codex-api/src/anthropic/salvage.rs`, `codex-rs/core/src/compact_native.rs` (`Rung`), `codex-rs/core/src/compact_native_request.rs`.
 - Tripwire: `content_recorded_during_a_tool_call_follows_its_batch` and `salvage_always_yields_an_encodable_history` (`codex-rs/codex-api/src/anthropic/history_tests.rs`), `unusable_completions_record_usage_and_name_their_rung_escalation` (`codex-rs/core/src/compact_native_request_tests.rs`).
 - Pressure: 0.162 #51156 moves base instructions into input messages; #51117 installs full context in compaction replacement history (`compact.rs`, `compact_remote_v2.rs`); #51188 records base instructions in incremental tool history.
-- Evidence: 65b19edd6c, d68f5c1e02.
+- Evidence: 65b19edd6c, d68f5c1e02; 6c09b92a17; LIBGRID_MASCOT wedged on 27 tool-result images (33.2 MB encoded) at 45% of its context window, 2026-10-30.
 
 ### subscription-boundary
 
