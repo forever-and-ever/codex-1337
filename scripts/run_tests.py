@@ -186,7 +186,11 @@ FIXTURE_BINARIES = (
 # Fixtures that unit tests spawn. A --lib run builds only these: building a
 # package's binary compiles its library again outside the test configuration.
 UNIT_TEST_FIXTURES = (
-    ("codex-code-mode-host", "codex-code-mode-host", ("codex-guardian-v2",)),
+    (
+        "codex-code-mode-host",
+        "codex-code-mode-host",
+        ("codex-core", "codex-guardian-v2"),
+    ),
 )
 
 

@@ -786,11 +786,13 @@ impl TestCodexBuilder {
         );
         #[cfg(not(target_os = "linux"))]
         let codex_linux_sandbox_exe = None;
+        // Unit-test runs build no helper binary and never reach the restricted filesystem
+        // helper, so the harness image serves them, as it did before helper images were preferred.
         let local_runtime_paths = codex_exec_server::ExecServerRuntimeOptions::new(
-            config
-                .codex_self_exe
-                .clone()
-                .context("test runtime requires a helper-capable Codex executable")?,
+            match config.codex_self_exe.clone() {
+                Some(helper) => helper,
+                None => std::env::current_exe().context("test executable path")?,
+            },
             codex_linux_sandbox_exe,
         )?;
         let environment_manager = Arc::new(if include_local_environment {
