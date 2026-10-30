@@ -71,14 +71,32 @@ pub fn anthropic_stop_reason(metadata: &ResponseUsageMetadata) -> Option<Anthrop
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Frame {
-    MessageStart { message: Message },
-    ContentBlockStart { index: usize, content_block: Block },
-    ContentBlockDelta { index: usize, delta: Delta },
-    ContentBlockStop { index: usize },
-    MessageDelta { delta: MessageDelta, usage: Value },
+    MessageStart {
+        message: Message,
+    },
+    ContentBlockStart {
+        index: usize,
+        content_block: Block,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: Delta,
+    },
+    ContentBlockStop {
+        index: usize,
+    },
+    MessageDelta {
+        delta: MessageDelta,
+        usage: Value,
+    },
     MessageStop,
     Ping,
-    Error { error: NativeError },
+    Error {
+        error: NativeError,
+    },
+    /// Anthropic may add event types; an unknown one carries nothing this decoder acts on.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Deserialize)]
@@ -174,9 +192,8 @@ pub(super) struct Decoder<'a> {
     usage: Usage,
     raw_usage: Map<String, Value>,
     finished: bool,
-    /// A completed item may already be recorded, rendered or dispatched as a tool call, so a
-    /// failure after it cannot be replayed.
-    committed: bool,
+    /// Completed text and thinking, held back until a call or the stop commits them.
+    withheld: Vec<ResponseItem>,
 }
 
 impl<'a> Decoder<'a> {
@@ -192,7 +209,7 @@ impl<'a> Decoder<'a> {
             usage: Usage::default(),
             raw_usage: Map::new(),
             finished: false,
-            committed: false,
+            withheld: Vec::new(),
         }
     }
 
@@ -217,28 +234,26 @@ impl<'a> Decoder<'a> {
         let mut events = Vec::new();
         match frame {
             Frame::Error { error } => {
-                // Before any item completes, a retry replays nothing the client acted on, so
-                // errors that invite one stay typed for the retry policy.
+                // Errors that invite a retry stay typed wherever they arrive: a retry rebuilds
+                // from recorded history, which ends with an answered call or before this reply.
                 let message = error.message.chars().take(1024).collect::<String>();
-                if !self.committed {
-                    match error.r#type.as_str() {
-                        "overloaded_error" => {
-                            return Err(ApiError::ServerOverloaded { retry_after: None });
-                        }
-                        "rate_limit_error" => {
-                            return Err(ApiError::RateLimitExceeded {
-                                message,
-                                retry_after: None,
-                            });
-                        }
-                        "api_error" => {
-                            return Err(ApiError::Retryable {
-                                message: format!("Anthropic api_error: {message}"),
-                                retry_after: None,
-                            });
-                        }
-                        _ => {}
+                match error.r#type.as_str() {
+                    "overloaded_error" => {
+                        return Err(ApiError::ServerOverloaded { retry_after: None });
                     }
+                    "rate_limit_error" => {
+                        return Err(ApiError::RateLimitExceeded {
+                            message,
+                            retry_after: None,
+                        });
+                    }
+                    "api_error" => {
+                        return Err(ApiError::Retryable {
+                            message: format!("Anthropic api_error: {message}"),
+                            retry_after: None,
+                        });
+                    }
+                    _ => {}
                 }
                 return Err(ApiError::NativeStream(format!(
                     "Anthropic {}: {}",
@@ -246,7 +261,7 @@ impl<'a> Decoder<'a> {
                     message
                 )));
             }
-            Frame::Ping => {}
+            Frame::Ping | Frame::Unknown => {}
             Frame::MessageStart { message } => {
                 if self.id.is_some() || message.id.is_empty() || message.id.len() > 512 {
                     return Err(ApiError::NativeStream(
@@ -409,6 +424,14 @@ impl<'a> Decoder<'a> {
                     }
                     _ => self.item(&open)?,
                 };
+                // Core records a completed item at once. Text and thinking wait for the call
+                // that follows them, or for the stop, so an interruption before either leaves
+                // nothing recorded and the attempt replays whole.
+                if !matches!(open.block, Block::ToolUse { .. }) {
+                    self.withheld.push(item);
+                    return Ok(events);
+                }
+                events.extend(self.withheld.drain(..).map(ResponseEvent::OutputItemDone));
                 if let ResponseItem::FunctionCall {
                     call_id, arguments, ..
                 } = &item
@@ -426,7 +449,6 @@ impl<'a> Decoder<'a> {
                         delta: input.clone(),
                     });
                 }
-                self.committed = true;
                 events.push(ResponseEvent::OutputItemDone(item));
             }
             Frame::MessageDelta { delta, usage } => {
@@ -434,10 +456,7 @@ impl<'a> Decoder<'a> {
                 // tool-use block it will not retry on a fallback model, without closing it. The
                 // unfinished block (partial input or text, unsigned thinking) is never committed.
                 let declined = delta.stop_reason == Some(AnthropicStopReason::Refusal);
-                if self.id.is_none()
-                    || self.reason.is_some()
-                    || (!declined && !self.blocks.is_empty())
-                {
+                if self.id.is_none() || (!declined && !self.blocks.is_empty()) {
                     return Err(ApiError::NativeStream(format!(
                         "invalid Anthropic message_delta order (stop reason {:?}, {} open blocks)",
                         delta.stop_reason,
@@ -445,9 +464,13 @@ impl<'a> Decoder<'a> {
                     )));
                 }
                 self.blocks.clear();
+                // One or more message_delta events may arrive: usage is cumulative, and a later
+                // stop reason supersedes an earlier one.
                 self.update_usage(&usage)?;
-                self.reason = delta.stop_reason;
-                self.stop_details = delta.stop_details;
+                if delta.stop_reason.is_some() {
+                    self.reason = delta.stop_reason;
+                    self.stop_details = delta.stop_details;
+                }
             }
             Frame::MessageStop => {
                 let response_id = self.id.clone().ok_or_else(|| {
@@ -463,6 +486,10 @@ impl<'a> Decoder<'a> {
                 }
                 let token_usage = self.usage.finish()?;
                 self.finished = true;
+                // A refusal's output is incomplete and Anthropic directs that it be discarded.
+                if reason != AnthropicStopReason::Refusal {
+                    events.extend(self.withheld.drain(..).map(ResponseEvent::OutputItemDone));
+                }
                 let mut metadata = json!({
                     "provider": "anthropic",
                     "stop_reason": reason,

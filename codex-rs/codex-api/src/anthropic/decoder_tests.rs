@@ -210,8 +210,9 @@ fn optional_thinking_breakdown_does_not_corrupt_completion_accounting() {
 
 #[test]
 fn interleaved_tools_signed_blocks_and_cumulative_usage() {
-    // Tool fragments interleave, signatures append, and iterative usage replaces
-    // summary counts. Losing any of these corrupts the next request's history.
+    // Tool fragments interleave, signatures append, iterative usage replaces summary
+    // counts, unknown events pass and message_delta may repeat. Losing any of these
+    // corrupts the next request's history.
     let tools = [
         AnthropicTool {
             name: "functions__exec".to_owned(),
@@ -237,6 +238,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     ];
     let frames = [
         json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":0,"output_tokens":0}}}),
+        json!({"type":"future_event","detail":{"hint":1}}),
         json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"A"}}),
         json!({"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"Exact ","signature":""}}),
         json!({"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"α"}}),
@@ -256,6 +258,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         json!({"type":"content_block_start","index":4,"content_block":{"type":"compaction","content":"Exact checkpoint. ","signature":""}}),
         json!({"type":"content_block_delta","index":4,"delta":{"type":"signature_delta","signature":"signed/=="}}),
         json!({"type":"content_block_stop","index":4}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":42,"output_tokens":19,"output_tokens_details":{"thinking_tokens":13},"iterations":[{"input_tokens":42,"output_tokens":19,"cache_creation_input_tokens":7,"cache_read_input_tokens":11},{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5,"cache_read_input_tokens":13}]}}),
         json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":42,"output_tokens":19,"output_tokens_details":{"thinking_tokens":13},"iterations":[{"input_tokens":42,"output_tokens":19,"cache_creation_input_tokens":7,"cache_read_input_tokens":11},{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5,"cache_read_input_tokens":13}]}}),
         json!({"type":"message_stop"}),
     ];

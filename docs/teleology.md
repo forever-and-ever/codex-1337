@@ -240,9 +240,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### native-robustness
 
 - Telos: a provider anomaly costs at most the affected call, and every charged token is recorded.
-- Holds: a `tool_use` that names an undeclared tool or whose input does not fit its tool's envelope becomes `ResponseItem::RejectedToolCall` (`ToolCallRejection`): it is answered, not dispatched, and later blocks and usage survive; charged usage is recorded before an exhausted or refused response is rejected; subscription exhaustion maps to a usage-limit error; a refusal ends the turn with a terminal error naming the policy area Anthropic reports, and commits no part of a block it cuts off.
-- Owners: `codex-rs/codex-api/src/anthropic/decoder.rs` (`AnthropicStopReason`), `codex-rs/protocol/src/models.rs` (`ToolCallRejection`), `codex-rs/core/src/stream_events_utils.rs`, `codex-rs/codex-api/src/anthropic/limits.rs` (`parse_usage_limit`), `codex-rs/core/src/session/turn.rs`, `codex-rs/core/src/compact_native_request.rs`.
-- Tripwire: `undeclared_tool_preserves_stream_and_replays_as_a_paired_rejection`, `malformed_declared_tool_preserves_later_blocks_and_usage` and `interleaved_tools_signed_blocks_and_cumulative_usage` (`codex-rs/codex-api/src/anthropic/decoder_tests.rs`), `rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume` (`codex-rs/core/src/stream_events_utils_tests.rs`), `map_api_error_distinguishes_anthropic_subscription_exhaustion` (`codex-rs/codex-api/src/api_bridge_tests.rs`). Usage before rejection in the sampling path: none.
+- Holds: a `tool_use` that names an undeclared tool or whose input does not fit its tool's envelope becomes `ResponseItem::RejectedToolCall` (`ToolCallRejection`): it is answered, not dispatched, and later blocks and usage survive; charged usage is recorded before an exhausted or refused response is rejected; subscription exhaustion maps to a usage-limit error; a refusal ends the turn with a terminal error naming the policy area Anthropic reports and commits no output a call has not already committed; completed text and thinking wait for the call that follows them or for the stop, so a recoverable interruption retries from recorded history, replaying nothing or continuing from answered calls; repeated `message_delta` events and unknown event types are accepted.
+- Owners: `codex-rs/codex-api/src/anthropic/decoder.rs` (`AnthropicStopReason`), `codex-rs/codex-api/src/api_bridge.rs` (`AnthropicStream`), `codex-rs/protocol/src/models.rs` (`ToolCallRejection`), `codex-rs/core/src/stream_events_utils.rs`, `codex-rs/codex-api/src/anthropic/limits.rs` (`parse_usage_limit`), `codex-rs/core/src/session/turn.rs`, `codex-rs/core/src/compact_native_request.rs`.
+- Tripwire: `undeclared_tool_preserves_stream_and_replays_as_a_paired_rejection`, `malformed_declared_tool_preserves_later_blocks_and_usage` and `interleaved_tools_signed_blocks_and_cumulative_usage` (`codex-rs/codex-api/src/anthropic/decoder_tests.rs`), `rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume` (`codex-rs/core/src/stream_events_utils_tests.rs`), `map_api_error_distinguishes_anthropic_subscription_exhaustion` (`codex-rs/codex-api/src/api_bridge_tests.rs`), `fragmented_utf8_crlf_sse_and_uncommitted_failures_replay` and `stream_failures_stay_typed_for_retry` (`codex-rs/codex-api/src/anthropic/stream_tests.rs`), the `Committed` profile of `native_request_pins_recovery_then_switches_with_exact_custom_tool_replay_and_cache_warm` (`codex-rs/core/src/client_anthropic_tests.rs`). Usage before rejection in the sampling path: none.
 - Pressure: 0.162 #51241 and #51249 add a partial-answer message phase in `protocol/src/models.rs` and `stream_events_utils.rs`; `session/turn.rs` takes 16 upstream commits.
 - Evidence: df7be75a07, f21241bd52, 6fa07b94ea, e12016f164, d54b293a72, 148c4ae73a.
 
@@ -381,9 +381,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### backpressure-waits
 
 - Telos: provider backpressure delays interactive work instead of failing it.
-- Holds: `ServerOverloaded`, `RateLimitExceeded` and a 429 that is neither a usage limit nor exhausted quota make an interactive session wait as long as the user allows, without spending the retry budget; server advice sets the delay, otherwise it doubles from 5 s to 60 s; usage limits and exhausted quota end the turn; internal and Guardian sessions keep their failure path; Anthropic overload, rate-limit and API errors before any completed item stay retryable.
+- Holds: `ServerOverloaded`, `RateLimitExceeded` and a 429 that is neither a usage limit nor exhausted quota make an interactive session wait as long as the user allows, without spending the retry budget; server advice sets the delay, otherwise it doubles from 5 s to 60 s; usage limits and exhausted quota end the turn; internal and Guardian sessions keep their failure path; Anthropic overload, rate-limit and API errors stay retryable wherever they arrive in a stream.
 - Owners: `codex-rs/core/src/backpressure.rs`, `codex-rs/core/src/responses_retry.rs`, `codex-rs/codex-api/src/anthropic/decoder.rs`, `codex-rs/codex-api/src/anthropic/client.rs`.
-- Tripwire: `responses_http_capacity_recovers_and_remains_interruptible`, `sse_rate_limit_without_retry_after_outlasts_stream_retries`, `sse_capacity_recovers` and `websocket_backpressure_recovers` (`codex-rs/core/tests/suite/retry_after.rs`), `errors_before_any_completed_item_stay_typed_for_retry` (`codex-rs/codex-api/src/anthropic/stream_tests.rs`).
+- Tripwire: `responses_http_capacity_recovers_and_remains_interruptible`, `sse_rate_limit_without_retry_after_outlasts_stream_retries`, `sse_capacity_recovers` and `websocket_backpressure_recovers` (`codex-rs/core/tests/suite/retry_after.rs`), `stream_failures_stay_typed_for_retry` (`codex-rs/codex-api/src/anthropic/stream_tests.rs`).
 - Pressure: 0.162 #49441 retries `ServerOverloaded` with server advice "within the configured retry budgets" in `responses_retry.rs`.
 - Evidence: f36483414d, 076db2fb39.
 
@@ -825,6 +825,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/codex-mcp/src/elicitation.rs`: idle-mcp-human-consent
 - `codex-rs/app-server/src/outgoing_message.rs`: idle-mcp-human-consent
 - `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`: idle-mcp-human-consent
+- `codex-rs/codex-api/src/api_bridge.rs`: native-robustness
 
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread, attention-gated-painting

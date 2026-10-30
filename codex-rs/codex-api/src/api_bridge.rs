@@ -1,5 +1,4 @@
 use crate::TransportError;
-use crate::anthropic::AnthropicStreamProgress;
 use crate::error::ApiError;
 use crate::error::parse_terminal_provider_error;
 use crate::rate_limits::parse_promo_message;
@@ -64,10 +63,11 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         ApiError::Stream(msg) => CodexErr::Stream(msg),
         ApiError::NativeStream(message) => CodexErr::Fatal(message),
         ApiError::AnthropicStream { progress, source } => {
-            // Core discards unfinished client-visible items before replay. Completed
-            // native items remain irreversible: retrying them can duplicate tools or
-            // send an invalid signed-thinking prefill.
-            if progress != AnthropicStreamProgress::CompletedItem && source.retryable() {
+            // TELOS(native-robustness): every recoverable native interruption stays retryable.
+            // Text and thinking stay uncommitted until a call commits them, and a retry rebuilds
+            // the request from recorded history, so it replays nothing or continues from answered
+            // calls; neither repeats a call nor sends an assistant prefill.
+            if source.retryable() {
                 CodexErr::Stream(source.to_string())
             } else {
                 CodexErr::Fatal(format!("Anthropic stream error ({progress:?}): {source}"))

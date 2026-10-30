@@ -12,7 +12,6 @@ use codex_client::HttpTransport;
 use codex_client::Request;
 use codex_client::Response;
 use codex_protocol::error::CodexErrKind;
-use codex_protocol::error::CodexErrorDetails;
 use futures::stream;
 use http::HeaderMap;
 use pretty_assertions::assert_eq;
@@ -41,7 +40,7 @@ fn response(chunks: Vec<Vec<u8>>) -> StreamResponse {
 }
 
 #[tokio::test]
-async fn fragmented_utf8_crlf_sse_and_terminal_failures_are_not_replayed() {
+async fn fragmented_utf8_crlf_sse_and_uncommitted_failures_replay() {
     let start = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{\"input_tokens\":13,\"output_tokens\":1,\"cache_read_input_tokens\":100,\"cache_creation_input_tokens\":7}}}\r\n\r\n";
     let text = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\r\n\r\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"α answer\"}}\r\n\r\ndata: {\"type\":\"content_block_stop\",\"index\":0}\r\n\r\n";
     for (tail, expected) in [
@@ -86,28 +85,32 @@ async fn fragmented_utf8_crlf_sse_and_terminal_failures_are_not_replayed() {
                         observed.push(json!("completed"));
                     }
                     Err(error) => {
+                        // Text waits for a call or the stop to commit it, so an interruption
+                        // leaves nothing recorded and stays retryable.
                         assert!(matches!(
                             error,
-                            ApiError::NativeStream(_)
+                            ApiError::ServerOverloaded { .. }
                                 | ApiError::AnthropicStream {
-                                    progress: AnthropicStreamProgress::CompletedItem,
+                                    progress: AnthropicStreamProgress::PartialOutput,
                                     source: AnthropicStreamError::Truncated,
                                 }
                         ));
-                        let mapped = crate::map_api_error(error);
-                        assert!(matches!(mapped.details(), CodexErrorDetails::Fatal(_)));
-                        assert_eq!(mapped.retry_delay(/*retry_count*/ 1), None);
+                        assert!(matches!(
+                            CodexErrKind::from(crate::map_api_error(error).details()),
+                            CodexErrKind::ServerOverloaded | CodexErrKind::Stream
+                        ));
                         observed.push(json!(expected));
                     }
                     _ => {}
                 }
             }
+            let committed = (expected == "completed").then(|| json!({"type":"message","id":"msg_0","role":"assistant","content":[{"type":"output_text","text":"α answer"}]}));
             assert_eq!(
                 observed,
-                vec![
-                    json!({"type":"message","id":"msg_0","role":"assistant","content":[{"type":"output_text","text":"α answer"}]}),
-                    json!(expected)
-                ]
+                committed
+                    .into_iter()
+                    .chain([json!(expected)])
+                    .collect::<Vec<_>>()
             );
         }
     }
@@ -132,7 +135,7 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
         if expected_progress != AnthropicStreamProgress::BeforeOutput {
             frames.push(json!({
                 "type":"content_block_start","index":0,
-                "content_block":{"type":"thinking","thinking":"partial","signature":"signed"}
+                "content_block":{"type":"tool_use","id":"call","name":"fixture","input":{"value":1}}
             }));
         }
         if expected_progress == AnthropicStreamProgress::CompletedItem {
@@ -175,10 +178,7 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
                 };
                 assert_eq!(*progress, expected_progress);
                 assert!(std::error::Error::source(&error).is_some());
-                assert_eq!(
-                    crate::map_api_error(error).retry_delay(1).is_some(),
-                    expected_progress != AnthropicStreamProgress::CompletedItem
-                );
+                assert!(crate::map_api_error(error).retry_delay(1).is_some());
                 assert!(stream.next().await.is_none());
             } else {
                 drop(stream);
@@ -243,9 +243,9 @@ async fn uncertain_post_attempts_once_despite_provider_retry_policy() {
 }
 
 #[tokio::test]
-async fn errors_before_any_completed_item_stay_typed_for_retry() {
-    // Provider frames and recoverable body interruptions use core's precommit
-    // retry/discard boundary; completed native items must never be replayed.
+async fn stream_failures_stay_typed_for_retry() {
+    // Recoverable interruptions stay typed for retry: a retry rebuilds from recorded
+    // history, which ends before this reply or with a call it answered.
     let start = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{\"input_tokens\":13,\"output_tokens\":1,\"cache_read_input_tokens\":100,\"cache_creation_input_tokens\":7}}}\n\n";
     let partial = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n";
     let mut kinds = Vec::new();
@@ -280,14 +280,16 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
             CodexErrKind::Fatal,
         ]
     );
-    // A timeout, clean EOF and malformed SSE can all arrive after HTTP succeeds;
-    // only precompletion transport interruption may spend the finite retry budget.
+    // A timeout, clean EOF and malformed SSE can all arrive after HTTP succeeds; only a
+    // transport interruption may spend the finite retry budget. Text and thinking wait
+    // for a call to commit them.
     let stop = "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
     for block in [
         json!({"type":"text","text":"partial"}),
         json!({"type":"thinking","thinking":"partial","signature":"signed"}),
         json!({"type":"tool_use","id":"call","name":"fixture","input":{"value":1}}),
     ] {
+        let commits = block["type"] == "tool_use";
         let block_start = format!(
             "data: {}\n\n",
             json!({
@@ -308,7 +310,11 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
                         "content_block":{"type":"text","text":"later partial"}
                     })
                 ),
-                AnthropicStreamProgress::CompletedItem,
+                if commits {
+                    AnthropicStreamProgress::CompletedItem
+                } else {
+                    AnthropicStreamProgress::PartialOutput
+                },
             ),
         ] {
             for terminal in [
@@ -379,12 +385,10 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
                     assert_eq!(*progress, expected_progress);
                 }
                 let mapped = crate::map_api_error(error);
-                let retryable =
-                    recoverable && expected_progress != AnthropicStreamProgress::CompletedItem;
-                assert_eq!(mapped.retry_delay(1).is_some(), retryable);
+                assert_eq!(mapped.retry_delay(1).is_some(), recoverable);
                 assert_eq!(
                     CodexErrKind::from(mapped.details()),
-                    if retryable {
+                    if recoverable {
                         CodexErrKind::Stream
                     } else {
                         CodexErrKind::Fatal

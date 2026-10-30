@@ -488,50 +488,60 @@ async fn native_regular_replay_profiles(
             json!({"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"FAILED_NATIVE_TEXT"}}),
         ]
     };
+    let answer = |id: &str, text: &str| {
+        vec![
+            json!({"type":"message_start","message":{"id":id,"usage":{"input_tokens":1,"output_tokens":0}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}),
+            json!({"type":"message_stop"}),
+        ]
+    };
     for profile in [
         NativeReplayProfile::Recover,
         NativeReplayProfile::Exhaust,
         NativeReplayProfile::Committed,
     ] {
         server.reset().await;
-        let (budget, replies, retried_ids, expected_success) = match profile {
+        let (budget, replies, retries, expected_success) = match profile {
             NativeReplayProfile::Recover => {
                 let mut provider_error = pending("pending-1");
                 provider_error.push(json!({"type":"error","error":{"type":"api_error","message":"synthetic retry"}}));
-                let completed = vec![
-                    json!({"type":"message_start","message":{"id":"recovered","usage":{"input_tokens":1,"output_tokens":0}}}),
-                    json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
-                    json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Recovered native answer."}}),
-                    json!({"type":"content_block_stop","index":0}),
-                    json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}),
-                    json!({"type":"message_stop"}),
-                ];
+                let completed = answer("recovered", "Recovered native answer.");
                 (
                     2,
                     vec![pending("pending-0"), provider_error, completed],
-                    vec!["pending-0", "pending-1"],
+                    vec![
+                        (vec!["pending-0_0", "pending-0_1"], "pending-1_0"),
+                        (vec!["pending-1_0", "pending-1_1"], "recovered_0"),
+                    ],
                     true,
                 )
             }
             NativeReplayProfile::Exhaust => (
                 1,
                 vec![pending("pending-0"), pending("pending-1")],
-                vec!["pending-0"],
+                vec![(vec!["pending-0_0", "pending-0_1"], "pending-1_0")],
                 false,
             ),
             NativeReplayProfile::Committed => (
                 1,
-                vec![vec![
-                    json!({"type":"message_start","message":{"id":"committed","usage":{"input_tokens":1,"output_tokens":0}}}),
-                    json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Completed thought.","signature":"committed-signature/=="}}),
-                    json!({"type":"content_block_stop","index":0}),
-                    json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"one-action","name":"update_plan","input":{"arguments":{"plan":[{"step":"Native commit once","status":"completed"}]}}}}),
-                    json!({"type":"content_block_stop","index":1}),
-                    json!({"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}),
-                    json!({"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"FAILED_NATIVE_TEXT"}}),
-                ]],
-                Vec::new(),
-                false,
+                vec![
+                    vec![
+                        json!({"type":"message_start","message":{"id":"committed","usage":{"input_tokens":1,"output_tokens":0}}}),
+                        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Completed thought.","signature":"committed-signature/=="}}),
+                        json!({"type":"content_block_stop","index":0}),
+                        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"one-action","name":"update_plan","input":{"arguments":{"plan":[{"step":"Native commit once","status":"completed"}]}}}}),
+                        json!({"type":"content_block_stop","index":1}),
+                        json!({"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}),
+                        json!({"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"FAILED_NATIVE_TEXT"}}),
+                    ],
+                    answer("continued", "Continued after the committed call."),
+                ],
+                // Only the unfinished text is discarded: the step continues from the answered call.
+                vec![(vec!["committed_2"], "continued_0")],
+                true,
             ),
         };
         let expected_requests = replies.len();
@@ -646,15 +656,14 @@ async fn native_regular_replay_profiles(
         let requests = server.received_requests().await.unwrap();
         assert_eq!(
             discarded.len(),
-            retried_ids.len(),
+            retries.len(),
             "native retry lifecycle: terminal={:?}, provider POSTs={}",
             observed.last(),
             requests.len(),
         );
-        for ((position, ids), attempt) in discarded.iter().zip(&retried_ids) {
-            let expected = vec![format!("{attempt}_0"), format!("{attempt}_1")];
+        for ((position, ids), (expected, next)) in discarded.iter().zip(&retries) {
             assert_eq!(
-                *ids, expected,
+                ids, expected,
                 "discard every started native item exactly once"
             );
             for id in ids {
@@ -676,13 +685,8 @@ async fn native_regular_replay_profiles(
                     .expect("native partial output really delivered");
                 assert!(started < delta && delta < *position);
             }
-            let next = if *attempt == "pending-0" {
-                "pending-1_0"
-            } else {
-                "recovered_0"
-            };
             let next_started = observed.iter().position(|event| {
-                matches!(event, EventMsg::ItemStarted(event) if event.item.id() == next)
+                matches!(event, EventMsg::ItemStarted(event) if event.item.id() == *next)
             }).expect("retried native item really started");
             assert!(*position < next_started);
         }
@@ -695,7 +699,9 @@ async fn native_regular_replay_profiles(
             .iter()
             .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body).unwrap())
             .collect::<Vec<_>>();
-        for body in &bodies {
+        let committed = matches!(profile, NativeReplayProfile::Committed);
+        let first = bodies[0]["messages"].as_array().unwrap();
+        for (attempt, body) in bodies.iter().enumerate() {
             let messages = &body["messages"];
             let wire = messages.to_string();
             assert!(wire.contains("retained-signature/=="));
@@ -705,12 +711,17 @@ async fn native_regular_replay_profiles(
             assert!(wire.contains("continue native replay"));
             assert!(!wire.contains("FAILED_NATIVE_"));
             assert_eq!(messages.as_array().unwrap().last().unwrap()["role"], "user");
-            assert_eq!(
-                *messages, bodies[0]["messages"],
-                "retry contains only committed history"
-            );
+            if committed && attempt > 0 {
+                // The continuation appends the answered call to the committed history.
+                assert_eq!(messages.as_array().unwrap().len(), first.len() + 2);
+                assert!(wire.contains("committed-signature/==") && wire.contains("one-action"));
+            } else {
+                assert_eq!(
+                    *messages, bodies[0]["messages"],
+                    "retry contains only committed history"
+                );
+            }
         }
-        let committed = matches!(profile, NativeReplayProfile::Committed);
 
         if committed {
             assert!(
