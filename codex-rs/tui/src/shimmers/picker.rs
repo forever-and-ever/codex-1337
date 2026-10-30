@@ -12,6 +12,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use unicode_width::UnicodeWidthStr;
 
 use libshimmer::Motion;
 use libshimmer::Palette;
@@ -28,6 +29,7 @@ use super::live;
 use super::live::GLYPHS;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionItem;
+use crate::bottom_pane::SelectionRowDisplay;
 use crate::bottom_pane::SelectionSecondaryAction;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::SideContentWidth;
@@ -68,13 +70,13 @@ pub(crate) fn picker(
         hint.extend([" · ".dim(), cancel.into(), " back".dim()]);
     }
     let hint = Line::from(hint);
-    let items = recipes
+    let items: Vec<SelectionItem> = recipes
         .iter()
         .copied()
         .enumerate()
         .map(|(index, recipe)| SelectionItem {
             name: recipe.name().to_owned(),
-            description: Some(format!("{} — {}", recipe.blurb(), recipe.credit())),
+            description: Some(recipe.blurb().to_owned()),
             is_current: current == Some(index),
             dismiss_on_select: true,
             actions: vec![Box::new(move |_: &AppEventSender| live::engage(recipe))],
@@ -86,11 +88,13 @@ pub(crate) fn picker(
             ..Default::default()
         })
         .collect();
+    let widest = widest_row(&items);
     let params = SelectionViewParams {
         title: Some("Shimmer".to_owned()),
         items,
         initial_selected_idx: current,
         max_visible_rows: recipes.len(),
+        row_display: SelectionRowDisplay::SingleLine,
         ..SelectionViewParams::picker()
     };
     let Some(palette) = live::palette() else {
@@ -115,7 +119,9 @@ pub(crate) fn picker(
         subtitle: Some("Move to preview; Enter swaps the live rows.".to_owned()),
         side_content: Box::new(pane(&preview, frames.clone())),
         side_content_width: SideContentWidth::Half,
-        side_content_min_width: PREVIEW_WIDTH,
+        // `Half` never gives the list less than the preview, so a preview no narrower than the
+        // widest row keeps every blurb whole; a narrower terminal stacks the preview below.
+        side_content_min_width: PREVIEW_WIDTH.max(widest),
         stacked_side_content: Some(Box::new(pane(&preview, frames))),
         preserve_side_content_bg: true,
         on_selection_changed: Some(Box::new(move |recipe, _: &AppEventSender| {
@@ -126,6 +132,22 @@ pub(crate) fn picker(
         })),
         ..params
     }
+}
+
+/// Columns the widest row needs to show its description whole, as `ListSelectionView` lays out
+/// single-line rows: a `› 23. ` gutter, the name and any ` (current)` marker, then a two-column
+/// gap before the description column that every row shares.
+fn widest_row(items: &[SelectionItem]) -> u16 {
+    let names = items.iter().enumerate().map(|(index, item)| {
+        let marker = if item.is_current { " (current)" } else { "" };
+        format!("› {}. {}{marker}", index + 1, item.name).width()
+    });
+    let descriptions = items
+        .iter()
+        .filter_map(|item| item.description.as_deref())
+        .map(UnicodeWidthStr::width);
+    let columns = names.max().unwrap_or_default() + 2 + descriptions.max().unwrap_or_default();
+    u16::try_from(columns).unwrap_or(u16::MAX)
 }
 
 /// The highlighted shimmer playing the script from its start.
@@ -189,6 +211,8 @@ impl Renderable for PreviewPane {
                 feed(shimmer, *ticks);
             }
         }
+        let credit = Line::from(format!("by {}", shimmer.recipe().credit())).dim();
+        buf.set_line(area.x, area.y, &credit, area.width);
         let area = Rect {
             y: area.y.saturating_add(1),
             height: area.height.saturating_sub(1),
