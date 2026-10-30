@@ -121,8 +121,10 @@ impl AnthropicRequest {
             serde_json::value::to_raw_value(body).map_err(|err| ApiError::InvalidRequest {
                 message: format!("failed to encode Anthropic request: {err}"),
             })?;
+        // History is what outgrows a request, and salvage sheds its media to fit: an oversized
+        // request is an invalid prompt, so a sampling history that overflows compacts.
         if body.get().len() > Self::MAX_BODY_BYTES {
-            return Err(ApiError::InvalidRequest {
+            return Err(ApiError::InvalidPrompt {
                 message: format!("Anthropic request exceeds {} bytes", Self::MAX_BODY_BYTES),
             });
         }

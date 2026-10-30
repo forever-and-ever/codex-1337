@@ -210,7 +210,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    fn finish(self) -> Result<History, ApiError> {
+    pub(super) fn finish(self) -> Result<History, ApiError> {
         if !self.pending.is_empty() {
             return Err(invalid("Anthropic history ends with unresolved tool calls"));
         }

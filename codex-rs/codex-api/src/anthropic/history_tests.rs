@@ -5,7 +5,7 @@ use super::AnthropicTool;
 use super::AnthropicToolIdentity;
 use super::cache::mark_prefixes;
 use super::history::encode_history;
-use super::salvage_anthropic_history;
+use super::salvage::salvage_within;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use pretty_assertions::assert_eq;
@@ -163,8 +163,14 @@ fn content_recorded_during_a_tool_call_follows_its_batch() {
 
 #[test]
 fn salvage_always_yields_an_encodable_history() {
+    // Two images outgrow the ceiling, so the older one yields its media.
+    let image = format!("data:image/png;base64,{}", "A".repeat(100_000));
     let input: Vec<ResponseItem> = serde_json::from_value(json!([
         {"type":"message","role":"user","content":[{"type":"input_text","text":"Go."}]},
+        {"type":"function_call","call_id":"old","name":"f","arguments":"{}"},
+        {"type":"function_call_output","call_id":"old","output":[{"type":"input_image","image_url":&image}]},
+        {"type":"function_call","call_id":"new","name":"f","arguments":"{}"},
+        {"type":"function_call_output","call_id":"new","output":[{"type":"input_image","image_url":&image}]},
         {"type":"function_call","call_id":"a","name":"f","arguments":"{}"},
         {"type":"function_call","call_id":"b","name":"f","arguments":"{}"},
         {"type":"function_call_output","call_id":"a","output":"A"},
@@ -178,7 +184,8 @@ fn salvage_always_yields_an_encodable_history() {
         {"type":"function_call","call_id":"d","name":"f","arguments":"{}"}
     ]))
     .unwrap();
-    let salvage = salvage_anthropic_history(input, &[InputModality::Text]);
+    let modalities = [InputModality::Text, InputModality::Image];
+    let salvage = salvage_within(input, &modalities, 150_000);
     assert_eq!(
         salvage.repairs,
         vec![
@@ -190,7 +197,17 @@ fn salvage_always_yields_an_encodable_history() {
                 "history item has no supported native Anthropic representation".into()
             ),
             AnthropicRepair::Closed(1),
+            AnthropicRepair::Shed(1),
         ]
     );
-    encode_history(&salvage.items, "", &[], &[InputModality::Text]).unwrap();
+    let items = serde_json::to_value(&salvage.items).unwrap();
+    assert_eq!(
+        [
+            &items[2]["output"][0]["type"],
+            &items[4]["output"][0]["type"]
+        ],
+        [&json!("input_text"), &json!("input_image")]
+    );
+    let history = encode_history(&salvage.items, "", &[], &modalities).unwrap();
+    assert!(serde_json::to_vec(&history.messages).unwrap().len() <= 150_000);
 }

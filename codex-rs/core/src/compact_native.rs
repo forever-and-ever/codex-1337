@@ -501,6 +501,9 @@ fn concession(rung: Rung, repairs: &[AnthropicRepair], rejections: &[CodexErr]) 
                     format!("replaced media in {count} item(s): {reason}")
                 }
                 AnthropicRepair::Closed(_) => format!("answered {count} unanswered tool call(s)"),
+                AnthropicRepair::Shed(items) => format!(
+                    "replaced media in the {items} oldest item(s) to fit the request size limit"
+                ),
             })
             .collect::<Vec<_>>()
             .join("; ");

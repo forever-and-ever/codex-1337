@@ -222,8 +222,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### messages-from-canonical-history
 
 - Telos: native Claude reads Codex's canonical history directly, and no history it cannot encode wedges a thread.
-- Holds: Messages requests are encoded item by item from canonical `ResponseItem` history, not through a Responses emulation; content recorded during an unresolved tool batch follows the batch's results; `salvage_anthropic_history` always yields an encodable history and reports each `AnthropicRepair`; native compaction descends the `Rung` ladder (whole history, tail, recent user messages), and when even the last rung returns no checkpoint the thread resets to that material without a model call; each concession is a warning; a refused sampling history compacts once per step and retries.
-- Owners: `codex-rs/codex-api/src/anthropic/history.rs`, `codex-rs/codex-api/src/anthropic/salvage.rs`, `codex-rs/core/src/compact_native.rs` (`Rung`), `codex-rs/core/src/compact_native_request.rs`.
+- Holds: Messages requests are encoded item by item from canonical `ResponseItem` history, not through a Responses emulation; content recorded during an unresolved tool batch follows the batch's results; `salvage_anthropic_history` always yields an encodable history whose messages fit 30 of a request's 32 MB, shedding the oldest media first, and reports each `AnthropicRepair`; native compaction descends the `Rung` ladder (whole history, tail, recent user messages), and when even the last rung returns no checkpoint the thread resets to that material without a model call; each concession is a warning; a sampling history that the provider refuses, or that the encoder rejects and salvage would repair (an oversized request is an invalid prompt), compacts once per step and retries.
+- Owners: `codex-rs/codex-api/src/anthropic/mod.rs` (`AnthropicRequest::from_body`), `codex-rs/codex-api/src/anthropic/history.rs`, `codex-rs/codex-api/src/anthropic/salvage.rs`, `codex-rs/core/src/compact_native.rs` (`Rung`), `codex-rs/core/src/compact_native_request.rs`.
 - Tripwire: `content_recorded_during_a_tool_call_follows_its_batch` and `salvage_always_yields_an_encodable_history` (`codex-rs/codex-api/src/anthropic/history_tests.rs`), `unusable_completions_record_usage_and_name_their_rung_escalation` (`codex-rs/core/src/compact_native_request_tests.rs`).
 - Pressure: 0.162 #51156 moves base instructions into input messages; #51117 installs full context in compaction replacement history (`compact.rs`, `compact_remote_v2.rs`); #51188 records base instructions in incremental tool history.
 - Evidence: 65b19edd6c, d68f5c1e02.
@@ -913,6 +913,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/codex-api/src/anthropic/decoder.rs`: native-robustness, backpressure-waits
 - `codex-rs/codex-api/src/anthropic/history.rs`: reminders-not-system, stable-native-identities, messages-from-canonical-history
 - `codex-rs/codex-api/src/anthropic/limits.rs`: native-robustness
+- `codex-rs/codex-api/src/anthropic/mod.rs`: messages-from-canonical-history
 - `codex-rs/codex-api/src/anthropic/request.rs`: claude-native-voice, subscription-boundary
 - `codex-rs/codex-api/src/anthropic/salvage.rs`: messages-from-canonical-history
 - `codex-rs/codex-api/src/anthropic/tool_alias.rs`: stable-native-identities
