@@ -19,7 +19,7 @@ the shot list and render again. The film is 1080p60 H.264 with AAC; size, rate, 
 and glow are `[film]` settings.
 
 The first render after a cue or shimmer change runs the export, which compiles codex-tui's tests;
-exports are cached by cue sheet, host source and libshimmer identity in
+exports are cached by cue sheet, host source, libshimmer and libshimmer-ratatui identity in
 `~/.cache/codex-1337/shimmer-reel/`, newest four kept. Each clip uses a fixed seed, so fresh exports remain deterministic.
 
 | Module | Owns |

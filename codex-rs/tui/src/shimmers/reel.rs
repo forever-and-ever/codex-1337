@@ -20,6 +20,7 @@ use libshimmer::Shimmer;
 use libshimmer::Spell;
 use libshimmer::TICK;
 use libshimmer::stock::ROSTER;
+use libshimmer_ratatui::RowExt as _;
 
 use super::live::BRISK;
 use super::live::GLYPHS;

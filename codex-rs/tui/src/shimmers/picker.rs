@@ -21,9 +21,10 @@ use libshimmer::Row;
 use libshimmer::STALE;
 use libshimmer::Shimmer;
 use libshimmer::TICK;
-use libshimmer::Wide;
 use libshimmer::script;
 use libshimmer::stock::ROSTER;
+use libshimmer_ratatui::InkExt as _;
+use libshimmer_ratatui::RowExt as _;
 
 use super::live;
 use super::live::GLYPHS;
@@ -53,7 +54,7 @@ pub(crate) fn picker(
 ) -> SelectionViewParams {
     let recipes: Vec<_> = ROSTER
         .iter()
-        .filter(|recipe| recipe.fits::<Wide>(GLYPHS).is_ok())
+        .filter(|recipe| recipe.fits(GLYPHS).is_ok())
         .collect();
     let current = live::engaged().and_then(|engaged| {
         recipes

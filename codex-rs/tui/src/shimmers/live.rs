@@ -25,6 +25,8 @@ use libshimmer::Shimmer;
 use libshimmer::Spell;
 use libshimmer::TICK;
 use libshimmer::stock::ROSTER;
+use libshimmer_ratatui::InkExt as _;
+use libshimmer_ratatui::RowExt as _;
 use rand::seq::IteratorRandom as _;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

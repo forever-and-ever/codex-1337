@@ -4304,6 +4304,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "libshimmer",
+ "libshimmer-ratatui",
  "objc2-app-kit",
  "objc2-foundation",
  "pathdiff",
@@ -8753,13 +8754,22 @@ dependencies = [
 
 [[package]]
 name = "libshimmer"
-version = "0.2.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "904030acde673cec1e234890c163eca668ef7d6564941e59890b991f34993838"
+checksum = "cc93639c3e1d0d44ab18ee1368afab739830f6b0758a5bd1b8aff57f6ca716c9"
 dependencies = [
- "ratatui-core",
  "unicode-segmentation",
  "unicode-width 0.2.1",
+]
+
+[[package]]
+name = "libshimmer-ratatui"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f68877c17f0f68eafa291feb7733c9b5fd9b6fa2d9d3f923eda0e7cb42b5b0a7"
+dependencies = [
+ "libshimmer",
+ "ratatui-core",
 ]
 
 [[package]]

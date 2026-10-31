@@ -72,19 +72,21 @@ def exported(cues: dict[str, object]) -> Path:
         digest.update(source.read_bytes())
     workspace = ROOT / "codex-rs"
     manifest = tomllib.loads((workspace / "Cargo.toml").read_text())
-    dependency = manifest["workspace"]["dependencies"]["libshimmer"]
-    if isinstance(dependency, dict) and "path" in dependency:
-        library = workspace / dependency["path"]
-        digest.update((library / "Cargo.toml").read_bytes())
-        for source in sorted((library / "src").rglob("*.rs")):
-            digest.update(source.relative_to(library).as_posix().encode())
-            digest.update(source.read_bytes())
-    else:
-        lock = tomllib.loads((workspace / "Cargo.lock").read_text())
-        (package,) = (
-            package for package in lock["package"] if package["name"] == "libshimmer"
-        )
-        digest.update(json.dumps([package["version"], package["checksum"]]).encode())
+    lock = tomllib.loads((workspace / "Cargo.lock").read_text())
+    for name in ("libshimmer", "libshimmer-ratatui"):
+        dependency = manifest["workspace"]["dependencies"][name]
+        if isinstance(dependency, dict) and "path" in dependency:
+            library = workspace / dependency["path"]
+            digest.update((library / "Cargo.toml").read_bytes())
+            for source in sorted((library / "src").rglob("*.rs")):
+                digest.update(source.relative_to(library).as_posix().encode())
+                digest.update(source.read_bytes())
+        else:
+            (package,) = (
+                package for package in lock["package"] if package["name"] == name
+            )
+            identity = [package["version"], package["checksum"]]
+            digest.update(json.dumps(identity).encode())
     entry = CACHE / digest.hexdigest()[:20]
     clips = entry / "clips.json"
     if not clips.exists():
