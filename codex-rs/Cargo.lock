@@ -8754,9 +8754,9 @@ dependencies = [
 
 [[package]]
 name = "libshimmer"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc93639c3e1d0d44ab18ee1368afab739830f6b0758a5bd1b8aff57f6ca716c9"
+checksum = "e362cb146e6e0534fd1d80b3d946728bc40a93ef7e943daf374e09dac93fe82d"
 dependencies = [
  "unicode-segmentation",
  "unicode-width 0.2.1",
