@@ -1,4 +1,5 @@
 //! Human-only work below the transcript. Disclosures own their height; only terminal bounds clip.
+//! Each paint replaces control hits and the text-selection surface, including an empty paint.
 
 pub(crate) mod operations;
 mod presented;
@@ -288,10 +289,11 @@ impl LiveWorkView {
         self.hits.clear();
         Clear.render(area, buf);
         let area = crate::render::live_section::content_area(area);
-        if area.is_empty() {
-            return;
-        }
-        let lines = self.lines(area.width);
+        let lines = if area.is_empty() {
+            Vec::new()
+        } else {
+            self.lines(area.width)
+        };
         let height = usize::from(area.height);
         let clipped = lines.len() > height;
         let mut budget = height.saturating_sub(usize::from(clipped));
@@ -400,6 +402,11 @@ impl LiveWorkView {
                 usize::from(area.width),
             );
             painted.push(hint.into());
+        }
+        if painted.is_empty() {
+            self.focused = false;
+            self.selection.jump_to_latest();
+            self.release_hover();
         }
         self.selection.render_surface(
             Rect::new(area.x, area.y, area.width, painted.len() as u16),
@@ -1036,7 +1043,7 @@ mod tests {
         // An open bottom-pane view hides this panel while its controls occupy the panel's old rows.
         // The hidden text surface must not intercept their clicks, even with a held selection.
         view.render(Rect::default(), &mut Buffer::empty(Rect::default()));
-        view.capture_painted_frame(false);
+        view.capture_painted_frame();
         assert_eq!(view.handle_mouse(click), Interaction::Ignored);
         assert!(
             view.selection_event(&mouse(
@@ -1046,5 +1053,36 @@ mod tests {
             ))
             .is_none()
         );
+        // A present composer gap can allocate no live rows after work completes or clipping.
+        // Its former text surface must yield those rows to the growing transcript.
+        for empty in [
+            Rect { height: 0, ..area },
+            Rect {
+                width: crate::ui_consts::LIVE_PREFIX_COLS,
+                ..area
+            },
+        ] {
+            view.render(area, &mut Buffer::empty(area));
+            view.capture_painted_frame();
+            assert!(
+                view.selection_event(&mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    area.x + crate::ui_consts::LIVE_PREFIX_COLS,
+                    area.y + 1,
+                ))
+                .is_some()
+            );
+            view.render(empty, &mut Buffer::empty(empty));
+            view.capture_painted_frame();
+            assert_eq!(view.handle_mouse(click), Interaction::Ignored);
+            assert!(
+                view.selection_event(&mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    area.x + crate::ui_consts::LIVE_PREFIX_COLS,
+                    area.y + 1,
+                ))
+                .is_none()
+            );
+        }
     }
 }

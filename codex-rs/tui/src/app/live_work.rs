@@ -220,9 +220,9 @@ impl LiveWorkState {
         }
     }
 
-    pub(super) fn capture_painted_frame(&mut self, visible: bool) {
+    pub(super) fn capture_painted_frame(&mut self) {
         if let Some(scope) = &mut self.scope {
-            scope.view.capture_painted_frame(visible);
+            scope.view.capture_painted_frame();
         }
     }
 

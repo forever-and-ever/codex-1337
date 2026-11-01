@@ -379,15 +379,13 @@ impl App {
                 .borrow_mut()
                 .render_first_screen(view.remaining_area(), frame.buffer, composer);
             bottom.render(bottom_area, frame.buffer);
-            if let Some(gap) = &composer_gap {
-                live_work.render(
-                    Rect {
-                        width: transcript_width,
-                        ..gap.live_area.get()
-                    },
-                    frame.buffer,
-                );
-            }
+            live_work.render(
+                composer_gap.as_ref().map_or(Rect::default(), |gap| Rect {
+                    width: transcript_width,
+                    ..gap.live_area.get()
+                }),
+                frame.buffer,
+            );
             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
                 tip.render(area, frame.buffer);
             }
@@ -460,7 +458,7 @@ impl App {
                 cursor_style,
             );
             view.capture_painted_frame();
-            live_work.capture_painted_frame(composer_gap.is_some());
+            live_work.capture_painted_frame();
         })?;
         tui.offer_glint(glint);
         if let Some((surface, tip)) = &turn_tip
