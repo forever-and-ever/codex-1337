@@ -3,9 +3,12 @@ use codex_tools::FreeformToolFormat;
 use codex_tools::ResponsesApiNamespace;
 
 #[test]
-fn freeform_projection_round_trip() {
+fn wire_projection_hides_custom_tools_and_tool_images() {
     // Responses hosts may implement functions but not custom tools. Conversion
     // must be wire-only: dispatch and replay retain the original input kind.
+    // Chat-completions hosts lose images in tool results, so images ride in a user
+    // message, which must follow the whole run of outputs: inside the run it would
+    // part the later outputs from their calls.
     let freeform = FreeformTool {
         name: "python".into(),
         description: "Execute Python".into(),
@@ -30,16 +33,21 @@ fn freeform_projection_round_trip() {
         "name": "python", "namespace": "scripts", "input": input,
     }))
     .unwrap();
-    let output: ResponseItem = serde_json::from_value(json!({
-        "type": "custom_tool_call_output", "call_id": "call-1", "name": "python", "output": "42",
-    }))
+    let image = "data:image/png;base64,AA==";
+    let rest: Vec<ResponseItem> = serde_json::from_value(json!([
+        {"type": "function_call", "call_id": "call-2", "name": "shell", "arguments": "{}"},
+        {"type": "custom_tool_call_output", "call_id": "call-1", "name": "python", "output": [
+            {"type": "input_text", "text": "42"}, {"type": "input_image", "image_url": image},
+        ]},
+        {"type": "function_call_output", "call_id": "call-2", "output": "ok"},
+    ]))
     .unwrap();
     let mut request = ResponsesApiRequest {
         model: "openai/test".into(),
         stream: true,
         service_tier: None,
         openrouter: None,
-        input: vec![original.clone(), output],
+        input: std::iter::once(original.clone()).chain(rest).collect(),
         tools: None,
         tool_choice: "auto".into(),
         parallel_tool_calls: true,
@@ -76,8 +84,22 @@ fn freeform_projection_round_trip() {
     );
     assert_eq!(wire["input"][0]["type"], "function_call");
     assert_eq!(wire["input"][0]["name"], wire["tools"][1]["name"]);
-    assert_eq!(wire["input"][1]["type"], "function_call_output");
-    assert_eq!(wire["input"][1]["name"], wire["tools"][1]["name"]);
+    assert_eq!(wire["input"][2]["type"], "function_call_output");
+    assert_eq!(wire["input"][2]["name"], wire["tools"][1]["name"]);
+    assert_eq!(
+        wire["input"][2]["output"],
+        json!([
+            {"type": "input_text", "text": "42"},
+            {"type": "input_text", "text": "[image 1: attached after the tool results]"},
+        ])
+    );
+    assert_eq!(wire["input"][3]["call_id"], "call-2");
+    assert_eq!(wire["input"].as_array().unwrap().len(), 5);
+    assert_eq!(wire["input"][4]["role"], "user");
+    assert_eq!(
+        wire["input"][4]["content"][2],
+        json!({"type": "input_image", "image_url": image})
+    );
     let arguments: Value =
         serde_json::from_str(wire["input"][0]["arguments"].as_str().unwrap()).unwrap();
     assert_eq!(arguments, json!({"input": input}));

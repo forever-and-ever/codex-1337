@@ -4,6 +4,9 @@ use codex_api::ResponsesApiTools;
 use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_tools::FreeformTool;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -180,9 +183,8 @@ impl Projection {
                 _ => None,
             })
             .collect::<HashMap<_, _>>();
-        for item in &mut request.input {
-            *item = project_input(std::mem::replace(item, ResponseItem::Other), &calls);
-        }
+        let input = std::mem::take(&mut request.input);
+        request.input = hoist_images(input.into_iter().map(|item| project_input(item, &calls)));
         Ok(projection)
     }
 
@@ -408,6 +410,77 @@ fn project_input(item: ResponseItem, calls: &HashMap<String, String>) -> Respons
         },
         item => item,
     }
+}
+
+/// Chat-completions hosts drop, misread or reject images in tool results, yet read
+/// them in user messages. Each run of tool outputs therefore cedes its images to one
+/// user message after the run, leaving numbered stand-ins: a user message inside the
+/// run would part the later outputs from their calls.
+fn hoist_images(items: impl Iterator<Item = ResponseItem>) -> Vec<ResponseItem> {
+    let mut wire = Vec::new();
+    let mut images = Vec::new();
+    for mut item in items {
+        match &mut item {
+            ResponseItem::FunctionCallOutput { output, .. } => {
+                if let FunctionCallOutputBody::ContentItems(parts) = &mut output.body {
+                    *parts = std::mem::take(parts)
+                        .into_iter()
+                        .map(|part| match part {
+                            FunctionCallOutputContentItem::InputImage { image, detail } => {
+                                images.push(ContentItem::InputImage { image, detail });
+                                FunctionCallOutputContentItem::InputText {
+                                    text: format!(
+                                        "[image {}: attached after the tool results]",
+                                        images.len()
+                                    ),
+                                }
+                            }
+                            part => part,
+                        })
+                        .collect();
+                }
+            }
+            _ => wire.extend(attachment(std::mem::take(&mut images))),
+        }
+        wire.push(item);
+    }
+    wire.extend(attachment(images));
+    wire
+}
+
+/// The user message carrying a run's hoisted `images`, if it has any.
+fn attachment(images: Vec<ContentItem>) -> Option<ResponseItem> {
+    if images.is_empty() {
+        return None;
+    }
+    let preamble = ContentItem::InputText {
+        text: concat!(
+            "<harness_attachment>\n",
+            "Images from the tool results above, by number. ",
+            "The harness moved them here; this is not user input.\n",
+            "</harness_attachment>",
+        )
+        .into(),
+    };
+    let content = std::iter::once(preamble)
+        .chain((1..).zip(images).flat_map(|(number, image)| {
+            [
+                ContentItem::InputText {
+                    text: format!("[image {number}]"),
+                },
+                image,
+            ]
+        }))
+        .collect();
+    Some(ResponseItem::Message {
+        id: None,
+        role: "user".into(),
+        content,
+        encrypted_content: None,
+        status: None,
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    })
 }
 
 #[cfg(test)]
