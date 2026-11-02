@@ -5,6 +5,14 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openrouter"
+      ],
+      "type": "string"
+    },
     "Admission": {
       "description": "The step's admission, known once the next request completes.",
       "oneOf": [
@@ -667,6 +675,19 @@
             "activeTurnNotSteerable"
           ],
           "title": "ActiveTurnNotSteerableCodexErrorInfo",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "signInRequired": {
+              "$ref": "#/definitions/SignInRequired"
+            }
+          },
+          "required": [
+            "signInRequired"
+          ],
+          "title": "SignInRequiredCodexErrorInfo",
           "type": "object"
         },
         {
@@ -1560,6 +1581,22 @@
       "description": "A non-empty reasoning effort value advertised by the model.",
       "minLength": 1,
       "type": "string"
+    },
+    "SignInRequired": {
+      "description": "The saved identity whose grant no longer permits requests.",
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/AccountProvider"
+        }
+      },
+      "required": [
+        "account",
+        "provider"
+      ],
+      "type": "object"
     },
     "SubAgentActivityKind": {
       "enum": [

@@ -99,3 +99,5 @@ pub use openrouter::EndpointSlug;
 pub use openrouter::KeyName;
 pub use openrouter::ModelSlug;
 pub use openrouter::Usd;
+
+pub mod sign_in_required;

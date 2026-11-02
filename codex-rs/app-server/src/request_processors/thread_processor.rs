@@ -1631,6 +1631,9 @@ impl ThreadRequestProcessor {
                     .await;
                 remove_pending_thread_metadata(thread_store.as_ref(), reserved_thread_id).await;
                 return Err(match err.details() {
+                    CodexErrorDetails::SignInRequired(required) => {
+                        super::sign_in_required::sign_in_required(required)
+                    }
                     CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
                     CodexErrorDetails::UnsupportedOperation(message) => {
                         method_not_found(message.clone())
@@ -4584,6 +4587,9 @@ impl ThreadRequestProcessor {
             }
             Err(err) => {
                 let error = match err.details() {
+                    CodexErrorDetails::SignInRequired(required) => {
+                        super::sign_in_required::sign_in_required(required)
+                    }
                     CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
                     _ => internal_error(format!("error resuming thread: {err}")),
                 };

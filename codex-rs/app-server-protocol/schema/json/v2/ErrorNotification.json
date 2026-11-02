@@ -1,6 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openrouter"
+      ],
+      "type": "string"
+    },
     "CodexErrorInfo": {
       "anyOf": [
         {
@@ -142,6 +150,19 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "properties": {
+            "signInRequired": {
+              "$ref": "#/definitions/SignInRequired"
+            }
+          },
+          "required": [
+            "signInRequired"
+          ],
+          "title": "SignInRequiredCodexErrorInfo",
+          "type": "object"
+        },
+        {
           "type": [
             "string",
             "object"
@@ -204,6 +225,22 @@
         "compact"
       ],
       "type": "string"
+    },
+    "SignInRequired": {
+      "description": "The saved identity whose grant no longer permits requests.",
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/AccountProvider"
+        }
+      },
+      "required": [
+        "account",
+        "provider"
+      ],
+      "type": "object"
     },
     "TurnError": {
       "properties": {

@@ -5304,6 +5304,14 @@ class Settings(BaseModel):
     reasoning_effort: ReasoningEffort | None = None
 
 
+class SignInRequired(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: str
+    provider: AccountProvider
+
+
 class SkillErrorInfo(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8854,6 +8862,14 @@ class ActiveTurnNotSteerableCodexErrorInfo(BaseModel):
     ]
 
 
+class SignInRequiredCodexErrorInfo(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    sign_in_required: Annotated[SignInRequired, Field(alias="signInRequired")]
+
+
 class CodexErrorInfo(
     RootModel[
         CodexErrorInfoValue
@@ -8862,6 +8878,7 @@ class CodexErrorInfo(
         | ResponseStreamDisconnectedCodexErrorInfo
         | ResponseTooManyFailedAttemptsCodexErrorInfo
         | ActiveTurnNotSteerableCodexErrorInfo
+        | SignInRequiredCodexErrorInfo
         | dict[str, Any]
     ]
 ):
@@ -8872,6 +8889,7 @@ class CodexErrorInfo(
         | ResponseStreamDisconnectedCodexErrorInfo
         | ResponseTooManyFailedAttemptsCodexErrorInfo
         | ActiveTurnNotSteerableCodexErrorInfo
+        | SignInRequiredCodexErrorInfo
         | dict[str, Any],
         Field(
             description="This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant."

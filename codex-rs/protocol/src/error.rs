@@ -232,6 +232,9 @@ pub enum CodexErrorDetails {
     TokioJoin(#[from] JoinError),
     #[error("{0}")]
     EnvVar(EnvVarError),
+    #[error("{0}")]
+    // TELOS(recoverable-sign-in): retain the provider identity until the presentation boundary.
+    SignInRequired(crate::sign_in_required::SignInRequired),
 }
 
 impl From<&CodexErr> for CodexErrKind {
@@ -424,7 +427,8 @@ impl CodexErr {
     /// otherwise use exponential backoff with jitter. Callers enforce their own retry budgets.
     pub fn retry_delay(&self, retry_count: u64) -> Option<Duration> {
         match self.details() {
-            CodexErrorDetails::TurnAborted
+            CodexErrorDetails::SignInRequired(_)
+            | CodexErrorDetails::TurnAborted
             | CodexErrorDetails::SessionBudgetExceeded
             | CodexErrorDetails::Interrupted
             | CodexErrorDetails::EnvVar(_)
@@ -504,6 +508,9 @@ impl CodexErr {
     /// Translate core error to client-facing protocol error.
     pub fn to_codex_protocol_error(&self) -> CodexErrorInfo {
         match &self.details {
+            CodexErrorDetails::SignInRequired(required) => {
+                CodexErrorInfo::SignInRequired(required.clone())
+            }
             CodexErrorDetails::ContextWindowExceeded => CodexErrorInfo::ContextWindowExceeded,
             CodexErrorDetails::SessionBudgetExceeded => CodexErrorInfo::SessionBudgetExceeded,
             CodexErrorDetails::RateLimitExceeded(_) => CodexErrorInfo::RateLimitExceeded,

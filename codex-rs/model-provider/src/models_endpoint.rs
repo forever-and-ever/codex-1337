@@ -33,7 +33,6 @@ use codex_models_manager::manager::ModelsEndpointFuture;
 use codex_models_manager::manager::ModelsEndpointResponse;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
-use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_response_debug_context::extract_response_debug_context;
@@ -287,17 +286,10 @@ impl OpenAiModelsEndpoint {
                                 },
                             ) if attempt == 0 => {
                                 page_auth = Arc::new(
-                                    page_auth.refresh_after_rejection().await.map_err(|error| {
-                                        let message =
-                                            if let CodexErrorDetails::InvalidRequest(message) =
-                                                error.details()
-                                            {
-                                                message.clone()
-                                            } else {
-                                                error.to_string()
-                                            };
-                                        ApiError::InvalidRequest { message }
-                                    })?,
+                                    page_auth
+                                        .refresh_after_rejection()
+                                        .await
+                                        .map_err(crate::native_claude_catalog::PageError::Auth)?,
                                 );
                                 *captured.lock().await = Arc::clone(&page_auth);
                             }
@@ -306,16 +298,17 @@ impl OpenAiModelsEndpoint {
                                     ApiError::InvalidRequest {
                                         message: "invalid native Anthropic model catalogue".into(),
                                     }
+                                    .into()
                                 });
                             }
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         }
                     }
                     unreachable!()
                 }
             })
             .await
-            .map_err(map_error)?
+            .map_err(|error: crate::native_claude_catalog::PageError| error.into_core(map_error))?
         } else {
             timeout(MODELS_REFRESH_TIMEOUT, async {
                 let transport = self
@@ -618,6 +611,7 @@ mod originator_tests;
 
 #[cfg(test)]
 mod tests {
+    use codex_protocol::error::CodexErrorDetails;
     use std::num::NonZeroU64;
     use std::sync::Mutex;
 
@@ -633,7 +627,6 @@ mod tests {
     use codex_models_manager::model_info::model_info_from_slug;
     use codex_protocol::auth::AuthMode;
     use codex_protocol::config_types::ModelProviderAuthInfo;
-    use codex_protocol::error::CodexErrorDetails;
     use codex_protocol::openai_models::ModelVisibility;
     use codex_protocol::openai_models::ModelsResponse;
     use pretty_assertions::assert_eq;

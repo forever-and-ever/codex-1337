@@ -14,12 +14,15 @@ use super::Stylize;
 pub(crate) enum SessionDraft {
     Editing,
     Starting,
+    AwaitingSignIn(codex_protocol::sign_in_required::AccountProvider),
 }
 
 impl ChatWidget {
     pub(super) fn defer_draft_command(&mut self, command: SlashCommand) -> bool {
         if self.session_draft.is_none()
             || command.available_when_thread_unavailable()
+                && (command != SlashCommand::Account
+                    || matches!(self.session_draft, Some(SessionDraft::AwaitingSignIn(_))))
             || matches!(command, SlashCommand::Model | SlashCommand::Reload)
         {
             return false;
@@ -37,7 +40,7 @@ impl ChatWidget {
         true
     }
 
-    pub(super) fn request_draft_session(&mut self) {
+    pub(crate) fn request_draft_session(&mut self) {
         if self.session_draft == Some(SessionDraft::Editing) {
             self.session_draft = Some(SessionDraft::Starting);
             self.app_event_tx.send(AppEvent::StartDraftSession);
@@ -101,6 +104,9 @@ impl ChatWidget {
                 " change provider or model".dim(),
             ],
             Some(SessionDraft::Starting) => vec!["Starting conversation…".dim()],
+            Some(SessionDraft::AwaitingSignIn(_)) => {
+                vec!["/account".into(), " sign in again".dim()]
+            }
             None => return RenderableItem::Owned(Box::new(())),
         };
         RenderableItem::Owned(Box::new(Line::from(text))).inset(Insets::tlbr(

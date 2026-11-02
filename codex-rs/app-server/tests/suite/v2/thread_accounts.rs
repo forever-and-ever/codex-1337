@@ -209,12 +209,65 @@ default_claude_account = {}
             }
         );
     }
-    let config: toml_edit::DocumentMut = std::fs::read_to_string(config_path)?.parse()?;
+    let config: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
     assert_eq!(
         config["wrangler"]["default_claude_account"].as_str(),
         Some(ids[1].as_str())
     );
     assert_eq!(store.list()?.len(), 2);
+    assert!(app.shutdown_gracefully().await?.success());
+
+    // Authoritative hydration must not disguise an expired grant as missing metadata.
+    let account_path = home
+        .path()
+        .join("anthropic/accounts")
+        .join(format!("{}.json", ids[1]));
+    let mut record: serde_json::Value = serde_json::from_slice(&std::fs::read(&account_path)?)?;
+    record["grant"]["expires_at"] = json!(1);
+    std::fs::write(account_path, serde_json::to_vec(&record)?)?;
+    let text = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        &config_path,
+        text.lines()
+            .filter(|line| !line.starts_with("model_catalog_json"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let required = codex_protocol::sign_in_required::SignInRequired {
+        provider: AccountProvider::ClaudeSubscription,
+        account: "synthetic-b@example.test".into(),
+    };
+    for (method, params) in [
+        ("thread/start", json!({})),
+        ("thread/resume", json!({"threadId": threads[0]})),
+    ] {
+        let request = app.send_request(method, Some(params)).await?;
+        let error = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app.read_stream_until_error_message(RequestId::Integer(request)),
+        )
+        .await??;
+        assert_eq!(error.error.code, -32600);
+        assert_eq!(
+            error.error.data,
+            Some(
+                json!({"codexErrorInfo": codex_app_server_protocol::CodexErrorInfo::SignInRequired(required.clone())})
+            )
+        );
+        assert!(error.error.message.contains("synthetic-b@example.test"));
+        assert!(
+            error
+                .error
+                .message
+                .contains("codex login --provider claude_subscription")
+        );
+    }
+    assert!(app.shutdown_gracefully().await?.success());
     Ok(())
 }
 

@@ -119,6 +119,8 @@ pub enum CodexErrorInfo {
         #[ts(rename = "turnKind")]
         turn_kind: NonSteerableTurnKind,
     },
+    // TELOS(recoverable-sign-in): share request and turn error identity.
+    SignInRequired(codex_protocol::sign_in_required::SignInRequired),
     #[serde(
         untagged,
         serialize_with = "serialize_other_codex_error_info",
@@ -150,6 +152,9 @@ where
 impl From<CoreCodexErrorInfo> for CodexErrorInfo {
     fn from(value: CoreCodexErrorInfo) -> Self {
         match value {
+            CoreCodexErrorInfo::SignInRequired(required) => {
+                CodexErrorInfo::SignInRequired(required)
+            }
             CoreCodexErrorInfo::ContextWindowExceeded => CodexErrorInfo::ContextWindowExceeded,
             CoreCodexErrorInfo::SessionBudgetExceeded => CodexErrorInfo::SessionBudgetExceeded,
             CoreCodexErrorInfo::UsageLimitExceeded => CodexErrorInfo::UsageLimitExceeded,

@@ -68,9 +68,7 @@ impl AnthropicAuthContext {
 
     async fn capture_id(&self, id: AccountId) -> Result<AnthropicRequestAuth> {
         let account = self.manager.pin(id);
-        let credentials = account.credentials().await.map_err(|error| {
-            CodexErr::InvalidRequest(format!("Anthropic authentication failed: {error}"))
-        })?;
+        let credentials = account.credentials().await.map_err(auth_error)?;
         AnthropicRequestAuth::new(account, credentials)
     }
 }
@@ -106,9 +104,7 @@ impl AnthropicRequestAuth {
             .account
             .refresh_after_rejection(&self.credentials)
             .await
-            .map_err(|error| {
-                CodexErr::InvalidRequest(format!("Anthropic authentication failed: {error}"))
-            })?;
+            .map_err(auth_error)?;
         Self::new(self.account.clone(), credentials)
     }
 }
@@ -122,5 +118,14 @@ impl AuthProvider for AnthropicBearerAuth {
     ) -> std::result::Result<(), codex_api::AuthError> {
         headers.insert(http::header::AUTHORIZATION, self.0.clone());
         Ok(())
+    }
+}
+
+fn auth_error(error: codex_login::anthropic::AuthError) -> CodexErr {
+    match error {
+        codex_login::anthropic::AuthError::LoginRequired(required) => {
+            codex_protocol::error::CodexErrorDetails::SignInRequired(required).into()
+        }
+        error => CodexErr::InvalidRequest(format!("Anthropic authentication failed: {error}")),
     }
 }

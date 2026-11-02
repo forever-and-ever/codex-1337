@@ -724,30 +724,7 @@ pub struct SavedAccount {
     pub plan: Option<String>,
 }
 
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, Hash, JsonSchema, TS,
-)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub enum AccountProvider {
-    #[default]
-    Openai,
-    ClaudeSubscription,
-    #[serde(rename = "openrouter")]
-    #[ts(rename = "openrouter")]
-    OpenRouter,
-}
-
-impl AccountProvider {
-    pub fn config_id(self) -> &'static str {
-        match self {
-            Self::Openai => "openai",
-            Self::ClaudeSubscription => "claude_subscription",
-            Self::OpenRouter => "openrouter",
-        }
-    }
-}
+pub use codex_protocol::sign_in_required::AccountProvider;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

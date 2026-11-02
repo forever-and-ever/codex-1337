@@ -235,7 +235,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/codex-api/src/anthropic/request.rs` (`SUBSCRIPTION_PREAMBLE`), `codex-rs/model-provider-info/src/lib.rs` (`ANTHROPIC_BASE_URL`, `ModelProviderInfo::validate`), `codex-rs/core/src/client_anthropic.rs` (`capture_anthropic_auth`, `with_anthropic_account`).
 - Tripwire: account capture: `native_request_pins_recovery_then_switches_with_exact_custom_tool_replay_and_cache_warm` (`codex-rs/core/src/client_anthropic_tests.rs`). Preamble and endpoint: none; `scripts/native_anthropic/check.py` is manual, and its corpus predates the harness block.
 - Pressure: 0.162 #50459 adds capability overrides for custom providers in `model-provider-info/src/lib.rs`.
-- Evidence: 60e8198df4, b674b02d5a, 4157a2e4ea, ea648c2824.
+- Evidence: 60e8198df4, b674b02d5a, 4157a2e4ea, ea648c2824. Owner decision, 2026-11-02: keep the standard Claude OAuth grant (8-hour access token, automatic refresh, renewal chain ending about four weeks after sign-in), not the 1-year inference-only setup-token grant, which would lose the account email and weekly-quota display.
 
 ### native-robustness
 
@@ -424,6 +424,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Tripwire: `conversation_accounts_survive_selection_login_and_fork` (`codex-rs/app-server/tests/suite/v2/thread_accounts.rs`), `cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns` (`codex-rs/app-server/src/request_processors/account_processor/quota_cache_tests.rs`). `chatgpt_auth_registers_agent_identity_when_enabled` (`codex-rs/login/src/auth/auth_tests.rs`) checks registration when a legacy client omits login metadata; changed-grant registration has no separate witness. `plan_type_maps_enterprise_cbp_usage_based_plan` (`codex-rs/login/src/auth/auth_tests.rs`) checks managed-account selection with unavailable storage; `enterprise_login_attempt_lifecycle` (`codex-rs/app-server/tests/suite/v2/account_enterprise_tests.rs`) gates primary keyring access while starting a thread. Draft quota scope: none.
 - Pressure: 0.162 #50199 (account email in `/status`) and #49715 (account security reminders) edit the TUI account paths in `app.rs`, `reconnect.rs` and `lib.rs`. Registration persistence must retain account-scoped compare/exchange and identity-only cache publication instead of restoring a store save/reload. Preserve the managed-workspace exclusion before storage lookup. Personal-account lookup still reads secure storage synchronously to observe out-of-process login changes; removing that read requires a replacement freshness owner.
 - Evidence: 8bc33e5acd, 0ec65fe8c4, df24f7a816, 9733575fc3, 901f783aff, ade2c0c496.
+
+### recoverable-sign-in
+
+- Telos: expired provider sign-ins name the account and reconnect retained conversations after sign-in.
+- Holds: dead subscription grants remain typed through catalog discovery, session start/resume, turn events and JSON-RPC error data; only sign-in-required errors bypass best-effort catalog fallback. The TUI preserves transcripts and drafts, offers `/account`, and resumes affected conversations after successful provider sign-in, while headless clients receive the provider-specific login command. ChatGPT refresh handling is unchanged.
+- Owners: `codex-rs/protocol/src/sign_in_required.rs`, `codex-rs/login/src/anthropic/manager.rs`, `codex-rs/model-provider/src/anthropic_auth.rs` and `native_claude_catalog.rs`, `codex-rs/models-manager/src/authoritative_catalog.rs`, `codex-rs/core/src/session/model_catalog.rs`, `codex-rs/app-server/src/request_processors/sign_in_required.rs`, `codex-rs/tui/src/app/sign_in_required.rs` and `reconnect.rs`.
+- Tripwire: `failed_refresh_is_account_local_and_native_login_supersedes_its_grant`, `authoritative_catalog_access_rejection_invalidates_cache_until_refresh_succeeds`, `claude_subscription_accounts_are_native_and_conversation_scoped`, the active/navigation reconnect tests and `live_app_server_failed_turn_does_not_duplicate_error_history`.
+- Pressure: upstream best-effort catalogs and request-error formatting discard structured causes; reconnect fallback treats all unavailable transcripts alike.
+- Evidence: this change.
 
 ### credential-backend-authority
 
@@ -730,13 +739,11 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
 - `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint, attention-gated-painting
 - `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread, goal-boxes
 - `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/config_persistence.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/thread_goal_actions.rs`: fast-ui-thread, goal-boxes
 - `codex-rs/tui/src/goal_files.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_event_buffer.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_routing.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/async_question_reply.rs`: async-questions-never-auto-answered
@@ -744,9 +751,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/chatwidget/interaction.rs`: key-doctrine
 - `codex-rs/tui/src/chatwidget.rs`: explicit-command-verbs, attention-gated-painting
-- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs
 - `codex-rs/tui/src/goal_display.rs`: explicit-command-verbs
-- `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/chatwidget/questions.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/clipboard_copy.rs`: key-doctrine
 - `codex-rs/tui/src/exec_cell/compact.rs`: fullscreen-only
@@ -795,7 +800,6 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/key_hint_label_tests.rs`: warpaint
 - `codex-rs/tui/src/markdown_render_tests.rs`: warpaint
 - `codex-rs/tui/src/resume_picker_color_tests.rs`: warpaint
-- `codex-rs/tui/src/app.rs`: warpaint, attention-gated-painting
 
 - `codex-rs/tui/src/chatwidget/streaming.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view.rs`: fast-ui-thread
@@ -826,6 +830,27 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/outgoing_message.rs`: idle-mcp-human-consent
 - `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`: idle-mcp-human-consent
 - `codex-rs/codex-api/src/api_bridge.rs`: native-robustness
+- `codex-rs/app-server-protocol/src/protocol/v2/account.rs`: recoverable-sign-in
+- `codex-rs/app-server-protocol/src/protocol/v2/shared.rs`: recoverable-sign-in
+- `codex-rs/app-server/src/request_processors.rs`: goal-boxes, recoverable-sign-in
+- `codex-rs/app-server/src/request_processors/thread_processor.rs`: recoverable-sign-in
+- `codex-rs/core/src/session/mod.rs`: recoverable-sign-in, recoverable-output, interleaved-turn-accounting
+- `codex-rs/ext/guardian-reviewer/src/retry.rs`: recoverable-sign-in
+- `codex-rs/model-provider/src/models_endpoint.rs`: recoverable-sign-in
+- `codex-rs/models-manager/src/manager.rs`: recoverable-sign-in
+- `codex-rs/protocol/src/codex_error_info.rs`: recoverable-sign-in
+- `codex-rs/protocol/src/error.rs`: recoverable-sign-in
+- `codex-rs/protocol/src/lib.rs`: goal-boxes, recoverable-sign-in
+- `codex-rs/protocol/src/protocol.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app.rs`: warpaint, attention-gated-painting, recoverable-sign-in
+- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread, goal-boxes, recoverable-sign-in
+- `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues, recoverable-sign-in
+- `codex-rs/tui/src/app/session_lifecycle.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app/thread_events.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app_event.rs`: goal-boxes, recoverable-sign-in
+- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs, recoverable-sign-in
+- `codex-rs/tui/src/chatwidget/turn_runtime.rs`: recoverable-sign-in
+- `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs, recoverable-sign-in
 
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread, attention-gated-painting
@@ -942,7 +967,6 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/session/context_inventory.rs`: token-bills
 - `codex-rs/core/src/session/tool_output_tokens.rs`: token-bills
 - `codex-rs/core/src/session/inject.rs`: recoverable-output
-- `codex-rs/core/src/session/mod.rs`: recoverable-output, interleaved-turn-accounting
 - `codex-rs/core/src/session/prepared_tool_budget.rs`: recoverable-output
 - `codex-rs/core/src/tools/code_mode/output_sections.rs`: recoverable-output
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
@@ -1066,17 +1090,14 @@ Fork-owned files, absent upstream:
 - `codex-rs/app-server-protocol/src/protocol/common.rs`: goal-boxes
 - `codex-rs/app-server-protocol/src/protocol/v2/mod.rs`: goal-boxes
 - `codex-rs/app-server/src/message_processor.rs`: goal-boxes
-- `codex-rs/app-server/src/request_processors.rs`: goal-boxes
 - `codex-rs/app-server/src/request_processors/account_processor.rs`: goal-boxes
 - `codex-rs/app-server/src/request_processors/thread_goal_processor.rs`: goal-boxes
 - `codex-rs/ext/goal/src/api.rs`: goal-boxes
 - `codex-rs/ext/goal/src/lib.rs`: goal-boxes
 - `codex-rs/ext/goal/src/steering.rs`: goal-boxes
-- `codex-rs/protocol/src/lib.rs`: goal-boxes
 - `codex-rs/state/src/runtime/goals.rs`: goal-boxes
 - `codex-rs/tui/src/app/owned_transcript_tests.rs`: goal-boxes
 - `codex-rs/tui/src/app/tests.rs`: goal-boxes
-- `codex-rs/tui/src/app_event.rs`: goal-boxes
 - `codex-rs/tui/src/chatwidget/tests/slash_commands.rs`: goal-boxes
 - `codex-rs/hooks/src/events/common.rs`: no-vacuous-injections
 - `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
@@ -1094,3 +1115,19 @@ Fork-owned files, absent upstream:
 - `codex-rs/codex-mcp/src/elicitation_policy.rs`: idle-mcp-human-consent
 - `codex-rs/app-server/src/idle_mcp_elicitation.rs`: idle-mcp-human-consent
 - `codex-rs/core/src/unified_exec/terminal_watch.rs`: alarm-watched-sessions
+
+
+- `codex-rs/app-server/src/request_processors/sign_in_required.rs`: recoverable-sign-in
+- `codex-rs/core/src/session/model_catalog.rs`: recoverable-sign-in
+- `codex-rs/login/src/anthropic/manager.rs`: recoverable-sign-in
+- `codex-rs/model-provider/src/anthropic_auth.rs`: recoverable-sign-in
+- `codex-rs/model-provider/src/native_claude_catalog.rs`: recoverable-sign-in
+- `codex-rs/model-provider/src/openrouter/catalog.rs`: recoverable-sign-in
+- `codex-rs/models-manager/src/authoritative_catalog.rs`: recoverable-sign-in
+- `codex-rs/protocol/src/sign_in_required.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app/accounts.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app/server_thread_selection.rs`: recoverable-sign-in
+- `codex-rs/tui/src/app/sign_in_required.rs`: recoverable-sign-in
+- `codex-rs/tui/src/chatwidget/account_picker.rs`: recoverable-sign-in
+- `codex-rs/tui/src/chatwidget/session_draft.rs`: recoverable-sign-in
+- `codex-rs/tui/src/history_cell/failed_turn.rs`: recoverable-sign-in

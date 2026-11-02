@@ -30,7 +30,13 @@ impl FailedTurnCell {
                 FinalMessageSeparator::new(None, None)
                     .with_completed_at(timestamp.with_timezone(&Local), ClockFormat::system())
             });
-        let body = new_error_event(error.message.clone());
+        let message = match &error.codex_error_info {
+            Some(CodexErrorInfo::SignInRequired(required)) => {
+                crate::app::sign_in_required::message(required)
+            }
+            _ => error.message.clone(),
+        };
+        let body = new_error_event(message);
         Self {
             turn_id,
             error,

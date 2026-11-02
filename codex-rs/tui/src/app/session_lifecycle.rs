@@ -641,6 +641,16 @@ impl App {
                 }
                 self.chat_widget.maybe_send_next_queued_input();
             }
+            Err(err) if super::sign_in_required::from_report(&err).is_some() => {
+                let required =
+                    super::sign_in_required::from_report(&err).expect("matched sign-in failure");
+                self.chat_widget.restore_session_draft();
+                self.chat_widget
+                    .add_error_message(crate::app::sign_in_required::message(&required));
+                self.chat_widget.session_draft = Some(
+                    crate::chatwidget::SessionDraft::AwaitingSignIn(required.provider),
+                );
+            }
             Err(err) if self.chat_widget.session_draft.is_some() => {
                 self.chat_widget.restore_session_draft();
                 self.chat_widget.add_error_message(format!(

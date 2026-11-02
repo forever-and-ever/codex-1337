@@ -530,7 +530,9 @@ impl ChatWidget {
         {
             return;
         }
-        if codex_error_info == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation) {
+        if let Some(AppServerCodexErrorInfo::SignInRequired(required)) = &codex_error_info {
+            self.on_error(crate::app::sign_in_required::message(&required));
+        } else if codex_error_info == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation) {
             self.on_misalignment_policy_violation();
         } else if codex_error_info
             .as_ref()

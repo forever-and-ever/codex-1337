@@ -2025,6 +2025,8 @@ pub enum CodexErrorInfo {
     // Retained to deserialize errors recorded in legacy rollouts.
     ThreadRollbackFailed,
     Other,
+    // TELOS(recoverable-sign-in): clients distinguish a dead grant without inspecting its message.
+    SignInRequired(crate::sign_in_required::SignInRequired),
 }
 
 impl CodexErrorInfo {
@@ -2046,6 +2048,7 @@ impl CodexErrorInfo {
             | Self::HttpConnectionFailed { .. }
             | Self::ResponseStreamConnectionFailed { .. }
             | Self::InternalServerError
+            | Self::SignInRequired(_)
             | Self::Unauthorized
             | Self::BadRequest
             | Self::InvalidPrompt

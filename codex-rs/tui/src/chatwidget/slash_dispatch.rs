@@ -417,6 +417,13 @@ impl ChatWidget {
                 if let Some(thread_id) = self.thread_id {
                     self.app_event_tx
                         .send(AppEvent::OpenAccountPicker { thread_id });
+                } else if matches!(
+                    self.session_draft,
+                    Some(super::session_draft::SessionDraft::AwaitingSignIn(
+                        codex_protocol::sign_in_required::AccountProvider::ClaudeSubscription
+                    ))
+                ) {
+                    self.app_event_tx.send(AppEvent::AddClaudeAccount);
                 } else {
                     self.add_error_message(
                         "Session is still starting; try /account again shortly.".to_string(),

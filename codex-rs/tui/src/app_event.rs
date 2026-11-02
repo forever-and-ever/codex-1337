@@ -402,11 +402,9 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         result: Result<codex_app_server_protocol::AccountNicknameSetResponse, String>,
     },
-    AddClaudeAccount {
-        thread_id: ThreadId,
-    },
+    AddClaudeAccount,
     ClaudeLoginStarted {
-        thread_id: ThreadId,
+        start_id: crate::app::ClaudeLoginStartId,
         result: Result<codex_app_server_protocol::LoginAccountResponse, String>,
     },
     CancelClaudeLogin {
@@ -1821,6 +1819,7 @@ pub(crate) enum AppEvent {
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
     OpenRouter(crate::openrouter::Event),
     VerifiedServerNotification(Box<crate::app::VerifiedServerNotification>),
+    SignInRecovery(crate::app::sign_in_required::RecoveryEvent),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

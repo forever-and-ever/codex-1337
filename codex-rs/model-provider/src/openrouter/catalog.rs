@@ -239,3 +239,13 @@ impl ModelsManager for Catalog {
         })
     }
 }
+
+impl codex_models_manager::manager::AuthoritativeCatalog for Catalog {
+    fn authoritative_catalog(
+        &self,
+        strategy: RefreshStrategy,
+        factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, codex_protocol::error::Result<ModelsResponse>> {
+        Box::pin(async move { Ok(self.raw_model_catalog(strategy, factory).await) })
+    }
+}

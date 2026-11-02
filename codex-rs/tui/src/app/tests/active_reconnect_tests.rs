@@ -654,20 +654,34 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
             "cliVersion": "test", "source": "cli", "turns": []
         });
         let server = tokio::spawn(async move {
+            let resumed = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (stream, _) = listener.accept().await?;
             serve_reconnect_requests(
                 tokio_tungstenite::accept_async(stream).await?,
                 move |request| {
                     let thread = thread.clone();
+                    let resumed = resumed.clone();
                     async move {
                         if request.method == "thread/read" {
                             return Some(json!({"result": {"thread": thread}}));
                         }
+                        if matches!(request.method.as_str(), "thread/list" | "thread/loaded/list") {
+                            return Some(json!({"result": {"data": [], "nextCursor": null}}));
+                        }
+                        if request.method == "thread/goal/get" {
+                            return Some(json!({"result": {"goal": null}}));
+                        }
+                        if request.method == "account/login/start" {
+                            return Some(json!({"result": {"type": "claudeSubscription", "loginId": "reauth", "authUrl": "https://example.test"}}));
+                        }
                         assert_eq!(request.method, "thread/resume");
+                        if resumed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            return Some(json!({"result": {"thread": thread, "model": "gpt-test", "modelProvider": "test-provider", "cwd": thread["cwd"], "approvalPolicy": "never", "approvalsReviewer": "user", "sandbox": {"type": "dangerFullAccess"}, "reasoningEffort": null}}));
+                        }
                         tokio::time::pause();
                         tokio::time::sleep(Duration::from_secs(delay)).await;
                         tokio::time::resume();
-                        Some(json!({"error": {"code": -32600, "message": "thread no longer exists"}}))
+                        Some(json!({"error": {"code": -32600, "message": "sign-in needed", "data": {"codexErrorInfo": {"signInRequired": {"provider": "claudeSubscription", "account": "claude@example.test"}}}}}))
                     }
                 },
             )
@@ -725,7 +739,7 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
                 "unavailable draft"
             );
             let history = drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
-            let history = &history[history.find("• This conversation is unavailable").unwrap()..];
+            let history = &history[history.find("• Claude sign-in expired").unwrap()..];
             assert_snapshot!(
                 "unavailable_conversation",
                 format!(
@@ -737,6 +751,29 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
                     "/tmp/project"
                 )
             );
+            // A confirmed login resumes the existing conversation, preserving its draft.
+            app.add_claude_account(&mut session);
+            app.finish_claude_login(
+                &codex_app_server_protocol::AccountLoginCompletedNotification {
+                    login_id: Some("reauth".into()),
+                    success: true,
+                    error: None,
+                    onboarding_entrypoint: None,
+                },
+            );
+            while app.thread_unavailable(id) {
+                let event = tokio::time::timeout(Duration::from_secs(10), events.recv())
+                    .await?
+                    .unwrap();
+                app.handle_event(&mut tui, &mut session, event).await?;
+            }
+            app.settle_turn_submissions(&mut session).await?;
+            assert_eq!(app.current_displayed_thread_id(), Some(id));
+            assert_eq!(
+                app.chat_widget.composer_text_with_pending(),
+                "unavailable draft"
+            );
+            assert!(app.active_thread_rx.is_some());
             session.shutdown().await?;
             assert!((15..120).contains(&elapsed), "{elapsed}");
             let methods = server.await??;

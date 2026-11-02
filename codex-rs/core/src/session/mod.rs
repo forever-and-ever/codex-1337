@@ -765,12 +765,13 @@ impl Session {
         if native {
             // Explicit models bypass get_default_model discovery. Native metadata
             // must be hydrated even for resumed/fresh children before get_model_info.
+            // TELOS(recoverable-sign-in): authoritative startup retains the account's auth failure.
             let catalog = models_manager
-                .raw_model_catalog(
+                .authoritative_catalog(
                     RefreshStrategy::OnlineIfUncached,
                     config.http_client_factory(),
                 )
-                .await;
+                .await?;
             if !catalog.models.iter().any(|model| model.anthropic.is_some()) {
                 return Err(CodexErr::InvalidRequest(
                     "Cannot load authoritative Anthropic model metadata for this account".into(),

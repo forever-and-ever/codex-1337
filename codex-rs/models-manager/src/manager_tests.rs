@@ -1130,6 +1130,11 @@ async fn authoritative_catalog_preserves_hidden_models_and_matches_exact_ids() {
 #[tokio::test]
 async fn authoritative_catalog_access_rejection_invalidates_cache_until_refresh_succeeds() {
     for error in [
+        CodexErrorDetails::SignInRequired(codex_protocol::sign_in_required::SignInRequired {
+            provider: codex_protocol::sign_in_required::AccountProvider::ClaudeSubscription,
+            account: "claude@example.test".into(),
+        })
+        .into(),
         catalog_http_error(/*status*/ 401),
         catalog_http_error(/*status*/ 403),
         CodexErr::RefreshTokenFailed(codex_protocol::error::RefreshTokenFailedError::new(
@@ -1141,6 +1146,10 @@ async fn authoritative_catalog_access_rejection_invalidates_cache_until_refresh_
         )
         .into(),
     ] {
+        let required = match error.details() {
+            CodexErrorDetails::SignInRequired(required) => Some(required.clone()),
+            _ => None,
+        };
         // Like a native TTL backend, this cache may return an invalidated stored entry.
         let cache = Arc::new(TestModelsCache::default());
         let models = vec![remote_model(
@@ -1157,8 +1166,8 @@ async fn authoritative_catalog_access_rejection_invalidates_cache_until_refresh_
             cache.clone(),
             endpoint.clone(),
             /*auth_manager*/ None,
-        )
-        .with_provider_catalog();
+        );
+        let manager = manager.with_provider_catalog();
         assert_eq!(
             manager
                 .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
@@ -1167,12 +1176,18 @@ async fn authoritative_catalog_access_rejection_invalidates_cache_until_refresh_
             models
         );
         for strategy in [RefreshStrategy::Online, RefreshStrategy::Offline] {
-            assert_eq!(
-                manager
-                    .raw_model_catalog(strategy, DEFAULT_HTTP_CLIENT_FACTORY)
-                    .await,
-                ModelsResponse::default()
-            );
+            let result = manager
+                .authoritative_catalog(strategy, DEFAULT_HTTP_CLIENT_FACTORY)
+                .await;
+            if matches!(strategy, RefreshStrategy::Online)
+                && let Some(required) = &required
+            {
+                assert!(
+                    matches!(result.unwrap_err().details(), CodexErrorDetails::SignInRequired(actual) if actual == required)
+                );
+            } else {
+                assert_eq!(result.unwrap(), ModelsResponse::default());
+            }
         }
         let restarted =
             OpenAiModelsManager::new_with_cache(cache, endpoint, /*auth_manager*/ None)

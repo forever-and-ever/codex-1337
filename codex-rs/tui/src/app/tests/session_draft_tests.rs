@@ -55,6 +55,29 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     }
+    // Sign-in belongs to the provider, not to a thread that could not be created.
+    app.chat_widget.session_draft = Some(SessionDraft::AwaitingSignIn(
+        codex_app_server_protocol::AccountProvider::ClaudeSubscription,
+    ));
+    while events.try_recv().is_ok() {}
+    app.chat_widget.insert_str("/account");
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        app.chat_widget.session_draft,
+        Some(SessionDraft::AwaitingSignIn(
+            codex_app_server_protocol::AccountProvider::ClaudeSubscription
+        ))
+    );
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::AddClaudeAccount))
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/start"),
+        Vec::<serde_json::Value>::new()
+    );
+    app.chat_widget.restore_session_draft();
     let original_model = app
         .model_catalog
         .models
@@ -189,9 +212,29 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     );
     // A rejected creation restores the submitted input, including its attachment, for retry.
     app.pending_startup_thread_start = true;
-    app.handle_startup_thread_started(&mut server, Err(color_eyre::eyre::eyre!("test rejection")))
+    app.handle_startup_thread_started(&mut server, Err(TypedRequestError::Server {
+        method: "thread/start".into(),
+        source: JSONRPCErrorError {
+            code: -32600, message: "sign-in needed".into(),
+            data: Some(serde_json::json!({"codexErrorInfo": {"signInRequired": {"provider": "claudeSubscription", "account": "claude@example.test"}}})),
+        },
+    }.into()))
         .await?;
-    assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Editing));
+    assert_eq!(
+        app.chat_widget.session_draft,
+        Some(SessionDraft::AwaitingSignIn(
+            codex_app_server_protocol::AccountProvider::ClaudeSubscription
+        ))
+    );
+    app.handle_sign_in_recovery(
+        &mut tui,
+        &mut server,
+        sign_in_required::RecoveryEvent::Retry(
+            codex_app_server_protocol::AccountProvider::ClaudeSubscription,
+        ),
+    )
+    .await?;
+    assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
     assert_eq!(
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input

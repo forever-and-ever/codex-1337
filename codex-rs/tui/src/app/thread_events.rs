@@ -59,11 +59,12 @@ pub(super) struct FeedbackThreadEvent {
     pub(super) result: Result<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ThreadEventAttachment {
     Live,
     ReplayOnly,
     ExternalWriter,
+    SignInRequired(codex_protocol::sign_in_required::SignInRequired),
 }
 
 #[derive(Debug)]
@@ -652,7 +653,7 @@ impl ThreadEventChannel {
     }
 
     pub(super) fn attachment(&self) -> ThreadEventAttachment {
-        self.attachment
+        self.attachment.clone()
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -670,6 +671,13 @@ impl ThreadEventChannel {
             ))),
             attachment: ThreadEventAttachment::Live,
         }
+    }
+
+    pub(super) fn require_sign_in(
+        &mut self,
+        required: codex_protocol::sign_in_required::SignInRequired,
+    ) {
+        self.attachment = ThreadEventAttachment::SignInRequired(required);
     }
 }
 

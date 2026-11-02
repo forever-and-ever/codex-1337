@@ -1,3 +1,5 @@
+#[path = "authoritative_catalog.rs"]
+mod authoritative_catalog;
 use super::cache::FileModelsCache;
 use crate::ModelCatalogOriginator;
 use crate::cache::ModelsCache;
@@ -5,6 +7,7 @@ use crate::cache::ModelsCacheEntry;
 use crate::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::config::ModelsManagerConfig;
 use crate::model_info;
+pub use authoritative_catalog::AuthoritativeCatalog;
 use chrono::DateTime;
 use chrono::Utc;
 use codex_http_client::HttpClientFactory;
@@ -141,7 +144,8 @@ impl fmt::Display for RefreshStrategy {
 type SharedModelsEndpointClient = Arc<dyn ModelsEndpointClient>;
 
 /// Coordinates model discovery plus cached metadata on disk.
-pub trait ModelsManager: fmt::Debug + Send + Sync {
+// TELOS(recoverable-sign-in): authoritative readers opt into typed sign-in failures.
+pub trait ModelsManager: fmt::Debug + Send + Sync + AuthoritativeCatalog {
     /// Provider metadata policy that also governs cold and unavailable catalogs.
     /// Normalization precedes explicit configuration overrides, including context limits.
     fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
@@ -725,11 +729,14 @@ impl OpenAiModelsManager {
                 let access_denied = matches!(error.http_status_code_value(), Some(401 | 403));
                 let credentials_rejected = matches!(
                     error.details(),
-                    CodexErrorDetails::RefreshTokenFailed(_)
+                    CodexErrorDetails::SignInRequired(_)
+                        | CodexErrorDetails::RefreshTokenFailed(_)
                         | CodexErrorDetails::GatewayLoginRequired(_)
                 );
 
-                if is_provider_catalog && (access_denied || credentials_rejected) {
+                if is_provider_catalog && (access_denied || credentials_rejected)
+                    || matches!(error.details(), CodexErrorDetails::SignInRequired(_))
+                {
                     {
                         let mut current = self.remote_models.write().await;
                         if request_identity != self.endpoint_client.identity() {

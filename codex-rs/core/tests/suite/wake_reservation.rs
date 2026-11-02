@@ -207,3 +207,17 @@ async fn interrupt_during_wake_context_construction_does_not_start_turn() -> any
     codex.shutdown_and_wait().await?;
     Ok(())
 }
+
+impl codex_models_manager::manager::AuthoritativeCatalog for GatedModelsManager {
+    fn authoritative_catalog(
+        &self,
+        strategy: RefreshStrategy,
+        factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, codex_protocol::error::Result<ModelsResponse>> {
+        codex_models_manager::manager::AuthoritativeCatalog::authoritative_catalog(
+            &self.inner,
+            strategy,
+            factory,
+        )
+    }
+}

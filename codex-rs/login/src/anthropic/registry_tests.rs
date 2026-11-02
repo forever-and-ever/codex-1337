@@ -149,7 +149,7 @@ async fn failed_refresh_is_account_local_and_native_login_supersedes_its_grant()
     assert_eq!(bearer.expires_at(), None);
     assert!(matches!(
         bearer_handle.refresh_after_rejection(&bearer).await,
-        Err(AuthError::LoginRequired)
+        Err(AuthError::LoginRequired(required)) if required.account == "account-c@example.test" && required.provider == codex_protocol::sign_in_required::AccountProvider::ClaudeSubscription
     ));
     let a = store
         .upsert(
@@ -208,5 +208,27 @@ async fn failed_refresh_is_account_local_and_native_login_supersedes_its_grant()
         "a-login"
     );
     assert!(store.load(&b).unwrap() == before);
+    // A dead grant is recoverable identity, not an arbitrary endpoint failure.
+    server.reset().await;
+    for (status, body) in [
+        (400, json!({"error": "invalid_grant"})),
+        (401, json!({"error": "invalid_token"})),
+        (403, json!({"error": "access_denied"})),
+    ] {
+        refresh_mock(
+            &server,
+            "b-refresh",
+            ResponseTemplate::new(status).set_body_json(body),
+        )
+        .await;
+        let error = manager(&store, &server)
+            .pin(b.clone())
+            .credentials()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AuthError::LoginRequired(ref required)
+            if required.account == "account-b@example.test"));
+        server.reset().await;
+    }
     server.verify().await;
 }

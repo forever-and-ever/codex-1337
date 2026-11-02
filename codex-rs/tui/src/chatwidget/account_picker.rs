@@ -138,7 +138,7 @@ impl ChatWidget {
             name: "Add Claude account".to_owned(),
             description: Some("Sign in with your Claude subscription".to_owned()),
             actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::AddClaudeAccount { thread_id });
+                tx.send(AppEvent::AddClaudeAccount);
             })],
             dismiss_on_select: true,
             ..Default::default()

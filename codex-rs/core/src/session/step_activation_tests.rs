@@ -1518,3 +1518,17 @@ async fn guardian_v2_empty_model_defaults_are_equivalent() {
         );
     }
 }
+
+impl codex_models_manager::manager::AuthoritativeCatalog for GatedModelsManager {
+    fn authoritative_catalog(
+        &self,
+        strategy: RefreshStrategy,
+        factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, codex_protocol::error::Result<ModelsResponse>> {
+        codex_models_manager::manager::AuthoritativeCatalog::authoritative_catalog(
+            &self.inner,
+            strategy,
+            factory,
+        )
+    }
+}

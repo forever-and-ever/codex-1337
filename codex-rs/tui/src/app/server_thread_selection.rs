@@ -27,6 +27,7 @@ use super::Uuid;
 use super::detach;
 use super::recap;
 use super::tui;
+use crate::app::ThreadEventChannel;
 use crate::app_server_session::session_preparation::PreparedHistory;
 use crate::app_server_session::session_preparation::PreparedSession;
 use crate::app_server_session::session_preparation::ResumePreparation;
@@ -333,38 +334,48 @@ impl App {
                         self.commit_agent_selection(tui, server, *context, selected)
                             .await?;
                     }
-                    Err(error) => match custody {
-                        SubscriptionCustody::Uncertain(thread_id) => {
-                            self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete."));
-                            self.retain_navigation_uncertainty(operation, vec![thread_id], true);
+                    Err(error) => {
+                        if let Some(required) = crate::app::sign_in_required::from_report(&error) {
+                            self.ensure_thread_channel(context.thread_id)
+                                .require_sign_in(required);
                         }
-                        SubscriptionCustody::Subscribed(thread_id)
-                            if matches!(kind, SelectionKind::Attach) =>
-                        {
-                            self.start_navigation_cleanup(
-                                operation,
-                                handle,
-                                thread_id,
-                                Vec::new(),
-                                CleanupContinuation::SelectionFallback(context),
-                                true,
-                            );
+                        match custody {
+                            SubscriptionCustody::Uncertain(thread_id) => {
+                                self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete."));
+                                self.retain_navigation_uncertainty(
+                                    operation,
+                                    vec![thread_id],
+                                    true,
+                                );
+                            }
+                            SubscriptionCustody::Subscribed(thread_id)
+                                if matches!(kind, SelectionKind::Attach) =>
+                            {
+                                self.start_navigation_cleanup(
+                                    operation,
+                                    handle,
+                                    thread_id,
+                                    Vec::new(),
+                                    CleanupContinuation::SelectionFallback(context),
+                                    true,
+                                );
+                            }
+                            _ if matches!(kind, SelectionKind::Refresh) => {
+                                tracing::warn!(%error, "failed to refresh inferred thread session before replay");
+                                self.commit_agent_selection(
+                                    tui,
+                                    server,
+                                    *context,
+                                    SelectedThread::Cached {
+                                        replay: ReplayMode::Live,
+                                        verification: Err(error),
+                                    },
+                                )
+                                .await?;
+                            }
+                            _ => self.start_selection_fallback(server, operation, context),
                         }
-                        _ if matches!(kind, SelectionKind::Refresh) => {
-                            tracing::warn!(%error, "failed to refresh inferred thread session before replay");
-                            self.commit_agent_selection(
-                                tui,
-                                server,
-                                *context,
-                                SelectedThread::Cached {
-                                    replay: ReplayMode::Live,
-                                    verification: Err(error),
-                                },
-                            )
-                            .await?;
-                        }
-                        _ => self.start_selection_fallback(server, operation, context),
-                    },
+                    }
                 }
             }
             (SelectStage::Fallback(context), SelectionReceipt::Fallback(prepared)) => {
@@ -556,13 +567,20 @@ impl App {
         self.server_operations.navigation.current = Some(operation);
     }
 
-    async fn install_selected_snapshot(
+    pub(in crate::app) async fn install_selected_snapshot(
         &mut self,
         thread_id: ThreadId,
         session: ThreadSessionState,
         turns: Vec<Turn>,
         live_attached: bool,
     ) {
+        let sign_in_required = self
+            .thread_event_channels
+            .get(&thread_id)
+            .and_then(|channel| match channel.attachment() {
+                ThreadEventAttachment::SignInRequired(required) => Some(required),
+                _ => None,
+            });
         let was_external_writer = self
             .thread_event_channels
             .get(&thread_id)
@@ -575,6 +593,8 @@ impl App {
         let channel = self.ensure_thread_channel(thread_id);
         if live_attached {
             channel.mark_live();
+        } else if let Some(required) = sign_in_required {
+            channel.require_sign_in(required);
         } else if was_external_writer {
             channel.mark_external_writer();
         } else {
@@ -850,7 +870,13 @@ impl App {
                 .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::ExternalWriter)
         {
             self.chat_widget.pause_unavailable_thread();
-            let message = if attached_replay_only {
+            let message = if let Some(ThreadEventAttachment::SignInRequired(required)) = self
+                .thread_event_channels
+                .get(&thread_id)
+                .map(ThreadEventChannel::attachment)
+            {
+                crate::app::sign_in_required::message(&required)
+            } else if attached_replay_only {
                 format!(
                     "Agent thread {thread_id} could not be resumed live. Replaying saved transcript."
                 )

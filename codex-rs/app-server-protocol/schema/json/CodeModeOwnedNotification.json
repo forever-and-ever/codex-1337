@@ -38,6 +38,14 @@
       ],
       "type": "object"
     },
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openrouter"
+      ],
+      "type": "string"
+    },
     "AccountRateLimitsUpdatedNotification": {
       "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
       "properties": {
@@ -1411,6 +1419,19 @@
             "activeTurnNotSteerable"
           ],
           "title": "ActiveTurnNotSteerableCodexErrorInfo",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "signInRequired": {
+              "$ref": "#/definitions/SignInRequired"
+            }
+          },
+          "required": [
+            "signInRequired"
+          ],
+          "title": "SignInRequiredCodexErrorInfo",
           "type": "object"
         },
         {
@@ -8161,6 +8182,22 @@
       },
       "required": [
         "model"
+      ],
+      "type": "object"
+    },
+    "SignInRequired": {
+      "description": "The saved identity whose grant no longer permits requests.",
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/AccountProvider"
+        }
+      },
+      "required": [
+        "account",
+        "provider"
       ],
       "type": "object"
     },

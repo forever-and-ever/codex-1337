@@ -5896,6 +5896,19 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "properties": {
+            "signInRequired": {
+              "$ref": "#/definitions/SignInRequired"
+            }
+          },
+          "required": [
+            "signInRequired"
+          ],
+          "title": "SignInRequiredCodexErrorInfo",
+          "type": "object"
+        },
+        {
           "type": [
             "string",
             "object"
@@ -21488,6 +21501,22 @@
       },
       "required": [
         "model"
+      ],
+      "type": "object"
+    },
+    "SignInRequired": {
+      "description": "The saved identity whose grant no longer permits requests.",
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/AccountProvider"
+        }
+      },
+      "required": [
+        "account",
+        "provider"
       ],
       "type": "object"
     },

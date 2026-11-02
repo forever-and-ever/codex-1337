@@ -1363,8 +1363,8 @@ impl App {
             }
             AppEvent::SetAccountNickname { thread_id, provider, account_id, nickname } => self.set_account_nickname(app_server, thread_id, provider, account_id, nickname),
             AppEvent::AccountNicknameSetFinished { thread_id, result } => self.finish_account_nickname_set(app_server, thread_id, result),
-            AppEvent::AddClaudeAccount { thread_id } => self.add_claude_account(app_server, thread_id),
-            AppEvent::ClaudeLoginStarted { thread_id, result } => self.finish_claude_login_start(thread_id, result),
+            AppEvent::AddClaudeAccount => self.add_claude_account(app_server),
+            AppEvent::ClaudeLoginStarted { start_id, result } => self.finish_claude_login_start(start_id, result),
             AppEvent::CancelClaudeLogin { login_id } => self.cancel_claude_login(app_server, login_id),
             AppEvent::ClaudeLoginCancelFailed { error } => self.chat_widget.add_error_message(error),
             AppEvent::AccountPickerLoaded { thread_id, serial, result } => self.apply_account_picker(thread_id, serial, result),
@@ -2580,6 +2580,7 @@ impl App {
                     result,
                 );
             }
+            AppEvent::SignInRecovery(event) => { self.handle_sign_in_recovery(tui, app_server, event).await?; }
             AppEvent::SelectAgentThread(thread_id) => {
                 self.select_agent_thread(tui, app_server, thread_id)
                     .await?;

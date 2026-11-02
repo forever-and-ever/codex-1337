@@ -89,11 +89,12 @@ struct Capabilities {
     image_input: Supported,
 }
 
-pub(crate) async fn list_models<Fut>(
+pub(crate) async fn list_models<Fut, E>(
     mut fetch_page: impl FnMut(Option<String>) -> Fut,
-) -> Result<(Vec<ModelInfo>, Option<String>), ApiError>
+) -> Result<(Vec<ModelInfo>, Option<String>), E>
 where
-    Fut: Future<Output = Result<Page, ApiError>> + Send,
+    Fut: Future<Output = Result<Page, E>> + Send,
+    E: From<ApiError>,
 {
     let mut cursor = None;
     let mut seen = BTreeSet::new();
@@ -102,9 +103,9 @@ where
         let page = fetch_page(cursor).await?;
         for native in page.data {
             if !seen.insert(native.id.clone()) || seen.len() > MAX_MODELS {
-                return Err(invalid(
-                    "native model catalogue repeats IDs or exceeds its limit",
-                ));
+                return Err(
+                    invalid("native model catalogue repeats IDs or exceeds its limit").into(),
+                );
             }
             if let Some(mut model) = project(native)? {
                 model.priority = i32::try_from(models.len())
@@ -122,7 +123,7 @@ where
             .ok_or_else(|| invalid("native model catalogue lacks a valid next cursor"))?;
         cursor = Some(last_id);
     }
-    Err(invalid("native model catalogue exceeds its page limit"))
+    Err(invalid("native model catalogue exceeds its page limit").into())
 }
 
 fn project(native: NativeModel) -> Result<Option<ModelInfo>, ApiError> {
@@ -253,3 +254,26 @@ fn invalid(message: &str) -> ApiError {
 #[cfg(test)]
 #[path = "native_claude_catalog_tests.rs"]
 mod tests;
+
+pub(crate) enum PageError {
+    Api(ApiError),
+    Auth(codex_protocol::error::CodexErr),
+}
+
+impl From<ApiError> for PageError {
+    fn from(error: ApiError) -> Self {
+        Self::Api(error)
+    }
+}
+
+impl PageError {
+    pub(crate) fn into_core(
+        self,
+        map: impl FnOnce(ApiError) -> codex_protocol::error::CodexErr,
+    ) -> codex_protocol::error::CodexErr {
+        match self {
+            Self::Api(error) => map(error),
+            Self::Auth(error) => error,
+        }
+    }
+}

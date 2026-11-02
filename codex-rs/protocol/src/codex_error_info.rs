@@ -49,6 +49,7 @@ enum CodexErrorInfoWire {
         turn_kind: NonSteerableTurnKind,
     },
     ThreadRollbackFailed,
+    SignInRequired(crate::sign_in_required::SignInRequired),
     #[serde(other)]
     Other,
 }

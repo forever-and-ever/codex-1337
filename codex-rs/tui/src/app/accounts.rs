@@ -27,7 +27,7 @@ pub(super) struct AccountUi {
     serial: u64,
     picker_request: Option<Uuid>,
     pub(super) selection_request: Option<ThreadId>,
-    login_request: Option<ThreadId>,
+    login_request: Option<ClaudeLoginStartId>,
     claude_login: Option<String>,
     early_login_completions: VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
     nickname_request: Option<ThreadId>,
@@ -117,6 +117,9 @@ impl App {
         self.account_ui.claude_login = None;
         self.chat_widget.finish_claude_login_pending();
         if notification.success {
+            self.app_event_tx.send(AppEvent::SignInRecovery(
+                super::sign_in_required::RecoveryEvent::Retry(AccountProvider::ClaudeSubscription),
+            ));
             self.chat_widget.add_info_message(
                 "Claude account added. Reopen /account to select or rename it.".to_owned(),
                 /*hint*/ None,
@@ -579,15 +582,12 @@ impl App {
         }
     }
 
-    pub(super) fn add_claude_account(
-        &mut self,
-        server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) {
+    pub(super) fn add_claude_account(&mut self, server: &mut AppServerSession) {
         if self.account_ui.login_request.is_some() || self.account_ui.claude_login.is_some() {
             return;
         }
-        self.account_ui.login_request = Some(thread_id);
+        let start_id = ClaudeLoginStartId(Uuid::new_v4());
+        self.account_ui.login_request = Some(start_id);
         self.chat_widget
             .add_info_message("Starting Claude sign-in…".to_owned(), /*hint*/ None);
         let request_id = server.next_request_id();
@@ -604,16 +604,16 @@ impl App {
             .await
             .map_err(|_| "Sign-in start not confirmed; reopen /account before retrying".to_owned())
             .and_then(|result| result.map_err(|error| error.to_string()));
-            tx.send(AppEvent::ClaudeLoginStarted { thread_id, result });
+            tx.send(AppEvent::ClaudeLoginStarted { start_id, result });
         });
     }
 
     pub(super) fn finish_claude_login_start(
         &mut self,
-        thread_id: ThreadId,
+        start_id: ClaudeLoginStartId,
         result: Result<LoginAccountResponse, String>,
     ) {
-        if self.account_ui.login_request != Some(thread_id) {
+        if self.account_ui.login_request != Some(start_id) {
             return;
         }
         self.account_ui.login_request = None;
@@ -656,3 +656,6 @@ impl App {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ClaudeLoginStartId(Uuid);

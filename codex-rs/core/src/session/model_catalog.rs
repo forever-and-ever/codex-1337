@@ -39,11 +39,11 @@ impl Session {
         let manager =
             provider.models_manager(config.models_cache_path(), config.model_catalog.clone());
         let catalog = manager
-            .raw_model_catalog(
+            .authoritative_catalog(
                 RefreshStrategy::OnlineIfUncached,
                 config.http_client_factory(),
             )
-            .await;
+            .await?;
         if !catalog.models.iter().any(|model| model.anthropic.is_some()) {
             return Err(CodexErr::InvalidRequest(
                 "Cannot load authoritative Anthropic model metadata for this account".into(),

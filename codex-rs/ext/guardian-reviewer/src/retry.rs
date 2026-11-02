@@ -200,6 +200,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
             | CodexErrorInfo::BioPolicy
             | CodexErrorInfo::MisalignmentPolicyViolation
             | CodexErrorInfo::TooManyDenials
+            | CodexErrorInfo::SignInRequired(_)
             | CodexErrorInfo::Unauthorized
             | CodexErrorInfo::BadRequest
             | CodexErrorInfo::ModelNotFound

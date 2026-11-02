@@ -515,6 +515,7 @@ export type { ServerDiagnosticsProcess } from "./ServerDiagnosticsProcess";
 export type { ServerRequestResolvedNotification } from "./ServerRequestResolvedNotification";
 export type { SessionMigration } from "./SessionMigration";
 export type { SessionSource } from "./SessionSource";
+export type { SignInRequired } from "./SignInRequired";
 export type { SkillDependencies } from "./SkillDependencies";
 export type { SkillErrorInfo } from "./SkillErrorInfo";
 export type { SkillInterface } from "./SkillInterface";

@@ -25,6 +25,23 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
             "structured_outputs":{"supported":true},"image_input":{"supported":true}
         }
     });
+    // Authentication rejected while fetching a page must survive its API-error boundary.
+    let required = codex_protocol::sign_in_required::SignInRequired {
+        provider: codex_protocol::sign_in_required::AccountProvider::ClaudeSubscription,
+        account: "claude@example.test".into(),
+    };
+    let error = list_models(|_| {
+        std::future::ready(Err::<Page, _>(PageError::Auth(
+            codex_protocol::error::CodexErrorDetails::SignInRequired(required.clone()).into(),
+        )))
+    })
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error.into_core(codex_api::map_api_error).details(),
+        codex_protocol::error::CodexErrorDetails::SignInRequired(actual) if actual == &required)
+    );
     let mut cursors = Vec::new();
     let (models, etag) = list_models(|cursor| {
         cursors.push(cursor.clone());
@@ -35,7 +52,7 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
             }
             Some(_) => unreachable!(),
         };
-        async move { Ok(serde_json::from_value(page).unwrap()) }
+        async move { Ok::<Page, ApiError>(serde_json::from_value(page).unwrap()) }
     })
     .await
     .unwrap();

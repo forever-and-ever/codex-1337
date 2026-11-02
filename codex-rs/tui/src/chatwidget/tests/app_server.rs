@@ -1659,6 +1659,10 @@ async fn live_app_server_collab_spawn_completed_renders_requested_model_and_effo
 
 #[tokio::test]
 async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
+    let required = codex_protocol::sign_in_required::SignInRequired {
+        provider: codex_protocol::sign_in_required::AccountProvider::ClaudeSubscription,
+        account: "claude@example.test".into(),
+    };
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.handle_server_notification(
@@ -1684,7 +1688,9 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
             error: AppServerTurnError {
                 misalignment: None,
                 message: "permission denied".to_string(),
-                codex_error_info: None,
+                codex_error_info: Some(codex_app_server_protocol::CodexErrorInfo::SignInRequired(
+                    required.clone(),
+                )),
                 additional_details: None,
             },
             will_retry: false,
@@ -1695,7 +1701,10 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
     );
     let first_cells = drain_insert_history(&mut rx);
     assert_eq!(first_cells.len(), 1);
-    assert!(lines_to_single_string(&first_cells[0]).contains("permission denied"));
+    assert!(
+        lines_to_single_string(&first_cells[0])
+            .contains(&crate::app::sign_in_required::message(&required))
+    );
 
     chat.handle_server_notification(
         ServerNotification::TurnCompleted(TurnCompletedNotification {
@@ -1709,7 +1718,9 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
                 error: Some(AppServerTurnError {
                     misalignment: None,
                     message: "permission denied".to_string(),
-                    codex_error_info: None,
+                    codex_error_info: Some(
+                        codex_app_server_protocol::CodexErrorInfo::SignInRequired(required.clone()),
+                    ),
                     additional_details: None,
                 }),
                 started_at: None,

@@ -21,12 +21,14 @@ pub(super) struct ReconnectState {
     pub(super) failed: bool,
     pub(super) presentation: ReconnectPresentation,
     pub(super) seen_version_notice: Option<String>,
+    pub(super) sign_in_recovery: super::sign_in_required::Recovery,
 }
 
 pub(super) struct Reconnected {
     session: AppServerSession,
     bootstrap: AppServerBootstrap,
-    thread: Option<AppServerStartedThread>,
+    thread:
+        Result<Option<AppServerStartedThread>, codex_protocol::sign_in_required::SignInRequired>,
 }
 
 #[expect(
@@ -94,7 +96,11 @@ pub(super) async fn reconnect(
                     )
                     .await
                 {
-                    Ok(thread) => Some(thread),
+                    Ok(thread) => Ok(Some(thread)),
+                    Err(error) if super::sign_in_required::from_report(&error).is_some() => {
+                        Err(super::sign_in_required::from_report(&error)
+                            .expect("matched sign-in error"))
+                    }
                     Err(error)
                         if matches!(
                             error.downcast_ref::<TypedRequestError>(),
@@ -121,12 +127,12 @@ pub(super) async fn reconnect(
                             Some(TypedRequestError::Server { source, .. }) if source.code == -32600
                         ) || presentation == ReconnectPresentation::Overview =>
                     {
-                        None
+                        Ok(None)
                     }
                     Err(error) => return Err(error),
                 }
             } else {
-                None
+                Ok(None)
             };
             Ok::<_, color_eyre::Report>(Reconnected {
                 session,
@@ -239,6 +245,7 @@ impl App {
             return false;
         }
         if !self.reconnect.offline {
+            self.reconnect.sign_in_recovery = Default::default();
             self.retire_work_connection();
             if self.chat_widget.session_draft.is_some() {
                 self.config = self.chat_widget.config_ref().clone();
@@ -354,8 +361,12 @@ impl App {
         let Reconnected {
             mut session,
             bootstrap,
-            mut thread,
+            thread,
         } = connected;
+        let (mut thread, sign_in_required) = match thread {
+            Ok(thread) => (thread, None),
+            Err(required) => (None, Some(required)),
+        };
         let history_notice = thread
             .as_mut()
             .and_then(|started| started.history_notice.take());
@@ -485,6 +496,8 @@ impl App {
             );
             if channel.attachment() == ThreadEventAttachment::ExternalWriter {
                 replacement.mark_external_writer();
+            } else if let ThreadEventAttachment::SignInRequired(required) = channel.attachment() {
+                replacement.require_sign_in(required);
             } else {
                 replacement.mark_replay_only();
             }
@@ -590,7 +603,15 @@ impl App {
             if self.thread_unavailable(id) && !self.chat_widget.is_external_writer_view() {
                 self.agent_navigation.mark_stopped(id);
                 self.chat_widget.pause_unavailable_thread();
-                self.chat_widget.add_info_message("This conversation is unavailable. Its cached transcript and draft remain here; input is paused. Open the agent picker or return to the parent to continue.".into(), /*hint*/ None);
+                let message = if let Some(required) = sign_in_required {
+                    if let Some(channel) = self.thread_event_channels.get_mut(&id) {
+                        channel.require_sign_in(required.clone());
+                    }
+                    crate::app::sign_in_required::message(&required)
+                } else {
+                    "This conversation is unavailable. Its cached transcript and draft remain here; input is paused. Open the agent picker or return to the parent to continue.".into()
+                };
+                self.chat_widget.add_info_message(message, /*hint*/ None);
             } else {
                 self.schedule_recap_check(id, Instant::now());
             }

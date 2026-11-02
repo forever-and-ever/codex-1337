@@ -25,8 +25,8 @@ use crate::oauth::TokenEndpoint;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error("Anthropic sign-in required")]
-    LoginRequired,
+    #[error("{0}")]
+    LoginRequired(codex_protocol::sign_in_required::SignInRequired),
     #[error("Anthropic token endpoint rejected refresh (HTTP {0})")]
     Rejected(u16),
     #[error("Anthropic token exchange failed")]
@@ -147,7 +147,7 @@ impl Account {
             .map_err(|_| io::Error::other("Anthropic credential read task failed"))?
             .map_err(|error| {
                 if error.kind() == io::ErrorKind::NotFound {
-                    AuthError::LoginRequired
+                    self.login_required(None)
                 } else {
                     error.into()
                 }
@@ -168,7 +168,7 @@ impl Account {
                 .grant
                 .refresh_token
                 .as_deref()
-                .ok_or(AuthError::LoginRequired)?;
+                .ok_or_else(|| self.login_required(Some(&record.info)))?;
             let response: TokenResponse = OAuthClient::new(
                 &state.http,
                 TokenEndpoint {
@@ -188,9 +188,10 @@ impl Account {
             .await
             .map_err(|error| match error {
                 OAuthError::Rejected(rejection)
-                    if rejection.detail.error_code() == Some("invalid_grant") =>
+                    if rejection.detail.error_code() == Some("invalid_grant")
+                        || matches!(rejection.status.as_u16(), 401 | 403) =>
                 {
-                    AuthError::LoginRequired
+                    self.login_required(Some(&record.info))
                 }
                 OAuthError::Rejected(rejection) => AuthError::Rejected(rejection.status.as_u16()),
                 OAuthError::Transport(_) => AuthError::ExchangeFailed,
@@ -232,6 +233,17 @@ impl Account {
         .map_err(|_| io::Error::other("Anthropic credential write task failed"))??;
         state.pending.lock().await.remove(&self.id);
         Ok(())
+    }
+
+    fn login_required(&self, info: Option<&super::AccountInfo>) -> AuthError {
+        use codex_protocol::sign_in_required::AccountProvider;
+        use codex_protocol::sign_in_required::SignInRequired;
+        AuthError::LoginRequired(SignInRequired {
+            provider: AccountProvider::ClaudeSubscription,
+            account: info
+                .and_then(|info| info.email.clone())
+                .unwrap_or_else(|| self.id.to_string()),
+        })
     }
 }
 

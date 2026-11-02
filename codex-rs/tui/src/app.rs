@@ -210,6 +210,7 @@ mod agents_overview_view;
 mod code_mode;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod accounts;
+pub(crate) use accounts::ClaudeLoginStartId;
 mod app_server_event_targets;
 mod app_server_events;
 pub(crate) mod app_server_requests;
@@ -1359,6 +1360,7 @@ impl Drop for App {
     }
 }
 
+pub(crate) mod sign_in_required;
 mod stream_discard;
 #[cfg(test)]
 pub(super) mod test_support;
