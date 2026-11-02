@@ -57,6 +57,9 @@ impl App {
                     | AppEvent::TerminalTitleSetupCancelled
                     | AppEvent::OpenConfigEditor(_)
                     | AppEvent::SyntaxThemeSelected { .. }
+                    | AppEvent::SyntaxThemeFollowConfig
+                    | AppEvent::SyntaxThemeFollowConfigPreview
+                    | AppEvent::ResolveTheme
                     | AppEvent::SyntaxThemePreviewed
                     | AppEvent::OpenKeymapActionMenu { .. }
                     | AppEvent::OpenKeymapReplaceBindingMenu { .. }
@@ -2948,19 +2951,19 @@ impl App {
             AppEvent::PersistAgentsOverviewGrouping(grouping) => {
                 self.persist_agents_overview_grouping(grouping).await;
             }
+            // TELOS(warpaint): confirmation saves a family override; previews never write.
             AppEvent::SyntaxThemeSelected { name } => {
-                if let Some(theme) = crate::render::highlight::resolve_theme_by_name(
-                    &name,
-                    Some(&self.local_settings.codex_home),
-                ) {
-                    crate::render::highlight::set_syntax_theme(theme);
-                }
-                self.sync_tui_theme_selection(name);
-                self.chat_widget.refresh_config_panel(/*notice*/ None);
-                self.refresh_status_line();
-                tui.frame_requester().schedule_frame();
+                self.save_family_theme(app_server, Some(name));
+            }
+            AppEvent::SyntaxThemeFollowConfig => {
+                self.save_family_theme(app_server, None);
+            }
+            AppEvent::SyntaxThemeFollowConfigPreview => self.preview_config_theme(),
+            AppEvent::ResolveTheme => {
+                self.refresh_family_theme(app_server);
             }
             AppEvent::SyntaxThemePreviewed => {
+                self.resolve_runtime_theme();
                 self.refresh_status_line();
                 tui.frame_requester().schedule_frame();
             }

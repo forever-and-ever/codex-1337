@@ -1992,6 +1992,7 @@ impl ThreadRequestProcessor {
             project_id,
             git_info,
             daybreak_enabled,
+            theme,
             comms,
         } = params;
         let thread_uuid = ThreadId::from_string(&thread_id)
@@ -2018,6 +2019,7 @@ impl ThreadRequestProcessor {
         if git_info.is_none()
             && project_id.is_none()
             && daybreak_enabled.is_none()
+            && theme.is_none()
             && comms.is_none()
         {
             return Err(invalid_request(
@@ -2098,6 +2100,7 @@ impl ThreadRequestProcessor {
                 git_info,
                 project_id: project_update.clone(),
                 daybreak_enabled,
+                theme,
                 comms,
                 ..Default::default()
             };
@@ -3037,7 +3040,7 @@ impl ThreadRequestProcessor {
         include_turns: bool,
     ) -> Result<Thread, ThreadReadViewError> {
         // Read staging first: persistence can consume it while the stored thread is read.
-        let pending_daybreak_enabled = self
+        let pending_metadata = self
             .thread_store
             .read_pending_thread_metadata(thread_id)
             .await
@@ -3045,8 +3048,11 @@ impl ThreadRequestProcessor {
                 ThreadReadViewError::Internal(format!(
                     "failed to read pending thread metadata: {err}"
                 ))
-            })?
+            })?;
+        let pending_daybreak_enabled = pending_metadata
+            .as_ref()
             .and_then(|metadata| metadata.daybreak_enabled);
+        let pending_theme = pending_metadata.and_then(|metadata| metadata.theme);
         let loaded_thread = self.thread_manager.get_thread(thread_id).await.ok();
         let mut thread = if include_turns {
             if let Some(loaded_thread) = loaded_thread.as_ref() {
@@ -3101,6 +3107,10 @@ impl ThreadRequestProcessor {
         };
 
         thread.daybreak_enabled = thread.daybreak_enabled.or(pending_daybreak_enabled);
+        // TELOS(warpaint): a staged null clears a persisted choice, rather than preserving it.
+        if let Some(theme) = pending_theme {
+            thread.theme = theme;
+        }
 
         let has_live_in_progress_turn = if let Some(loaded_thread) = loaded_thread.as_ref() {
             matches!(loaded_thread.agent_status().await, AgentStatus::Running)
@@ -6710,6 +6720,7 @@ pub(crate) fn thread_from_stored_thread(
         git_info,
         name: thread.name,
         daybreak_enabled: thread.daybreak_enabled,
+        theme: thread.theme,
         comms: thread.comms,
         context_role: thread.context_role.map(|role| role.as_str().to_owned()),
         turns: Vec::new(),
@@ -6899,6 +6910,7 @@ fn build_thread_from_snapshot(
         git_info: None,
         name: None,
         daybreak_enabled: None,
+        theme: None,
         comms: Default::default(),
         context_role: None,
         turns: Vec::new(),

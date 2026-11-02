@@ -27,6 +27,7 @@ pub(in crate::app) enum UiRequestScope {
 #[derive(Clone, Copy)]
 pub(in crate::app) enum UiRequestKind {
     ReadOnly,
+    ThreadMetadataRead,
     Mutation,
 }
 
@@ -239,7 +240,10 @@ impl UiRequest {
     }
 
     pub(super) fn is_read_only(&self) -> bool {
-        matches!(self.kind, UiRequestKind::ReadOnly)
+        matches!(
+            self.kind,
+            UiRequestKind::ReadOnly | UiRequestKind::ThreadMetadataRead
+        )
     }
 
     pub(super) fn is_cancelled(&self) -> bool {
@@ -330,6 +334,9 @@ impl App {
                 let operation = match kind {
                     UiRequestKind::ReadOnly => {
                         ServerOperation::Catalog(CatalogRequest::UiRequest(request))
+                    }
+                    UiRequestKind::ThreadMetadataRead => {
+                        ServerOperation::ThreadMetadataRead(request)
                     }
                     UiRequestKind::Mutation => {
                         ServerOperation::Mutation(ThreadMutation::UiRequest(request))

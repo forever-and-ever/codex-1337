@@ -45,6 +45,7 @@ mod alarms;
 mod agent_mail;
 mod backfill;
 mod comms;
+// TELOS(warpaint): durable per-family pack choices.
 mod context_role;
 mod farm_requests;
 mod goals;
@@ -54,6 +55,7 @@ mod logs_maintenance;
 mod memories;
 mod memory_versions;
 mod projects;
+mod warpaint;
 pub use agent_mail::AgentMailRecord;
 pub use agent_mail::AgentMailState;
 

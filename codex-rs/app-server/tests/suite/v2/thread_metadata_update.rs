@@ -622,6 +622,7 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -726,6 +727,7 @@ async fn thread_metadata_update_sanitizes_git_origin_before_persisting() -> Resu
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -809,6 +811,7 @@ async fn thread_metadata_update_rejects_empty_git_info_patch() -> Result<()> {
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread.id,
             project_id: None,
             daybreak_enabled: None,
@@ -862,6 +865,7 @@ async fn thread_metadata_update_rejects_ephemeral_thread() -> Result<()> {
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -939,6 +943,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_stored_thread() -
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -1028,6 +1033,7 @@ async fn thread_metadata_update_repairs_loaded_thread_without_resetting_summary(
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -1102,6 +1108,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_archived_thread()
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
@@ -1168,6 +1175,7 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
 
     let update_id = mcp
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,

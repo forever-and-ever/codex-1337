@@ -2,22 +2,9 @@
 //!
 //! Wraps [syntect] with the [two_face] grammar bundle to provide ~250-language
 //! syntax highlighting; the themes are the fork's warpaint packs.  The module
-//! owns five process-global singletons:
-//!
-//! | Singleton | Type | Purpose |
-//! |---|---|---|
-//! | `SYNTAX_SET` | `OnceLock<SyntaxSet>` | Grammar database, immutable after init |
-//! | `THEME` | `OnceLock<RwLock<Theme>>` | Active color theme, swappable at runtime |
-//! | `THEME_REVISION` | `AtomicU64` | Invalidates rendered-content caches after theme swaps |
-//! | `THEME_OVERRIDE` | `OnceLock<Option<String>>` | Persisted user preference (write-once) |
-//! | `CODEX_HOME` | `OnceLock<Option<PathBuf>>` | Root for custom `.tmTheme` discovery |
-//!
-//! **Lifecycle:** call [`set_theme_override`] once at startup (after the final
-//! config is resolved) to persist the user preference and seed the `THEME`
-//! lock.  After that, [`set_syntax_theme`] and [`current_syntax_theme`] can
-//! swap/snapshot the theme for live preview.  All highlighting functions read
-//! the theme via `theme_lock()`. Unit tests isolate the active theme and its
-//! revision per thread so parallel tests cannot change each other’s rendering.
+//! owns the immutable grammar database and swappable runtime theme. Warpaint resolves
+//! configuration and the active family's saved preference before seeding this theme;
+//! picker previews swap it transiently. Tests isolate the theme and revision per thread.
 //! Generic renderers preserve configured theme foregrounds because callers may paint them on
 //! shaded surfaces. Diff rendering separately resolves contrast against its actual row fills.
 //! ANSI colors remain owned by the terminal palette.
@@ -63,8 +50,6 @@ static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME: OnceLock<RwLock<Theme>> = OnceLock::new();
 #[cfg(not(test))]
 static THEME_REVISION: AtomicU64 = AtomicU64::new(0);
-static THEME_OVERRIDE: OnceLock<Option<String>> = OnceLock::new();
-static CODEX_HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
@@ -89,41 +74,14 @@ fn syntax_set() -> &'static SyntaxSet {
 // time — long before it reaches users.  A runtime warning would be
 // unactionable noise since users can't fix upstream themes.
 
-/// Set the user-configured syntax theme override and codex home path.
-///
-/// Call this with the **final resolved config** (after onboarding, resume, and
-/// fork reloads complete). The first call persists `name` and `codex_home` in
-/// `OnceLock`s used by startup/default theme resolution.
-///
-/// Subsequent calls cannot change the persisted `OnceLock` values, but they
-/// still update the runtime theme immediately for live preview flows.
-///
-/// Returns user-facing warnings for actionable configuration issues, such as
-/// unknown/invalid theme names or duplicate override persistence.
+/// TELOS(warpaint): seed the runtime from config without inventing a conversation.
 pub(crate) fn set_theme_override(
     name: Option<String>,
     codex_home: Option<PathBuf>,
 ) -> Option<String> {
-    let name = crate::warpaint::startup_theme(name);
     let warning = validate_theme_name(name.as_deref(), codex_home.as_deref());
-    let override_set_ok = THEME_OVERRIDE.set(name.clone()).is_ok();
-    let codex_home_set_ok = CODEX_HOME.set(codex_home.clone()).is_ok();
-    #[cfg(not(test))]
-    let initialized = THEME.get().is_some();
-    #[cfg(test)]
-    let initialized = TEST_THEME.with(|theme| theme.get().is_some());
-    if initialized {
-        set_syntax_theme(resolve_theme_with_override(
-            name.as_deref(),
-            codex_home.as_deref(),
-        ));
-    }
-    if !override_set_ok || !codex_home_set_ok {
-        // This should never happen in practice — set_theme_override is only
-        // called once at startup.  Keep as a debug breadcrumb in case a second
-        // call site is added in the future.
-        tracing::debug!("set_theme_override called more than once; OnceLock values unchanged");
-    }
+    let pack = crate::warpaint::resolved_pack(name.as_deref(), None);
+    set_syntax_theme(crate::warpaint::theme(pack).unwrap_or_else(crate::warpaint::default_theme));
     warning
 }
 
@@ -139,33 +97,8 @@ pub(crate) fn validate_theme_name(name: Option<&str>, codex_home: Option<&Path>)
     ))
 }
 
-/// Return the name of the default theme: warpaint's default pack.
-pub(crate) fn adaptive_default_theme_name() -> &'static str {
-    crate::warpaint::DEFAULT_PACK
-}
-
-/// Build the theme from current override/default-theme settings.
-/// Extracted from the old `theme()` init closure so it can be reused.
-fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) -> Theme {
-    // Honor user-configured theme if valid.
-    if let Some(name) = name {
-        if let Some(theme) = resolve_theme_by_name(name, codex_home) {
-            return theme;
-        }
-        tracing::debug!("Theme \"{name}\" not recognized; using default theme");
-    }
-
-    crate::warpaint::default_theme()
-}
-
-/// Build the theme from current override/default-theme settings.
-/// Extracted from the old `theme()` init closure so it can be reused.
 fn build_default_theme() -> Theme {
-    let name = THEME_OVERRIDE.get().and_then(|name| name.as_deref());
-    let codex_home = CODEX_HOME
-        .get()
-        .and_then(|codex_home| codex_home.as_deref());
-    resolve_theme_with_override(name, codex_home)
+    crate::warpaint::default_theme()
 }
 
 fn theme_lock() -> impl std::ops::Deref<Target = RwLock<Theme>> {
@@ -289,22 +222,6 @@ pub(crate) fn foreground_style_for_scopes_with_theme(
         let fg = highlighter.style_mod_for_stack(&[scope]).foreground?;
         convert_syntect_color(fg).map(|fg| Style::default().fg(fg))
     })
-}
-
-/// Return the configured kebab-case theme name when it resolves; otherwise
-/// return the adaptive auto-detected default theme name.
-///
-/// This intentionally reflects persisted configuration/default selection, not
-/// transient runtime swaps applied via `set_syntax_theme`.
-pub(crate) fn configured_theme_name() -> String {
-    // Explicit user override?
-    if let Some(Some(name)) = THEME_OVERRIDE.get() {
-        let home = CODEX_HOME.get().and_then(|home| home.as_deref());
-        if resolve_theme_by_name(name, home).is_some() {
-            return name.clone();
-        }
-    }
-    adaptive_default_theme_name().to_string()
 }
 
 /// Resolve a theme name to the scope theme of the warpaint pack it names. Returns `None` when

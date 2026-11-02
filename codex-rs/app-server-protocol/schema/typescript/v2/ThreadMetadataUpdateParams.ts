@@ -10,6 +10,9 @@ export type ThreadMetadataUpdateParams = {threadId: string, /**
  * provide a string to replace the stored value.
  */
 gitInfo?: ThreadMetadataGitInfoUpdateParams | null, /**
+ * TELOS(warpaint): save a pack on the family root; null follows config; omission preserves.
+ */
+theme?: string | null, /**
  * Cross-context message admission; omission leaves it unchanged.
  */
 comms?: CommsGate | null};

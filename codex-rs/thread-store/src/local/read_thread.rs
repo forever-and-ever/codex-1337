@@ -62,6 +62,9 @@ pub(super) async fn read_thread(
         .as_ref()
         .map(|metadata| metadata.comms)
         .unwrap_or_default();
+    let theme = sqlite_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.theme.clone());
     let daybreak_enabled = sqlite_metadata
         .as_ref()
         .and_then(|metadata| metadata.daybreak_enabled);
@@ -98,6 +101,7 @@ pub(super) async fn read_thread(
             rollout_thread.name = thread.name;
             rollout_thread.project_id = thread.project_id;
             rollout_thread.daybreak_enabled = thread.daybreak_enabled;
+            rollout_thread.theme = thread.theme;
             rollout_thread.comms = thread.comms;
             rollout_thread.context_role = thread.context_role;
             rollout_thread.model = thread.model;
@@ -128,6 +132,7 @@ pub(super) async fn read_thread(
 
     let mut thread = read_thread_from_rollout_path(store, path).await?;
     thread.daybreak_enabled = daybreak_enabled;
+    thread.theme = theme;
     thread.comms = comms;
     thread.context_role = context_role;
     if let Some((model, reasoning_effort)) = persisted_model_settings {
@@ -187,6 +192,7 @@ pub(super) async fn read_thread_by_rollout_path(
             thread.section_entered_at = metadata.section_entered_at;
             thread.project_id = metadata.project_id;
             thread.daybreak_enabled = metadata.daybreak_enabled;
+            thread.theme = metadata.theme;
             thread.comms = metadata.comms;
             thread.context_role = metadata.context_role;
             thread.model = metadata.model;
@@ -479,6 +485,7 @@ pub(super) fn stored_thread_from_state_metadata(
         section_entered_at: metadata.section_entered_at,
         project_id: metadata.project_id,
         daybreak_enabled: metadata.daybreak_enabled,
+        theme: metadata.theme,
         comms: metadata.comms,
         context_role: metadata.context_role,
         cwd: metadata.cwd,
@@ -561,6 +568,7 @@ fn stored_thread_from_meta_line(
         section_entered_at: None,
         project_id: None,
         daybreak_enabled: None,
+        theme: None,
         comms: Default::default(),
         context_role: None,
         cwd: meta_line.meta.cwd,

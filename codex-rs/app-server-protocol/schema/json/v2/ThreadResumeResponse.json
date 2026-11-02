@@ -2234,6 +2234,13 @@
           ],
           "description": "Current runtime status for the thread."
         },
+        "theme": {
+          "description": "TELOS(warpaint): saved pack; null follows configuration. Only the family root's choice applies.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "threadSource": {
           "anyOf": [
             {

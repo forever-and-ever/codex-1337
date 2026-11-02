@@ -528,6 +528,9 @@ async fn apply_metadata_update(
             if let Some(daybreak_enabled) = patch.daybreak_enabled {
                 metadata.daybreak_enabled = Some(daybreak_enabled);
             }
+            if let Some(theme) = patch.theme.as_ref() {
+                metadata.theme = theme.clone();
+            }
             let upsert_result = state_db.upsert_thread(&metadata).await;
             if existing.is_none()
                 && metadata.project_id.is_some()
@@ -614,6 +617,9 @@ async fn apply_metadata_update(
                 return Err(ThreadStoreError::Internal {
                     message: format!("thread metadata unavailable before comms update: {thread_id}"),
                 });
+            }
+            if let Some(theme) = patch.theme {
+                super::warpaint::apply_theme(state_db.as_ref(), thread_id, theme.as_deref()).await?;
             }
             if let Some(daybreak_enabled) = patch.daybreak_enabled
                 && !state_db
@@ -769,6 +775,7 @@ fn sqlite_write_failure_should_block(patch: &ThreadMetadataPatch) -> bool {
     patch.name.is_some()
         || patch.project_id.is_some()
         || patch.daybreak_enabled.is_some()
+        || patch.theme.is_some()
         || patch.comms.is_some()
         || patch.context_role.is_some()
         || (patch.git_info.is_some() && !has_observed_metadata_facts(patch))

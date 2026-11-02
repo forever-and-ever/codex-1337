@@ -624,9 +624,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### warpaint
 
 - Telos: one pack paints every color the TUI shows, and wearing another repaints everything, committed transcript cells included.
-- Holds: cells hold warpaint tokens (`Color::Indexed` in reserved ranges) or upstream's named colors, never a pack color, and the binder resolves them at flush against the pack the active syntax theme was resolved from. A bound frame never meets the binder again; the editor handoff repaints it through `Terminal::replay` (`custom_terminal/output.rs`). A pack's style gives syntax classes modifiers at bind time, so style follows the worn pack as color does and never reaches a capture. No upstream code paints an extended index; `best_color` and contrast correction return RGB at 256 colors. Upstream's palette helpers still decide whether to paint, and wherever they settle on a color of their own, that role's token replaces it. Tool output is quarantined at ingestion into indices below 16 and RGB. Every painted pair is declared in `warpaint/pairs.rs` and proven by `scripts/warpaint`. The terminal's own default colors return whenever the TUI lets go of the screen.
-- Owners: `codex-rs/tui/src/warpaint.rs`, `codex-rs/tui/src/warpaint/` (`paint.rs`, `pairs.rs`, `bind.rs`, `pack.rs`, `investiture.rs`, `scopes.rs`, `livery.rs`), `codex-rs/tui/src/style/speaker_backgrounds.rs`, `codex-rs/ansi-escape/src/quarantine.rs`, `codex-rs/tui/src/app/warpaint_capture.rs`, `scripts/warpaint/`.
-- Tripwire: `roles_json_matches_the_declaration` (`codex-rs/tui/src/warpaint/pairs.rs`), `embedded_packs_are_the_pack_directory` (`codex-rs/tui/src/warpaint/pack.rs`), `revoke_returns_the_colors_the_terminal_reported` (`codex-rs/tui/src/warpaint/investiture.rs`), `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` (`codex-rs/tui/src/custom_terminal/output.rs`) for the replay, `previewing_and_cancelling_rebinds_pack_style_over_unchanged_frames` (`codex-rs/tui/src/warpaint.rs`), `just warpaint-check`. Token painting at seams: noisy (snapshots showing `Indexed(..)`).
+- Holds: a family root owns its nullable saved pack; null follows configuration. Random configuration uses stable rendezvous hashing of the canonical root thread ID, never a launch-global pick. Preview never persists. One resolver follows activation, attachment, reconnection and configuration refresh; metadata reads run independently of turn ordering, and stale replies cannot recolour another active family. No active conversation wears fixed config or `DEFAULT_PACK`. Cells hold warpaint tokens (`Color::Indexed` in reserved ranges) or upstream's named colors, never a pack color, and the binder resolves them at flush against the pack the active syntax theme was resolved from. A bound frame never meets the binder again; the editor handoff repaints it through `Terminal::replay` (`custom_terminal/output.rs`). A pack's style gives syntax classes modifiers at bind time, so style follows the worn pack as color does and never reaches a capture. No upstream code paints an extended index; `best_color` and contrast correction return RGB at 256 colors. Upstream's palette helpers still decide whether to paint, and wherever they settle on a color of their own, that role's token replaces it. Tool output is quarantined at ingestion into indices below 16 and RGB. Every painted pair is declared in `warpaint/pairs.rs` and proven by `scripts/warpaint`. The terminal's own default colors return whenever the TUI lets go of the screen.
+- Owners: `codex-rs/tui/src/warpaint.rs`, `codex-rs/tui/src/warpaint/` (`paint.rs`, `pairs.rs`, `bind.rs`, `pack.rs`, `investiture.rs`, `scopes.rs`, `livery.rs`), `codex-rs/tui/src/style/speaker_backgrounds.rs`, `codex-rs/ansi-escape/src/quarantine.rs`, `codex-rs/tui/src/app/warpaint_capture.rs`, `scripts/warpaint/`, `codex-rs/tui/src/app/warpaint.rs`, `codex-rs/state/src/runtime/warpaint.rs`, `codex-rs/thread-store/src/local/warpaint.rs`, and the nullable `Thread.theme`/metadata-update protocol seams.
+- Tripwire: `selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children` (`codex-rs/tui/src/app/tests.rs`), `config_refresh_repaints_conversations_without_an_override` (`app/config_persistence.rs`), `daybreak_preference_survives_reconciliation_and_cold_reads` (`codex-rs/thread-store/src/local/daybreak_metadata_tests.rs`); `roles_json_matches_the_declaration` (`codex-rs/tui/src/warpaint/pairs.rs`), `embedded_packs_are_the_pack_directory` (`codex-rs/tui/src/warpaint/pack.rs`), `revoke_returns_the_colors_the_terminal_reported` (`codex-rs/tui/src/warpaint/investiture.rs`), `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` (`codex-rs/tui/src/custom_terminal/output.rs`) for the replay, `previewing_and_cancelling_rebinds_pack_style_over_unchanged_frames` (`codex-rs/tui/src/warpaint.rs`), `just warpaint-check`. Token painting at seams: noisy (snapshots showing `Indexed(..)`).
 - Pressure: upstream palette helpers in `style.rs`, `style/contrast.rs`, `diff_render.rs`, the activity chart and the composer sparkle derive colors from the terminal's default colors. A new helper that paints its own RGB escapes the pack until it is repainted; one that paints `Color::Indexed` collides with the token ranges. `render/highlight.rs` lost two-face's bundled theme registry and custom `.tmTheme` loading: upstream edits to either conflict as modify/delete, and both stay deleted.
 - Evidence: e68772b43b, 48fc0612ba.
 
@@ -743,18 +743,18 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/protocol/src/items.rs`: human-only-facts
 - `codex-rs/protocol/src/models.rs`: native-robustness
 - `codex-rs/rollout/src/policy.rs`: human-only-facts
-- `codex-rs/tui/src/app/startup.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread, attention-gated-painting
+- `codex-rs/tui/src/app/startup.rs`: fast-ui-thread, warpaint
+- `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread, attention-gated-painting, warpaint
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
 - `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint, attention-gated-painting
 - `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
-- `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/config_persistence.rs`: fast-ui-thread
+- `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread, warpaint
+- `codex-rs/tui/src/app/config_persistence.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/app/thread_goal_actions.rs`: fast-ui-thread, goal-boxes
 - `codex-rs/tui/src/goal_files.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_event_buffer.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/thread_routing.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/thread_routing.rs`: durable-approvals-and-queues, warpaint
 - `codex-rs/tui/src/async_question_reply.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/bottom_pane/chat_composer_history.rs`: key-doctrine
 - `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`: async-questions-never-auto-answered
@@ -842,7 +842,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server-protocol/src/protocol/v2/account.rs`: recoverable-sign-in
 - `codex-rs/app-server-protocol/src/protocol/v2/shared.rs`: recoverable-sign-in
 - `codex-rs/app-server/src/request_processors.rs`: goal-boxes, recoverable-sign-in
-- `codex-rs/app-server/src/request_processors/thread_processor.rs`: recoverable-sign-in
+- `codex-rs/app-server/src/request_processors/thread_processor.rs`: recoverable-sign-in, warpaint
 - `codex-rs/core/src/session/mod.rs`: recoverable-sign-in, recoverable-output, interleaved-turn-accounting
 - `codex-rs/ext/guardian-reviewer/src/retry.rs`: recoverable-sign-in
 - `codex-rs/model-provider/src/models_endpoint.rs`: recoverable-sign-in
@@ -852,15 +852,51 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/protocol/src/lib.rs`: goal-boxes, recoverable-sign-in
 - `codex-rs/protocol/src/protocol.rs`: recoverable-sign-in
 - `codex-rs/tui/src/app.rs`: warpaint, attention-gated-painting, recoverable-sign-in
-- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread, goal-boxes, recoverable-sign-in
-- `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues, recoverable-sign-in
+- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread, goal-boxes, recoverable-sign-in, warpaint
+- `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues, recoverable-sign-in, warpaint
 - `codex-rs/tui/src/app/session_lifecycle.rs`: recoverable-sign-in
 - `codex-rs/tui/src/app/thread_events.rs`: recoverable-sign-in
-- `codex-rs/tui/src/app_event.rs`: goal-boxes, recoverable-sign-in
+- `codex-rs/tui/src/app_event.rs`: goal-boxes, recoverable-sign-in, warpaint
 - `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs, recoverable-sign-in
 - `codex-rs/tui/src/chatwidget/turn_runtime.rs`: recoverable-sign-in
 - `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs, recoverable-sign-in
 - `codex-rs/cli/src/login.rs`: provider-login
+
+- `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`: warpaint
+- `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`: warpaint
+- `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`: warpaint
+- `codex-rs/app-server/src/request_processors/thread_processor_tests.rs`: warpaint
+- `codex-rs/app-server/src/request_processors/thread_resume_redaction.rs`: warpaint
+- `codex-rs/app-server/src/request_processors/thread_summary.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/cyber_access_program.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/mcp_resource.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/projects.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/thread_metadata_update.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/thread_resume.rs`: warpaint
+- `codex-rs/app-server/tests/suite/v2/turn_start.rs`: warpaint
+- `codex-rs/state/src/extract.rs`: warpaint
+- `codex-rs/state/src/model/thread_metadata.rs`: warpaint
+- `codex-rs/state/src/runtime.rs`: warpaint
+- `codex-rs/state/src/runtime/memories.rs`: warpaint
+- `codex-rs/state/src/runtime/test_support.rs`: warpaint
+- `codex-rs/state/src/runtime/threads.rs`: warpaint
+- `codex-rs/thread-store/src/in_memory.rs`: warpaint
+- `codex-rs/thread-store/src/local/daybreak_metadata_tests.rs`: warpaint
+- `codex-rs/thread-store/src/local/helpers.rs`: warpaint
+- `codex-rs/thread-store/src/local/mod.rs`: warpaint
+- `codex-rs/thread-store/src/local/read_thread.rs`: warpaint
+- `codex-rs/thread-store/src/local/update_thread_metadata.rs`: warpaint
+- `codex-rs/thread-store/src/types.rs`: warpaint
+- `codex-rs/tui/src/app/agents_overview.rs`: warpaint
+- `codex-rs/tui/src/app/agents_overview_tests.rs`: warpaint
+- `codex-rs/tui/src/app/loaded_threads.rs`: warpaint
+- `codex-rs/tui/src/app/test_support.rs`: warpaint
+- `codex-rs/tui/src/app/tests/model_defaults_tests.rs`: warpaint
+- `codex-rs/tui/src/app/tests/startup.rs`: warpaint
+- `codex-rs/tui/src/app/thread_session_state.rs`: warpaint
+- `codex-rs/tui/src/chatwidget/settings.rs`: warpaint
+- `codex-rs/tui/src/lib_tests.rs`: warpaint
+- `codex-rs/tui/src/resume_picker.rs`: warpaint
 
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread, attention-gated-painting
@@ -883,8 +919,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`: fast-ui-thread, stable-feed-publication
 - `codex-rs/tui/src/app/history_pagination/failed_turns.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/app_server_thread_ownership/continuations.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/config_persistence/continuations.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/daybreak/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/config_persistence/continuations.rs`: fast-ui-thread, warpaint
+- `codex-rs/tui/src/app/daybreak/continuations.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/app/event_dispatch/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/experimental_features/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/model_defaults/continuations.rs`: fast-ui-thread
@@ -906,7 +942,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/history_cell/invocation.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/activity_lifecycle.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/ui_schedule.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/server_ui_requests.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/server_ui_requests.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/app/local_ui_requests.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/navigation_config.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/prompt_revert.rs`: fast-ui-thread
@@ -1071,9 +1107,9 @@ Fork-owned files, absent upstream:
 
 
 
-- `codex-rs/tui/src/app/turn_submissions.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/turn_submission_controller.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/server_operation_requests.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/turn_submissions.rs`: durable-approvals-and-queues, warpaint
+- `codex-rs/tui/src/app/turn_submission_controller.rs`: durable-approvals-and-queues, warpaint
+- `codex-rs/tui/src/app/server_operation_requests.rs`: durable-approvals-and-queues, warpaint
 - `codex-rs/tui/src/app/server_realtime_operations.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_control_operations.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_navigation_operations.rs`: durable-approvals-and-queues
@@ -1097,7 +1133,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/ansi-escape/src/quarantine.rs`: warpaint
 - `codex-rs/tui/src/app/warpaint_capture.rs`: warpaint
 - `scripts/warpaint/`: warpaint
-- `codex-rs/app-server-protocol/src/protocol/common.rs`: goal-boxes
+- `codex-rs/app-server-protocol/src/protocol/common.rs`: goal-boxes, warpaint
 - `codex-rs/app-server-protocol/src/protocol/v2/mod.rs`: goal-boxes
 - `codex-rs/app-server/src/message_processor.rs`: goal-boxes
 - `codex-rs/app-server/src/request_processors/account_processor.rs`: goal-boxes
@@ -1107,7 +1143,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/ext/goal/src/steering.rs`: goal-boxes
 - `codex-rs/state/src/runtime/goals.rs`: goal-boxes
 - `codex-rs/tui/src/app/owned_transcript_tests.rs`: goal-boxes
-- `codex-rs/tui/src/app/tests.rs`: goal-boxes
+- `codex-rs/tui/src/app/tests.rs`: goal-boxes, warpaint
 - `codex-rs/tui/src/chatwidget/tests/slash_commands.rs`: goal-boxes
 - `codex-rs/hooks/src/events/common.rs`: no-vacuous-injections
 - `codex-rs/code-mode-protocol/src/session.rs`: code-mode-cell-outcomes
@@ -1144,3 +1180,11 @@ Fork-owned files, absent upstream:
 - `codex-rs/cli/src/login_command.rs`: provider-login
 - `codex-rs/cli/src/login_status.rs`: provider-login
 - `codex-rs/cli/src/claude_login.rs`: provider-login
+
+- `codex-rs/state/migrations/0069_threads_theme.sql`: warpaint
+- `codex-rs/state/src/runtime/warpaint.rs`: warpaint
+- `codex-rs/thread-store/src/local/warpaint.rs`: warpaint
+- `codex-rs/tui/src/app/comms.rs`: warpaint
+- `codex-rs/tui/src/app/thread_metadata.rs`: warpaint
+- `codex-rs/tui/src/app/warpaint.rs`: warpaint
+- `codex-rs/tui/src/app_server_session/fork_preparation.rs`: warpaint

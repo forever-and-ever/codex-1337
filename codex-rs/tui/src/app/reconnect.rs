@@ -617,6 +617,7 @@ impl App {
             }
         } else {
             self.active_thread_id = None;
+            self.app_event_tx.send(AppEvent::ResolveTheme);
             self.active_thread_rx = None;
             self.primary_thread_id = None;
             self.primary_session_configured = None;

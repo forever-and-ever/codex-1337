@@ -227,7 +227,7 @@ impl ForkPreparation {
             history_support,
         };
         let mut custody = SubscriptionCustody::None;
-        let result = async {
+        let result = Box::pin(async {
             let fork_parent = match presentation {
                 ForkPresentation::Regular => read_thread(policy, &handle, parent).await.ok(),
                 ForkPresentation::SideConversation => None,
@@ -371,7 +371,7 @@ impl ForkPreparation {
                 started.task_tools_available = true;
             }
             Ok(started)
-        }
+        })
         .await;
         PreparedSession {
             result,

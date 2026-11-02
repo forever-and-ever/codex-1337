@@ -3380,6 +3380,7 @@ mod tests {
                 tool_policy: None,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
+                    theme: None,
                     originator: None,
                     environments: None,
                     id: "67e55044-10b1-426f-9247-bb680e5fe0c8".to_string(),
@@ -3437,69 +3438,68 @@ mod tests {
 
         assert_eq!(response.id(), &RequestId::Integer(7));
         assert_eq!(response.method(), "thread/start");
-        assert_eq!(
-            json!({
-                "method": "thread/start",
-                "id": 7,
-                "response": {
-                    "thread": {
-                        "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
-                        "environments": null,
-                        "extra": null,
-                        "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
-                        "forkedFromId": null,
-                        "parentThreadId": null,
-                        "preview": "first prompt",
-                        "ephemeral": true,
-                        "section": null,
-                        "sectionEnteredAt": null,
-                        "projectId": null,
-                        "historyMode": "legacy",
-                        "modelProvider": "openai",
-                        "model": null,
-                        "reasoningEffort": null,
-                        "createdAt": 1,
-                        "updatedAt": 2,
-                        "recencyAt": 3,
-                        "status": {
-                            "type": "idle"
-                        },
-                        "path": null,
-                        "cwd": absolute_path_string("tmp"),
-                        "cliVersion": "0.0.0",
-                        "originator": null,
-                        "source": "exec",
-                        "canAcceptDirectInput": null,
-                        "canAcceptTextInput": null,
-                        "threadSource": null,
-                        "agentNickname": null,
-                        "agentRole": null,
-                        "gitInfo": null,
-                        "name": null,
-                        "daybreakEnabled": null,
-                        "comms": "open",
-                        "contextRole": null,
-                        "turns": []
-                    },
-                    "model": "gpt-5",
+        let mut expected = json!({
+            "method": "thread/start",
+            "id": 7,
+            "response": {
+                "thread": {
+                    "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                    "environments": null,
+                    "extra": null,
+                    "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
+                    "forkedFromId": null,
+                    "parentThreadId": null,
+                    "preview": "first prompt",
+                    "ephemeral": true,
+                    "section": null,
+                    "sectionEnteredAt": null,
+                    "projectId": null,
+                    "historyMode": "legacy",
                     "modelProvider": "openai",
-                    "serviceTier": null,
-                    "disabledPluginIds": [],
-                    "cwd": absolute_path_string("tmp"),
-                    "runtimeWorkspaceRoots": [],
-                    "instructionSources": [absolute_path_string("tmp/AGENTS.md")],
-                    "approvalPolicy": "on-request",
-                    "approvalsReviewer": "user",
-                    "sandbox": {
-                        "type": "dangerFullAccess"
-                    },
-                    "activePermissionProfile": null,
+                    "model": null,
                     "reasoningEffort": null,
-                    "multiAgentMode": "explicitRequestOnly"
-                }
-            }),
-            serde_json::to_value(&response)?,
-        );
+                    "createdAt": 1,
+                    "updatedAt": 2,
+                    "recencyAt": 3,
+                    "status": {
+                        "type": "idle"
+                    },
+                    "path": null,
+                    "cwd": absolute_path_string("tmp"),
+                    "cliVersion": "0.0.0",
+                    "originator": null,
+                    "source": "exec",
+                    "canAcceptDirectInput": null,
+                    "canAcceptTextInput": null,
+                    "threadSource": null,
+                    "agentNickname": null,
+                    "agentRole": null,
+                    "gitInfo": null,
+                    "name": null,
+                    "daybreakEnabled": null,
+                    "comms": "open",
+                    "contextRole": null,
+                    "turns": []
+                },
+                "model": "gpt-5",
+                "modelProvider": "openai",
+                "serviceTier": null,
+                "disabledPluginIds": [],
+                "cwd": absolute_path_string("tmp"),
+                "runtimeWorkspaceRoots": [],
+                "instructionSources": [absolute_path_string("tmp/AGENTS.md")],
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": {
+                    "type": "dangerFullAccess"
+                },
+                "activePermissionProfile": null,
+                "reasoningEffort": null,
+                "multiAgentMode": "explicitRequestOnly"
+            }
+        });
+        expected["response"]["thread"]["theme"] = serde_json::Value::Null;
+        assert_eq!(expected, serde_json::to_value(&response)?);
         Ok(())
     }
 

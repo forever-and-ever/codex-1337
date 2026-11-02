@@ -3301,6 +3301,7 @@ mod tests {
         let response = ThreadResumeResponse {
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
+                theme: None,
                 originator: None,
                 environments: None,
                 id: thread_id.to_string(),

@@ -146,20 +146,34 @@ pub(crate) fn pack_names() -> impl Iterator<Item = &'static str> {
     pack::packs().iter().map(|pack| pack.name)
 }
 
-/// Resolve the startup preference once, before the runtime theme is initialized.
-pub(crate) fn startup_theme(name: Option<String>) -> Option<String> {
-    use rand::Rng as _;
+/// TELOS(warpaint): override, fixed config, then stable family rendezvous selection.
+/// SHA-256 scores UTF-8 root UUID, NUL, then pack name; highest digest wins.
+pub(crate) fn resolved_pack(
+    config: Option<&str>,
+    family: Option<(&str, Option<&str>)>,
+) -> &'static str {
+    use sha2::Digest;
+    use sha2::Sha256;
 
-    if name.as_deref() == Some("random") {
-        let packs = pack::packs();
-        Some(
-            packs[rand::rng().random_range(0..packs.len())]
-                .name
-                .to_string(),
-        )
-    } else {
-        name
+    let selected = family
+        .and_then(|(_, pack)| pack)
+        .or(config)
+        .unwrap_or(DEFAULT_PACK);
+    if selected != "random" {
+        return pack::find(selected).map_or(DEFAULT_PACK, |index| pack::packs()[index].name);
     }
+    let Some((root, _)) = family else {
+        return DEFAULT_PACK;
+    };
+    pack_names()
+        .max_by_key(|name| {
+            let mut hash = Sha256::new();
+            hash.update(root.as_bytes());
+            hash.update([0]);
+            hash.update(name.as_bytes());
+            (hash.finalize(), *name)
+        })
+        .unwrap_or(DEFAULT_PACK)
 }
 
 /// The theme a pack highlights with, if `name` is a pack.

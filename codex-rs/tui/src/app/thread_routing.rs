@@ -62,6 +62,7 @@ impl App {
             None
         };
         self.active_thread_id = Some(thread_id);
+        self.app_event_tx.send(AppEvent::ResolveTheme);
         self.active_thread_rx = receiver;
         self.refresh_pending_thread_approvals().await;
     }
@@ -94,6 +95,7 @@ impl App {
         let mut store = channel.store.lock().await;
         store.active = true;
         let snapshot = store.snapshot();
+        self.app_event_tx.send(AppEvent::ResolveTheme);
         Some((receiver, snapshot))
     }
 
@@ -102,6 +104,7 @@ impl App {
             self.set_thread_active(active_id, /*active*/ false).await;
         }
         self.active_thread_rx = None;
+        self.app_event_tx.send(AppEvent::ResolveTheme);
         self.refresh_pending_thread_approvals().await;
     }
 

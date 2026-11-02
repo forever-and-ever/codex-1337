@@ -829,33 +829,8 @@ impl App {
         false
     }
 
-    pub(super) fn sync_tui_theme_selection(&mut self, name: String) {
-        self.local_settings.tui.theme = Some(name.clone());
-        self.chat_widget.set_tui_theme(Some(name));
-    }
-
     pub(super) fn restore_runtime_theme_from_config(&self) {
-        // Random was resolved once at startup; changing folders must not reroll it.
-        if self.local_settings.tui.theme.as_deref() == Some("random") {
-            return;
-        }
-        if let Some(name) = self.local_settings.tui.theme.as_deref()
-            && let Some(theme) = crate::render::highlight::resolve_theme_by_name(
-                name,
-                Some(&self.local_settings.codex_home),
-            )
-        {
-            crate::render::highlight::set_syntax_theme(theme);
-            return;
-        }
-
-        let auto_theme_name = crate::render::highlight::adaptive_default_theme_name();
-        if let Some(theme) = crate::render::highlight::resolve_theme_by_name(
-            auto_theme_name,
-            Some(&self.local_settings.codex_home),
-        ) {
-            crate::render::highlight::set_syntax_theme(theme);
-        }
+        self.resolve_runtime_theme();
     }
 
     fn sync_feature_state_from_effective_config(
@@ -1687,7 +1662,7 @@ theme = "dracula"
     async fn rebuild_config_for_resume_or_fallback_uses_current_config_on_same_cwd_error()
     -> Result<()> {
         let mut app = make_test_app().await;
-        app.sync_tui_theme_selection("dracula".to_string());
+        app.local_settings.tui.theme = Some("dracula".to_string());
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf().abs();
         std::fs::write(codex_home.path().join("config.toml"), "[broken")?;
@@ -1723,27 +1698,29 @@ theme = "dracula"
     }
 
     #[tokio::test]
-    async fn sync_tui_theme_selection_updates_chat_widget_config_copy() {
+    async fn config_refresh_repaints_conversations_without_an_override() {
         let mut app = make_test_app().await;
-
-        app.sync_tui_theme_selection("dracula".to_string());
-
-        assert_eq!(app.local_settings.tui.theme.as_deref(), Some("dracula"));
-        assert_eq!(
-            app.chat_widget.local_settings.tui.theme.as_deref(),
-            Some("dracula")
-        );
-        assert_eq!(
-            app.chat_widget.config_panel_tui.theme.as_deref(),
-            Some("dracula")
-        );
+        for name in ["slag", "eclipse", "random"] {
+            app.local_settings.tui.theme = Some(name.to_string());
+            app.restore_runtime_theme_from_config();
+            assert_eq!(
+                crate::render::highlight::current_syntax_theme()
+                    .name
+                    .as_deref(),
+                Some(if name == "random" {
+                    crate::warpaint::DEFAULT_PACK
+                } else {
+                    name
+                })
+            );
+        }
     }
 
     #[tokio::test]
     async fn replacement_preserves_live_local_settings_and_server_auth_requirement() -> Result<()> {
         let mut app = make_test_app().await;
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.sync_tui_theme_selection("dracula".to_string());
+        app.local_settings.tui.theme = Some("dracula".to_string());
         app.chat_widget.requires_openai_auth = false;
         crate::markdown_render::preferences::init(Default::default());
         app.local_settings.tui.rendering.math = false;

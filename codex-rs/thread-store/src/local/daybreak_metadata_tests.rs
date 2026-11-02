@@ -43,11 +43,27 @@ async fn daybreak_preference_survives_reconciliation_and_cold_reads()
             .expect("updated thread");
         assert_eq!(updated.daybreak_enabled, Some(daybreak_enabled));
     }
+    // Explicit nullable preferences must survive stale rollout reconciliation, including clears.
+    for theme in [Some("eclipse"), None, Some("eclipse")] {
+        let updated = store
+            .update_thread_metadata(UpdateThreadMetadataParams {
+                thread_id,
+                patch: ThreadMetadataPatch {
+                    theme: Some(theme.map(str::to_string)),
+                    ..Default::default()
+                },
+                include_archived: false,
+            })
+            .await?
+            .expect("updated theme");
+        assert_eq!(updated.theme.as_deref(), theme);
+    }
     let mut stale_metadata = runtime
         .get_thread(thread_id)
         .await?
         .expect("saved metadata");
     stale_metadata.daybreak_enabled = Some(true);
+    stale_metadata.theme = Some("slag".to_string());
     runtime.upsert_thread(&stale_metadata).await?;
     codex_rollout::state_db::reconcile_rollout(
         Some(runtime.as_ref()),
@@ -77,6 +93,7 @@ async fn daybreak_preference_survives_reconciliation_and_cold_reads()
             })
             .await?;
         assert_eq!(thread.daybreak_enabled, Some(false));
+        assert_eq!(thread.theme.as_deref(), Some("eclipse"));
     }
     assert_eq!(std::fs::read(rollout_path)?, original_rollout);
     Ok(())

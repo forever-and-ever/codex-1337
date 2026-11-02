@@ -736,6 +736,7 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
         .request(|request_id| ClientRequest::ThreadMetadataUpdate {
             request_id,
             params: ThreadMetadataUpdateParams {
+                theme: None,
                 thread_id: thread.id.clone(),
                 project_id: None,
                 git_info: None,

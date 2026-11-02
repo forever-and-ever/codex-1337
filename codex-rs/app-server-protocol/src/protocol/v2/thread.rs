@@ -1191,6 +1191,15 @@ pub struct ThreadMetadataUpdateParams {
     #[experimental("thread/metadata/update.daybreakEnabled")]
     #[ts(optional = nullable)]
     pub daybreak_enabled: Option<bool>,
+    /// TELOS(warpaint): save a pack on the family root; null follows config; omission preserves.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::protocol::serde_helpers::serialize_double_option",
+        deserialize_with = "crate::protocol::serde_helpers::deserialize_double_option"
+    )]
+    #[ts(optional = nullable, type = "string | null")]
+    pub theme: Option<Option<String>>,
     /// Cross-context message admission; omission leaves it unchanged.
     #[ts(optional = nullable)]
     pub comms: Option<CommsGate>,

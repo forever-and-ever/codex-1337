@@ -151,6 +151,8 @@ pub(in crate::app) use detach::DetachScope;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum OperationLane {
     Thread(ThreadId),
+    /// TELOS(warpaint): cosmetic reads never order or gate conversation work.
+    ThreadMetadata(ThreadId),
     Control(ThreadId),
     Exit,
     Connection,

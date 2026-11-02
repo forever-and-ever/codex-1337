@@ -8,7 +8,7 @@
 //! - **Cancel-restore:** on dismiss (Esc / Ctrl+C) the `on_cancel` callback
 //!   restores the theme snapshot taken when the picker opened.
 //! - **Persist on confirm:** the `AppEvent::SyntaxThemeSelected` action persists
-//!   `[tui] theme = "..."` to `config.toml` via `ConfigEditsBuilder`.
+//!   the family root's override through app-server thread metadata. “Follow config” clears it.
 //!
 //! Two preview renderables adapt to terminal width:
 //!
@@ -261,18 +261,15 @@ impl Renderable for ThemePreviewNarrowRenderable {
     }
 }
 
+pub(crate) const THEME_PICKER_VIEW_ID: &str = "theme-picker";
+
 /// Builds [`SelectionViewParams`] for the `/theme` picker dialog.
 ///
 /// Lists the warpaint packs, with live preview on cursor movement and
 /// cancel-restore.
 ///
-/// `current_name` should be the value of `Config::tui_theme` (the persisted
-/// preference).  When it names a theme that is currently available the picker
-/// preselects it; otherwise the picker falls back to the configured name (or
-/// adaptive default) so opening the picker without a persisted preference still
-/// highlights the most likely intended entry.
 pub(crate) fn build_theme_picker_params(
-    current_name: Option<&str>,
+    _current_name: Option<&str>,
     codex_home: Option<&Path>,
     _terminal_width: Option<u16>,
 ) -> SelectionViewParams {
@@ -282,21 +279,16 @@ pub(crate) fn build_theme_picker_params(
     let entries = highlight::list_available_themes(codex_home);
     let codex_home_owned = codex_home.map(Path::to_path_buf);
 
-    // Resolve the effective theme name: honor explicit config only when it is
-    // currently available; otherwise fall back to configured/default selection
-    // so opening `/theme` does not auto-preview an unrelated first entry.
-    let effective_name = if let Some(name) = current_name
-        && entries.iter().any(|entry| entry.name == name)
-    {
-        name.to_string()
-    } else {
-        highlight::configured_theme_name()
-    };
+    // TELOS(warpaint): preselect the family pack being worn, not the global config.
+    let effective_name = original_theme
+        .name
+        .clone()
+        .unwrap_or_else(|| crate::warpaint::DEFAULT_PACK.to_string());
 
     // Track the index of the current theme so we can preselect it.
     let mut initial_idx = None;
 
-    let items: Vec<SelectionItem> = entries
+    let mut items: Vec<SelectionItem> = entries
         .iter()
         .enumerate()
         .map(|(idx, entry)| {
@@ -325,6 +317,15 @@ pub(crate) fn build_theme_picker_params(
         })
         .collect();
 
+    items.push(SelectionItem {
+        name: "Follow config".to_string(),
+        description: Some("Clear this family's saved theme".to_string()),
+        search_value: Some("Follow config".to_string()),
+        dismiss_on_select: true,
+        actions: vec![Box::new(|tx| tx.send(AppEvent::SyntaxThemeFollowConfig))],
+        ..Default::default()
+    });
+
     // Derive preview targets from the final `items` list (not from `entries`)
     // so preview ordering stays aligned if item construction/sorting changes.
     let preview_theme_names: Vec<Option<String>> =
@@ -337,6 +338,11 @@ pub(crate) fn build_theme_picker_params(
             {
                 highlight::set_syntax_theme(theme);
                 tx.send(AppEvent::SyntaxThemePreviewed);
+            } else if preview_theme_names
+                .get(idx)
+                .is_some_and(|name| name.as_deref() == Some("Follow config"))
+            {
+                tx.send(AppEvent::SyntaxThemeFollowConfigPreview);
             }
         },
     )
@@ -352,6 +358,7 @@ pub(crate) fn build_theme_picker_params(
     SelectionViewParams {
         allow_input_when_disconnected: true,
         title: Some("Select Theme".to_string()),
+        view_id: Some(THEME_PICKER_VIEW_ID),
         subtitle: Some(PREVIEW_FALLBACK_SUBTITLE.to_string()),
         footer_hint: Some(standard_popup_hint_line()),
         items,
@@ -528,7 +535,9 @@ mod tests {
 
     #[test]
     fn unavailable_configured_theme_falls_back_to_configured_or_default_selection() {
-        let configured_or_default_theme = highlight::configured_theme_name();
+        let configured_or_default_theme = highlight::current_syntax_theme()
+            .name
+            .unwrap_or_else(|| crate::warpaint::DEFAULT_PACK.to_string());
         let params = build_theme_picker_params(
             Some("not-a-real-theme"),
             /*codex_home*/ None,

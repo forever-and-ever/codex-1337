@@ -228,6 +228,7 @@ pub(in crate::app) fn overview_thread(
     status: ThreadStatus,
 ) -> Thread {
     Thread {
+        theme: None,
         originator: None,
         environments: None,
         id: thread_id.to_string(),

@@ -325,10 +325,16 @@ login or not at all.
 ## Warpaint
 
 `[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike.
-Set it to `"random"` to choose a pack once on each TUI launch; switching conversations
-or folders does not reroll it. `/theme` previews packs and cancel restores the prior one;
-confirming changes only the running TUI, never the saved preference. An unknown pack
-warns and the default, `slag`, is worn. `docs/warpaint.md` describes the engine.
+Each conversation follows its family root's saved override, or configuration when that
+choice is null. A fixed config pack applies directly; `"random"` derives one stable pack
+from the root thread ID using rendezvous hashing, so a family wears one colour across
+switches, restarts and machines. Adding a pack only moves families that it wins.
+`/theme` previews transiently; cancel restores the prior pack and confirm saves the
+family's override through app-server thread metadata. “Follow config” clears it.
+Conversations without an override reskin when configuration reloads. Configuration is
+reloaded on existing folder/session/config-refresh paths, not watched continuously.
+Without an active conversation, fixed config applies and `"random"` wears the default,
+`slag`. An unknown pack warns and falls back to `slag`. `docs/warpaint.md` describes the engine.
 
 Speed-tier commands such as `/fast` and their keybindings change the conversation,
 not the saved `service_tier` default. Edit configuration explicitly to change defaults.

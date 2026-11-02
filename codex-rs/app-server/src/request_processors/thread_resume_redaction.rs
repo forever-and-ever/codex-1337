@@ -226,6 +226,7 @@ mod tests {
 
     fn test_thread(items: Vec<ThreadItem>) -> Thread {
         Thread {
+            theme: None,
             originator: None,
             environments: None,
             id: "thread-1".to_string(),

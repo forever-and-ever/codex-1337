@@ -427,6 +427,7 @@ async fn daybreak_thread_metadata_persists_independently_across_restart_and_fork
                 .request(|request_id| ClientRequest::ThreadMetadataUpdate {
                     request_id,
                     params: ThreadMetadataUpdateParams {
+                        theme: None,
                         thread_id: thread_id.clone(),
                         project_id: None,
                         git_info: None,
@@ -495,6 +496,7 @@ async fn daybreak_thread_metadata_persists_independently_across_restart_and_fork
             .request(|request_id| ClientRequest::ThreadMetadataUpdate {
                 request_id,
                 params: ThreadMetadataUpdateParams {
+                    theme: None,
                     thread_id: first.thread.id.clone(),
                     project_id: None,
                     git_info: None,

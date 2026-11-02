@@ -661,6 +661,8 @@ pub struct StoredThread {
     /// User-selected Daybreak preference, absent until explicitly set.
     #[serde(default)]
     pub daybreak_enabled: Option<bool>,
+    /// TELOS(warpaint): saved root pack, independent of rollout metadata.
+    pub theme: Option<String>,
     #[serde(default)]
     pub comms: CommsGate,
     pub context_role: Option<codex_protocol::ContextRole>,
@@ -839,6 +841,13 @@ pub struct ThreadMetadataPatch {
     pub project_id: ClearableField<String>,
     /// User-selected Daybreak preference; omission leaves it unchanged.
     pub daybreak_enabled: Option<bool>,
+    /// Omission preserves; null clears the pack back to configuration.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_option"
+    )]
+    pub theme: ClearableField<String>,
     pub comms: Option<CommsGate>,
     #[serde(
         default,
@@ -944,6 +953,9 @@ impl ThreadMetadataPatch {
         if next.comms.is_some() {
             self.comms = next.comms;
         }
+        if next.theme.is_some() {
+            self.theme = next.theme;
+        }
         if next.daybreak_enabled.is_some() {
             self.daybreak_enabled = next.daybreak_enabled;
         }
@@ -981,6 +993,7 @@ impl ThreadMetadataPatch {
             && self.memory_mode.is_none()
             && self.project_id.is_none()
             && self.daybreak_enabled.is_none()
+            && self.theme.is_none()
             && self.comms.is_none()
             && self.context_role.is_none()
     }

@@ -57,6 +57,7 @@ SELECT
     threads.section_entered_at_ms,
     threads.project_id,
     threads.daybreak_enabled,
+    threads.theme,
     threads.comms,
     threads.context_role,
     threads.git_sha,
@@ -666,10 +667,11 @@ INSERT INTO threads (
     memory_mode,
     project_id,
     daybreak_enabled,
+    theme,
     comms,
     context_role,
     attached_thread_parent_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -723,6 +725,7 @@ ON CONFLICT(id) DO NOTHING
         .bind("enabled")
         .bind(metadata.project_id.as_deref())
         .bind(metadata.daybreak_enabled)
+        .bind(metadata.theme.as_deref())
         .bind(metadata.comms.as_str())
         .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
         .bind(metadata.attached_thread_parent_id.map(|id| id.to_string()))
@@ -976,10 +979,11 @@ INSERT INTO threads (
     memory_mode,
     project_id,
     daybreak_enabled,
+    theme,
     comms,
     context_role,
     attached_thread_parent_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     attached_thread_parent_id = COALESCE(excluded.attached_thread_parent_id, threads.attached_thread_parent_id),
     rollout_path = excluded.rollout_path,
@@ -1070,6 +1074,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(creation_memory_mode.unwrap_or("enabled"))
         .bind(metadata.project_id.as_deref())
         .bind(metadata.daybreak_enabled)
+        .bind(metadata.theme.as_deref())
         .bind(metadata.comms.as_str())
         .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
         .bind(metadata.attached_thread_parent_id.map(|id| id.to_string()))
@@ -1386,6 +1391,7 @@ SELECT
     threads.section_entered_at_ms,
     threads.project_id,
     threads.daybreak_enabled,
+    threads.theme,
     threads.comms,
     threads.context_role,
     threads.git_sha,

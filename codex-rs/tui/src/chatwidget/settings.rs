@@ -309,12 +309,6 @@ impl ChatWidget {
         self.refresh_status_surfaces();
     }
 
-    /// Set the syntax theme override in the widget's config copy.
-    pub(crate) fn set_tui_theme(&mut self, theme: Option<String>) {
-        self.config_panel_tui.theme.clone_from(&theme);
-        self.local_settings.tui.theme = theme;
-    }
-
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
         if model != self.current_model() {

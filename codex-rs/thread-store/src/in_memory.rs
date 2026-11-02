@@ -1161,6 +1161,9 @@ fn stored_thread_from_state(
         section_entered_at: state.section_entered_at.get(&thread_id).copied(),
         project_id: None,
         daybreak_enabled: metadata.and_then(|metadata| metadata.daybreak_enabled),
+        theme: metadata
+            .and_then(|metadata| metadata.theme.clone())
+            .flatten(),
         context_role: metadata
             .and_then(|metadata| metadata.context_role.clone())
             .flatten(),

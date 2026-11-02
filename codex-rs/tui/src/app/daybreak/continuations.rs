@@ -76,6 +76,7 @@ impl App {
                                             Uuid::new_v4()
                                         )),
                                         ThreadMetadataUpdateParams {
+                                            theme: None,
                                             thread_id: thread_id.to_string(),
                                             daybreak_enabled: Some(enabled),
                                             project_id: None,

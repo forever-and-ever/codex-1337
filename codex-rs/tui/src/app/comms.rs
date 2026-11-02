@@ -31,6 +31,7 @@ impl App {
                             api::ClientRequest::ThreadMetadataUpdate {
                                 request_id,
                                 params: api::ThreadMetadataUpdateParams {
+                                    theme: None,
                                     thread_id: thread_id.to_string(),
                                     comms: Some(comms),
                                     project_id: None,

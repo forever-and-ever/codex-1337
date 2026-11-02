@@ -373,27 +373,15 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
         let profile_before = std::fs::read(&profile_path)?;
         app.chat_widget
             .set_service_tier(Some(ServiceTier::Fast.request_value().into()));
-        for event in [
-            AppEvent::ServiceTierSelected {
-                service_tier: Some(ServiceTier::Fast.request_value().into()),
-            },
-            AppEvent::SyntaxThemeSelected {
-                name: "eclipse".into(),
-            },
-        ] {
+        for event in [AppEvent::ServiceTierSelected {
+            service_tier: Some(ServiceTier::Fast.request_value().into()),
+        }] {
             Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
             assert!(app.server_operations.is_empty());
         }
         assert_eq!(
             app.config.service_tier.as_deref(),
             Some(ServiceTier::Fast.request_value())
-        );
-        assert_eq!(app.local_settings.tui.theme.as_deref(), Some("eclipse"));
-        assert_eq!(
-            crate::render::highlight::current_syntax_theme()
-                .name
-                .as_deref(),
-            Some("eclipse")
         );
         assert_eq!(std::fs::read(&profile_path)?, profile_before);
         assert_eq!(std::fs::read(&local_config_path).ok(), local_config_before);

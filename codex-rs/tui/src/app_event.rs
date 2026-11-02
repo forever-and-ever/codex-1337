@@ -1742,6 +1742,11 @@ pub(crate) enum AppEvent {
     /// Runtime syntax theme preview changed; refresh theme-derived UI colors.
     SyntaxThemePreviewed,
 
+    // TELOS(warpaint): null follows config; attachment resolves the canonical family.
+    SyntaxThemeFollowConfig,
+    SyntaxThemeFollowConfigPreview,
+    ResolveTheme,
+
     /// Open set/remove actions for the selected keymap action.
     OpenKeymapActionMenu {
         context: String,

@@ -423,7 +423,7 @@ impl App {
                         return None;
                     }
                     let ready = match key {
-                        OperationLane::Exit | OperationLane::Response(_) => true,
+                        OperationLane::Exit | OperationLane::Response(_) | OperationLane::ThreadMetadata(_) => true,
                         OperationLane::Control(thread_id) => {
                             !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
                                 if matches!(&**operation, ServerOperation::Control(ControlOperation::RealtimeStop { .. })))

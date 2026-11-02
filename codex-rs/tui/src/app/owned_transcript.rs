@@ -153,6 +153,17 @@ impl App {
         tui: &mut tui::Tui,
         screen_size: Size,
     ) -> Result<Rect> {
+        let dashboard_visible = self
+            .chat_widget
+            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
+            .is_some();
+        if std::mem::replace(
+            &mut self.agents_overview.rendered_full_screen,
+            dashboard_visible,
+        ) != dashboard_visible
+        {
+            self.resolve_runtime_theme();
+        }
         crate::shimmers::follow_thread(
             self.chat_widget.thread_id(),
             self.chat_widget.is_agent_turn_running(),

@@ -1,6 +1,7 @@
 mod agent_mail;
 mod archive_thread;
 mod context_role;
+// TELOS(warpaint): explicit nullable pack updates.
 mod create_thread;
 mod delete_thread;
 mod helpers;
@@ -15,6 +16,7 @@ mod projects;
 mod read_thread;
 mod revert_thread;
 mod rollout_migration;
+mod warpaint;
 // This lands before the reader PRs that consume the shared lineage resolver.
 #[allow(dead_code)]
 mod rollout_lineage;

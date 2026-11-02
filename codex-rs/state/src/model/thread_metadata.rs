@@ -192,6 +192,8 @@ pub struct ThreadMetadata {
     pub project_id: Option<String>,
     /// User-selected Daybreak preference, absent until explicitly set.
     pub daybreak_enabled: Option<bool>,
+    /// TELOS(warpaint): a root's saved pack; null follows configuration.
+    pub theme: Option<String>,
     pub comms: CommsGate,
     pub context_role: Option<codex_protocol::ContextRole>,
     /// The git commit SHA, if known.
@@ -348,6 +350,7 @@ impl ThreadMetadataBuilder {
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
+            theme: None,
             comms: Default::default(),
             context_role: None,
             git_sha: self.git_sha.clone(),
@@ -495,6 +498,9 @@ impl ThreadMetadata {
         if self.comms != other.comms {
             diffs.push("comms");
         }
+        if self.theme != other.theme {
+            diffs.push("theme");
+        }
         if self.daybreak_enabled != other.daybreak_enabled {
             diffs.push("daybreak_enabled");
         }
@@ -552,6 +558,7 @@ pub(crate) struct ThreadRow {
     section_entered_at_ms: Option<i64>,
     project_id: Option<String>,
     daybreak_enabled: Option<bool>,
+    theme: Option<String>,
     comms: String,
     context_role: Option<String>,
     git_sha: Option<String>,
@@ -597,6 +604,7 @@ impl ThreadRow {
             section_entered_at_ms: row.try_get("section_entered_at_ms")?,
             project_id: row.try_get("project_id")?,
             daybreak_enabled: row.try_get("daybreak_enabled")?,
+            theme: row.try_get("theme")?,
             comms: row.try_get("comms")?,
             context_role: row.try_get("context_role")?,
             git_sha: row.try_get("git_sha")?,
@@ -646,6 +654,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             section_entered_at_ms,
             project_id,
             daybreak_enabled,
+            theme,
             comms,
             context_role,
             git_sha,
@@ -712,6 +721,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
                 .transpose()?,
             project_id,
             daybreak_enabled,
+            theme,
             comms: comms.parse().map_err(anyhow::Error::msg)?,
             context_role: context_role
                 .as_deref()
@@ -835,6 +845,7 @@ mod tests {
             section_entered_at_ms: None,
             project_id: None,
             daybreak_enabled: None,
+            theme: None,
             comms: "open".to_string(),
             context_role: None,
             git_sha: None,
@@ -879,6 +890,7 @@ mod tests {
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
+            theme: None,
             comms: Default::default(),
             context_role: None,
             git_sha: None,

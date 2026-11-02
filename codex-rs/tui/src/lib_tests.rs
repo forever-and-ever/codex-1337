@@ -1548,7 +1548,7 @@ async fn theme_warning_uses_final_config() -> std::io::Result<()> {
     let initial_config = build_config(&temp_dir).await?;
     assert!(initial_config.tui_theme.is_none());
 
-    let picked = crate::warpaint::startup_theme(Some("random".into())).expect("random pack");
+    let picked = crate::warpaint::resolved_pack(Some("random"), None);
     assert!(crate::warpaint::pack_names().any(|name| name == picked));
     assert!(validate_theme_name(Some("random"), Some(temp_dir.path())).is_none());
 

@@ -650,6 +650,7 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
                 sender.request(ClientRequest::ThreadMetadataUpdate {
                     request_id: RequestId::Integer(5),
                     params: ThreadMetadataUpdateParams {
+                        theme: None,
                         thread_id: thread.id.clone(),
                         project_id: None,
                         daybreak_enabled: None,
@@ -864,6 +865,7 @@ async fn resume_revalidates_persisted_thread_after_config_load(
             .request(ClientRequest::ThreadMetadataUpdate {
                 request_id: RequestId::Integer(101),
                 params: ThreadMetadataUpdateParams {
+                    theme: None,
                     thread_id: thread_id.clone(),
                     project_id: project_id.clone(),
                     daybreak_enabled: None,
@@ -898,6 +900,7 @@ async fn resume_revalidates_persisted_thread_after_config_load(
         ResumeMutation::GitMetadata => ClientRequest::ThreadMetadataUpdate {
             request_id: RequestId::Integer(2),
             params: ThreadMetadataUpdateParams {
+                theme: None,
                 thread_id: thread_id.clone(),
                 project_id: project_id.clone(),
                 daybreak_enabled: None,

@@ -944,6 +944,7 @@ See the Codex keymap documentation for supported actions and examples."
         let mut app = Self {
             reload_requested: false,
             farm: Default::default(),
+            theme: Default::default(),
             jira: None,
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,

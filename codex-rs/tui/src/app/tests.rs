@@ -3067,6 +3067,24 @@ fn open_agent_picker_marks_loaded_threads_open() -> Result<()> {
 
 #[test]
 fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -> Result<()> {
+    async fn settle_theme(
+        app: &mut App,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+    ) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while app.theme.request.is_some() {
+                tokio::select! {
+                    Some(completion) = app.server_operations.control_rx.recv() => {
+                        Box::pin(app.handle_server_completion(tui, server, completion)).await?;
+                    }
+                    Some(completion) = app.thread_delivery.completion_rx.recv() => app.handle_local_thread_completion(server, completion).await?,
+                }
+            }
+            Ok::<_, color_eyre::Report>(())
+        }).await??;
+        Ok(())
+    }
     const WORKER_THREADS: usize = 1;
     const TEST_STACK_SIZE_BYTES: usize = 12 * 1024 * 1024;
 
@@ -3079,7 +3097,8 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
     // Keep the scenario and its large setup/resume futures off the test thread's stack.
     runtime.block_on(Box::pin(async {
         let (mut app, mut app_event_rx, _op_rx) = Box::pin(make_test_app_with_channels()).await;
-        let root_thread_id = ThreadId::new();
+        let root_thread_id = ThreadId::from_string("019b76da-0000-7000-8000-000000000001")?;
+        app.local_settings.tui.theme = Some("random".into());
         let rollout_dir = app
             .config
             .codex_home
@@ -3184,7 +3203,11 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         .await?;
         app.enqueue_primary_thread_session(root.session, root.turns)
             .await?;
+        app.refresh_family_theme(&app_server);
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        settle_theme(&mut app, &mut tui, &mut app_server).await?;
+        let family_pack = crate::render::highlight::current_syntax_theme().name.expect("family pack");
+        assert_eq!(family_pack, "eclipse"); // SHA-256 rendezvous anchor, independent of registry order.
         for (index, (child_thread_id, multi_agent_version)) in child_thread_ids
             .iter()
             .copied()
@@ -3199,6 +3222,9 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_id)
                 .await?;
             assert_eq!(app.active_thread_id, Some(child_thread_id));
+            app.refresh_family_theme(&app_server);
+            settle_theme(&mut app, &mut tui, &mut app_server).await?;
+            assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some(family_pack.as_str()));
             assert_eq!(
                 app.agent_navigation.is_parent_owned(child_thread_id),
                 multi_agent_version == MultiAgentVersion::V2
@@ -3252,6 +3278,9 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             app.handle_backend_event(&app_server, closed).await;
             app.drain_active_thread_events(&mut tui).await?;
             assert_eq!(app.active_thread_id, Some(child_thread_id));
+            app.refresh_family_theme(&app_server);
+            settle_theme(&mut app, &mut tui, &mut app_server).await?;
+            assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some(family_pack.as_str()));
             assert!(!matches!(
                 app_server.thread_read(child_thread_id, /*include_turns*/ false).await?.status,
                 codex_app_server_protocol::ThreadStatus::NotLoaded
@@ -3417,6 +3446,45 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         app.chat_widget.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok()).any(|event|
             matches!(event, AppEvent::ForkCurrentSession { name: Some(name) } if name == "investigation")));
+        // A family override is independent of config and survives a fresh app-server/runtime.
+        app.handle_event(&mut tui, &mut app_server, AppEvent::SyntaxThemeSelected { name: "eclipse".into() }).await?;
+        settle_theme(&mut app, &mut tui, &mut app_server).await?;
+        assert_eq!(app_server.thread_read(root_thread_id, false).await?.theme.as_deref(), Some("eclipse"));
+        assert_eq!(app_server.thread_read(child_thread_ids[1], false).await?.theme, None);
+        app.local_settings.tui.theme = Some("slag".into());
+        app.resolve_runtime_theme();
+        assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some("eclipse"));
+        {
+            let mut restarted_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
+            let (mut restarted_app, _events, _) = Box::pin(make_test_app_with_channels()).await;
+            restarted_app.config = app.config.clone();
+            restarted_app.local_settings = app.local_settings.clone();
+            restarted_app.ensure_thread_channel(root_thread_id);
+            restarted_app.activate_thread_channel(root_thread_id).await;
+            restarted_app.refresh_family_theme(&restarted_server);
+            settle_theme(&mut restarted_app, &mut tui, &mut restarted_server).await?;
+            assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some("eclipse"));
+        }
+        // Clearing restores following, including fixed→fixed→random config changes.
+        app.handle_event(&mut tui, &mut app_server, AppEvent::SyntaxThemeFollowConfig).await?;
+        settle_theme(&mut app, &mut tui, &mut app_server).await?;
+        assert_eq!(app_server.thread_read(root_thread_id, false).await?.theme, None);
+        for (config, expected) in [("slag", "slag"), ("eclipse", "eclipse"), ("random", family_pack.as_str())] {
+            app.local_settings.tui.theme = Some(config.into());
+            app.restore_runtime_theme_from_config();
+            assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some(expected));
+        }
+        {
+            let mut restarted_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
+            let (mut restarted_app, _events, _) = Box::pin(make_test_app_with_channels()).await;
+            restarted_app.config = app.config.clone();
+            restarted_app.local_settings = app.local_settings.clone();
+            restarted_app.ensure_thread_channel(root_thread_id);
+            restarted_app.activate_thread_channel(root_thread_id).await;
+            restarted_app.refresh_family_theme(&restarted_server);
+            settle_theme(&mut restarted_app, &mut tui, &mut restarted_server).await?;
+            assert_eq!(crate::render::highlight::current_syntax_theme().name.as_deref(), Some(family_pack.as_str()));
+        }
         let child_cwd = app.chat_widget.config_ref().cwd.clone();
         let child_roots = app.chat_widget.config_ref().workspace_roots.clone();
         let child_tier = app.chat_widget.current_service_tier().map(str::to_string);
@@ -3442,6 +3510,46 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
     app.settle_navigation(&mut tui, &mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(fork_id));
+
+        // A stalled cosmetic metadata read must never hold a later typed turn.
+        let (read_started_tx, read_started_rx) = tokio::sync::oneshot::channel();
+        let (release_read_tx, release_read_rx) = tokio::sync::oneshot::channel();
+        app.request_server(
+            &app_server,
+            super::turn_submissions::ui_requests::UiRequestScope::Thread(fork_id),
+            super::turn_submissions::ui_requests::UiRequestKind::ThreadMetadataRead,
+            "Loading conversation theme",
+            move |_| async move {
+                let _ = read_started_tx.send(());
+                let _ = release_read_rx.await;
+                Ok(())
+            },
+            |_, _, result| {
+                assert!(result.is_ok());
+                Ok(())
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(5), read_started_rx).await??;
+        while app_event_rx.try_recv().is_ok() {}
+        app.chat_widget.restore_user_message_to_composer("typed while theme is pending".into());
+        app.chat_widget.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let turn = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .find(|event| matches!(event, AppEvent::CodexOp(Op::UserTurn { .. })))
+            .expect("typed turn is admitted while metadata is pending");
+        app.handle_event(&mut tui, &mut app_server, turn).await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = app_server.next_event().await {
+                if matches!(&event.event,
+                    codex_app_server_client::AppServerEvent::ServerNotification(notification)
+                        if matches!(notification.as_ref(), ServerNotification::TurnStarted(started)
+                            if started.thread_id == fork_id.to_string()))
+                {
+                    return;
+                }
+            }
+            panic!("server ended before the typed turn started");
+        }).await?;
+        release_read_tx.send(()).expect("metadata read is still pending when the turn starts");
         Ok(())
     }))
 }
@@ -5411,6 +5519,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         agent_thread_id,
         ServerNotification::ThreadStarted(ThreadStartedNotification {
             thread: Thread {
+                theme: None,
                 originator: None,
                 environments: Some(vec![codex_app_server_protocol::ThreadEnvironment {
                     environment_id: "remote".to_string(),
@@ -5524,6 +5633,7 @@ async fn inactive_thread_started_notification_preserves_primary_model_when_path_
         agent_thread_id,
         ServerNotification::ThreadStarted(ThreadStartedNotification {
             thread: Thread {
+                theme: None,
                 originator: None,
                 environments: None,
                 id: agent_thread_id.to_string(),
@@ -5598,6 +5708,7 @@ async fn thread_read_session_state_does_not_reuse_primary_permission_profile() {
     app.primary_session_configured = Some(primary_session);
 
     let thread = Thread {
+        theme: None,
         originator: None,
         environments: None,
         id: read_thread_id.to_string(),
@@ -6939,6 +7050,7 @@ async fn make_test_app() -> Box<App> {
     Box::new(App {
         reload_requested: false,
         farm: Default::default(),
+        theme: Default::default(),
         jira: None,
         feature_write_lock: Arc::default(),
         config_notification_test_generation: 0,
@@ -7071,6 +7183,7 @@ pub(super) async fn make_test_app_with_channels() -> (
         Box::new(App {
             reload_requested: false,
             farm: Default::default(),
+            theme: Default::default(),
             jira: None,
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,

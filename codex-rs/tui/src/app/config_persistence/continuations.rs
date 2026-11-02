@@ -196,6 +196,7 @@ impl App {
     pub(in crate::app) fn install_refreshed_config(&mut self, mut config: Config) -> Result<()> {
         self.apply_runtime_policy_overrides(&mut config, RuntimePolicyOverrideScope::All)?;
         self.local_settings = self.local_settings.reloaded(&config);
+        self.resolve_runtime_theme();
         self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
         self.chat_widget
             .local_settings

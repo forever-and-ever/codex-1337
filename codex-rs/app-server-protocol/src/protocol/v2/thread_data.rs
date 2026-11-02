@@ -291,6 +291,8 @@ pub struct Thread {
     /// Saved Daybreak choice, independent of turn execution. Null if unset.
     #[experimental("thread.daybreakEnabled")]
     pub daybreak_enabled: Option<bool>,
+    /// TELOS(warpaint): saved pack; null follows configuration. Only the family root's choice applies.
+    pub theme: Option<String>,
     /// Cross-context message admission, independent of user input.
     pub comms: CommsGate,
     /// Explicit description of this context for other agents; never inferred.
@@ -345,6 +347,8 @@ struct ThreadCompatibility {
     name: Option<String>,
     daybreak_enabled: Option<bool>,
     #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
     comms: CommsGate,
     context_role: Option<String>,
     turns: Vec<Turn>,
@@ -389,6 +393,7 @@ impl<'de> Deserialize<'de> for Thread {
             git_info: thread.git_info,
             name: thread.name,
             daybreak_enabled: thread.daybreak_enabled,
+            theme: thread.theme,
             comms: thread.comms,
             context_role: thread.context_role,
             turns: thread.turns,

@@ -57,7 +57,9 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
         ThreadId::new(),
         app.config.cwd.to_path_buf(),
     ));
-    app.sync_tui_theme_selection("eclipse".to_string());
+    app.local_settings.tui.theme = Some("eclipse".to_string());
+    app.chat_widget.local_settings.tui.theme = Some("eclipse".to_string());
+    app.restore_runtime_theme_from_config();
     hold_older_history(&mut app, &mut tui);
     let held = transcript_buffer(&mut app);
 

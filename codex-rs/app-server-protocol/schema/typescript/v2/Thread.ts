@@ -97,6 +97,9 @@ gitInfo: GitInfo | null, /**
  * Optional user-facing thread title.
  */
 name: string | null, /**
+ * TELOS(warpaint): saved pack; null follows configuration. Only the family root's choice applies.
+ */
+theme: string | null, /**
  * Cross-context message admission, independent of user input.
  */
 comms: CommsGate, /**

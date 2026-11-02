@@ -163,6 +163,7 @@ pub(super) fn stored_thread_from_rollout_item(
         section_entered_at: None,
         project_id: item.project_id,
         daybreak_enabled: item.daybreak_enabled,
+        theme: None,
         comms: item.comms,
         context_role: item.context_role,
         cwd: item.cwd.unwrap_or_default(),

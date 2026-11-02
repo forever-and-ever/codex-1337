@@ -326,6 +326,8 @@ mod warnings_tests;
 // TELOS(warpaint): packs are judged on frames this App draws.
 #[cfg(test)]
 mod warpaint_capture;
+// TELOS(warpaint): family-owned preferences and active-conversation resolution.
+mod warpaint;
 mod working_directory;
 
 use self::agent_navigation::AgentNavigationDirection;
@@ -575,6 +577,7 @@ struct InitialHistoryReplayBuffer {
 pub(crate) struct App {
     pub(super) reload_requested: bool,
     farm: farm::FarmUi,
+    theme: warpaint::ThemeState,
     local_shell: local_shell::LocalShell,
     jira: Option<jira_view::JiraBrowser>,
     feature_write_lock: Arc<tokio::sync::Mutex<()>>,
@@ -1311,6 +1314,9 @@ impl App {
             &mut self.agents_overview.rendered_full_screen,
             dashboard_visible,
         );
+        if dashboard_visible != dashboard_was_visible {
+            self.resolve_runtime_theme();
+        }
         // Full-height inline overlays scroll history off screen without a terminal resize.
         // Rebuild it once when returning to a content-height chat viewport.
         let restoring_inline_viewport = !tui.is_alt_screen_active()

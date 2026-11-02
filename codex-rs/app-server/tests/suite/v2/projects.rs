@@ -354,6 +354,7 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
         .request(|request_id| ClientRequest::ThreadMetadataUpdate {
             request_id,
             params: ThreadMetadataUpdateParams {
+                theme: None,
                 thread_id: started.thread.id.clone(),
                 project_id: Some(String::new()),
                 daybreak_enabled: None,
@@ -404,6 +405,7 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
         .request(|request_id| ClientRequest::ThreadMetadataUpdate {
             request_id,
             params: ThreadMetadataUpdateParams {
+                theme: None,
                 thread_id: started.thread.id.clone(),
                 project_id: Some(created.project.id.clone()),
                 daybreak_enabled: None,
@@ -456,6 +458,7 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
         .request(|request_id| ClientRequest::ThreadMetadataUpdate {
             request_id,
             params: ThreadMetadataUpdateParams {
+                theme: None,
                 thread_id: started.thread.id.clone(),
                 project_id: Some(created.project.id.clone()),
                 daybreak_enabled: None,
@@ -952,6 +955,7 @@ async fn projects_validate_filters_cursors_and_sqlite_less_assignment() -> Resul
     let started = server.start_thread(ThreadStartParams::default()).await?;
     let metadata_id = server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
+            theme: None,
             thread_id: started.thread.id.clone(),
             project_id: Some(Uuid::now_v7().to_string()),
             daybreak_enabled: None,

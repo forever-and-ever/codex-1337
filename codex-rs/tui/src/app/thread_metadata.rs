@@ -25,6 +25,7 @@ impl App {
                     .thread_metadata_update_branch(
                         api::RequestId::String(uuid::Uuid::new_v4().to_string()),
                         api::ThreadMetadataUpdateParams {
+                            theme: None,
                             thread_id: thread_id.to_string(),
                             project_id: None,
                             daybreak_enabled: None,

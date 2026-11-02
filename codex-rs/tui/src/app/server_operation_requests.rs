@@ -45,6 +45,8 @@ pub(in crate::app) enum ServerOperation {
     Mutation(ThreadMutation),
     Control(ControlOperation),
     Catalog(CatalogRequest),
+    /// TELOS(warpaint): silent hydration of persistent presentation metadata.
+    ThreadMetadataRead(ui_requests::UiRequest),
     Connection(ConnectionMutation),
     Realtime(RealtimeOperation),
     Response(Box<ServerRequestDelivery>),
@@ -164,6 +166,7 @@ impl ServerOperation {
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
             Self::Catalog(CatalogRequest::UiRequest(request))
+            | Self::ThreadMetadataRead(request)
             | Self::Connection(ConnectionMutation::UiRequest(request)) => request.label(),
             Self::Connection(ConnectionMutation::Trust(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
@@ -187,6 +190,7 @@ impl ServerOperation {
         match self {
             Self::Mutation(ThreadMutation::UiRequest(request))
             | Self::Catalog(CatalogRequest::UiRequest(request))
+            | Self::ThreadMetadataRead(request)
             | Self::Connection(ConnectionMutation::UiRequest(request)) => Some(request),
             _ => None,
         }
@@ -219,6 +223,7 @@ impl ServerOperation {
             Self::Connection(_) => OperationLane::Connection,
             Self::Control(ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
             Self::Control(_) => OperationLane::Control(thread_id()),
+            Self::ThreadMetadataRead(_) => OperationLane::ThreadMetadata(thread_id()),
             Self::Mutation(_) | Self::Catalog(_) => OperationLane::Thread(thread_id()),
         }
     }
@@ -386,7 +391,8 @@ pub(super) async fn send(
                 Ok(OperationReceipt::GuardianApproved)
             }
         },
-        ServerOperation::Catalog(CatalogRequest::UiRequest(_)) => {
+        ServerOperation::Catalog(CatalogRequest::UiRequest(_))
+        | ServerOperation::ThreadMetadataRead(_) => {
             unreachable!("UI request dispatched before thread projection")
         }
         ServerOperation::Catalog(CatalogRequest::Skills { params, .. }) => handle
@@ -689,6 +695,7 @@ impl App {
                 ServerOperation::Response(_)
                 | ServerOperation::Mutation(_)
                 | ServerOperation::Catalog(_)
+                | ServerOperation::ThreadMetadataRead(_)
                 | ServerOperation::Connection(_)
                 | ServerOperation::Control(_) => {}
             }

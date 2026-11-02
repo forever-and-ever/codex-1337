@@ -6304,6 +6304,12 @@ class ThreadMetadataUpdateParams(BaseModel):
             description="Patch the stored Git metadata for this thread. Omit a field to leave it unchanged, set it to `null` to clear it, or provide a string to replace the stored value.",
         ),
     ] = None
+    theme: Annotated[
+        str | None,
+        Field(
+            description="TELOS(warpaint): save a pack on the family root; null follows config; omission preserves."
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -14990,6 +14996,12 @@ class Thread(BaseModel):
         ),
     ]
     status: Annotated[ThreadStatus, Field(description="Current runtime status for the thread.")]
+    theme: Annotated[
+        str | None,
+        Field(
+            description="TELOS(warpaint): saved pack; null follows configuration. Only the family root's choice applies."
+        ),
+    ] = None
     thread_source: Annotated[
         ThreadSource | None,
         Field(

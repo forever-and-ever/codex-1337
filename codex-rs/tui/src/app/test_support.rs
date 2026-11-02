@@ -24,6 +24,7 @@ pub(crate) async fn make_test_app() -> Box<App> {
     let session_telemetry = test_session_telemetry(&config, model.as_str());
 
     Box::new(App {
+        theme: Default::default(),
         reload_requested: false,
         farm: Default::default(),
         jira: None,
