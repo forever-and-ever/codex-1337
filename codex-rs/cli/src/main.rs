@@ -10,6 +10,7 @@ extern crate self as codex_cli;
 mod commands;
 pub use commands::*;
 
+use crate::login_command::LoginProvider;
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
@@ -23,15 +24,6 @@ use codex_arg0::arg0_dispatch_or_else;
 use codex_chatgpt::apply_command::ApplyCommand;
 use codex_chatgpt::apply_command::run_apply_command;
 use codex_cli::LoginAction as LoginSubcommand;
-use codex_cli::read_access_token_from_stdin;
-use codex_cli::read_api_key_from_stdin;
-use codex_cli::run_claude_account_command;
-use codex_cli::run_login_status;
-use codex_cli::run_login_with_access_token;
-use codex_cli::run_login_with_api_key;
-use codex_cli::run_login_with_chatgpt;
-use codex_cli::run_login_with_claude_subscription;
-use codex_cli::run_login_with_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
@@ -84,6 +76,8 @@ mod exec_server_credential;
 mod exec_server_telemetry;
 mod marketplace_cmd;
 mod mcp_cmd;
+// TELOS(provider-login): provider selection and dispatch belong to the fork.
+mod login_command;
 mod mcp_login;
 mod migrate_nfs_db;
 mod migrate_rollouts;
@@ -486,7 +480,7 @@ enum ExecpolicySubcommand {
 
 #[derive(Debug, Parser)]
 struct LoginCommand {
-    /// Subscription provider; defaults to the existing OpenAI login flow.
+    /// Sign-in provider; interactive bare login asks which provider to use.
     #[arg(long, value_enum, conflicts_with_all = ["with_api_key", "with_access_token", "api_key", "use_device_code", "issuer_base_url", "client_id"])]
     provider: Option<LoginProvider>,
     #[clap(skip)]
@@ -528,14 +522,6 @@ struct LoginCommand {
 
     #[command(subcommand)]
     action: Option<LoginSubcommand>,
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-enum LoginProvider {
-    #[value(name = "openai")]
-    Openai,
-    #[value(name = "claude_subscription")]
-    ClaudeSubscription,
 }
 
 #[derive(Debug, Parser)]
@@ -1625,59 +1611,7 @@ async fn cli_main(
                 &mut login_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            match login_cli.action {
-                Some(LoginSubcommand::Status) => {
-                    if matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
-                        run_claude_account_command(
-                            login_cli.config_overrides,
-                            LoginSubcommand::Status,
-                        )
-                        .await;
-                    }
-                    run_login_status(login_cli.config_overrides).await;
-                }
-                Some(
-                    action @ (LoginSubcommand::Select { .. } | LoginSubcommand::Rename { .. }),
-                ) => {
-                    if !matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
-                        eprintln!(
-                            "Use --provider claude_subscription to select or rename a Claude account."
-                        );
-                        std::process::exit(1);
-                    }
-                    run_claude_account_command(login_cli.config_overrides, action).await;
-                }
-                None => {
-                    if matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
-                        run_login_with_claude_subscription(login_cli.config_overrides).await;
-                    } else if login_cli.with_api_key && login_cli.with_access_token {
-                        eprintln!(
-                            "Choose one login credential source: --with-api-key or --with-access-token."
-                        );
-                        std::process::exit(1);
-                    } else if login_cli.use_device_code {
-                        run_login_with_device_code(
-                            login_cli.config_overrides,
-                            login_cli.issuer_base_url,
-                            login_cli.client_id,
-                        )
-                        .await;
-                    } else if login_cli.api_key.is_some() {
-                        eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
-                        );
-                        std::process::exit(1);
-                    } else if login_cli.with_api_key {
-                        let api_key = read_api_key_from_stdin();
-                        run_login_with_api_key(login_cli.config_overrides, api_key).await;
-                    } else if login_cli.with_access_token {
-                        let access_token = read_access_token_from_stdin();
-                        run_login_with_access_token(login_cli.config_overrides, access_token).await;
-                    } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
-                    }
-                }
-            }
+            login_command::run(login_cli).await;
         }
         Some(Subcommand::Logout(mut logout_cli)) => {
             reject_remote_mode_for_subcommand(

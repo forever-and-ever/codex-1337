@@ -47,10 +47,79 @@ fn read_auth_json(codex_home: &Path) -> Result<Value> {
     Ok(serde_json::from_str(&auth_json)?)
 }
 
-#[test]
-fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
+#[tokio::test]
+async fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
+
+    codex_command(codex_home.path())?
+        .args(["-c", "forced_login_method=\"api\"", "login"])
+        .assert()
+        .failure()
+        .stderr(contains("--provider openai|claude_subscription"));
+    codex_command(codex_home.path())?
+        .args([
+            "-c",
+            "forced_login_method=\"api\"",
+            "login",
+            "--provider",
+            "openai",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("ChatGPT login is disabled"));
+
+    // Both streams must be terminals; invalid choices stay in the menu, not an OAuth flow.
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    env.insert(
+        "CODEX_HOME".into(),
+        codex_home.path().to_string_lossy().into_owned(),
+    );
+    let codex_utils_pty::SpawnedProcess {
+        session,
+        mut stdout_rx,
+        exit_rx,
+        ..
+    } = codex_utils_pty::spawn_pty_process(
+        &codex_utils_cargo_bin::cargo_bin("codex")?.to_string_lossy(),
+        &[
+            "-c".into(),
+            "forced_login_method=\"api\"".into(),
+            "login".into(),
+        ],
+        codex_home.path(),
+        &env,
+        &None,
+        codex_utils_pty::TerminalSize::default(),
+        codex_utils_pty::ChildFds::Inherited(&[]),
+    )
+    .await?;
+    let mut output = String::new();
+    let mut sent = false;
+    let code = tokio::time::timeout(Duration::from_secs(15), async {
+        while let Some(bytes) = stdout_rx.recv().await {
+            output.push_str(&String::from_utf8_lossy(&bytes));
+            if !sent && output.contains("Provider [1-2]:") {
+                session
+                    .writer_sender()
+                    .send(b"invalid\n1\n".to_vec())
+                    .await?;
+                sent = true;
+            }
+        }
+        Ok::<_, anyhow::Error>(exit_rx.await?)
+    })
+    .await??;
+    assert_eq!(code, 1, "{output}");
+    for message in [
+        "ChatGPT (OpenAI)",
+        "Claude subscription (Anthropic)",
+        "Enter 1 for ChatGPT or 2 for Claude subscription.",
+        "ChatGPT login is disabled",
+    ] {
+        assert!(output.contains(message), "{output}");
+    }
+    assert!(!output.contains("OpenRouter"));
 
     let mut cmd = codex_command(codex_home.path())?;
     let login = cmd
@@ -81,10 +150,43 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
         .assert()
         .success();
     insta::assert_snapshot!(String::from_utf8_lossy(&status.get_output().stderr), @r"
+    OpenAI (ChatGPT):
     API key configured - ***
     Authentication is checked when you send a request.
+    Claude subscription (Anthropic):
     ");
 
+    assert!(
+        String::from_utf8_lossy(&status.get_output().stdout).contains("No saved Claude accounts.")
+    );
+    let claude = codex_login::anthropic::AccountStore::new(codex_home.path().to_path_buf())
+        .upsert(
+            codex_login::anthropic::AccountInfo {
+                identity: codex_login::anthropic::AccountIdentity::new("claude-cli")?,
+                email: Some("claude@example.test".into()),
+                organization_uuid: None,
+                organization_name: None,
+            },
+            codex_login::anthropic::SubscriptionGrant::bearer_only("synthetic-claude".into())?,
+        )
+        .await?;
+    std::fs::remove_file(codex_home.path().join("auth.json"))?;
+    codex_command(codex_home.path())?
+        .args(["login", "status"])
+        .assert()
+        .success()
+        .stderr(contains("Not logged in"))
+        .stdout(contains(format!("{claude} · claude@example.test")));
+    codex_command(codex_home.path())?
+        .args(["login", "--provider", "openai", "status"])
+        .assert()
+        .failure()
+        .stderr(contains("Not logged in"));
+    codex_command(codex_home.path())?
+        .args(["login", "--provider", "claude_subscription", "status"])
+        .assert()
+        .success()
+        .stdout(contains("claude@example.test"));
     Ok(())
 }
 
@@ -135,7 +237,8 @@ fn login_status_reports_auth_storage_errors() -> Result<()> {
         .args(["login", "status"])
         .assert()
         .failure()
-        .stderr(contains("Error checking login status:"));
+        .stderr(contains("Error checking OpenAI login status:"))
+        .stdout(contains("No saved Claude accounts."));
 
     Ok(())
 }

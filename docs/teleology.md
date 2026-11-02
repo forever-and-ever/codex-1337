@@ -434,6 +434,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: upstream best-effort catalogs and request-error formatting discard structured causes; reconnect fallback treats all unavailable transcripts alike.
 - Evidence: this change.
 
+### provider-login
+
+- Telos: signing in chooses the provider instead of silently selecting OpenAI.
+- Holds: bare login offers ChatGPT and Claude subscription only when stdin and stdout are terminals; unattended login requires an explicit provider or an OpenAI credential/device-auth option. Explicit provider selection skips the menu. Unqualified status reports OpenAI and saved Claude accounts, even when one provider has no login or its storage fails; explicit status retains its provider-specific behavior. OpenRouter remains a key-file account choice, not a sign-in flow.
+- Owners: `codex-rs/cli/src/login_command.rs`, `codex-rs/cli/src/login_status.rs`, `codex-rs/cli/src/claude_login.rs`, with dispatch and status seams in `main.rs` and `login.rs`.
+- Tripwire: `login_with_api_key_reads_stdin_and_writes_auth_json`, `login_status_reports_auth_storage_errors`, and `device_login_adds_an_account_without_revoking_existing_credentials` in `codex-rs/cli/tests/login.rs`.
+- Pressure: upstream's bare login and single-provider status assume OpenAI; prompt logic placed in the command tree smears the fork across upstream dispatch.
+- Evidence: this change.
+
 ### credential-backend-authority
 
 - Telos: credential instrumentation cannot replace a backend's storage and transaction authority.
@@ -676,7 +685,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
-- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility, scoped-config-overrides
+- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility, scoped-config-overrides, provider-login
 - `codex-rs/exec/src/main.rs`: scoped-config-overrides
 - `codex-rs/utils/cli/src/lib.rs`: scoped-config-overrides
 - `codex-rs/exec-server/src/fs_sandbox.rs`: helper-image-read-roots
@@ -851,6 +860,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs, recoverable-sign-in
 - `codex-rs/tui/src/chatwidget/turn_runtime.rs`: recoverable-sign-in
 - `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs, recoverable-sign-in
+- `codex-rs/cli/src/login.rs`: provider-login
 
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread, attention-gated-painting
@@ -1131,3 +1141,6 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/chatwidget/account_picker.rs`: recoverable-sign-in
 - `codex-rs/tui/src/chatwidget/session_draft.rs`: recoverable-sign-in
 - `codex-rs/tui/src/history_cell/failed_turn.rs`: recoverable-sign-in
+- `codex-rs/cli/src/login_command.rs`: provider-login
+- `codex-rs/cli/src/login_status.rs`: provider-login
+- `codex-rs/cli/src/claude_login.rs`: provider-login

@@ -18,6 +18,40 @@ pub enum LoginAction {
     },
 }
 
+// TELOS(provider-login): status shares one saved-account renderer with the combined report.
+pub(crate) fn print_login_status(config: &codex_core::config::Config) -> std::io::Result<bool> {
+    let accounts = AccountStore::new(config.codex_home.to_path_buf()).list()?;
+    print_saved_accounts(config, &accounts);
+    Ok(!accounts.is_empty())
+}
+
+fn print_saved_accounts(
+    config: &codex_core::config::Config,
+    accounts: &[codex_login::anthropic::AccountInfo],
+) {
+    if accounts.is_empty() {
+        println!("No saved Claude accounts.");
+    }
+    for account in accounts {
+        let id = account.identity.id().to_string();
+        let selected = config.wrangler.default_claude_account.as_ref() == Some(&id);
+        let label = config
+            .wrangler
+            .account_nicknames
+            .get("claude_subscription")
+            .and_then(|names| names.get(&id))
+            .cloned()
+            .or_else(|| account.email.clone())
+            .unwrap_or_default();
+        let label = label
+            .chars()
+            .filter(|c| !c.is_control() && !matches!(*c as u32, 0x202A..=0x202E | 0x2066..=0x2069))
+            .take(96)
+            .collect::<String>();
+        println!("{id} · {label}{}", if selected { " (default)" } else { "" });
+    }
+}
+
 pub async fn run_claude_account_command(overrides: CliConfigOverrides, action: LoginAction) -> ! {
     let reload_overrides = overrides.clone();
     let config = crate::login::load_config_or_exit(overrides).await;
@@ -26,30 +60,7 @@ pub async fn run_claude_account_command(overrides: CliConfigOverrides, action: L
         let accounts = store.list()?;
         let (id, nickname) = match action {
             LoginAction::Status => {
-                if accounts.is_empty() {
-                    println!("No saved Claude accounts.");
-                }
-                for account in accounts {
-                    let id = account.identity.id().to_string();
-                    let selected = config.wrangler.default_claude_account.as_ref() == Some(&id);
-                    let label = config
-                        .wrangler
-                        .account_nicknames
-                        .get("claude_subscription")
-                        .and_then(|names| names.get(&id))
-                        .cloned()
-                        .or(account.email)
-                        .unwrap_or_default();
-                    let label = label
-                        .chars()
-                        .filter(|c| {
-                            !c.is_control()
-                                && !matches!(*c as u32, 0x202A..=0x202E | 0x2066..=0x2069)
-                        })
-                        .take(96)
-                        .collect::<String>();
-                    println!("{id} · {label}{}", if selected { " (default)" } else { "" });
-                }
+                print_saved_accounts(&config, &accounts);
                 return Ok(());
             }
             LoginAction::Select { account_id } => (account_id, None),

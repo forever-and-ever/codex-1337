@@ -102,7 +102,16 @@ You can also use Codex with an API key, but this requires [additional setup](htt
 
 ### Downstream Accounts
 
-`codex login` adds or updates a saved account in the existing credential store;
+`codex login` asks you to choose ChatGPT (OpenAI) or Claude subscription
+(Anthropic) when stdin and stdout are terminals. Use
+`codex login --provider openai` or
+`codex login --provider claude_subscription` to skip the menu; a bare login
+without a terminal requires this explicit choice. OpenAI credential/device-auth
+flags imply OpenAI. `codex login status` reports the OpenAI login and all saved
+Claude accounts; `--provider` limits the report to one provider. OpenRouter keys
+are selected from key files in `/account`, not through CLI sign-in.
+
+Sign-in adds or updates a saved account in the existing credential store;
 only a provider's first account becomes its active account. `/account` opens the
 picker, including during work; `/account work` uses an alias.
 The picker shows account IDs for configuring aliases:

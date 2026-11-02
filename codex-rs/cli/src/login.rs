@@ -10,19 +10,16 @@
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::Config;
 use codex_login::AuthKeyringBackendKind;
-use codex_login::AuthManager;
 use codex_login::AuthRouteConfig;
 use codex_login::CLIENT_ID;
 use codex_login::CodexAuth;
 use codex_login::ServerOptions;
-use codex_login::is_workload_identity_selected;
 use codex_login::login_with_access_token;
 use codex_login::login_with_api_key;
 use codex_login::logout_with_revoke;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
 use codex_mcp::ema_auth_scope;
-use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_rmcp_client::EnterpriseOAuthCredentialGuard;
 use codex_utils_cli::CliConfigOverrides;
@@ -335,7 +332,7 @@ pub async fn run_login_with_device_code(
 }
 
 /// Prefers device-code login (with `open_browser = false`) when headless environment is detected, but keeps
-/// `codex login` working in environments where device-code may be disabled/feature-gated.
+/// `codex login --provider openai` working where device-code may be disabled/feature-gated.
 /// If `run_device_code_login` returns `ErrorKind::NotFound` ("device-code unsupported"), this
 /// falls back to starting the local browser login server.
 pub async fn run_login_with_device_code_fallback_to_browser(
@@ -402,67 +399,12 @@ pub async fn run_login_with_device_code_fallback_to_browser(
     }
 }
 
+#[path = "login_status.rs"]
+pub(crate) mod provider_status;
+
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
-    let config = load_config_or_exit(cli_config_overrides).await;
-
-    if is_workload_identity_selected() {
-        match AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await {
-            Ok(_) => {
-                eprintln!("Logged in using workload identity");
-                std::process::exit(0);
-            }
-            Err(err) => {
-                eprintln!("Error checking login status: {err}");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    let auth_config = config.auth_config();
-    match auth_config
-        .load_auth(/*enable_codex_api_key_env*/ false)
-        .await
-    {
-        Ok(Some(auth)) => match auth.auth_mode() {
-            AuthMode::ApiKey => match auth.get_token() {
-                Ok(api_key) => {
-                    eprintln!("API key configured - {}", safe_format_key(&api_key));
-                    eprintln!("{API_KEY_AUTHENTICATION_NOTICE}");
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("Unexpected error retrieving API key: {e}");
-                    std::process::exit(1);
-                }
-            },
-            AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
-                match auth.get_account_email() {
-                    Some(email) => eprintln!("Logged in using ChatGPT as {email}"),
-                    None => eprintln!("Logged in using ChatGPT"),
-                }
-                std::process::exit(0);
-            }
-            AuthMode::Headers => {
-                unreachable!("header auth cannot be loaded from auth storage")
-            }
-            AuthMode::AgentIdentity => {
-                eprintln!("Logged in using access token");
-                std::process::exit(0);
-            }
-            AuthMode::PersonalAccessToken => {
-                eprintln!("Logged in using personal access token");
-                std::process::exit(0);
-            }
-        },
-        Ok(None) => {
-            eprintln!("Not logged in");
-            std::process::exit(1);
-        }
-        Err(err) => {
-            eprintln!("Error checking login status: {err}");
-            std::process::exit(1);
-        }
-    }
+    // TELOS(provider-login): keep explicit OpenAI status while sharing the combined report.
+    provider_status::run_openai(cli_config_overrides).await
 }
 
 pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
