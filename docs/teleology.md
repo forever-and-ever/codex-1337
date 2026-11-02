@@ -432,7 +432,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/protocol/src/sign_in_required.rs`, `codex-rs/login/src/anthropic/manager.rs`, `codex-rs/model-provider/src/anthropic_auth.rs` and `native_claude_catalog.rs`, `codex-rs/models-manager/src/authoritative_catalog.rs`, `codex-rs/core/src/session/model_catalog.rs`, `codex-rs/app-server/src/request_processors/sign_in_required.rs`, `codex-rs/tui/src/app/sign_in_required.rs` and `reconnect.rs`.
 - Tripwire: `failed_refresh_is_account_local_and_native_login_supersedes_its_grant`, `authoritative_catalog_access_rejection_invalidates_cache_until_refresh_succeeds`, `claude_subscription_accounts_are_native_and_conversation_scoped`, the active/navigation reconnect tests and `live_app_server_failed_turn_does_not_duplicate_error_history`.
 - Pressure: upstream best-effort catalogs and request-error formatting discard structured causes; reconnect fallback treats all unavailable transcripts alike.
-- Evidence: this change.
+- Evidence: 5109352165.
 
 ### provider-login
 
@@ -441,7 +441,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/cli/src/login_command.rs`, `codex-rs/cli/src/login_status.rs`, `codex-rs/cli/src/claude_login.rs`, with dispatch and status seams in `main.rs` and `login.rs`.
 - Tripwire: `login_with_api_key_reads_stdin_and_writes_auth_json`, `login_status_reports_auth_storage_errors`, and `device_login_adds_an_account_without_revoking_existing_credentials` in `codex-rs/cli/tests/login.rs`.
 - Pressure: upstream's bare login and single-provider status assume OpenAI; prompt logic placed in the command tree smears the fork across upstream dispatch.
-- Evidence: this change.
+- Evidence: 742a56de48.
 
 ### credential-backend-authority
 
