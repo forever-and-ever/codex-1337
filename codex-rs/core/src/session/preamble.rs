@@ -193,7 +193,6 @@ impl Session {
             id: format!("preamble:{turn_id}:{response_id}"),
             response_id: response_id.to_string(),
             window_id: Some(window_id.to_string()),
-            completed_at_ms,
             parts,
             raw: None,
             sources,

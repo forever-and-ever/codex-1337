@@ -138,7 +138,7 @@ async fn failed_background_worker_only_needs_attention_for_a_pending_request() {
     let view = app.agents_overview_view(vec![worker, child], Some(worker_id));
     assert_eq!(view.rows[0].group, AgentsOverviewGroup::NeedsYou);
     let rendered = screen(&view, /*width*/ 100, /*height*/ 32);
-    assert!(rendered.contains("● Needs input"));
+    assert!(rendered.contains("■ Needs input"));
     assert!(rendered.contains("Waiting for approval."));
 }
 

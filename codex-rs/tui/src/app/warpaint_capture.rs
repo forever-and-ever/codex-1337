@@ -399,7 +399,6 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
             ThreadItemPayload::Thought {
                 id: "thought-1".to_string(),
                 response_id: "response-2".to_string(),
-                completed_at_ms: at(41),
                 summary: Vec::new(),
                 content: vec![REASONING.to_string()],
                 reported_reasoning_tokens: None,

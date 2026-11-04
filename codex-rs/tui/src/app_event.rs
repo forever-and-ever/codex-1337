@@ -1223,7 +1223,7 @@ pub(crate) enum AppEvent {
     },
     RecordStepAdmission {
         thread_id: ThreadId,
-        item: codex_app_server_protocol::StepAdmissionItem,
+        item: codex_app_server_protocol::ThreadItem,
     },
     RecordFinalResponse {
         thread_id: ThreadId,

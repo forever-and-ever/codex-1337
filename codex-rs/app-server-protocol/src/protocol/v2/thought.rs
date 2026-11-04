@@ -10,7 +10,6 @@ use codex_protocol::protocol::RawResponseCompletedEvent;
 /// ordinal of the line that created them.
 pub struct ResponseProjection {
     pub turn_id: String,
-    pub completed_at_ms: i64,
     pub item: ThreadItem,
 }
 
@@ -22,14 +21,12 @@ impl ThreadItem {
         let thought = event.thought.as_ref()?;
         Some(ResponseProjection {
             turn_id: thought.turn_id.clone(),
-            completed_at_ms: thought.completed_at_ms,
             item: Self {
                 started_at_ms: None,
                 completed_at_ms: (thought.completed_at_ms != 0).then_some(thought.completed_at_ms),
                 payload: ThreadItemPayload::Thought {
                     id: format!("thought:{}:{}", thought.turn_id, event.response_id),
                     response_id: event.response_id.clone(),
-                    completed_at_ms: thought.completed_at_ms,
                     summary: thought.summary.clone(),
                     content: thought.content.clone(),
                     reported_reasoning_tokens: event

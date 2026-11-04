@@ -8,6 +8,7 @@ use super::NetworkPolicyAmendment;
 use super::RequestPermissionProfile;
 use super::UserInput;
 use super::shared::v2_enum_from_core;
+pub use super::step_admission::StepAdmissionItem;
 use crate::JsonSchema;
 use crate::TS;
 use crate::protocol::item_builders::CommandExecutionPresentation;
@@ -56,7 +57,6 @@ use codex_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
 use codex_protocol::protocol::ReviewDecision as CoreReviewDecision;
 use codex_protocol::protocol::SubAgentActivityKind as CoreSubAgentActivityKind;
 pub use codex_protocol::step_admission::ArrivalItem;
-pub use codex_protocol::step_admission::StepAdmissionItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
 use serde::Deserialize;
@@ -286,7 +286,7 @@ impl From<&codex_protocol::protocol::ItemCompletedEvent> for ThreadItem {
         ThreadItem::completed(
             ThreadItemPayload::from(event.item.clone()),
             event.started_at_ms,
-            event.completed_at_ms,
+            crate::protocol::lifecycle::completed_at_ms(&event.item, event.completed_at_ms),
         )
     }
 }
@@ -383,8 +383,6 @@ pub enum ThreadItemPayload {
     Thought {
         id: String,
         response_id: String,
-        #[ts(type = "number")]
-        completed_at_ms: i64,
         summary: Vec<String>,
         content: Vec<String>,
         #[ts(type = "number | null")]
@@ -398,8 +396,6 @@ pub enum ThreadItemPayload {
         response_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_id: Option<String>,
-        #[ts(type = "number")]
-        completed_at_ms: i64,
         parts: Vec<codex_protocol::PreamblePart>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         #[ts(optional, as = "Option<_>")]
@@ -1013,7 +1009,7 @@ impl From<CoreTurnItem> for ThreadItemPayload {
     fn from(value: CoreTurnItem) -> Self {
         match value {
             CoreTurnItem::CodeMode(item) => Self::CodeMode(item),
-            CoreTurnItem::StepAdmission(item) => Self::StepAdmission(item),
+            CoreTurnItem::StepAdmission(item) => Self::StepAdmission(item.into()),
             CoreTurnItem::Arrival(item) => Self::Arrival(item),
             CoreTurnItem::UserMessage(user) => Self::UserMessage {
                 id: user.id,
@@ -1063,7 +1059,6 @@ impl From<CoreTurnItem> for ThreadItemPayload {
                 id: preamble.id,
                 window_id: preamble.window_id,
                 response_id: preamble.response_id,
-                completed_at_ms: preamble.completed_at_ms,
                 parts: preamble.parts,
                 raw: preamble.raw,
                 sources: preamble.sources,

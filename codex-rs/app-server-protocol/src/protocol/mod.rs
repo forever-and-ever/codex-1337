@@ -6,6 +6,7 @@ pub mod code_mode;
 pub mod common;
 pub mod event_mapping;
 pub mod item_builders;
+mod lifecycle;
 mod mappers;
 mod serde_helpers;
 pub mod thread_history;

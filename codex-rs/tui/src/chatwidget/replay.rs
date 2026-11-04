@@ -393,11 +393,22 @@ impl ChatWidget {
             item @ ThreadItemPayload::Thought { .. } => {
                 // Reasoning has no live row; its disclosure owns formatting, not insertion probes.
                 self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    history_cell::ThoughtCell::from_item(item, &self.config.cwd),
+                    history_cell::ThoughtCell::from_item(
+                        ThreadItem {
+                            payload: item,
+                            started_at_ms,
+                            completed_at_ms,
+                        },
+                        &self.config.cwd,
+                    ),
                 )));
             }
             item @ ThreadItemPayload::Preamble { .. } => {
-                self.add_to_history(history_cell::PreambleCell::from_item(item));
+                self.add_to_history(history_cell::PreambleCell::from_item(ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                }));
             }
             ThreadItemPayload::Arrival(item) => {
                 self.add_to_history(history_cell::ArrivalCell::new(item))
@@ -445,11 +456,14 @@ impl ChatWidget {
                     codex_app_server_protocol::CommandExecutionStatus::Completed
                     | codex_app_server_protocol::CommandExecutionStatus::Failed,
                 ..
-            } if from_replay => self.handle_command_execution_completed_now(ThreadItem {
-                payload: item,
-                started_at_ms,
-                completed_at_ms,
-            }),
+            } if from_replay => {
+                self.finish_unified_exec_command(&item);
+                self.handle_command_execution_completed_now(ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                });
+            }
             item @ ThreadItemPayload::CommandExecution { .. } => self
                 .on_command_execution_completed(ThreadItem {
                     payload: item,
@@ -543,10 +557,16 @@ impl ChatWidget {
                         .send(AppEvent::RecordToolInput { thread_id, input });
                 }
             }
-            ThreadItemPayload::StepAdmission(item) => {
+            item @ ThreadItemPayload::StepAdmission(_) => {
                 if let Some(thread_id) = self.thread_id() {
-                    self.app_event_tx
-                        .send(AppEvent::RecordStepAdmission { thread_id, item });
+                    self.app_event_tx.send(AppEvent::RecordStepAdmission {
+                        thread_id,
+                        item: ThreadItem {
+                            payload: item,
+                            started_at_ms,
+                            completed_at_ms,
+                        },
+                    });
                 }
             }
             ThreadItemPayload::ToolOutputTokens {

@@ -1243,10 +1243,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                 outgoing
                     .send_server_notification(ServerNotification::ItemCompleted(
                         codex_app_server_protocol::ItemCompletedNotification {
+                            completed_at_ms: projection.item.completed_at_ms.unwrap_or_default(),
                             item: projection.item,
                             thread_id: conversation_id.to_string(),
                             turn_id: event_turn_id.clone(),
-                            completed_at_ms: projection.completed_at_ms,
                         },
                     ))
                     .await;

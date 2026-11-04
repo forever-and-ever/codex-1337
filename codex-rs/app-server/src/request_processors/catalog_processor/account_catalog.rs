@@ -25,14 +25,17 @@ impl CatalogRequestProcessor {
         params: &ModelListParams,
     ) -> Result<AccountCatalog, JSONRPCErrorError> {
         // Policy edits take effect on every request, not just after an account transition.
+        // Use the typed provider-validation loader before catalog access can refresh credentials.
         let config = Arc::new(
             self.config_manager
-                .load_with_overrides(
+                .load_for_resume(
+                    None,
                     None,
                     ConfigOverrides {
                         model_provider: params.model_provider.clone(),
                         ..Default::default()
                     },
+                    None,
                 )
                 .await
                 .map_err(|err| config_load_error(&err))?,

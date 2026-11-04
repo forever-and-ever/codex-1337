@@ -5,6 +5,7 @@ mod context_role;
 pub use context_inventory::*;
 pub use context_role::*;
 mod shared;
+mod step_admission;
 
 mod account;
 mod alarm;

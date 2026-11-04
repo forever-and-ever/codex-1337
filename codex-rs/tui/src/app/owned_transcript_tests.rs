@@ -882,7 +882,7 @@ async fn inline_select_mode_routes_find_and_returns_to_the_preserved_draft() -> 
 }
 
 #[tokio::test]
-async fn inline_transcript_search_draws_and_escape_precedes_backtrack() -> Result<()> {
+async fn inline_transcript_search_draws_and_escape_closes_after_search() -> Result<()> {
     let mut app = crate::app::test_support::make_test_app().await;
     attach_thread(&mut app, ThreadId::new());
     app.transcript_cells = vec![user_cell("needle in history")];
@@ -927,8 +927,8 @@ async fn inline_transcript_search_draws_and_escape_precedes_backtrack() -> Resul
         TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
     )
     .await?;
-    assert!(app.backtrack.overlay_preview_active);
-    app.close_transcript_overlay(&mut tui);
+    assert!(!app.backtrack.overlay_preview_active);
+    assert!(app.overlay.is_none());
     app_server.shutdown().await?;
     Ok(())
 }

@@ -689,6 +689,15 @@ async fn billing_surfaces_render_for_every_supported_enterprise_plan() {
             chat.add_status_output(
                 /*refreshing_rate_limits*/ false, /*request_id*/ None,
             );
+            let request_id = thread_usage_request_id(&mut rx);
+            assert!(chat.finish_thread_usage_refresh(
+                thread_id,
+                request_id,
+                Ok(ThreadUsageOutcome::Available(ThreadUsage {
+                    native_usage_usd_micros: Some(750_000),
+                    ..thread_usage(thread_id, 0, Some(0))
+                })),
+            ));
             let status_cell = match rx.try_recv() {
                 Ok(AppEvent::InsertHistoryCell(cell)) => cell,
                 event => panic!("expected /status card, got {event:?}"),

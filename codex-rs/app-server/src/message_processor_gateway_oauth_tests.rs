@@ -252,7 +252,7 @@ delivery = {{ kind = "header", name = "X-Gateway-Authorization" }}
     send_request(
         &processor,
         &session,
-        json!({"id": 2, "method": "model/list", "params": {}}),
+        json!({"id": 2, "method": "model/list", "params": {"modelProvider": "gateway"}}),
     )
     .await;
     let error = timeout(Duration::from_secs(/*secs*/ 10), async {

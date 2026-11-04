@@ -11,8 +11,10 @@ use test_case::test_case;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worker_guardian_sees_goal_set_after_spawn(origin: &str) -> Result<()> {
     skip_if_no_network!(Ok(()));
+    const FOLLOWUP: &str = "Ask the worker to check again.";
     let state = Arc::new(MockResponsesState {
         root_worker: true,
+        root_user_followup: Some(FOLLOWUP),
         mcp_server_name: Some(TEST_SERVER_NAME),
         ..Default::default()
     });
@@ -87,7 +89,7 @@ async fn worker_guardian_sees_goal_set_after_spawn(origin: &str) -> Result<()> {
         .send_turn_start_request(TurnStartParams {
             thread_id: root.id,
             input: vec![UserInput::Text {
-                text: "Ask the worker to check again.".to_owned(),
+                text: FOLLOWUP.to_owned(),
                 text_elements: vec![],
             }],
             ..Default::default()

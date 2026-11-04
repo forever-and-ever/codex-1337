@@ -133,12 +133,27 @@ impl ChatWidget {
     }
 
     pub(super) fn on_command_execution_completed(&mut self, item: ThreadItem) {
+        let ThreadItemPayload::CommandExecution { source, .. } = &item.payload else {
+            return;
+        };
+        self.finish_unified_exec_command(&item.payload);
+        if is_unified_exec_source(*source) && !self.bottom_pane.is_task_running() {
+            return;
+        }
+        self.defer_or_handle(
+            item,
+            InterruptManager::push_item_completed,
+            Self::handle_command_execution_completed_now,
+        );
+    }
+
+    pub(super) fn finish_unified_exec_command(&mut self, item: &ThreadItemPayload) {
         let ThreadItemPayload::CommandExecution {
             id,
             process_id,
             source,
             ..
-        } = &item.payload
+        } = item
         else {
             return;
         };
@@ -152,15 +167,7 @@ impl ChatWidget {
                 self.flush_unified_exec_wait_streak();
             }
             self.track_unified_exec_process_end(id, process_id.as_deref());
-            if !self.bottom_pane.is_task_running() {
-                return;
-            }
         }
-        self.defer_or_handle(
-            item,
-            InterruptManager::push_item_completed,
-            Self::handle_command_execution_completed_now,
-        );
     }
 
     pub(super) fn track_unified_exec_process_begin(

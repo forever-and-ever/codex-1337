@@ -6913,9 +6913,9 @@ async fn thread_resume_returns_provider_error_even_with_provider_override(
 }
 
 #[test_case::test_case(false; "missing_definition")]
-#[test_case::test_case(true; "provider_mismatch")]
+#[test_case::test_case(true; "different_global_selection")]
 #[tokio::test]
-async fn thread_resume_recovers_after_provider_configuration_is_restored(
+async fn thread_resume_retains_saved_provider_and_recovers_missing_definition(
     configured: bool,
 ) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
@@ -6949,41 +6949,21 @@ async fn thread_resume_recovers_after_provider_configuration_is_restored(
         ..Default::default()
     };
     let id = client.send_thread_resume_request(params.clone()).await?;
-    let error = client
-        .read_stream_until_error_message(RequestId::Integer(id))
-        .await?;
-    assert_eq!(
-        error
-            .error
-            .data
-            .as_ref()
-            .expect("provider error should include structured data")["type"],
-        if configured {
-            "modelProviderMismatch"
-        } else {
-            "modelProviderNotConfigured"
-        }
-    );
     if configured {
-        for overrides in [
-            ThreadResumeParams {
-                model_provider: Some("mock_provider".into()),
-                ..params.clone()
-            },
-            ThreadResumeParams {
-                config: Some(std::collections::HashMap::from([(
-                    "model_provider".into(),
-                    json!("mock_provider"),
-                )])),
-                ..params.clone()
-            },
-        ] {
-            let id = client.send_thread_resume_request(overrides).await?;
-            let overridden = client
-                .read_stream_until_error_message(RequestId::Integer(id))
-                .await?;
-            assert_eq!(overridden.error, error.error);
-        }
+        let resumed: ThreadResumeResponse = client.read_response(id).await?;
+        assert_eq!(resumed.model_provider, "old_provider");
+    } else {
+        let error = client
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        assert_eq!(
+            error
+                .error
+                .data
+                .as_ref()
+                .expect("provider error should include structured data")["type"],
+            "modelProviderNotConfigured"
+        );
     }
     let id = client
         .send_raw_request(

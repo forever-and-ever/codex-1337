@@ -347,7 +347,7 @@ async fn snapshot_formatter_completed_patch_needs_no_started_notification() {
 }
 
 #[tokio::test]
-async fn snapshot_formatter_live_and_buffered_patch_notifications_render_once() {
+async fn snapshot_formatter_live_and_buffered_patch_notifications_publish_pending_then_terminal() {
     for replay_kind in [
         None,
         Some(ReplayKind::ThreadSnapshot),
@@ -375,11 +375,25 @@ async fn snapshot_formatter_live_and_buffered_patch_notifications_render_once() 
             replay_kind,
         );
         let replayed = take_history_cells(&mut rx);
-        assert_eq!(replayed.len(), 1);
-        insta::assert_snapshot!(
-            "snapshot_formatter_completed_patch",
-            lines_to_single_string(&replayed[0].display_lines(/*width*/ 80))
-        );
+        assert_eq!(replayed.len(), 2);
+        for (cell, status) in replayed.iter().zip([
+            AppServerPatchApplyStatus::InProgress,
+            AppServerPatchApplyStatus::Completed,
+        ]) {
+            let projected = thread_items_to_transcript_cells(
+                chat.thread_id,
+                &chat.config.cwd,
+                [patch_item(status)],
+                RawReasoningVisibility::Hidden,
+                Some(&chat.config),
+                &|_| crate::multi_agents::AgentMetadata::default(),
+            );
+            assert_eq!(projected.len(), 1);
+            assert_eq!(
+                cell.display_hyperlink_lines(80),
+                projected[0].display_hyperlink_lines(80)
+            );
+        }
     }
 }
 

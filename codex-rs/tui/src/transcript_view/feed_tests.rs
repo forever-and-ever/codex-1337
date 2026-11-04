@@ -30,13 +30,16 @@ const CLOCK_MS: i64 = 1_700_000_000_000;
 
 fn thought(response: &str) -> Arc<dyn HistoryCell> {
     Arc::new(ThoughtCell::from_item(
-        ThreadItemPayload::Thought {
-            id: format!("thought:{response}"),
-            response_id: response.into(),
-            completed_at_ms: CLOCK_MS,
-            summary: Vec::new(),
-            content: vec!["Considering the failure".into()],
-            reported_reasoning_tokens: None,
+        codex_app_server_protocol::ThreadItem {
+            payload: ThreadItemPayload::Thought {
+                id: format!("thought:{response}"),
+                response_id: response.into(),
+                summary: Vec::new(),
+                content: vec!["Considering the failure".into()],
+                reported_reasoning_tokens: None,
+            },
+            started_at_ms: None,
+            completed_at_ms: Some(CLOCK_MS),
         },
         std::path::Path::new("/tmp"),
     ))
@@ -129,17 +132,20 @@ fn step(
     calls: &[&str],
     messages: &[&str],
     admission: Admission,
-) -> StepAdmissionItem {
-    StepAdmissionItem {
-        id: format!("step:{response}"),
-        response_id: response.into(),
-        completed_at_ms: CLOCK_MS,
-        read_tokens: 20_000,
-        thinking_tokens: Some(120),
-        output_tokens: 34,
-        call_ids: calls.iter().map(|call| (*call).to_string()).collect(),
-        message_ids: messages.iter().map(|id| (*id).to_string()).collect(),
-        admission,
+) -> codex_app_server_protocol::ThreadItem {
+    codex_app_server_protocol::ThreadItem {
+        payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(StepAdmissionItem {
+            id: format!("step:{response}"),
+            response_id: response.into(),
+            read_tokens: 20_000,
+            thinking_tokens: Some(120),
+            output_tokens: 34,
+            call_ids: calls.iter().map(|call| (*call).to_string()).collect(),
+            message_ids: messages.iter().map(|id| (*id).to_string()).collect(),
+            admission,
+        }),
+        started_at_ms: None,
+        completed_at_ms: Some(CLOCK_MS),
     }
 }
 
@@ -523,33 +529,38 @@ fn steps_fold_under_one_header_with_their_figures() {
     // identities also survive reflow and a new immutable revision of the same semantic item.
     let raw = "<instructions>\n  Be exact.\n</instructions>\n<tools>exec</tools>\n<context>needle Ω</context>";
     let preamble = |id: &str, raw: &str| -> Arc<dyn HistoryCell> {
-        Arc::new(PreambleCell::from_item(ThreadItemPayload::Preamble {
-            id: id.into(),
-            response_id: id.into(),
-            completed_at_ms: CLOCK_MS,
-            parts: vec![
-                codex_protocol::PreamblePart {
-                    section: codex_protocol::PreambleSection::Instructions,
-                    group: None,
-                    label: "Base instructions".into(),
-                    tokens: codex_protocol::CensusCount::Counted(700),
+        Arc::new(PreambleCell::from_item(
+            codex_app_server_protocol::ThreadItem {
+                payload: ThreadItemPayload::Preamble {
+                    id: id.into(),
+                    response_id: id.into(),
+                    parts: vec![
+                        codex_protocol::PreamblePart {
+                            section: codex_protocol::PreambleSection::Instructions,
+                            group: None,
+                            label: "Base instructions".into(),
+                            tokens: codex_protocol::CensusCount::Counted(700),
+                        },
+                        codex_protocol::PreamblePart {
+                            section: codex_protocol::PreambleSection::Context,
+                            group: None,
+                            label: "AGENTS.md /repo".into(),
+                            tokens: codex_protocol::CensusCount::Counted(300),
+                        },
+                    ],
+                    raw: None,
+                    sources: vec![codex_protocol::ContextSource::Prompt {
+                        label: "instructions".into(),
+                        text: raw.into(),
+                    }],
+                    change: None,
+                    reported_input_tokens: None,
+                    window_id: None,
                 },
-                codex_protocol::PreamblePart {
-                    section: codex_protocol::PreambleSection::Context,
-                    group: None,
-                    label: "AGENTS.md /repo".into(),
-                    tokens: codex_protocol::CensusCount::Counted(300),
-                },
-            ],
-            raw: None,
-            sources: vec![codex_protocol::ContextSource::Prompt {
-                label: "instructions".into(),
-                text: raw.into(),
-            }],
-            change: None,
-            reported_input_tokens: None,
-            window_id: None,
-        }))
+                started_at_ms: None,
+                completed_at_ms: Some(CLOCK_MS),
+            },
+        ))
     };
     let mut cells = vec![
         preamble("window-1", raw),
@@ -641,17 +652,20 @@ fn steps_fold_under_one_header_with_their_figures() {
     let mut cells = vec![
         script_block("cot-source-only", None, Some("public result")),
         Arc::new(ThoughtCell::from_item(
-            ThreadItemPayload::Thought {
-                id: "thought:cot-source-step".into(),
-                response_id: "cot-source-step".into(),
-                completed_at_ms: CLOCK_MS,
-                summary: vec!["Provider summary".into()],
-                content: vec![
-                    "Private alpha.".into(),
-                    "Private omega.".into(),
-                    "Private terminus.".into(),
-                ],
-                reported_reasoning_tokens: Some(42),
+            codex_app_server_protocol::ThreadItem {
+                payload: ThreadItemPayload::Thought {
+                    id: "thought:cot-source-step".into(),
+                    response_id: "cot-source-step".into(),
+                    summary: vec!["Provider summary".into()],
+                    content: vec![
+                        "Private alpha.".into(),
+                        "Private omega.".into(),
+                        "Private terminus.".into(),
+                    ],
+                    reported_reasoning_tokens: Some(42),
+                },
+                started_at_ms: None,
+                completed_at_ms: Some(CLOCK_MS),
             },
             std::path::Path::new("/tmp"),
         )) as Arc<dyn HistoryCell>,
@@ -1207,17 +1221,20 @@ fn dialogue_mode_keeps_prompts_and_replies() {
         let cells = vec![
             user("Question"),
             Arc::new(ThoughtCell::from_item(
-                ThreadItemPayload::Thought {
-                    id: "thought:final-step".into(),
-                    response_id: "final-step".into(),
-                    completed_at_ms: CLOCK_MS,
-                    summary: Vec::new(),
-                    content: if readable {
-                        vec!["Considering the failure".into()]
-                    } else {
-                        Vec::new()
+                codex_app_server_protocol::ThreadItem {
+                    payload: ThreadItemPayload::Thought {
+                        id: "thought:final-step".into(),
+                        response_id: "final-step".into(),
+                        summary: Vec::new(),
+                        content: if readable {
+                            vec!["Considering the failure".into()]
+                        } else {
+                            Vec::new()
+                        },
+                        reported_reasoning_tokens: None,
                     },
-                    reported_reasoning_tokens: None,
+                    started_at_ms: None,
+                    completed_at_ms: Some(CLOCK_MS),
                 },
                 std::path::Path::new("/tmp"),
             )),

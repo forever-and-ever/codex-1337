@@ -151,7 +151,6 @@ fn thought_completion_is_self_contained_and_response_scoped() {
             &ThreadItemPayload::Thought {
                 id: "thought:turn-1:response-1".into(),
                 response_id: "response-1".into(),
-                completed_at_ms: 12345,
                 summary: vec!["First block".into(), "Second block".into()],
                 content: vec!["Readable content".into()],
                 reported_reasoning_tokens: Some(1300),
@@ -159,7 +158,6 @@ fn thought_completion_is_self_contained_and_response_scoped() {
             &ThreadItemPayload::Thought {
                 id: "thought:turn-1:response-2".into(),
                 response_id: "response-2".into(),
-                completed_at_ms: 12345,
                 summary: Vec::new(),
                 content: Vec::new(),
                 reported_reasoning_tokens: None,
@@ -333,40 +331,53 @@ fn projects_completed_canonical_turn_items() {
 
 #[test]
 fn projects_optional_completed_item_lifecycle_timestamps() {
-    let item = TurnItem::UserMessage(UserMessageItem {
+    let user = TurnItem::UserMessage(UserMessageItem {
         source_response_item_id: None,
         id: "user-1".to_string(),
         client_id: None,
         content: Vec::new(),
     });
-
-    for (started_at_ms, completed_at_ms, expected_completed_at_ms) in
-        [(None, 123, Some(123)), (Some(100), 0, None)]
-    {
-        let changes = project(RolloutItem::EventMsg(EventMsg::ItemCompleted(
-            ItemCompletedEvent {
-                thread_id: ThreadId::default(),
-                turn_id: "turn-1".to_string(),
-                item: item.clone(),
-                started_at_ms,
-                completed_at_ms,
-            },
-        )));
-
-        assert_eq!(
-            changes,
-            ThreadHistoryChangeSet {
-                changed_items: vec![ThreadHistoryItemChange {
+    let step = TurnItem::StepAdmission(codex_protocol::step_admission::StepAdmissionItem {
+        id: "step-1".into(),
+        response_id: "response-1".into(),
+        completed_at_ms: 42,
+        read_tokens: 10,
+        thinking_tokens: None,
+        output_tokens: 2,
+        call_ids: Vec::new(),
+        message_ids: Vec::new(),
+        admission: codex_protocol::step_admission::Admission::Pending,
+    });
+    // A later bill-sealing event must not move the original response completion.
+    for (item, original_completion) in [(user, None), (step, Some(42))] {
+        for (started_at_ms, completed_at_ms, expected_completed_at_ms) in
+            [(None, 123, Some(123)), (Some(100), 0, None)]
+        {
+            let changes = project(RolloutItem::EventMsg(EventMsg::ItemCompleted(
+                ItemCompletedEvent {
+                    thread_id: ThreadId::default(),
                     turn_id: "turn-1".to_string(),
-                    item: ThreadItem {
-                        payload: ThreadItemPayload::from(item.clone()),
-                        started_at_ms,
-                        completed_at_ms: expected_completed_at_ms
-                    }
-                }],
-                ..Default::default()
-            }
-        );
+                    item: item.clone(),
+                    started_at_ms,
+                    completed_at_ms,
+                },
+            )));
+
+            assert_eq!(
+                changes,
+                ThreadHistoryChangeSet {
+                    changed_items: vec![ThreadHistoryItemChange {
+                        turn_id: "turn-1".to_string(),
+                        item: ThreadItem {
+                            payload: ThreadItemPayload::from(item.clone()),
+                            started_at_ms,
+                            completed_at_ms: original_completion.or(expected_completed_at_ms)
+                        }
+                    }],
+                    ..Default::default()
+                }
+            );
+        }
     }
 }
 

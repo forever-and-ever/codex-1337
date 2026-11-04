@@ -464,40 +464,78 @@ fn thread_items_list_round_trips() {
         (Some(1_789_855_978_123), Some(1_789_855_978_123)),
         (None, None),
     ] {
-        let response = ThreadItemsListResponse {
-            data: vec![ThreadItemEntry {
-                turn_id: "turn_456".to_string(),
-                item: ThreadItem {
-                    payload: ThreadItemPayload::ContextCompaction {
-                        id: "item_1".to_string(),
+        // Flattened payload keys must not consume the envelope's lifecycle metadata.
+        for payload in [
+            ThreadItemPayload::ContextCompaction {
+                id: "item_1".into(),
+            },
+            ThreadItemPayload::Thought {
+                id: "item_1".into(),
+                response_id: "response-1".into(),
+                summary: Vec::new(),
+                content: Vec::new(),
+                reported_reasoning_tokens: None,
+            },
+            ThreadItemPayload::Preamble {
+                id: "item_1".into(),
+                response_id: "response-1".into(),
+                window_id: None,
+                parts: Vec::new(),
+                sources: Vec::new(),
+                raw: None,
+                change: None,
+                reported_input_tokens: None,
+            },
+            ThreadItemPayload::StepAdmission(StepAdmissionItem {
+                id: "item_1".into(),
+                response_id: "response-1".into(),
+                read_tokens: 10,
+                thinking_tokens: None,
+                output_tokens: 2,
+                call_ids: Vec::new(),
+                message_ids: Vec::new(),
+                admission: codex_protocol::step_admission::Admission::Pending,
+            }),
+        ] {
+            let mut item_value = serde_json::to_value(&payload).unwrap();
+            assert!(item_value.get("startedAtMs").is_none());
+            assert!(item_value.get("completedAtMs").is_none());
+            item_value["startedAtMs"] = json!(started_at_ms);
+            item_value["completedAtMs"] = json!(completed_at_ms);
+            let response = ThreadItemsListResponse {
+                data: vec![ThreadItemEntry {
+                    turn_id: "turn_456".to_string(),
+                    item: ThreadItem {
+                        payload,
+                        started_at_ms,
+                        completed_at_ms,
                     },
                     started_at_ms,
                     completed_at_ms,
-                },
-                started_at_ms,
-                completed_at_ms,
-            }],
-            next_cursor: None,
-            backwards_cursor: Some("cursor_0".to_string()),
-        };
-        let value = serde_json::to_value(&response).expect("serialize response");
-        assert_eq!(
-            value,
-            json!({
-                "data": [{
-                    "turnId": "turn_456",
-                    "item": {"type": "contextCompaction", "id": "item_1", "startedAtMs": started_at_ms, "completedAtMs": completed_at_ms},
-                    "startedAtMs": started_at_ms,
-                    "completedAtMs": completed_at_ms,
                 }],
-                "nextCursor": null,
-                "backwardsCursor": "cursor_0",
-            })
-        );
-        assert_eq!(
-            serde_json::from_value::<ThreadItemsListResponse>(value).expect("deserialize response"),
-            response
-        );
+                next_cursor: None,
+                backwards_cursor: Some("cursor_0".to_string()),
+            };
+            let value = serde_json::to_value(&response).expect("serialize response");
+            assert_eq!(
+                value,
+                json!({
+                    "data": [{
+                        "turnId": "turn_456",
+                        "item": item_value,
+                        "startedAtMs": started_at_ms,
+                        "completedAtMs": completed_at_ms,
+                    }],
+                    "nextCursor": null,
+                    "backwardsCursor": "cursor_0",
+                })
+            );
+            assert_eq!(
+                serde_json::from_value::<ThreadItemsListResponse>(value)
+                    .expect("deserialize response"),
+                response
+            );
+        }
     }
 
     let params_without_turn = ThreadItemsListParams {

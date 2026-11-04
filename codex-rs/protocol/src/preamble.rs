@@ -13,7 +13,6 @@ pub struct PreambleItem {
     pub response_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_id: Option<String>,
-    pub completed_at_ms: i64,
     pub parts: Vec<PreamblePart>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(optional, as = "Option<_>")]

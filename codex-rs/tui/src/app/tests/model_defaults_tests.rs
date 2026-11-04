@@ -260,6 +260,8 @@ async fn cloud_model_selection_requires_server_acceptance() -> Result<()> {
         let (mut app, mut events, _ops) = make_test_app_with_channels().await;
         let thread_id = ThreadId::new();
         app.active_thread_id = Some(thread_id);
+        app.chat_widget
+            .handle_thread_session(test_thread_session(thread_id, app.config.cwd.to_path_buf()));
         let original_model = app.chat_widget.current_model().to_string();
         let original_effort = app.chat_widget.current_reasoning_effort();
         let (client, mut commands, _server_events) =
@@ -294,6 +296,7 @@ async fn cloud_model_selection_requires_server_acceptance() -> Result<()> {
             });
 
         result?;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(operation.thread_id, thread_id.to_string());
         assert_eq!(
             (

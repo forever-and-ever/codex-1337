@@ -224,16 +224,21 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
     let cells = vec![patch("a"), patch("b"), patch("other")];
     let mut view = TranscriptView::default();
     for (response, calls) in [("edits", vec!["a", "b"]), ("other", vec!["other"])] {
-        view.record_step_admission(codex_app_server_protocol::StepAdmissionItem {
-            id: format!("step:{response}"),
-            response_id: response.into(),
-            completed_at_ms: 1,
-            read_tokens: 0,
-            thinking_tokens: None,
-            output_tokens: 0,
-            call_ids: calls.into_iter().map(str::to_owned).collect(),
-            message_ids: vec![],
-            admission: codex_protocol::step_admission::Admission::Pending,
+        view.record_step_admission(codex_app_server_protocol::ThreadItem {
+            payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(
+                codex_app_server_protocol::StepAdmissionItem {
+                    id: format!("step:{response}"),
+                    response_id: response.into(),
+                    read_tokens: 0,
+                    thinking_tokens: None,
+                    output_tokens: 0,
+                    call_ids: calls.into_iter().map(str::to_owned).collect(),
+                    message_ids: vec![],
+                    admission: codex_protocol::step_admission::Admission::Pending,
+                },
+            ),
+            started_at_ms: None,
+            completed_at_ms: None,
         });
     }
     crate::transcript_view::tests::render(&mut view, &cells, 104, 80);

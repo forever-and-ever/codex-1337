@@ -1,11 +1,10 @@
 ---
 source: tui/src/status/claude_quota_tests.rs
-assertion_line: 90
 expression: rendered
 ---
 /status
 
-  >_ OpenAI Codex (v0.165.0-1337)
+  >_ OpenAI Codex (v0.166.0-1337)
 
   Model:           claude-sonnet-5-5 (reasoning none, summaries auto)
   Model provider:  claude_subscription

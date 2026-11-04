@@ -10,6 +10,8 @@
 
 use super::text::token_label;
 use codex_app_server_protocol::StepAdmissionItem;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
 use codex_protocol::step_admission::ArrivalKind;
@@ -17,7 +19,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Default)]
 pub(super) struct StepBills {
-    by_response: HashMap<String, StepAdmissionItem>,
+    by_response: HashMap<String, ThreadItem>,
     response_by_call: HashMap<String, String>,
     response_by_message: HashMap<String, String>,
     revision: u64,
@@ -84,7 +86,14 @@ impl StepBills {
     }
 
     pub(super) fn step(&self, response_id: &str) -> Option<&StepAdmissionItem> {
-        self.by_response.get(response_id)
+        match self.by_response.get(response_id)?.payload.native_item() {
+            ThreadItemPayload::StepAdmission(item) => Some(item),
+            _ => None,
+        }
+    }
+
+    pub(super) fn completed_at_ms(&self, response_id: &str) -> Option<i64> {
+        self.by_response.get(response_id)?.completed_at_ms
     }
 
     pub(super) fn step_of_call(&self, call_id: &str) -> Option<&str> {
@@ -95,13 +104,16 @@ impl StepBills {
         self.response_by_message.get(message_id).map(String::as_str)
     }
 
-    pub(super) fn record(&mut self, item: StepAdmissionItem) -> bool {
+    pub(super) fn record(&mut self, timed: ThreadItem) -> bool {
+        let ThreadItemPayload::StepAdmission(item) = timed.payload.native_item() else {
+            return false;
+        };
         // A live pending record must not overwrite the record that sealed it.
         if item.admission == Admission::Pending && self.by_response.contains_key(&item.response_id)
         {
             return false;
         }
-        if self.by_response.get(&item.response_id) == Some(&item) {
+        if self.by_response.get(&item.response_id) == Some(&timed) {
             return false;
         }
         for call_id in &item.call_ids {
@@ -112,7 +124,7 @@ impl StepBills {
             self.response_by_message
                 .insert(message_id.clone(), item.response_id.clone());
         }
-        self.by_response.insert(item.response_id.clone(), item);
+        self.by_response.insert(item.response_id.clone(), timed);
         self.revision += 1;
         true
     }

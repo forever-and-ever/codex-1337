@@ -1228,7 +1228,7 @@ impl FeedIndex {
             .find_map(|index| cells.get(*index)?.transcript_timestamp())
             .or_else(|| {
                 header.steps.iter().find_map(|step| {
-                    HistoryTimestamp::from_millis(bills.step(&item.steps[*step])?.completed_at_ms)
+                    HistoryTimestamp::from_millis(bills.completed_at_ms(&item.steps[*step])?)
                 })
             })
             .or_else(|| {
@@ -1238,7 +1238,7 @@ impl FeedIndex {
                         .as_any()
                         .downcast_ref::<AgentMarkdownCell>()?;
                     let step = bills.step_of_message(message.item_id.as_deref()?)?;
-                    HistoryTimestamp::from_millis(bills.step(step)?.completed_at_ms)
+                    HistoryTimestamp::from_millis(bills.completed_at_ms(step)?)
                 })
             });
         let (header_width, reach) = header_columns(width);
@@ -1852,7 +1852,7 @@ fn total_span(total: Total) -> Span<'static> {
 }
 
 impl TranscriptView {
-    pub(crate) fn record_step_admission(&mut self, item: StepAdmissionItem) {
+    pub(crate) fn record_step_admission(&mut self, item: codex_app_server_protocol::ThreadItem) {
         if self.step_bills.record(item) {
             self.cache.clear();
             self.live_key = None;

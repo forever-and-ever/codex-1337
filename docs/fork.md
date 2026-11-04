@@ -319,8 +319,9 @@ user's locality control, and Codex never widens it.
 
 OpenRouter bills per token. Codex sends it only requests for models the user
 chose, as a conversation's model or a subagent's. Work Codex starts on its own
-(approval review, web search, memories, titles, scoring) runs on the ChatGPT
-login or not at all.
+(approval review, web search, memories, titles, scoring) never runs on
+OpenRouter: it runs on the ChatGPT login, natively on the Claude subscription
+where Codex has that path, or not at all.
 
 ## Warpaint
 

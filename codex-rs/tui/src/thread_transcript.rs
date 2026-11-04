@@ -16,6 +16,7 @@ use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
@@ -134,7 +135,7 @@ pub(crate) fn thread_to_transcript_cells(
             &mut owned,
             thread_id,
             &cwd,
-            turn.items.into_iter().map(|entry| entry.payload),
+            turn.items,
             raw_reasoning_visibility,
             config,
             metadata,
@@ -163,7 +164,7 @@ pub(crate) fn thread_items_to_transcript_cells(
         &mut owned,
         thread_id,
         cwd,
-        items,
+        items.into_iter().map(ThreadItem::untimed),
         raw_reasoning_visibility,
         config,
         metadata,
@@ -180,7 +181,7 @@ fn append_thread_items(
     owned: &mut crate::code_mode_transcript::Reducers,
     thread_id: Option<ThreadId>,
     cwd: &AbsolutePathBuf,
-    items: impl IntoIterator<Item = ThreadItemPayload>,
+    items: impl IntoIterator<Item = ThreadItem>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
@@ -189,7 +190,12 @@ fn append_thread_items(
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
     });
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
-    for item in items {
+    for ThreadItem {
+        payload: item,
+        started_at_ms,
+        completed_at_ms,
+    } in items
+    {
         if let ThreadItemPayload::CodeModeOwned(scope) = item {
             flush_computer(&mut pending, cells);
             let display = thread_id.unwrap_or(scope.owner.thread_id);
@@ -251,7 +257,11 @@ fn append_thread_items(
                 .any(|block| block.owns(group))
         {
             for cell in item_to_cells(
-                item,
+                ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                },
                 cwd,
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
@@ -294,7 +304,11 @@ fn append_thread_items(
             }
             item => {
                 let projected = item_to_cells(
-                    item,
+                    ThreadItem {
+                        payload: item,
+                        started_at_ms,
+                        completed_at_ms,
+                    },
                     cwd,
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
@@ -339,19 +353,34 @@ fn append_thread_items(
 
 /// Project one item without changing the active widget or its turn lifecycle.
 fn item_to_cells(
-    item: ThreadItemPayload,
+    item: ThreadItem,
     cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
+    let item_started_at_ms = item.started_at_ms;
+    let item_completed_at_ms = item.completed_at_ms;
     let mut cells: TranscriptCells = Vec::new();
-    match item {
-        item @ ThreadItemPayload::Thought { .. } => cells.push(Arc::new(
-            crate::history_cell::ThoughtCell::from_item(item, cwd.as_path()),
-        )),
+    match item.payload {
+        item @ ThreadItemPayload::Thought { .. } => {
+            cells.push(Arc::new(crate::history_cell::ThoughtCell::from_item(
+                ThreadItem {
+                    payload: item,
+                    started_at_ms: item_started_at_ms,
+                    completed_at_ms: item_completed_at_ms,
+                },
+                cwd.as_path(),
+            )))
+        }
         item @ ThreadItemPayload::Preamble { .. } => {
-            cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
+            cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(
+                ThreadItem {
+                    payload: item,
+                    started_at_ms: item_started_at_ms,
+                    completed_at_ms: item_completed_at_ms,
+                },
+            )));
         }
         ThreadItemPayload::Arrival(item) => {
             cells.push(Arc::new(crate::history_cell::ArrivalCell::new(item)));
@@ -545,7 +574,7 @@ pub(crate) fn scoped_item_cells(
         return vec![Arc::new(call.into_cell())];
     }
     item_to_cells(
-        item,
+        ThreadItem::untimed(item),
         cwd,
         RawReasoningVisibility::Hidden,
         /*inline_visualization_context*/ None,

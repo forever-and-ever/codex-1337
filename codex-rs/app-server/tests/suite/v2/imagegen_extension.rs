@@ -997,11 +997,16 @@ async fn standalone_image_generation_is_exposed_in_code_mode_only() -> Result<()
         let requests = response_mock.requests();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].body_contains_text("image_gen__imagegen"));
-        let output = requests[1]
-            .function_call_output_text("describe-imagegen")
+        let output = requests[1].custom_tool_call_output("describe-imagegen");
+        let contract = output["output"]
+            .as_array()
+            .context("Code Mode output should contain content blocks")?
+            .iter()
+            .filter_map(|block| block["text"].as_str())
+            .find(|text| text.starts_with("image_gen__imagegen returns:"))
             .context("imagegen output contract should be available through discovery")?;
-        assert!(output.contains("image_url (required): string"));
-        assert!(output.contains("output_hint (optional): string"));
+        assert!(contract.contains("image_url (required): string"));
+        assert!(contract.contains("output_hint (optional): string"));
 
         Ok(())
     })

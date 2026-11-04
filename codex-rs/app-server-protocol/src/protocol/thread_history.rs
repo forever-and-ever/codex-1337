@@ -487,7 +487,10 @@ impl ThreadHistoryBuilder {
                     self.upsert_item(
                         Some(&projection.turn_id),
                         projection.item.payload,
-                        ItemTimes::legacy_completion(projection.completed_at_ms),
+                        ItemTimes {
+                            started_at_ms: projection.item.started_at_ms,
+                            completed_at_ms: projection.item.completed_at_ms,
+                        },
                     );
                 }
             }
@@ -740,7 +743,11 @@ impl ThreadHistoryBuilder {
             &payload.turn_id,
             &payload.item,
             payload.started_at_ms,
-            (payload.completed_at_ms != 0).then_some(payload.completed_at_ms),
+            {
+                let completed_at_ms =
+                    super::lifecycle::completed_at_ms(&payload.item, payload.completed_at_ms);
+                (completed_at_ms != 0).then_some(completed_at_ms)
+            },
             mode,
         );
     }

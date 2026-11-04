@@ -263,16 +263,21 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .unwrap(),
         ));
     }
-    view.record_step_admission(codex_protocol::step_admission::StepAdmissionItem {
-        id: "step:batch".into(),
-        response_id: "batch".into(),
-        completed_at_ms: 0,
-        read_tokens: 12,
-        thinking_tokens: Some(2),
-        output_tokens: 8,
-        call_ids: vec!["a".into(), "b".into(), "c".into()],
-        message_ids: Vec::new(),
-        admission: codex_protocol::step_admission::Admission::Pending,
+    view.record_step_admission(codex_app_server_protocol::ThreadItem {
+        payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(
+            codex_app_server_protocol::StepAdmissionItem {
+                id: "step:batch".into(),
+                response_id: "batch".into(),
+                read_tokens: 12,
+                thinking_tokens: Some(2),
+                output_tokens: 8,
+                call_ids: vec!["a".into(), "b".into(), "c".into()],
+                message_ids: Vec::new(),
+                admission: codex_protocol::step_admission::Admission::Pending,
+            },
+        ),
+        started_at_ms: None,
+        completed_at_ms: None,
     });
     let header = render(&mut view, &batch, 104, "compound batch");
     let outer = header
@@ -381,16 +386,21 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             },
         ));
         let mut view = TranscriptView::default();
-        let admission = || codex_protocol::step_admission::StepAdmissionItem {
-            id: "step:code".into(),
-            response_id: "code-response".into(),
-            completed_at_ms: 0,
-            read_tokens: 0,
-            thinking_tokens: None,
-            output_tokens: 0,
-            call_ids: vec!["code".into()],
-            message_ids: Vec::new(),
-            admission: codex_protocol::step_admission::Admission::Pending,
+        let admission = || codex_app_server_protocol::ThreadItem {
+            payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(
+                codex_app_server_protocol::StepAdmissionItem {
+                    id: "step:code".into(),
+                    response_id: "code-response".into(),
+                    read_tokens: 0,
+                    thinking_tokens: None,
+                    output_tokens: 0,
+                    call_ids: vec!["code".into()],
+                    message_ids: Vec::new(),
+                    admission: codex_protocol::step_admission::Admission::Pending,
+                },
+            ),
+            started_at_ms: None,
+            completed_at_ms: None,
         };
         if admitted {
             view.record_step_admission(admission());
@@ -1186,16 +1196,21 @@ fn grouped_invocation_ports_stay_within_their_feed_item() {
         ("single-e", vec!["e"]),
         ("single-f", vec!["f"]),
     ] {
-        view.record_step_admission(codex_protocol::step_admission::StepAdmissionItem {
-            id: format!("step:{response}"),
-            response_id: response.into(),
-            completed_at_ms: 0,
-            read_tokens: 0,
-            thinking_tokens: None,
-            output_tokens: 0,
-            call_ids: ids.into_iter().map(str::to_owned).collect(),
-            message_ids: Vec::new(),
-            admission: codex_protocol::step_admission::Admission::Pending,
+        view.record_step_admission(codex_app_server_protocol::ThreadItem {
+            payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(
+                codex_app_server_protocol::StepAdmissionItem {
+                    id: format!("step:{response}"),
+                    response_id: response.into(),
+                    read_tokens: 0,
+                    thinking_tokens: None,
+                    output_tokens: 0,
+                    call_ids: ids.into_iter().map(str::to_owned).collect(),
+                    message_ids: Vec::new(),
+                    admission: codex_protocol::step_admission::Admission::Pending,
+                },
+            ),
+            started_at_ms: None,
+            completed_at_ms: None,
         });
     }
     tests::render(&mut view, &cells, 104, 100);

@@ -61,7 +61,7 @@ callId: string | null, name: string, namespace: string | null, output: FunctionC
 /**
  * Approximate text tokens after truncation, measured with local o200k_base.
  */
-tokens: number | null, } | { "type": "plan", id: string, text: string, } | { "type": "reasoning", id: string, summary: Array<string>, content: Array<string>, } | { "type": "thought", id: string, responseId: string, completedAtMs: number, summary: Array<string>, content: Array<string>, reportedReasoningTokens: number | null, } | { "type": "preamble", id: string, responseId: string, windowId?: string | null, completedAtMs: number, parts: Array<PreamblePart>, sources?: Array<ContextSource>, raw?: string | null, change: PreambleChange | null,
+tokens: number | null, } | { "type": "plan", id: string, text: string, } | { "type": "reasoning", id: string, summary: Array<string>, content: Array<string>, } | { "type": "thought", id: string, responseId: string, summary: Array<string>, content: Array<string>, reportedReasoningTokens: number | null, } | { "type": "preamble", id: string, responseId: string, windowId?: string | null, parts: Array<PreamblePart>, sources?: Array<ContextSource>, raw?: string | null, change: PreambleChange | null,
 /**
  * Provider-reported input of the whole request, conversation included.
  */

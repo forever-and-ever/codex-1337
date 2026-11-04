@@ -24306,35 +24306,27 @@
               "$ref": "#/definitions/Admission"
             },
             "callIds": {
-              "description": "The calls the response made, in order; the step admits their results.",
               "items": {
                 "type": "string"
               },
               "type": "array"
-            },
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
             },
             "id": {
               "type": "string"
             },
             "messageIds": {
               "default": [],
-              "description": "The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "outputTokens": {
-              "description": "Provider-reported output, less any reported reasoning.",
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
             },
             "readTokens": {
-              "description": "Provider-reported input the request read, cached or not.",
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
@@ -24343,7 +24335,6 @@
               "type": "string"
             },
             "thinkingTokens": {
-              "description": "Provider-reported reasoning, when the provider breaks it out of the output.",
               "format": "uint64",
               "minimum": 0.0,
               "type": [
@@ -24362,7 +24353,6 @@
           "required": [
             "admission",
             "callIds",
-            "completedAtMs",
             "id",
             "outputTokens",
             "readTokens",
@@ -24710,10 +24700,6 @@
         {
           "description": "Human-only aggregate for one completed model response, not additional usage.",
           "properties": {
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
-            },
             "content": {
               "items": {
                 "type": "string"
@@ -24749,7 +24735,6 @@
             }
           },
           "required": [
-            "completedAtMs",
             "content",
             "id",
             "responseId",
@@ -24771,10 +24756,6 @@
                   "type": "null"
                 }
               ]
-            },
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
             },
             "id": {
               "type": "string"
@@ -24824,7 +24805,6 @@
             }
           },
           "required": [
-            "completedAtMs",
             "id",
             "parts",
             "responseId",
@@ -25702,35 +25682,27 @@
               "$ref": "#/definitions/Admission"
             },
             "callIds": {
-              "description": "The calls the response made, in order; the step admits their results.",
               "items": {
                 "type": "string"
               },
               "type": "array"
-            },
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
             },
             "id": {
               "type": "string"
             },
             "messageIds": {
               "default": [],
-              "description": "The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "outputTokens": {
-              "description": "Provider-reported output, less any reported reasoning.",
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
             },
             "readTokens": {
-              "description": "Provider-reported input the request read, cached or not.",
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
@@ -25739,7 +25711,6 @@
               "type": "string"
             },
             "thinkingTokens": {
-              "description": "Provider-reported reasoning, when the provider breaks it out of the output.",
               "format": "uint64",
               "minimum": 0.0,
               "type": [
@@ -25758,7 +25729,6 @@
           "required": [
             "admission",
             "callIds",
-            "completedAtMs",
             "id",
             "outputTokens",
             "readTokens",
@@ -26106,10 +26076,6 @@
         {
           "description": "Human-only aggregate for one completed model response, not additional usage.",
           "properties": {
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
-            },
             "content": {
               "items": {
                 "type": "string"
@@ -26145,7 +26111,6 @@
             }
           },
           "required": [
-            "completedAtMs",
             "content",
             "id",
             "responseId",
@@ -26167,10 +26132,6 @@
                   "type": "null"
                 }
               ]
-            },
-            "completedAtMs": {
-              "format": "int64",
-              "type": "integer"
             },
             "id": {
               "type": "string"
@@ -26220,7 +26181,6 @@
             }
           },
           "required": [
-            "completedAtMs",
             "id",
             "parts",
             "responseId",

@@ -346,10 +346,10 @@ fn reply_rows(question: &str, answer: &str, width: u16) -> Vec<HyperlinkLine> {
 fn reply_answer_distinguishes_whitespace_from_nonprinting_markdown() {
     let definition = "[docs]: https://example.test";
     for (answer, expected) in [
-        (" \t\n ", vec!["", "↪ Re: Why?", ""]),
+        (" \t\n ", vec!["↪ Re: Why?"]),
         (
             definition,
-            vec!["", "↪ Re: Why?", "", "  [docs]: https://example.test", ""],
+            vec!["↪ Re: Why?", "", "  [docs]: https://example.test"],
         ),
     ] {
         let rows: Vec<_> = reply_rows("Why?", answer, /*width*/ 60)
@@ -368,7 +368,7 @@ fn reply_caption_clips_on_overflow_and_copies_with_its_markdown_answer() {
             "12345678901234567890\n\n**Tail**",
             width,
         );
-        let last = &rows[2]; // The cell starts with one padding row and two caption rows.
+        let last = &rows[1]; // The caption occupies the first two rows.
         assert_eq!(last.line.to_string().ends_with('…'), clipped);
         assert_eq!(
             last.hyperlinks.last().unwrap().columns.end,
@@ -394,11 +394,12 @@ fn reply_caption_clips_on_overflow_and_copies_with_its_markdown_answer() {
 
 #[test]
 fn full_reply_caption_preserves_links_and_partial_selections() {
-    let width = 44;
+    // Keep the complete caption visible even when the terminal exposes link destinations.
+    let width = 100;
     for prefix in ["", "> ", "- > "] {
         let question = format!("{prefix}Read the [setup guide](https://example.test/setup)?");
         let rows = reply_rows(&question, "Yes", width);
-        let first = rows[1].line.to_string();
+        let first = rows[0].line.to_string();
         let layout = TextLayout::new(rows, width);
         assert!(
             layout

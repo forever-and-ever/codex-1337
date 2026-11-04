@@ -568,7 +568,6 @@ WHERE thread_id = ?
                 ThreadItemPayload::Thought {
                     id: format!("thought:turn-2:{response_id}"),
                     response_id: response_id.to_string(),
-                    completed_at_ms,
                     summary,
                     content,
                     reported_reasoning_tokens: Some(count),

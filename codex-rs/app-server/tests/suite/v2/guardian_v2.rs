@@ -196,6 +196,7 @@ struct MockResponsesState {
     mcp_tool_sequence: Option<&'static [&'static str]>,
     mcp_messages: Mutex<Vec<&'static str>>,
     root_worker: bool,
+    root_user_followup: Option<&'static str>,
     root_user_restriction: bool,
     root_user_input_restriction: bool,
     compact_root_after_answer: bool,
@@ -485,11 +486,25 @@ async fn parent_response(
             .pointer("/client_metadata/x-codex-parent-thread-id")
             .is_none()
     {
-        // Completion mail may wake the root before the next explicit user turn.
-        // It must not advance the scripted authorization handoff.
+        // Completion mail must not advance the script. The goal follow-up may steer
+        // a live mail turn, so recognize its direct user input at the handoff once.
+        let user_followup = state.root_requests.load(Ordering::SeqCst) == 2
+            && state.root_user_followup.is_some_and(|followup| {
+                request["input"].as_array().is_some_and(|input| {
+                    input.iter().any(|item| {
+                        item["role"] == "user"
+                            && item["content"].as_array().is_some_and(|content| {
+                                content.iter().any(|part| {
+                                    part["type"] == "input_text" && part["text"] == followup
+                                })
+                            })
+                    })
+                })
+            });
         if request["client_metadata"]["turn_id"]
             .as_str()
             .is_some_and(|turn_id| turn_id.starts_with("amsg_mail_"))
+            && !user_followup
         {
             return (
                 [(header::CONTENT_TYPE, "text/event-stream")],
@@ -1300,7 +1315,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 .rposition(|item| {
                     item["id"]
                         .as_str()
-                        .is_some_and(|id| id.starts_with("luna-score-message-"))
+                        .is_some_and(|id| id.starts_with("msg_luna-score-"))
                 })
                 .map_or(/*default*/ 2, |index| index + 1);
             let context = &input[context_start..];

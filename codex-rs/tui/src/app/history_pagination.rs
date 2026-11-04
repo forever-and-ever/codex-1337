@@ -272,7 +272,7 @@ impl App {
                 ThreadItemPayload::ToolInput(input) => {
                     self.transcript_view.record_tool_input(input.clone());
                 }
-                ThreadItemPayload::StepAdmission(item) => {
+                ThreadItemPayload::StepAdmission(_) => {
                     self.transcript_view.record_step_admission(item.clone());
                 }
                 _ => {}

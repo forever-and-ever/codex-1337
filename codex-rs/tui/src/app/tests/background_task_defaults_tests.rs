@@ -1133,6 +1133,7 @@ async fn command_center_new_session_preserves_existing_checkout() -> Result<()> 
     app.chat_widget.windows_sandbox_local_server = cfg!(target_os = "windows");
     app.harness_overrides.cwd = Some(selected.clone());
     trust_launch_folder(&mut app);
+    app.config = app.rebuild_config_for_cwd(selected.clone()).await?;
     let (mut server, requests, proxy) = start_recording_app_server_with_history(
         &app.config,
         HistoryCapabilities::Current,
@@ -1157,6 +1158,34 @@ async fn command_center_new_session_preserves_existing_checkout() -> Result<()> 
         app.chat_widget.config_ref().cwd.as_path(),
         &selected
     ));
+    assert_eq!(
+        app.chat_widget.config_ref().approvals_reviewer,
+        ApprovalsReviewer::AutoReview,
+    );
+    // Account scope changes invalidate permission discovery. Finish initial attachment
+    // before opening the menu, as the event loop does during ordinary startup.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !app
+            .account_ui
+            .displayed
+            .as_ref()
+            .is_some_and(|(shown, _)| *shown == Some(first))
+        {
+            tokio::select! {
+                Some(event) = events.recv() => {
+                    app.handle_event(&mut tui, &mut server, event).await?;
+                }
+                Some(completion) = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(&mut tui, &mut server, completion).await?;
+                }
+                Some(completion) = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(&mut server, completion).await?;
+                }
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
     // Exercise the menu's ordered events, not the separate profile-selection API.
     app.chat_widget
         .set_feature_enabled(Feature::GuardianApproval, /*enabled*/ true);

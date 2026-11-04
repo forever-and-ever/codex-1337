@@ -9,7 +9,6 @@ use codex_app_server_protocol::ConfigLayerSource as ApiConfigLayerSource;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
 use codex_config::test_support::CloudConfigBundleFixture;
-use codex_config::types::OtelExporterKind;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::OutboundProxyPolicy;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -2259,21 +2258,14 @@ span_attributes = { "service.name" = "managed-service" }"#,
         .expect("legacy managed layer");
     assert_eq!(managed_layer.config["otel"]["exporter"], exporter);
 
-    let runtime = service
-        .load_latest_config(/*fallback_cwd*/ None)
+    let layers = service
+        .load_config_layers(None)
         .await
-        .expect("load runtime config");
-    let OtelExporterKind::OtlpHttp { headers, .. } = runtime.otel.exporter else {
-        panic!("unexpected runtime exporter");
-    };
-    assert_eq!(
-        headers.get("Authorization").map(|value| value.as_str()),
-        Some("admin-secret")
-    );
-    assert_eq!(
-        headers.get("x.api.key").map(|value| value.as_str()),
-        Some("dotted-secret")
-    );
+        .expect("load config layers");
+    let effective = layers.effective_config();
+    let headers = &effective["otel"]["exporter"]["otlp-http"]["headers"];
+    assert_eq!(headers["Authorization"].as_str(), Some("admin-secret"));
+    assert_eq!(headers["x.api.key"].as_str(), Some("dotted-secret"));
 }
 
 /// Legacy managed feature toggles own their normalized enabled origin and override metadata.

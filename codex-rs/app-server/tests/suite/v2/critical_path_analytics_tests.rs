@@ -62,7 +62,7 @@ async fn critical_path_reaches_turn_event(finish: Finish, capture: Capture) -> R
         .mount(&server)
         .await;
     let codex_home = TempDir::new()?;
-    let mut features = BTreeMap::from([(Feature::RuntimeMetrics, true)]);
+    let mut features = BTreeMap::new();
     match capture {
         Capture::Default => {}
         Capture::Enabled => {

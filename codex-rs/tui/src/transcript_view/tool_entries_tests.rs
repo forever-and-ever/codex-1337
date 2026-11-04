@@ -47,13 +47,16 @@ fn completed_thought_discloses_only_readable_reasoning() {
         let readable = content.iter().any(|text| !text.trim().is_empty());
         let cells: Vec<Arc<dyn HistoryCell>> =
             vec![Arc::new(crate::history_cell::ThoughtCell::from_item(
-                ThreadItemPayload::Thought {
-                    id: format!("thought:{label}"),
-                    response_id: label.into(),
-                    completed_at_ms: 1_700_000_000_000,
-                    summary: summary.into_iter().map(str::to_owned).collect(),
-                    content: content.into_iter().map(str::to_owned).collect(),
-                    reported_reasoning_tokens: tokens,
+                codex_app_server_protocol::ThreadItem {
+                    payload: ThreadItemPayload::Thought {
+                        id: format!("thought:{label}"),
+                        response_id: label.into(),
+                        summary: summary.into_iter().map(str::to_owned).collect(),
+                        content: content.into_iter().map(str::to_owned).collect(),
+                        reported_reasoning_tokens: tokens,
+                    },
+                    started_at_ms: None,
+                    completed_at_ms: Some(1_700_000_000_000),
                 },
                 cwd,
             ))];
@@ -632,18 +635,22 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 label: "tool".into(),
                 tokens: codex_protocol::CensusCount::Counted(12),
             }];
-            let preamble =
-                crate::history_cell::PreambleCell::from_item(ThreadItemPayload::Preamble {
-                    id: "provenance-preamble".into(),
-                    response_id: "response".into(),
-                    completed_at_ms: 0,
-                    parts: parts.clone(),
-                    sources: sources.clone(),
-                    raw: None,
-                    window_id: None,
-                    change: None,
-                    reported_input_tokens: None,
-                });
+            let preamble = crate::history_cell::PreambleCell::from_item(
+                codex_app_server_protocol::ThreadItem {
+                    payload: ThreadItemPayload::Preamble {
+                        id: "provenance-preamble".into(),
+                        response_id: "response".into(),
+                        parts: parts.clone(),
+                        sources: sources.clone(),
+                        raw: None,
+                        window_id: None,
+                        change: None,
+                        reported_input_tokens: None,
+                    },
+                    started_at_ms: None,
+                    completed_at_ms: Some(0),
+                },
+            );
             let inventory =
                 crate::history_cell::PreambleCell::inventory(codex_protocol::ContextInventory {
                     parts,
@@ -782,13 +789,16 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             );
             assert!(tests::text(&folded).contains("Raw Context"));
             let thought = crate::history_cell::ThoughtCell::from_item(
-                ThreadItemPayload::Thought {
-                    id: "thought-author".into(),
-                    response_id: "response".into(),
-                    completed_at_ms: 0,
-                    summary: Vec::new(),
-                    content: vec!["Readable reasoning.".into()],
-                    reported_reasoning_tokens: Some(12),
+                codex_app_server_protocol::ThreadItem {
+                    payload: ThreadItemPayload::Thought {
+                        id: "thought-author".into(),
+                        response_id: "response".into(),
+                        summary: Vec::new(),
+                        content: vec!["Readable reasoning.".into()],
+                        reported_reasoning_tokens: Some(12),
+                    },
+                    started_at_ms: None,
+                    completed_at_ms: Some(0),
                 },
                 cwd,
             );

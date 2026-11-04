@@ -19,68 +19,72 @@ fn part(section: PreambleSection, group: Option<&str>, label: &str, tokens: u64)
 fn preamble_discloses_parts_largest_first() -> anyhow::Result<()> {
     use PreambleSection::Context;
     use PreambleSection::Tools;
-    let cell = PreambleCell::from_item(ThreadItemPayload::Preamble {
-        id: "preamble:turn:response".to_string(),
-        response_id: "response".to_string(),
-        completed_at_ms: 0,
-        parts: vec![
-            serde_json::from_value(serde_json::json!({
-                "section": "instructions",
-                "group": null,
-                "label": "Base instructions",
-                "tokens": 7412
-            }))?,
-            part(
-                Tools,
-                Some("exec"),
-                "guidance and grammar",
-                /*tokens*/ 3_120,
-            ),
-            part(Tools, Some("exec"), "apply_patch", /*tokens*/ 412),
-            part(
-                Tools,
-                Some("mcp__depot"),
-                "lsp_symbols",
-                /*tokens*/ 611,
-            ),
-            part(
-                Tools,
-                Some("mcp__depot"),
-                "sem_read_search",
-                /*tokens*/ 1_904,
-            ),
-            part(Tools, /*group*/ None, "web_search", /*tokens*/ 21),
-            PreamblePart {
-                section: Tools,
-                group: Some("exec".into()),
-                label: "large declaration".into(),
-                tokens: codex_protocol::CensusCount::Omitted(
-                    codex_protocol::CensusOmission::WorkLimit,
+    let cell = PreambleCell::from_item(codex_app_server_protocol::ThreadItem {
+        payload: ThreadItemPayload::Preamble {
+            id: "preamble:turn:response".to_string(),
+            response_id: "response".to_string(),
+
+            parts: vec![
+                serde_json::from_value(serde_json::json!({
+                    "section": "instructions",
+                    "group": null,
+                    "label": "Base instructions",
+                    "tokens": 7412
+                }))?,
+                part(
+                    Tools,
+                    Some("exec"),
+                    "guidance and grammar",
+                    /*tokens*/ 3_120,
                 ),
-            },
-            part(
-                Context,
-                /*group*/ None,
-                "environment_context",
-                /*tokens*/ 1_560,
-            ),
-            part(
-                Context,
-                /*group*/ None,
-                "AGENTS.md /repo",
-                /*tokens*/ 9_734,
-            ),
-        ],
-        change: Some(PreambleChange {
-            previous_tokens: 23_000,
-            added: vec!["mcp__depot/lsp_symbols".to_string()],
-            removed: Vec::new(),
-            resized: vec!["Base instructions".to_string()],
-        }),
-        reported_input_tokens: Some(31_208),
-        raw: None,
-        sources: Vec::new(),
-        window_id: None,
+                part(Tools, Some("exec"), "apply_patch", /*tokens*/ 412),
+                part(
+                    Tools,
+                    Some("mcp__depot"),
+                    "lsp_symbols",
+                    /*tokens*/ 611,
+                ),
+                part(
+                    Tools,
+                    Some("mcp__depot"),
+                    "sem_read_search",
+                    /*tokens*/ 1_904,
+                ),
+                part(Tools, /*group*/ None, "web_search", /*tokens*/ 21),
+                PreamblePart {
+                    section: Tools,
+                    group: Some("exec".into()),
+                    label: "large declaration".into(),
+                    tokens: codex_protocol::CensusCount::Omitted(
+                        codex_protocol::CensusOmission::WorkLimit,
+                    ),
+                },
+                part(
+                    Context,
+                    /*group*/ None,
+                    "environment_context",
+                    /*tokens*/ 1_560,
+                ),
+                part(
+                    Context,
+                    /*group*/ None,
+                    "AGENTS.md /repo",
+                    /*tokens*/ 9_734,
+                ),
+            ],
+            change: Some(PreambleChange {
+                previous_tokens: 23_000,
+                added: vec!["mcp__depot/lsp_symbols".to_string()],
+                removed: Vec::new(),
+                resized: vec!["Base instructions".to_string()],
+            }),
+            reported_input_tokens: Some(31_208),
+            raw: None,
+            sources: Vec::new(),
+            window_id: None,
+        },
+        started_at_ms: None,
+        completed_at_ms: Some(0),
     });
     let text = visible_lines(cell.expanded_hyperlink_lines(/*width*/ 80))
         .iter()

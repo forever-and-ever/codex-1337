@@ -422,191 +422,194 @@ async fn thread_revert_preserves_fork_cutoff_after_cold_resume() -> Result<()> {
 #[tokio::test]
 async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let response_mock =
-        responses::mount_sse_sequence(&server, vec![responses::sse_completed("done"); 4]).await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_model("gpt-5.5")
-        .enable_feature(Feature::FastMode)
-        .write(codex_home.path())?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build()
-        .await?;
-    initialize_experimental(&mut mcp).await?;
+    mock_server::run(&[&server], async {
+        let response_mock =
+            responses::mount_sse_sequence(&server, vec![responses::sse_completed("done"); 4]).await;
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .with_model("gpt-5.5")
+            .enable_feature(Feature::FastMode)
+            .write(codex_home.path())?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build()
+            .await?;
+        initialize_experimental(&mut mcp).await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            history_mode: Some(ThreadHistoryMode::Paginated),
-            service_tier: Some(Some("priority".to_string())),
-            personality: Some(Personality::Friendly),
-            ..Default::default()
-        })
-        .await?;
-    let stale_rollout_path = thread.path.clone().expect("thread rollout path");
-    let mut turn_ids = Vec::new();
-    for text in ["first", "second"] {
-        let completed = mcp
-            .start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id: thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: text.to_string(),
-                    text_elements: Vec::new(),
-                }],
-                model: (text == "second").then_some("gpt-daybreak-blue-latest".to_string()),
-                personality: (text == "second").then_some(Personality::None),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                history_mode: Some(ThreadHistoryMode::Paginated),
+                service_tier: Some(Some("priority".to_string())),
+                personality: Some(Personality::Friendly),
                 ..Default::default()
             })
             .await?;
-        turn_ids.push(completed.turn.id);
-    }
+        let stale_rollout_path = thread.path.clone().expect("thread rollout path");
+        let mut turn_ids = Vec::new();
+        for text in ["first", "second"] {
+            let completed = mcp
+                .start_turn_and_wait_for_completion(TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: text.to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    model: (text == "second").then_some("gpt-daybreak-blue-latest".to_string()),
+                    personality: (text == "second").then_some(Personality::None),
+                    ..Default::default()
+                })
+                .await?;
+            turn_ids.push(completed.turn.id);
+        }
 
-    let ThreadRevertResponse {
-        thread: reverted_thread,
-        turns_backwards_cursor,
-        items_backwards_cursor,
-    } = mcp
-        .request(|request_id| ClientRequest::ThreadRevert {
-            request_id,
-            params: ThreadRevertParams {
-                thread_id: thread.id.clone(),
-                before_turn_id: turn_ids[1].clone(),
-            },
-        })
-        .await?;
-    let reverted: ThreadRevertedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("thread/reverted"),
-    )
-    .await??;
-    assert_eq!(reverted.thread_id, thread.id);
-
-    assert_eq!(reverted_thread.id, thread.id);
-    assert!(reverted_thread.turns.is_empty());
-    assert!(items_backwards_cursor.is_some());
-    assert_eq!(
-        turn_ids_from_cursor(
-            &mut mcp,
-            &thread.id,
+        let ThreadRevertResponse {
+            thread: reverted_thread,
             turns_backwards_cursor,
-            /*sort_direction*/ None,
+            items_backwards_cursor,
+        } = mcp
+            .request(|request_id| ClientRequest::ThreadRevert {
+                request_id,
+                params: ThreadRevertParams {
+                    thread_id: thread.id.clone(),
+                    before_turn_id: turn_ids[1].clone(),
+                },
+            })
+            .await?;
+        let reverted: ThreadRevertedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("thread/reverted"),
         )
-        .await?,
-        turn_ids[..1]
-    );
-    let ThreadItemsListResponse {
-        data: reverted_items,
-        ..
-    } = mcp
-        .request(|request_id| ClientRequest::ThreadItemsList {
-            request_id,
-            params: ThreadItemsListParams {
-                thread_id: thread.id.clone(),
-                turn_id: None,
-                cursor: items_backwards_cursor.map(ThreadItemsListCursor::Opaque),
-                limit: None,
-                sort_direction: None,
-            },
-        })
-        .await?;
-    assert!(!reverted_items.is_empty());
-    assert!(
-        reverted_items
-            .iter()
-            .all(|item| item.turn_id == turn_ids[0])
-    );
+        .await??;
+        assert_eq!(reverted.thread_id, thread.id);
 
-    mcp.shutdown_gracefully().await?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build()
-        .await?;
-    initialize_experimental(&mut mcp).await?;
-    let stale_resume_id = mcp
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id.clone(),
-            path: Some(stale_rollout_path),
-            ..Default::default()
-        })
-        .await?;
-    let stale_resume_error: JSONRPCError = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(stale_resume_id)),
-    )
-    .await??;
-    assert!(
-        stale_resume_error.error.message.contains("stale path")
-            && stale_resume_error
-                .error
-                .message
-                .contains("omit path and resume by thread id"),
-        "unexpected resume error: {}",
-        stale_resume_error.error.message,
-    );
-    let resume_id = mcp
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let _: ThreadResumeResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
-    let invalid_revert_id = mcp
-        .send_raw_request(
-            "thread/revert",
-            Some(serde_json::to_value(ThreadRevertParams {
-                thread_id: thread.id.clone(),
-                before_turn_id: "missing-turn".to_string(),
-            })?),
-        )
-        .await?;
-    let invalid_revert_error: JSONRPCError = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(invalid_revert_id)),
-    )
-    .await??;
-    assert_eq!(
-        invalid_revert_error.error.message,
-        "turn not found: missing-turn"
-    );
+        assert_eq!(reverted_thread.id, thread.id);
+        assert!(reverted_thread.turns.is_empty());
+        assert!(items_backwards_cursor.is_some());
+        assert_eq!(
+            turn_ids_from_cursor(
+                &mut mcp,
+                &thread.id,
+                turns_backwards_cursor,
+                /*sort_direction*/ None,
+            )
+            .await?,
+            turn_ids[..1]
+        );
+        let ThreadItemsListResponse {
+            data: reverted_items,
+            ..
+        } = mcp
+            .request(|request_id| ClientRequest::ThreadItemsList {
+                request_id,
+                params: ThreadItemsListParams {
+                    thread_id: thread.id.clone(),
+                    turn_id: None,
+                    cursor: items_backwards_cursor.map(ThreadItemsListCursor::Opaque),
+                    limit: None,
+                    sort_direction: None,
+                },
+            })
+            .await?;
+        assert!(!reverted_items.is_empty());
+        assert!(
+            reverted_items
+                .iter()
+                .all(|item| item.turn_id == turn_ids[0])
+        );
 
-    let third_turn = mcp
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![UserInput::Text {
-                text: "third".to_string(),
-                text_elements: Vec::new(),
-            }],
-            model: Some("gpt-5.5".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let body = response_mock
-        .last_request()
-        .expect("third turn request")
-        .body_json();
-    assert_eq!(body["service_tier"], "priority");
-    assert!(
-        !body["instructions"]
-            .as_str()
-            .is_some_and(|instructions| { instructions.contains("# Personality") })
-    );
-    let model_input = body["input"].clone();
-    let model_input = serde_json::to_string(&model_input)?;
-    assert!(model_input.contains(r#""text":"first""#));
-    assert!(!model_input.contains(r#""text":"second""#));
-    assert!(model_input.contains(r#""text":"third""#));
-    assert_eq!(
-        turn_ids_from_cursor(
-            &mut mcp,
-            &thread.id,
-            /*cursor*/ None,
-            Some(SortDirection::Asc),
+        mcp.shutdown_gracefully().await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build()
+            .await?;
+        initialize_experimental(&mut mcp).await?;
+        let stale_resume_id = mcp
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                path: Some(stale_rollout_path),
+                ..Default::default()
+            })
+            .await?;
+        let stale_resume_error: JSONRPCError = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_error_message(RequestId::Integer(stale_resume_id)),
         )
-        .await?,
-        vec![turn_ids[0].clone(), third_turn.turn.id]
-    );
-    Ok(())
+        .await??;
+        assert!(
+            stale_resume_error.error.message.contains("stale path")
+                && stale_resume_error
+                    .error
+                    .message
+                    .contains("omit path and resume by thread id"),
+            "unexpected resume error: {}",
+            stale_resume_error.error.message,
+        );
+        let resume_id = mcp
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let _: ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+        let invalid_revert_id = mcp
+            .send_raw_request(
+                "thread/revert",
+                Some(serde_json::to_value(ThreadRevertParams {
+                    thread_id: thread.id.clone(),
+                    before_turn_id: "missing-turn".to_string(),
+                })?),
+            )
+            .await?;
+        let invalid_revert_error: JSONRPCError = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_error_message(RequestId::Integer(invalid_revert_id)),
+        )
+        .await??;
+        assert_eq!(
+            invalid_revert_error.error.message,
+            "turn not found: missing-turn"
+        );
+
+        let third_turn = mcp
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "third".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                model: Some("gpt-5.5".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let body = response_mock
+            .last_request()
+            .expect("third turn request")
+            .body_json();
+        assert_eq!(body["service_tier"], "priority");
+        assert!(
+            !body["instructions"]
+                .as_str()
+                .is_some_and(|instructions| { instructions.contains("# Personality") })
+        );
+        let model_input = body["input"].clone();
+        let model_input = serde_json::to_string(&model_input)?;
+        assert!(model_input.contains(r#""text":"first""#));
+        assert!(!model_input.contains(r#""text":"second""#));
+        assert!(model_input.contains(r#""text":"third""#));
+        assert_eq!(
+            turn_ids_from_cursor(
+                &mut mcp,
+                &thread.id,
+                /*cursor*/ None,
+                Some(SortDirection::Asc),
+            )
+            .await?,
+            vec![turn_ids[0].clone(), third_turn.turn.id]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

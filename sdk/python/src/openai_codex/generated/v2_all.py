@@ -6147,7 +6147,7 @@ class ThoughtThreadItem(BaseModel):
             alias="completedAtMs",
             description="Unix timestamp in milliseconds when the item completed, if recorded.",
         ),
-    ]
+    ] = None
     content: list[str]
     id: str
     reported_reasoning_tokens: Annotated[
@@ -6546,7 +6546,6 @@ class ThoughtThreadItemPayload(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
     content: list[str]
     id: str
     reported_reasoning_tokens: Annotated[
@@ -12364,7 +12363,7 @@ class PreambleThreadItem(BaseModel):
             alias="completedAtMs",
             description="Unix timestamp in milliseconds when the item completed, if recorded.",
         ),
-    ]
+    ] = None
     id: str
     parts: list[PreamblePart]
     raw: str | None = None
@@ -12641,7 +12640,6 @@ class PreambleThreadItemPayload(BaseModel):
         populate_by_name=True,
     )
     change: PreambleChange | None = None
-    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
     id: str
     parts: list[PreamblePart]
     raw: str | None = None
@@ -14727,44 +14725,18 @@ class StepAdmissionThreadItem(BaseModel):
         populate_by_name=True,
     )
     admission: Admission
-    call_ids: Annotated[
-        list[str],
-        Field(
-            alias="callIds",
-            description="The calls the response made, in order; the step admits their results.",
-        ),
-    ]
+    call_ids: Annotated[list[str], Field(alias="callIds")]
     completed_at_ms: Annotated[
         int | None,
         Field(
             alias="completedAtMs",
             description="Unix timestamp in milliseconds when the item completed, if recorded.",
         ),
-    ]
+    ] = None
     id: str
-    message_ids: Annotated[
-        list[str] | None,
-        Field(
-            alias="messageIds",
-            description="The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
-        ),
-    ] = []
-    output_tokens: Annotated[
-        int,
-        Field(
-            alias="outputTokens",
-            description="Provider-reported output, less any reported reasoning.",
-            ge=0,
-        ),
-    ]
-    read_tokens: Annotated[
-        int,
-        Field(
-            alias="readTokens",
-            description="Provider-reported input the request read, cached or not.",
-            ge=0,
-        ),
-    ]
+    message_ids: Annotated[list[str] | None, Field(alias="messageIds")] = []
+    output_tokens: Annotated[int, Field(alias="outputTokens", ge=0)]
+    read_tokens: Annotated[int, Field(alias="readTokens", ge=0)]
     response_id: Annotated[str, Field(alias="responseId")]
     started_at_ms: Annotated[
         int | None,
@@ -14773,14 +14745,7 @@ class StepAdmissionThreadItem(BaseModel):
             description="Unix timestamp in milliseconds when the item started, if recorded.",
         ),
     ] = None
-    thinking_tokens: Annotated[
-        int | None,
-        Field(
-            alias="thinkingTokens",
-            description="Provider-reported reasoning, when the provider breaks it out of the output.",
-            ge=0,
-        ),
-    ] = None
+    thinking_tokens: Annotated[int | None, Field(alias="thinkingTokens", ge=0)] = None
     type: Annotated[Literal["stepAdmission"], Field(title="StepAdmissionThreadItemType")]
 
 
@@ -14843,47 +14808,13 @@ class StepAdmissionThreadItemPayload(BaseModel):
         populate_by_name=True,
     )
     admission: Admission
-    call_ids: Annotated[
-        list[str],
-        Field(
-            alias="callIds",
-            description="The calls the response made, in order; the step admits their results.",
-        ),
-    ]
-    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
+    call_ids: Annotated[list[str], Field(alias="callIds")]
     id: str
-    message_ids: Annotated[
-        list[str] | None,
-        Field(
-            alias="messageIds",
-            description="The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
-        ),
-    ] = []
-    output_tokens: Annotated[
-        int,
-        Field(
-            alias="outputTokens",
-            description="Provider-reported output, less any reported reasoning.",
-            ge=0,
-        ),
-    ]
-    read_tokens: Annotated[
-        int,
-        Field(
-            alias="readTokens",
-            description="Provider-reported input the request read, cached or not.",
-            ge=0,
-        ),
-    ]
+    message_ids: Annotated[list[str] | None, Field(alias="messageIds")] = []
+    output_tokens: Annotated[int, Field(alias="outputTokens", ge=0)]
+    read_tokens: Annotated[int, Field(alias="readTokens", ge=0)]
     response_id: Annotated[str, Field(alias="responseId")]
-    thinking_tokens: Annotated[
-        int | None,
-        Field(
-            alias="thinkingTokens",
-            description="Provider-reported reasoning, when the provider breaks it out of the output.",
-            ge=0,
-        ),
-    ] = None
+    thinking_tokens: Annotated[int | None, Field(alias="thinkingTokens", ge=0)] = None
     type: Annotated[Literal["stepAdmission"], Field(title="StepAdmissionThreadItemPayloadType")]
 
 

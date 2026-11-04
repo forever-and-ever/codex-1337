@@ -442,12 +442,16 @@ pub fn item_event_to_server_notification(
             ))
         }
         EventMsg::ItemCompleted(item_completed_event) => {
+            let completed_at_ms = super::lifecycle::completed_at_ms(
+                &item_completed_event.item,
+                item_completed_event.completed_at_ms,
+            );
             ServerNotification::ItemCompleted(ItemCompletedNotification::new(
                 thread_id,
                 turn_id,
                 ThreadItemPayload::from(item_completed_event.item),
                 item_completed_event.started_at_ms,
-                item_completed_event.completed_at_ms,
+                completed_at_ms,
             ))
         }
         EventMsg::PatchApplyUpdated(event) => {
