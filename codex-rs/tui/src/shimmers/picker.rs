@@ -54,7 +54,7 @@ pub(crate) fn picker(
 ) -> SelectionViewParams {
     let recipes: Vec<_> = ROSTER
         .iter()
-        .filter(|recipe| recipe.fits(GLYPHS).is_ok())
+        .filter(|recipe| live::offered(recipe))
         .collect();
     let current = live::engaged().and_then(|engaged| {
         recipes
@@ -230,12 +230,16 @@ impl Renderable for PreviewPane {
     }
 }
 
-/// Advances `shimmer` through the script's `tick`th tick, counting from one.
+/// Advances `shimmer` through the script's `tick`th tick, counting from one, hearing its song if
+/// the shimmer listens.
 pub(super) fn feed(shimmer: &mut Shimmer, tick: u32) {
     let cue = script::cue(TICK * tick);
     shimmer.set_spell(cue.spell);
     shimmer.show(cue.caption);
     shimmer.set_intensity(cue.intensity);
+    if shimmer.recipe().listens() {
+        shimmer.hear(&script::sound(TICK * tick.saturating_sub(1), TICK * tick));
+    }
     shimmer.advance(TICK);
 }
 

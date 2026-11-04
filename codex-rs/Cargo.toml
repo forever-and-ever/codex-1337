@@ -398,7 +398,7 @@ keyring = { version = "3.6", default-features = false }
 landlock = "0.4.4"
 lazy_static = "1"
 libc = "0.2.182"
-libshimmer = "1.0.1"
+libshimmer = "1.1.0"
 libshimmer-ratatui = "0.1.0"
 # Keep SQLx's bundled SQLite on a version containing the WAL-reset corruption fix:
 # https://www.sqlite.org/wal.html#the_wal_reset_bug
