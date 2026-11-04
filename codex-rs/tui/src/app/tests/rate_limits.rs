@@ -266,6 +266,7 @@ async fn stale_rate_limit_reads_preserve_newer_workspace_hard_stop_for_every_ori
                 loop {
                     match app_event_rx.try_recv() {
                         Ok(AppEvent::RefreshRateLimits { origin }) => break origin,
+                        Ok(AppEvent::Usage { args }) => app.chat_widget.dispatch_usage(args),
                         Ok(_) => {}
                         other => panic!("expected usage refresh request, got {other:?}"),
                     }

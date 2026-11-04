@@ -391,7 +391,7 @@ impl App {
                         .displayed
                         .as_ref()
                         .is_some_and(|(id, account)| {
-                            *id == thread_id && account.account_id.is_none()
+                            *id == Some(thread_id) && account.account_id.is_none()
                         })
                 {
                     self.refresh_conversation_account(app_server_client, thread_id);

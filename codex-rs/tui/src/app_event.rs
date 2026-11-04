@@ -631,6 +631,9 @@ pub(crate) enum AppEvent {
 
     /// The first submission on a threadless composer requests its server conversation.
     StartDraftSession,
+    Usage {
+        args: String,
+    },
 
     /// Result of the fresh startup thread that is attached after the input UI is live.
     StartupThreadStarted {

@@ -1447,6 +1447,11 @@ async fn signed_out_usage_command_reports_chatgpt_login_requirement() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     submit_composer_text(&mut chat, "/usage");
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::Usage { args } if args == ""))
+    );
+    chat.dispatch_usage("".to_owned());
 
     let cells = drain_insert_history(&mut rx);
     let rendered = cells
@@ -1465,7 +1470,13 @@ async fn signed_out_usage_command_reports_chatgpt_login_requirement() {
 async fn signed_out_usage_command_with_args_reports_chatgpt_login_requirement() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
+    chat.session_draft = Some(super::super::SessionDraft::Editing);
     submit_composer_text(&mut chat, "/usage weekly");
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::Usage { args } if args == "weekly"))
+    );
+    chat.dispatch_usage("weekly".to_owned());
 
     let cells = drain_insert_history(&mut rx);
     let rendered = cells
@@ -1478,6 +1489,11 @@ async fn signed_out_usage_command_with_args_reports_chatgpt_login_requirement() 
         "expected ChatGPT login requirement, got: {rendered:?}"
     );
     assert_eq!(recall_latest_after_clearing(&mut chat), "/usage weekly");
+    assert_eq!(
+        chat.session_draft,
+        Some(super::super::SessionDraft::Editing)
+    );
+    assert_eq!(chat.thread_id(), None);
 }
 
 #[tokio::test]
@@ -1486,6 +1502,11 @@ async fn usage_command_with_invalid_view_reports_usage_snapshot() {
     set_chatgpt_auth(&mut chat);
 
     submit_composer_text(&mut chat, "/usage monthly");
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::Usage { args } if args == "monthly"))
+    );
+    chat.dispatch_usage("monthly".to_owned());
 
     let rendered = drain_insert_history(&mut rx)
         .iter()

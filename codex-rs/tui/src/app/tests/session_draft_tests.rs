@@ -18,6 +18,32 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn session_draft_switches_provider_without_creating_threads_or_losing_input() -> Result<()> {
     let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
+    let http = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"accounts": [{"id": "test-account", "plan_type": "pro", "workspace_backend_origin": "https://chatgpt.com", "account_routing_override": "NO_CONSTRAINT"}]}),
+        ))
+        .mount(&http)
+        .await;
+    app.config.chatgpt_base_url = format!("{}/backend-api", http.uri());
+    app.config.cli_auth_credentials_store_mode = codex_login::AuthCredentialsStoreMode::File;
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        format!(
+            "cli_auth_credentials_store = \"file\"\nchatgpt_base_url = {:?}\n",
+            app.config.chatgpt_base_url
+        ),
+    )?;
+    app_test_support::write_chatgpt_auth(
+        &app.config.codex_home,
+        app_test_support::ChatGptAuthFixture::new("test-access-token")
+            .account_id("test-account")
+            .chatgpt_account_id("test-account")
+            .chatgpt_user_id("test-user")
+            .plan_type("pro"),
+        codex_login::AuthCredentialsStoreMode::File,
+    )
+    .expect("test account fixture");
     let (mut server, requests, proxy) =
         Box::pin(start_recording_remote_app_server(&app.config)).await?;
     let mut tui = tui::test_support::make_test_tui()?;
@@ -43,6 +69,65 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     assert_eq!(
         app.chat_widget.status_account_display(),
         selected_account.as_ref()
+    );
+    // Usage resolves the displayed fresh-root account before checking access; it must
+    // neither trust stale signed-out flags nor create a conversation to discover identity.
+    for command in ["/usage", "/usage daily"] {
+        if command == "/usage daily" {
+            // Replacing the widget can lose its capabilities while retaining the account cache.
+            app.chat_widget
+                .update_account_state(None, None, false, false);
+        }
+        while events.try_recv().is_ok() {}
+        app.chat_widget.insert_str(command);
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let event = std::iter::from_fn(|| events.try_recv().ok())
+            .find(|event| matches!(event, AppEvent::Usage { .. }))
+            .expect("draft usage request");
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+        if command == "/usage" {
+            // A concurrent identity refresh may supersede the read, not the user's command.
+            app.read_displayed_account(&server, None);
+        }
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
+        assert!(
+            app.chat_widget.has_codex_backend_auth(),
+            "draft account: {:?}",
+            app.account_ui.displayed
+        );
+        assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Editing));
+        assert_eq!(app.chat_widget.thread_id(), None);
+        let replies = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            !replies
+                .iter()
+                .any(|event| matches!(event, AppEvent::StartDraftSession))
+        );
+        if command == "/usage daily" {
+            assert!(replies.iter().any(|event| matches!(
+                event,
+                AppEvent::OpenAnalytics {
+                    view: Some(crate::analytics::TokenActivityView::Daily)
+                }
+            )));
+        }
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    }
+    let account_reads = recorded_params(&requests, "account/read");
+    assert_eq!(account_reads.len(), 3);
+    assert!(account_reads.iter().all(|params| {
+        params
+            .get("threadId")
+            .is_none_or(serde_json::Value::is_null)
+            && params
+                .get("newThread")
+                .is_some_and(serde_json::Value::is_object)
+    }));
+    assert_eq!(
+        recorded_params(&requests, "thread/start"),
+        Vec::<serde_json::Value>::new()
     );
     // A deferred command leaves exactly its own draft for startup to replay.
     for draft in ["/account", "/rename Fix login"] {
@@ -173,6 +258,11 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
             original_input
         );
     }
+    assert!(
+        app.chat_widget.has_codex_backend_auth(),
+        "draft account: {:?}",
+        app.account_ui.displayed
+    );
     insta::assert_snapshot!(
         "session_draft_provider_switch",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)

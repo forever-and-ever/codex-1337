@@ -130,7 +130,7 @@ impl App {
             thread_id: thread_id.map(|id| id.to_string()),
             new_thread: thread_id
                 .is_none()
-                .then(|| app_server.new_thread_account_params(&self.config)),
+                .then(|| app_server.draft_account_params(self.chat_widget.config_ref())),
             supports_luna_reserve: true,
             exclude_reset_credit_details: origin == RateLimitRefreshOrigin::Periodic,
         };

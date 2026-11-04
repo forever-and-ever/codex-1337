@@ -27,6 +27,12 @@ impl AppServerSession {
         }
     }
 
+    pub(crate) fn draft_account_params(&self, config: &Config) -> NewThreadAccountParams {
+        let mut params = self.new_thread_account_params(config);
+        params.model_provider = Some(config.model_provider_id.clone());
+        params
+    }
+
     pub(super) async fn read_bootstrap_account(
         &mut self,
         config: &Config,
