@@ -48,6 +48,11 @@ impl ChatWidget {
     /// that staged entry after dispatch so slash-command recall follows the same "submitted input"
     /// rule as normal text.
     pub(super) fn handle_slash_command_dispatch(&mut self, cmd: SlashCommand) {
+        if cmd == SlashCommand::Usage {
+            self.request_usage(String::new());
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
         if self.defer_draft_command(cmd) {
             return;
         }
@@ -90,6 +95,11 @@ impl ChatWidget {
             SlashCommand::ContextRole => self.reject_invalid_context_role_command(&args),
             _ => false,
         } {
+            return;
+        }
+        if cmd == SlashCommand::Usage {
+            self.request_usage(args);
+            self.bottom_pane.record_pending_slash_command_history();
             return;
         }
         if self.defer_draft_command(cmd) {

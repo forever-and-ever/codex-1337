@@ -59,6 +59,7 @@ impl App {
             },
         );
         self.chat_widget.restore_session_draft();
+        self.read_displayed_account(server, None);
         self.file_search =
             FileSearchManager::new(self.config.cwd.to_path_buf(), self.app_event_tx.clone());
         self.refresh_skills(server);
@@ -110,6 +111,7 @@ impl App {
             return;
         }
         self.config = self.chat_widget.config_ref().clone();
+        self.read_displayed_account(server, None);
         self.model_catalog = self.chat_widget.model_catalog();
         server.set_available_models(self.model_catalog.models.clone());
         self.queue_model_defaults(

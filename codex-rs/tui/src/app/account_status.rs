@@ -21,7 +21,7 @@ impl App {
         let thread_id = self.current_displayed_thread_id();
         let new_thread = thread_id
             .is_none()
-            .then(|| app_server.new_thread_account_params(self.chat_widget.config_ref()));
+            .then(|| app_server.draft_account_params(self.chat_widget.config_ref()));
         tokio::spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),

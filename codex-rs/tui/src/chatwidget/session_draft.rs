@@ -40,6 +40,18 @@ impl ChatWidget {
         true
     }
 
+    pub(super) fn request_usage(&mut self, args: String) {
+        self.app_event_tx.send(AppEvent::Usage { args });
+    }
+
+    pub(crate) fn dispatch_usage(&mut self, args: String) {
+        if args.is_empty() {
+            self.dispatch_command(SlashCommand::Usage);
+        } else {
+            self.dispatch_command_with_args(SlashCommand::Usage, args, Vec::new());
+        }
+    }
+
     pub(crate) fn request_draft_session(&mut self) {
         if self.session_draft == Some(SessionDraft::Editing) {
             self.session_draft = Some(SessionDraft::Starting);

@@ -9,6 +9,7 @@ use crate::thread_manager::accounts::AccountInheritance;
 use crate::thread_manager::accounts::account_auth_for_provider;
 use crate::thread_manager::build_models_manager;
 use crate::thread_manager::build_models_manager_with_anthropic_account;
+use codex_http_client::HttpClientFactory;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::RefreshStrategy;
@@ -17,13 +18,64 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::protocol::MultiAgentVersion;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio_util::task::AbortOnDropHandle;
 
 const CATALOG_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 5);
 
 #[derive(Default)]
-pub(crate) struct AgentModelsManagers(Mutex<HashMap<String, CachedAgentModelsManager>>);
+pub(crate) struct AgentModelsManagers {
+    cached: Mutex<HashMap<String, CachedAgentModelsManager>>,
+    warming: Mutex<HashMap<String, AgentCatalogWarm>>,
+}
+
+struct AgentCatalogWarm {
+    manager: SharedModelsManager,
+    task: AbortOnDropHandle<()>,
+}
+
+impl AgentModelsManagers {
+    async fn warm(
+        &self,
+        provider_id: &str,
+        manager: &SharedModelsManager,
+        factory: HttpClientFactory,
+    ) {
+        let mut warming = self.warming.lock().await;
+        if let Some(current) = warming.get(provider_id)
+            && Arc::ptr_eq(&current.manager, manager)
+            && !current.task.is_finished()
+        {
+            return;
+        }
+        let provider_id = provider_id.to_owned();
+        let task_manager = Arc::clone(manager);
+        let task_provider = provider_id.clone();
+        let task = AbortOnDropHandle::new(tokio::spawn(async move {
+            if tokio::time::timeout(
+                CATALOG_TIMEOUT,
+                task_manager.list_models(RefreshStrategy::OnlineIfUncached, factory),
+            )
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    provider_id = task_provider,
+                    "subagent model catalog warm timed out"
+                );
+            }
+        }));
+        warming.insert(
+            provider_id,
+            AgentCatalogWarm {
+                manager: Arc::clone(manager),
+                task,
+            },
+        );
+    }
+}
 
 #[derive(PartialEq)]
 struct AgentModelsKey {
@@ -96,7 +148,7 @@ impl Session {
                 .then(|| auth.selected_account_id())
                 .flatten(),
         };
-        let mut managers = self.services.agent_models_managers.0.lock().await;
+        let mut managers = self.services.agent_models_managers.cached.lock().await;
         if let Some(cached) = managers.get(&config.model_provider_id)
             && cached.key == key
         {
@@ -178,14 +230,23 @@ impl Session {
                     return None;
                 }
             };
-            // Ordinary turns stay offline. Explicit selection also refreshes an uncached
-            // primary provider: a resumed Claude thread may have no warm catalog yet.
-            let models = match tokio::time::timeout(CATALOG_TIMEOUT, manager.list_models(
-                refresh, provider_config.http_client_factory(),
-            )).await {
-                Ok(models) => models,
-                Err(_) => manager.try_list_models().unwrap_or_default(),
+            // Even an Offline list_models can wait behind a network refresh's semaphore.
+            // Turns read only the resident snapshot; background warming loads disk or network.
+            let models = if refresh == RefreshStrategy::Offline {
+                manager.try_list_models().unwrap_or_default()
+            } else {
+                match tokio::time::timeout(CATALOG_TIMEOUT, manager.list_models(
+                    refresh, provider_config.http_client_factory(),
+                )).await {
+                    Ok(models) => models,
+                    Err(_) => manager.try_list_models().unwrap_or_default(),
+                }
             };
+            if models.is_empty() && refresh == RefreshStrategy::Offline {
+                self.services.agent_models_managers.warm(
+                    id, &manager, provider_config.http_client_factory(),
+                ).await;
+            }
             Some(ProviderModels {
                 provider_id: id.clone(),
                 manager,

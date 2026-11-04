@@ -12,7 +12,6 @@ use codex_login::anthropic::AccountIdentity;
 use codex_login::anthropic::AccountInfo;
 use codex_login::anthropic::AccountStore;
 use codex_login::anthropic::SubscriptionGrant;
-use codex_model_provider::create_model_provider_with_anthropic_account;
 use codex_model_provider_info::ANTHROPIC_BASE_URL;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
@@ -39,6 +38,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     // fresh-child execution can use that provider. Both directions must agree.
     let server = MockServer::start().await;
     let home = tempfile::tempdir().unwrap();
+    let stalled_catalog = Arc::new(tokio::sync::Notify::new());
     let account_id = AccountStore::new(home.path().to_owned())
         .upsert(
             AccountInfo {
@@ -172,16 +172,44 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         native_config.model_provider = provider("claude");
         native_config.model_catalog = None;
         session.agent_models_manager(&native_config).await.unwrap();
-        let manager = create_model_provider_with_anthropic_account(
-            native_config.model_provider,
-            Some(Arc::clone(&session.services.auth_manager)),
-            Some(account_id),
+        // Exercise cold discovery without sending subscription credentials off-provider.
+        // The explicit endpoint has the same empty fallback as the native Claude endpoint.
+        Mock::given(method("GET"))
+            .and(path("/claude_models"))
+            .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(&native_catalog))
+            .expect(1..)
+            .mount(&server)
+            .await;
+        let started = Arc::clone(&stalled_catalog);
+        Mock::given(method("GET"))
+            .and(path("/claude_models"))
+            .respond_with(move |_: &wiremock::Request| {
+                started.notify_one();
+                ResponseTemplate::new(/*s*/ 200)
+                    .set_body_json(&native_catalog)
+                    .set_delay(CATALOG_TIMEOUT + Duration::from_secs(/*secs*/ 1))
+            })
+            .up_to_n_times(/*n*/ 1)
+            .with_priority(/*p*/ 1)
+            .expect(/*r*/ 1)
+            .mount(&server)
+            .await;
+        let manager = codex_model_provider::create_model_provider(
+            ModelProviderInfo {
+                name: "Cold Claude catalog fixture".into(),
+                model_catalog_url: Some(format!("{}/claude_models", server.uri()).into()),
+                experimental_bearer_token: Some("test-bearer".into()),
+                ..Default::default()
+            },
+            None,
         )
-        .models_manager_without_cache(Some(native_catalog));
+        .models_manager_without_cache(None);
+        manager.set_api_key_model_discovery_enabled(true);
+        assert_eq!(manager.try_list_models().unwrap(), []);
         session
             .services
             .agent_models_managers
-            .0
+            .cached
             .lock()
             .await
             .get_mut("claude")
@@ -193,9 +221,85 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         .models_manager
         .set_api_key_model_discovery_enabled(true);
     let step = StepContext::for_test(turn.clone());
-    let mut catalog = session
-        .agent_model_catalogs(&turn.config, RefreshStrategy::OnlineIfUncached)
+    // Ordinary turns must discover an empty catalog, then retry after a timed-out
+    // first fetch instead of keeping a cross-provider manager empty for the session.
+    let first = tokio::time::timeout(
+        Duration::from_secs(/*secs*/ 2),
+        session.agent_model_catalogs(&turn.config, RefreshStrategy::Offline),
+    )
+    .await
+    .expect("ordinary turns must not await the stalled catalog");
+    if parent_id == "openai" {
+        tokio::time::timeout(Duration::from_secs(/*secs*/ 2), stalled_catalog.notified())
+            .await
+            .unwrap();
+    }
+    // A second offline read must neither wait behind the refresh semaphore nor
+    // start a duplicate refresh while the first request is still stalled.
+    tokio::time::timeout(
+        Duration::from_secs(/*secs*/ 2),
+        session.agent_model_catalogs(&turn.config, RefreshStrategy::Offline),
+    )
+    .await
+    .expect("ordinary turns must not join an ongoing network refresh");
+    let pending = std::mem::take(&mut *session.services.agent_models_managers.warming.lock().await);
+    for (id, mut warm) in pending {
+        if !warm.task.is_finished() {
+            (&mut warm.task).await.unwrap();
+        }
+        session
+            .services
+            .agent_models_managers
+            .warming
+            .lock()
+            .await
+            .insert(id, warm);
+    }
+    if parent_id == "openai" {
+        assert!(
+            !advertised_agent_models(&first, MultiAgentVersion::V2)
+                .iter()
+                .any(|model| model.model.starts_with("claude-"))
+        );
+    }
+    session
+        .agent_model_catalogs(&turn.config, RefreshStrategy::Offline)
         .await;
+    let pending = std::mem::take(&mut *session.services.agent_models_managers.warming.lock().await);
+    for (id, mut warm) in pending {
+        if !warm.task.is_finished() {
+            (&mut warm.task).await.unwrap();
+        }
+        session
+            .services
+            .agent_models_managers
+            .warming
+            .lock()
+            .await
+            .insert(id, warm);
+    }
+    let mut catalog = session
+        .agent_model_catalogs(&turn.config, RefreshStrategy::Offline)
+        .await;
+    let warm = session
+        .agent_model_catalogs(&turn.config, RefreshStrategy::Offline)
+        .await;
+    assert_eq!(
+        advertised_agent_models(&catalog, MultiAgentVersion::V2),
+        advertised_agent_models(&warm, MultiAgentVersion::V2),
+    );
+    if parent_id == "openai" {
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .filter(|request| request.url.path() == "/claude_models")
+                .count(),
+            2,
+        );
+    }
     let advertised = advertised_agent_models(&catalog, MultiAgentVersion::V2);
     // The cross-provider child is sixth in either direction, beyond the old
     // advertising cutoff, even though this same catalog accepts its selector.

@@ -1376,6 +1376,7 @@ impl App {
             AppEvent::ClaudeLoginCancelFailed { error } => self.chat_widget.add_error_message(error),
             AppEvent::AccountPickerLoaded { thread_id, serial, result } => self.apply_account_picker(thread_id, serial, result),
             AppEvent::AccountSelectionFinished { thread_id, result } => self.finish_account_selection(app_server, thread_id, result),
+            AppEvent::Usage { args } => self.read_displayed_account(app_server, Some(args)),
             AppEvent::RefreshConversationAccount { thread_id } => self.refresh_conversation_account(app_server, thread_id),
             AppEvent::ConversationAccountLoaded { thread_id, serial, result } => self.apply_conversation_account(app_server, thread_id, serial, result),
             AppEvent::ApplyBackendBannerFallback { thread_id } => {

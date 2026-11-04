@@ -179,7 +179,7 @@ async fn inline_server_permission_selection_holds_queued_prompt_until_confirmati
             // requesting its permission catalog. A scope boundary intentionally cancels discovery.
             assert!(app.account_ui.displayed.is_none());
             app.handle_event(&mut tui, &mut server, account_baseline).await?;
-            assert!(app.account_ui.displayed.as_ref().is_some_and(|(shown, _)| *shown == thread_id));
+            assert!(app.account_ui.displayed.as_ref().is_some_and(|(shown, _)| *shown == Some(thread_id)));
             app.settle_turn_submissions(&mut server).await?;
             while ops.try_recv().is_ok() {}
 

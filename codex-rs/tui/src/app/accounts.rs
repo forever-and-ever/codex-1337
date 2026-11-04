@@ -25,6 +25,8 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 #[derive(Default)]
 pub(super) struct AccountUi {
     serial: u64,
+    // A newer identity read supersedes the data, not the submitted command.
+    usage: Option<(Option<ThreadId>, String)>,
     picker_request: Option<Uuid>,
     pub(super) selection_request: Option<ThreadId>,
     login_request: Option<ClaudeLoginStartId>,
@@ -32,7 +34,10 @@ pub(super) struct AccountUi {
     early_login_completions: VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
     nickname_request: Option<ThreadId>,
     pending: HashMap<ThreadId, String>,
-    pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
+    pub(super) displayed: Option<(
+        Option<ThreadId>,
+        codex_app_server_protocol::GetAccountResponse,
+    )>,
 }
 
 impl App {
@@ -209,7 +214,7 @@ impl App {
             .account_ui
             .displayed
             .as_ref()
-            .is_some_and(|(shown, _)| *shown != thread_id)
+            .is_some_and(|(shown, _)| *shown != Some(thread_id))
         {
             self.chat_widget.active_account_label = None;
             self.chat_widget.refresh_status_line();
@@ -250,25 +255,95 @@ impl App {
         serial: u64,
         result: Result<codex_app_server_protocol::GetAccountResponse, String>,
     ) {
-        if self.current_displayed_thread_id() != Some(thread_id) || self.account_ui.serial != serial
-        {
+        self.apply_displayed_account(server, Some(thread_id), serial, result);
+    }
+
+    pub(super) fn read_displayed_account(
+        &mut self,
+        server: &AppServerSession,
+        usage: Option<String>,
+    ) {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        self.account_ui.serial = self.account_ui.serial.wrapping_add(1);
+        let serial = self.account_ui.serial;
+        let thread_id = self.current_displayed_thread_id();
+        if let Some(args) = usage {
+            self.account_ui.usage = Some((thread_id, args));
+        }
+        let new_thread = thread_id
+            .is_none()
+            .then(|| server.draft_account_params(self.chat_widget.config_ref()));
+        self.request_server(
+            server,
+            thread_id.map_or(UiRequestScope::Connection, UiRequestScope::DisplayedThread),
+            UiRequestKind::ReadOnly,
+            "Reading account",
+            move |handle| async move {
+                handle
+                    .request_typed::<codex_app_server_protocol::GetAccountResponse>(
+                        ClientRequest::GetAccount {
+                            request_id: codex_app_server_protocol::RequestId::String(
+                                Uuid::new_v4().to_string(),
+                            ),
+                            params: codex_app_server_protocol::GetAccountParams {
+                                new_thread,
+                                thread_id: thread_id.map(|id| id.to_string()),
+                                refresh_token: false,
+                            },
+                        },
+                    )
+                    .await
+            },
+            move |app, server, result| {
+                app.apply_displayed_account(
+                    server,
+                    thread_id,
+                    serial,
+                    result.map_err(ToString::to_string),
+                );
+                Ok(())
+            },
+        );
+    }
+
+    pub(super) fn apply_displayed_account(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: Option<ThreadId>,
+        serial: u64,
+        result: Result<codex_app_server_protocol::GetAccountResponse, String>,
+    ) {
+        if self.current_displayed_thread_id() != thread_id || self.account_ui.serial != serial {
             return;
         }
-        let response = match result {
-            Ok(response) => response,
-            Err(error) => {
-                tracing::warn!(%error, "cannot read conversation account");
-                self.account_ui.displayed = None;
-                self.chat_widget.update_account_state(
-                    /*status_account_display*/ None, /*plan_type*/ None,
-                    /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
-                );
-                self.chat_widget.active_account_label = None;
-                self.chat_widget.refresh_status_line();
-                return;
+        let usage = self
+            .account_ui
+            .usage
+            .take()
+            .and_then(|(scope, args)| (scope == thread_id).then_some(args));
+        match result {
+            Ok(response) => {
+                self.update_displayed_account(server, thread_id, response);
+                if let Some(args) = usage {
+                    self.chat_widget.dispatch_usage(args);
+                }
             }
-        };
-        if self.account_ui.pending.get(&thread_id) == response.account_id.as_ref()
+            Err(error) if usage.is_some() => self
+                .chat_widget
+                .add_error_message(format!("Cannot read account for /usage: {error}")),
+            Err(error) => tracing::warn!(%error, "cannot read account"),
+        }
+    }
+
+    pub(super) fn update_displayed_account(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: Option<ThreadId>,
+        response: codex_app_server_protocol::GetAccountResponse,
+    ) {
+        if let Some(thread_id) = thread_id
+            && self.account_ui.pending.get(&thread_id) == response.account_id.as_ref()
             && self.account_ui.pending.remove(&thread_id).is_some()
         {
             self.chat_widget.add_info_message(
@@ -338,42 +413,46 @@ impl App {
                 _ => None,
             },
         );
-        if self
-            .account_ui
-            .displayed
-            .as_ref()
-            .is_some_and(|(shown, account)| *shown == thread_id && account == &response)
+        if self.chat_widget.has_chatgpt_account() == chatgpt
+            && self.chat_widget.has_codex_backend_auth() == (chatgpt || backend_only)
+            && self
+                .account_ui
+                .displayed
+                .as_ref()
+                .is_some_and(|(shown, account)| *shown == thread_id && account == &response)
             && self.chat_widget.status_account_display() == display.as_ref()
             && self.chat_widget.active_account_label == active_account_label
         {
             return;
         }
-        if self
-            .account_ui
-            .displayed
-            .as_ref()
-            .is_some_and(|(shown, previous)| {
-                *shown == thread_id
-                    && previous.account_id == response.account_id
-                    && previous.requires_openai_auth == response.requires_openai_auth
-                    && previous.workspace_routing == response.workspace_routing
-                    && match (&previous.account, &response.account) {
-                        (
-                            Some(Account::Chatgpt {
-                                plan_type: previous,
-                                ..
-                            }),
-                            Some(Account::Chatgpt { plan_type, .. }),
-                        ) => previous == plan_type,
-                        (
-                            Some(Account::ClaudeSubscription { .. }),
-                            Some(Account::ClaudeSubscription { .. }),
-                        )
-                        | (Some(Account::ApiKey {}), Some(Account::ApiKey {}))
-                        | (None, None) => true,
-                        _ => false,
-                    }
-            })
+        if self.chat_widget.has_chatgpt_account() == chatgpt
+            && self.chat_widget.has_codex_backend_auth() == (chatgpt || backend_only)
+            && self
+                .account_ui
+                .displayed
+                .as_ref()
+                .is_some_and(|(shown, previous)| {
+                    *shown == thread_id
+                        && previous.account_id == response.account_id
+                        && previous.requires_openai_auth == response.requires_openai_auth
+                        && previous.workspace_routing == response.workspace_routing
+                        && match (&previous.account, &response.account) {
+                            (
+                                Some(Account::Chatgpt {
+                                    plan_type: previous,
+                                    ..
+                                }),
+                                Some(Account::Chatgpt { plan_type, .. }),
+                            ) => previous == plan_type,
+                            (
+                                Some(Account::ClaudeSubscription { .. }),
+                                Some(Account::ClaudeSubscription { .. }),
+                            )
+                            | (Some(Account::ApiKey {}), Some(Account::ApiKey {}))
+                            | (None, None) => true,
+                            _ => false,
+                        }
+                })
         {
             self.account_ui.displayed = Some((thread_id, response));
             self.chat_widget.active_account_label = active_account_label;
