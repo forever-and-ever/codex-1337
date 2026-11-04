@@ -1,7 +1,9 @@
 //! Error types that can be emitted from this library
 
 use core::error::Error;
-use core::fmt::{self, Display, Formatter};
+use core::fmt::Display;
+use core::fmt::Formatter;
+use core::fmt::{self};
 use core::num::TryFromIntError;
 use std::borrow::Cow;
 use std::io;

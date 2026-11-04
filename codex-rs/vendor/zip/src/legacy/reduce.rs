@@ -1,6 +1,11 @@
-use std::io::{self, Read, Result};
+use std::io::Read;
+use std::io::Result;
+use std::io::{self};
 
-use bitstream_io::{BitRead, BitReader, Endianness, LittleEndian};
+use bitstream_io::BitRead;
+use bitstream_io::BitReader;
+use bitstream_io::Endianness;
+use bitstream_io::LittleEndian;
 
 /// Number of bits used to represent indices in a follower set of size n.
 const fn follower_idx_bitlen(n: u8) -> u8 {
@@ -230,7 +235,9 @@ impl<R: Read> Read for ReduceDecoder<R> {
 #[cfg(test)]
 mod tests {
     use super::hwexpand;
-    use crate::legacy::reduce::{follower_idx_bitlen, lsb, max_dist};
+    use crate::legacy::reduce::follower_idx_bitlen;
+    use crate::legacy::reduce::lsb;
+    use crate::legacy::reduce::max_dist;
     const HAMLET_2048: &[u8; 1285] =
         include_bytes!("../../tests/data/legacy/reduce_hamlet_2048.bin");
     const HAMLET_2048_OUT: &[u8; 2048] =

@@ -1,12 +1,16 @@
 //! Blocks used in zip format
 
 use crate::format::magic::Magic;
-use crate::result::{ZipError, ZipResult, invalid};
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
 
 use core::any::type_name;
 use core::mem;
 use core::slice;
-use std::io::{self, Read, Write};
+use std::io::Read;
+use std::io::Write;
+use std::io::{self};
 
 /// # Safety
 ///
@@ -629,11 +633,11 @@ pub(crate) struct CentralDirectoryEndInfo {
 mod tests {
     use std::io::Cursor;
 
-    use crate::{
-        format::blocks::{FixedSizeBlock, Pod},
-        format::magic::Magic,
-        result::{ZipError, invalid},
-    };
+    use crate::format::blocks::FixedSizeBlock;
+    use crate::format::blocks::Pod;
+    use crate::format::magic::Magic;
+    use crate::result::ZipError;
+    use crate::result::invalid;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     #[repr(packed, C)]

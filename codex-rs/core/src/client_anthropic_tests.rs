@@ -734,7 +734,11 @@ async fn native_regular_replay_profiles(
             let history = session
                 .clone_history()
                 .await
-                .for_prompt(&model.input_modalities);
+                .for_prompt(
+                    &model.input_modalities,
+                    session.services.image_store.as_ref(),
+                )
+                .await;
             assert_eq!(
                 history
                     .iter()

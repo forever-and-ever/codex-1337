@@ -14,13 +14,16 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![allow(unexpected_cfgs)] // Needed for cfg(fuzzing)
 #![allow(clippy::multiple_crate_versions)] // https://github.com/rust-lang/rust-clippy/issues/16440
-pub use crate::compression::{CompressionMethod, SUPPORTED_COMPRESSION_METHODS};
+pub use crate::compression::CompressionMethod;
+pub use crate::compression::SUPPORTED_COMPRESSION_METHODS;
 pub use crate::datetime::DateTime;
+pub use crate::format::ZIP64_BYTES_THR;
+pub use crate::format::ZIP64_ENTRY_THR;
 pub use crate::format::aes::AesMode;
 pub use crate::format::system::System;
-pub use crate::format::{ZIP64_BYTES_THR, ZIP64_ENTRY_THR};
 pub use crate::read::HasZipMetadata;
-pub use crate::read::{ZipArchive, ZipReadOptions};
+pub use crate::read::ZipArchive;
+pub use crate::read::ZipReadOptions;
 pub use crate::write::ZipWriter;
 
 #[cfg(feature = "aes-crypto")]

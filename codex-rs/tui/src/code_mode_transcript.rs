@@ -13,7 +13,7 @@ use codex_app_server_protocol::CodeModeOwned;
 use codex_app_server_protocol::CodeModeOwner;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
@@ -76,19 +76,19 @@ impl Admission {
                 (owned.owner.clone(), owned.payload().as_ref().clone())
             }
             ServerNotification::ItemStarted(started) => {
-                let ThreadItem::CodeModeOwned(owned) = &started.item else {
+                let ThreadItemPayload::CodeModeOwned(owned) = &started.item.payload else {
                     return Ok(None);
                 };
                 let mut native = started.clone();
-                native.item = owned.payload().as_ref().clone();
+                native.item.payload = owned.payload().as_ref().clone();
                 (owned.owner.clone(), ServerNotification::ItemStarted(native))
             }
             ServerNotification::ItemCompleted(completed) => {
-                let ThreadItem::CodeModeOwned(owned) = &completed.item else {
+                let ThreadItemPayload::CodeModeOwned(owned) = &completed.item.payload else {
                     return Ok(None);
                 };
                 let mut native = completed.clone();
-                native.item = owned.payload().as_ref().clone();
+                native.item.payload = owned.payload().as_ref().clone();
                 (
                     owned.owner.clone(),
                     ServerNotification::ItemCompleted(native),
@@ -98,13 +98,13 @@ impl Admission {
         };
         let thread = match &native {
             ServerNotification::ItemStarted(item) => {
-                if matches!(item.item, ThreadItem::CodeModeOwned(_)) {
+                if matches!(item.item.payload, ThreadItemPayload::CodeModeOwned(_)) {
                     return Err(AdmissionFault::NestedItem);
                 }
                 &item.thread_id
             }
             ServerNotification::ItemCompleted(item) => {
-                if matches!(item.item, ThreadItem::CodeModeOwned(_)) {
+                if matches!(item.item.payload, ThreadItemPayload::CodeModeOwned(_)) {
                     return Err(AdmissionFault::NestedItem);
                 }
                 &item.thread_id
@@ -126,28 +126,31 @@ impl Admission {
         }))
     }
 
-    pub(crate) fn item(owned: CodeModeOwned<Box<ThreadItem>>, turn_id: String) -> Self {
+    pub(crate) fn item(owned: CodeModeOwned<Box<ThreadItemPayload>>, turn_id: String) -> Self {
         let (owner, item) = owned.into_parts();
         let notification = if matches!(
             &*item,
-            ThreadItem::CommandExecution {
+            ThreadItemPayload::CommandExecution {
                 status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
                 ..
             }
         ) {
-            ServerNotification::ItemStarted(codex_app_server_protocol::ItemStartedNotification {
-                thread_id: owner.thread_id.to_string(),
-                turn_id,
-                item: *item,
-                started_at_ms: owner.started_at_ms,
-            })
+            ServerNotification::ItemStarted(
+                codex_app_server_protocol::ItemStartedNotification::new(
+                    owner.thread_id.to_string(),
+                    turn_id,
+                    *item,
+                    owner.started_at_ms,
+                ),
+            )
         } else {
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: owner.thread_id.to_string(),
+            ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+                owner.thread_id.to_string(),
                 turn_id,
-                item: *item,
-                completed_at_ms: owner.started_at_ms,
-            })
+                *item,
+                None,
+                owner.started_at_ms,
+            ))
         };
         Self {
             notification,
@@ -176,7 +179,7 @@ pub(crate) struct ScopedCodeMode {
 enum ChildRevision {
     Pending {
         source: Source,
-        item: Box<ThreadItem>,
+        item: Box<ThreadItemPayload>,
     },
     Terminal {
         source: Source,
@@ -194,7 +197,7 @@ impl ChildRevision {
         matches!(self, Self::Terminal { .. })
     }
 
-    fn pending(&self) -> Option<&ThreadItem> {
+    fn pending(&self) -> Option<&ThreadItemPayload> {
         match self {
             Self::Pending { item, .. } => Some(item),
             Self::Terminal { .. } => None,
@@ -298,11 +301,18 @@ impl Reducers {
         let mut tokens = None;
         match notification {
             ServerNotification::ItemStarted(started) => {
-                block.item(started.item, source, cwd, &mut wait, &mut tokens, metadata)?;
+                block.item(
+                    started.item.payload,
+                    source,
+                    cwd,
+                    &mut wait,
+                    &mut tokens,
+                    metadata,
+                )?;
             }
             ServerNotification::ItemCompleted(completed) => {
                 block.item(
-                    completed.item,
+                    completed.item.payload,
                     source,
                     cwd,
                     &mut wait,
@@ -315,9 +325,9 @@ impl Reducers {
                     source: previous,
                     item,
                 }) = block.revisions.get_mut(&delta.item_id)
-                    && let item @ ThreadItem::CommandExecution { .. } = item.as_mut()
+                    && let item @ ThreadItemPayload::CommandExecution { .. } = item.as_mut()
                 {
-                    if let ThreadItem::CommandExecution {
+                    if let ThreadItemPayload::CommandExecution {
                         aggregated_output, ..
                     } = item
                     {
@@ -341,9 +351,9 @@ impl Reducers {
                     source: previous,
                     item,
                 }) = block.revisions.get_mut(&updated.item_id)
-                    && let item @ ThreadItem::FileChange { .. } = item.as_mut()
+                    && let item @ ThreadItemPayload::FileChange { .. } = item.as_mut()
                 {
-                    if let ThreadItem::FileChange { changes, .. } = item {
+                    if let ThreadItemPayload::FileChange { changes, .. } = item {
                         *changes = updated.changes;
                     }
                     let id = item.id().to_owned();
@@ -363,7 +373,7 @@ impl Reducers {
                     .values()
                     .filter_map(ChildRevision::pending)
                     .find_map(|item| match item {
-                        ThreadItem::CommandExecution {
+                        ThreadItemPayload::CommandExecution {
                             command,
                             process_id: Some(process),
                             ..
@@ -449,7 +459,7 @@ impl ScopedCodeMode {
                 ChildRevision::Pending {
                     source: Source::Live,
                     item,
-                } if matches!(item.as_ref(), ThreadItem::CommandExecution { .. })
+                } if matches!(item.as_ref(), ThreadItemPayload::CommandExecution { .. })
             )
         })
     }
@@ -506,7 +516,7 @@ impl ScopedCodeMode {
 
     fn item(
         &mut self,
-        item: ThreadItem,
+        item: ThreadItemPayload,
         source: Source,
         cwd: &AbsolutePathBuf,
         wait: &mut Option<Arc<dyn HistoryCell>>,
@@ -514,8 +524,8 @@ impl ScopedCodeMode {
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
     ) -> Result<(), AdmissionFault> {
         match item {
-            ThreadItem::CodeModeOwned(_) => return Err(AdmissionFault::NestedItem),
-            ThreadItem::CodeMode(fact) => {
+            ThreadItemPayload::CodeModeOwned(_) => return Err(AdmissionFault::NestedItem),
+            ThreadItemPayload::CodeMode(fact) => {
                 let owner = &self.owner;
                 if fact.exec_call_id != owner.exec_call_id
                     || fact
@@ -541,7 +551,7 @@ impl ScopedCodeMode {
                 }
                 insert_code_mode_fact(&mut self.facts, fact);
             }
-            ThreadItem::ToolOutputTokens {
+            ThreadItemPayload::ToolOutputTokens {
                 id,
                 call_id,
                 tokens: count,
@@ -555,13 +565,13 @@ impl ScopedCodeMode {
             }
             mut item => {
                 let id = item.id().to_owned();
-                if let Some(ThreadItem::CollabAgentToolCall {
+                if let Some(ThreadItemPayload::CollabAgentToolCall {
                     prompt: old_prompt,
                     model: old_model,
                     reasoning_effort: old_effort,
                     ..
                 }) = self.revisions.get(&id).and_then(ChildRevision::pending)
-                    && let ThreadItem::CollabAgentToolCall {
+                    && let ThreadItemPayload::CollabAgentToolCall {
                         prompt,
                         model,
                         reasoning_effort,
@@ -580,16 +590,16 @@ impl ScopedCodeMode {
                 }
                 let pending = matches!(
                     &item,
-                    ThreadItem::CommandExecution {
+                    ThreadItemPayload::CommandExecution {
                         status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
                         ..
-                    } | ThreadItem::McpToolCall {
+                    } | ThreadItemPayload::McpToolCall {
                         status: codex_app_server_protocol::McpToolCallStatus::InProgress,
                         ..
-                    } | ThreadItem::FileChange {
+                    } | ThreadItemPayload::FileChange {
                         status: codex_app_server_protocol::PatchApplyStatus::InProgress,
                         ..
-                    } | ThreadItem::CollabAgentToolCall {
+                    } | ThreadItemPayload::CollabAgentToolCall {
                         status: codex_app_server_protocol::CollabAgentToolCallStatus::InProgress,
                         ..
                     }

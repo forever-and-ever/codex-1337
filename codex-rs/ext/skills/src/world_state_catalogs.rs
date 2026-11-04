@@ -10,6 +10,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::catalog::SkillCatalog;
+use crate::catalog_delta::CatalogDelta;
+use crate::catalog_delta::CatalogUsage;
+use crate::catalog_delta::skills_delta_section;
 use crate::render::AvailableSkillsRender;
 use crate::render::PreparedSkillCatalog;
 use crate::render::RenderedSkillCatalogs;
@@ -23,7 +26,9 @@ use crate::render_observability::record_catalog_render;
 use crate::roster::CLOUD_SKILLS_WORLD_STATE_ID;
 use crate::roster::CatalogRenderCallback;
 use crate::roster::Content;
+use crate::roster::HOST_SKILLS_WORLD_STATE_ID;
 use crate::roster::Muster;
+use crate::roster::SKILLS_WORLD_STATE_ID;
 use crate::roster::cloud_section;
 use crate::roster::executor_section;
 use crate::roster::host_section;
@@ -130,10 +135,11 @@ impl<'a> CatalogRenderingContext<'a> {
         });
 
         let render_policy = if step_state.discovery_v2 {
-            SkillCatalogRenderPolicy::DiscoveryV2
+            SkillCatalogRenderPolicy::DISCOVERY_V2
         } else {
-            SkillCatalogRenderPolicy::ExtensionCompatible
-        };
+            SkillCatalogRenderPolicy::EXTENSION_COMPATIBLE
+        }
+        .with_omitted_descriptions(step_state.config.omit_descriptions);
         Some(Self {
             input,
             step_state,
@@ -195,10 +201,7 @@ impl<'a> CatalogRenderingContext<'a> {
                     &entry.id.0,
                     entry.authority.kind.to_string(),
                     &entry.name,
-                    entry
-                        .short_description
-                        .as_ref()
-                        .unwrap_or(&entry.description),
+                    self.render_policy.description(entry),
                     entry.rendered_path(),
                     entry.alias_root(),
                     entry.alias_root_order(),
@@ -241,10 +244,38 @@ impl<'a> CatalogRenderingContext<'a> {
             PreparedSkillCatalog::new(&catalogs.cloud.catalog, self.render_policy).muster(),
             PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
-                SkillCatalogRenderPolicy::CoreCompatible,
+                SkillCatalogRenderPolicy::CORE_COMPATIBLE
+                    .with_omitted_descriptions(self.step_state.config.omit_descriptions),
             )
             .muster(),
         ];
+
+        if self.step_state.config.catalog_deltas_enabled {
+            let cloud = PreparedSkillCatalog::with_alias_plan(
+                &catalogs.cloud.catalog,
+                self.render_policy,
+                Some(
+                    self.step_state
+                        .catalog
+                        .aliases
+                        .for_authority(SkillToolAuthoritySelector::Cloud),
+                ),
+            );
+            let host = PreparedSkillCatalog::new(
+                &catalogs.host.catalog,
+                SkillCatalogRenderPolicy::CORE_COMPATIBLE
+                    .with_omitted_descriptions(self.step_state.config.omit_descriptions),
+            );
+            for (catalog, rendered) in [
+                (&executor, &mut rendered.executor),
+                (&cloud, &mut rendered.cloud),
+                (&host, &mut rendered.host),
+            ] {
+                if let Some(rendered) = rendered {
+                    rendered.entries = catalog.entries_for_render(rendered);
+                }
+            }
+        }
 
         [
             (
@@ -310,7 +341,8 @@ impl<'a> CatalogRenderingContext<'a> {
             ),
             &PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
-                SkillCatalogRenderPolicy::CoreCompatible,
+                SkillCatalogRenderPolicy::CORE_COMPATIBLE
+                    .with_omitted_descriptions(self.step_state.config.omit_descriptions),
             ),
             self.metadata_budget,
             self.include_usage,
@@ -367,7 +399,8 @@ impl<'a> CatalogRenderingContext<'a> {
             &PreparedSkillCatalog::new(&SkillCatalog::default(), self.render_policy),
             &PreparedSkillCatalog::new(
                 &catalogs.host.catalog,
-                SkillCatalogRenderPolicy::CoreCompatible,
+                SkillCatalogRenderPolicy::CORE_COMPATIBLE
+                    .with_omitted_descriptions(self.step_state.config.omit_descriptions),
             ),
             filesystem_budget,
             self.include_usage,
@@ -380,6 +413,7 @@ impl<'a> CatalogRenderingContext<'a> {
     fn build_world_state_section(
         &self,
         catalog: RenderedCatalogContribution,
+        remaining: &mut SkillMetadataBudget,
     ) -> WorldStateSectionContribution {
         let RenderedCatalogContribution {
             kind,
@@ -393,12 +427,11 @@ impl<'a> CatalogRenderingContext<'a> {
             .as_ref()
             .map(|rendered| rendered.report.clone())
             .unwrap_or_default();
-        let content = Content::new(rendered, muster, self.include_usage);
         let include_instructions = self.step_state.config.include_instructions;
+        let catalog_deltas_enabled = self.step_state.config.catalog_deltas_enabled;
         let metrics = self.input.extension_metrics.clone();
         let warning_emitter = Arc::clone(&self.warning_emitter);
-        let render_report = report.clone();
-        let on_render: CatalogRenderCallback = Box::new(move || {
+        let on_render = move |render_report: &crate::render::SkillRenderReport| {
             if !include_instructions || status != CatalogStatus::Enabled {
                 return;
             }
@@ -407,13 +440,43 @@ impl<'a> CatalogRenderingContext<'a> {
                 metrics.as_deref(),
                 kind.metrics_surface(),
                 budget,
-                &render_report,
+                render_report,
             );
-            if let Some(message) = render_report.warning_message() {
+            if let Some(message) = render_report.warning_message(catalog_deltas_enabled) {
                 warning_emitter(message);
             }
-        });
+        };
 
+        if catalog_deltas_enabled {
+            let (id, source) = match kind {
+                CatalogKind::Executor => (SKILLS_WORLD_STATE_ID, "Selected-environment"),
+                CatalogKind::Cloud => (CLOUD_SKILLS_WORLD_STATE_ID, "Cloud"),
+                CatalogKind::Host => {
+                    if status != CatalogStatus::Unavailable {
+                        self.input.turn_store.insert(HostSkillsCatalogInWorldState);
+                    }
+                    (HOST_SKILLS_WORLD_STATE_ID, "Host")
+                }
+            };
+            return skills_delta_section(
+                id,
+                source,
+                CatalogDelta {
+                    rendered,
+                    include_usage: self.include_usage,
+                    allocation: (kind == CatalogKind::Cloud).then_some(allocation),
+                },
+                self.input
+                    .previous_world_state
+                    .and_then(|state| state.get(id)),
+                remaining,
+                on_render,
+            );
+        }
+
+        let content = Content::new(rendered, muster, self.include_usage);
+        let render_report = report.clone();
+        let on_render: CatalogRenderCallback = Box::new(move || on_render(&render_report));
         match kind {
             CatalogKind::Executor => executor_section(content, include_instructions, on_render),
             CatalogKind::Cloud => cloud_section(
@@ -431,7 +494,7 @@ impl<'a> CatalogRenderingContext<'a> {
     }
 }
 
-/// Returns complete sections, omitting catalogs unavailable in this step.
+/// Renders catalog sections, retaining empty delta snapshots for shared budget accounting.
 pub(crate) fn render_world_state_sections(
     event_sink: Arc<dyn ExtensionEventSink>,
     input: WorldStateContributionInput<'_>,
@@ -439,10 +502,39 @@ pub(crate) fn render_world_state_sections(
     let Some(context) = CatalogRenderingContext::new(event_sink, input) else {
         return Vec::new();
     };
+    let mut remaining = if context.step_state.config.catalog_deltas_enabled {
+        let used = context
+            .input
+            .previous_world_state
+            .into_iter()
+            .flat_map(|state| {
+                [
+                    SKILLS_WORLD_STATE_ID,
+                    CLOUD_SKILLS_WORLD_STATE_ID,
+                    HOST_SKILLS_WORLD_STATE_ID,
+                ]
+                .into_iter()
+                .filter_map(|id| state.get(id))
+            })
+            .filter_map(|snapshot| snapshot.get("usage"))
+            .filter_map(|usage| CatalogUsage::deserialize(usage).ok())
+            .map(|usage| usage.cost(context.metadata_budget))
+            .sum::<usize>();
+        context
+            .metadata_budget
+            .with_limit(context.metadata_budget.limit().saturating_sub(used))
+    } else {
+        context.metadata_budget
+    };
     context
         .render_world_state_catalogs()
         .into_iter()
-        .filter(|catalog| catalog.status != CatalogStatus::Unavailable)
-        .map(|catalog| context.build_world_state_section(catalog))
+        // Keep empty snapshots too: a source that becomes available later must use
+        // the same remaining budget instead of publishing another initial catalog.
+        .filter(|catalog| {
+            context.step_state.config.catalog_deltas_enabled
+                || catalog.status != CatalogStatus::Unavailable
+        })
+        .map(|catalog| context.build_world_state_section(catalog, &mut remaining))
         .collect()
 }

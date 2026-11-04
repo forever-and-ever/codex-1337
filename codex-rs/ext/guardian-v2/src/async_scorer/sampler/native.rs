@@ -1,10 +1,13 @@
 //! Native classifications retain plaintext evidence and the owning account.
 //! A decision is publishable only after a complete, bounded structured response.
 
+use super::ConversationSample;
 use super::LunaSampler;
 use super::LunaSamplerError;
 use super::MAX_OUTPUT_BYTES;
+use super::SampledScore;
 use super::execution::record_token_usage;
+use super::telemetry::SamplingTelemetry;
 use codex_api::AnthropicCachePolicy;
 use codex_api::AnthropicCacheTtl;
 use codex_api::AnthropicClient;
@@ -27,12 +30,14 @@ use codex_http_client::ClientRouteClass;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::create_client_for_route_async;
 use codex_model_provider::AnthropicAuthContext;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::GuardianRiskLevel;
+use codex_protocol::protocol::TruncationPolicy;
 use http::StatusCode;
 use serde_json::json;
 use std::num::NonZeroU32;
@@ -40,6 +45,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use tokio::sync::OnceCell;
+use tokio::sync::oneshot;
 
 pub(super) struct Catalog {
     account_id: String,
@@ -275,9 +281,72 @@ async fn decision(
 #[path = "../sampler_native_tests.rs"]
 mod tests;
 
-impl LunaSampler {
-    pub(crate) fn supports_retained_history(&self) -> bool {
-        self.config.provider.info().is_openai()
-            && matches!(self.config.provider.anthropic_auth_context(), Ok(None))
+pub(in crate::async_scorer) fn output_instructions(adapter: ModelProviderAdapter) -> &'static str {
+    match adapter {
+        ModelProviderAdapter::ClaudeSubscription => {
+            super::super::config::NATIVE_CLASSIFICATION_OUTPUT_INSTRUCTIONS
+        }
+        ModelProviderAdapter::OpenaiCompatible | ModelProviderAdapter::OpenRouter => {
+            super::super::config::CLASSIFICATION_OUTPUT_INSTRUCTIONS
+        }
     }
+}
+
+/// Shares retained admission and cancellation, but never publishes native provider history.
+pub(super) async fn sample_snapshot(
+    sampler: &LunaSampler,
+    snapshot: ConversationSample,
+    ready: oneshot::Sender<Result<SampledScore, LunaSamplerError>>,
+) {
+    let mut telemetry = SamplingTelemetry::new(
+        sampler.config.metrics.clone(),
+        snapshot.sampling.pending_score.clone(),
+    );
+    let result = async {
+        let auth = sampler
+            .config
+            .provider
+            .anthropic_auth_context()
+            .map_err(|error| LunaSamplerError::Provider(error.into()))?
+            .ok_or_else(|| {
+                LunaSamplerError::Provider(CodexErr::InvalidRequest(
+                    "Native Guardian requires Anthropic authentication".into(),
+                ))
+            })?;
+        let account_id = snapshot
+            .sampling
+            .provider_account_id
+            .as_deref()
+            .ok_or_else(|| {
+                LunaSamplerError::Provider(CodexErr::InvalidRequest(
+                    "Native Guardian requires the thread's selected Anthropic account".into(),
+                ))
+            })?;
+        let model = model(sampler, account_id).await?;
+        let input: Vec<_> = snapshot
+            .input
+            .input
+            .into_iter()
+            .map(|envelope| envelope.item)
+            .filter(|item| !matches!(item, ResponseItem::AdditionalTools { .. }))
+            .collect();
+        let request = request(&model, &input)?;
+        // Admit the exact native body, including its schema, against discovered model metadata.
+        let tokens = TruncationPolicy::Bytes(request.body().get().len()).token_budget();
+        let limit = codex_guardian_context::effective_input_token_limit(&model, None);
+        if tokens > limit.saturating_sub(256) {
+            return Err(LunaSamplerError::InputTooLarge);
+        }
+        sample(
+            sampler,
+            auth,
+            request,
+            account_id,
+            Arc::new(AtomicBool::new(false)),
+            &mut telemetry,
+        )
+        .await
+    }
+    .await;
+    telemetry.deliver(ready, result);
 }

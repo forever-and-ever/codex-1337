@@ -1,9 +1,8 @@
 use std::io::Read;
 
-use crate::{
-    result::{ZipError, ZipResult},
-    unstable::LittleEndianReadExt,
-};
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::unstable::LittleEndianReadExt;
 
 /// The NTFS extra field as described in [PKWARE's APPNOTE.TXT v6.3.9].
 ///

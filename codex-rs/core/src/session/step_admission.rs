@@ -15,6 +15,7 @@ use codex_history::RolloutItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ItemCompletedEvent;
@@ -27,7 +28,7 @@ use codex_protocol::step_admission::ArrivalKind;
 use codex_protocol::step_admission::SealedAdmission;
 use codex_protocol::step_admission::StepAdmissionItem;
 use codex_utils_output_truncation::count_o200k_arrival;
-use codex_utils_output_truncation::count_o200k_text_tokens;
+use codex_utils_output_truncation::count_o200k_text;
 
 use super::Session;
 use super::TurnContext;
@@ -61,10 +62,10 @@ struct Baseline {
 
 impl Baseline {
     /// Whether `prompt` extends the marked request's context unchanged.
-    fn extended_by(&self, prompt: &Prompt, model: &str, history_version: u64) -> bool {
+    fn extended_by(&self, prompt_len: usize, model: &str, history_version: u64) -> bool {
         self.history_version == history_version
             && self.model == model
-            && self.prompt_len <= prompt.input.len()
+            && self.prompt_len <= prompt_len
     }
 }
 
@@ -121,10 +122,30 @@ impl StepMark {
 }
 
 /// The items a step admitted, before the delta is split among them.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Admitted {
-    results: Vec<FunctionCallOutputBody>,
+    results: Option<Vec<String>>,
     arrivals: Vec<Incoming>,
+}
+
+impl Default for Admitted {
+    fn default() -> Self {
+        Self {
+            results: Some(Vec::new()),
+            arrivals: Vec::new(),
+        }
+    }
+}
+
+/// Text-only admission evidence; request attachments are released before streaming.
+pub(super) struct PreparedStepAdmission {
+    prompt_len: usize,
+    previous: Option<CapturedAdmission>,
+}
+
+struct CapturedAdmission {
+    response_id: String,
+    admitted: Admitted,
 }
 
 /// The calls and assistant messages one response produced, observed as its items complete.
@@ -167,13 +188,42 @@ struct Apportionment {
 }
 
 impl Session {
+    pub(super) async fn prepare_step_admission(
+        &self,
+        step_context: &StepContext,
+        prompt: &Prompt,
+    ) -> PreparedStepAdmission {
+        let previous = {
+            let state = self.state.lock().await;
+            state.step_mark.as_ref().and_then(|mark| match &mark.basis {
+                StepBasis::Measured(baseline)
+                    if baseline.extended_by(
+                        prompt.input.len(),
+                        &step_context.settings.model_info.slug,
+                        state.history.history_version(),
+                    ) =>
+                {
+                    Some((mark.item.response_id.clone(), baseline.prompt_len))
+                }
+                StepBasis::Measured(_) | StepBasis::Replayed(_) => None,
+            })
+        };
+        PreparedStepAdmission {
+            prompt_len: prompt.input.len(),
+            previous: previous.map(|(response_id, start)| CapturedAdmission {
+                response_id,
+                admitted: admit(&prompt.input[start..]),
+            }),
+        }
+    }
+
     /// Leaves this response's step pending and seals the previous step with this request's
     /// input. The previous step is severed when the context was rewritten, the model changed
     /// or this request reported no usage.
     pub(super) async fn record_step_admission(
         self: &Arc<Self>,
         step_context: &StepContext,
-        prompt: &Prompt,
+        prompt: PreparedStepAdmission,
         response_id: &str,
         members: ResponseMembers,
         usage: Option<&TokenUsage>,
@@ -206,7 +256,7 @@ impl Session {
                     basis: StepBasis::Measured(Baseline {
                         model: model.to_string(),
                         history_version,
-                        prompt_len: prompt.input.len(),
+                        prompt_len: prompt.prompt_len,
                         output_tokens,
                     }),
                 }
@@ -234,8 +284,10 @@ impl Session {
                 StepBasis::Measured(baseline) => Some(baseline),
                 StepBasis::Replayed(_) => None,
             })
-            .filter(|(_, baseline)| baseline.extended_by(prompt, model, history_version));
-        let Some((read_tokens, baseline)) = measured else {
+            .filter(|(_, baseline)| baseline.extended_by(prompt.prompt_len, model, history_version))
+            .zip(prompt.previous)
+            .filter(|(_, captured)| captured.response_id == previous.item.response_id);
+        let Some(((read_tokens, baseline), captured)) = measured else {
             previous.item.admission = Admission::Severed;
             self.emit_step_item(
                 turn_context,
@@ -248,7 +300,7 @@ impl Session {
         let received = i128::from(read_tokens)
             - i128::from(previous.item.read_tokens)
             - i128::from(baseline.output_tokens);
-        let admitted = admit(&prompt.input[baseline.prompt_len..]);
+        let admitted = captured.admitted;
         let session = Arc::clone(self);
         let turn_context = Arc::clone(turn_context);
         // Tokenizing large or pathological text must not hold up the turn.
@@ -275,7 +327,7 @@ impl Session {
             };
             let start = match &mark.basis {
                 StepBasis::Measured(baseline)
-                    if baseline.extended_by(prompt, model, history_version) =>
+                    if baseline.extended_by(prompt.input.len(), model, history_version) =>
                 {
                     Some(baseline.prompt_len)
                 }
@@ -482,12 +534,31 @@ fn admit(items: &[ResponseItem]) -> Admitted {
             }),
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
-                admitted.results.push(output.body.clone());
+                if let Some(results) = &mut admitted.results {
+                    let text = match &output.body {
+                        FunctionCallOutputBody::Text(text) => Some(vec![text.clone()]),
+                        FunctionCallOutputBody::ContentItems(items) => items
+                            .iter()
+                            .map(|item| match item {
+                                FunctionCallOutputContentItem::InputText { text } => {
+                                    Some(text.clone())
+                                }
+                                FunctionCallOutputContentItem::InputImage { .. }
+                                | FunctionCallOutputContentItem::InputAudio { .. }
+                                | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+                            })
+                            .collect::<Option<Vec<_>>>(),
+                    };
+                    match text {
+                        Some(text) => results.extend(text),
+                        None => admitted.results = None,
+                    }
+                }
             }
             ResponseItem::ToolSearchOutput { tools, .. } => {
-                admitted.results.push(FunctionCallOutputBody::Text(
-                    serde_json::to_string(tools).unwrap_or_default(),
-                ));
+                if let Some(results) = &mut admitted.results {
+                    results.push(serde_json::to_string(tools).unwrap_or_default());
+                }
             }
             ResponseItem::Reasoning { .. }
             | ResponseItem::FunctionCall { .. }
@@ -505,8 +576,10 @@ fn admit(items: &[ResponseItem]) -> Admitted {
 
 /// Counts the step's shares and splits what it received among them.
 fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, StepAdmissionItem) {
-    let local = std::iter::once(admitted.results.iter().try_fold(0u64, |total, body| {
-        Some(total + count_o200k_text_tokens(body)?)
+    let local = std::iter::once(admitted.results.as_ref().map(|results| {
+        results.iter().fold(0u64, |total, text| {
+            total.saturating_add(count_o200k_text(text))
+        })
     }))
     .chain(
         admitted

@@ -140,8 +140,9 @@ impl ChatWidget {
             return (false, None);
         }
         self.empty_state_animation.borrow_mut().dismiss();
-        let hold_submission =
-            self.submission_settings_pending() || self.pending_image_submission.is_some();
+        let hold_submission = self.submission_settings_pending()
+            || self.pending_image_submission.is_some()
+            || self.safety_recourse.is_some();
         #[cfg(target_os = "linux")]
         let hold_submission = hold_submission || crate::reload::worker::is_activating();
         if hold_submission {
@@ -156,6 +157,7 @@ impl ChatWidget {
                 QueuedUserMessage {
                     source,
                     history_record,
+                    prepared_images,
                     ..QueuedUserMessage::new(
                         user_message,
                         match shell_escape_policy {
@@ -462,6 +464,7 @@ impl ChatWidget {
                     },
                 );
         let op = AppCommand::user_turn(
+            "user",
             client_user_message_id.clone(),
             items,
             pending_steer_replacement,

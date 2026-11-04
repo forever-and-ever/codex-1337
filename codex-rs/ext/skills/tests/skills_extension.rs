@@ -92,6 +92,9 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 #[path = "skills_extension/presentation_dedup_tests.rs"]
 mod presentation_dedup_tests;
 
+#[path = "skills_extension/catalog_delta_tests.rs"]
+mod catalog_delta_tests;
+
 static NEXT_CODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
 const SKILLS_INTRO_WITH_ABSOLUTE_PATHS: &str = "A skill is a `SKILL.md` source of instructions. Entries give each skill's name, description, and source locator: a plain path is a `file` on the host filesystem, an `executor package` is owned by its execution environment, a `cloud package` is an opaque package identifier, and a `custom resource` uses its provider's access mechanism.";
 const DEMO_SKILL_CONTENTS: &str =
@@ -452,7 +455,10 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
     let published_snapshot = published_snapshot.unwrap();
     assert!(fragment.is_some());
     let mut expected = expected_catalog_metric_samples("host_world_state", /*count*/ 1);
-    assert!(startup_metrics.samples().is_empty());
+    let expected_discovery = vec![expected_catalog_entries(
+        "executor", "complete", /*count*/ 0,
+    )];
+    assert_eq!(startup_metrics.samples(), expected_discovery);
     assert_eq!(turn_metrics.samples(), expected);
 
     let sections = prepared_world_state(
@@ -478,7 +484,7 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
             .1
             .is_none()
     );
-    assert!(startup_metrics.samples().is_empty());
+    assert_eq!(startup_metrics.samples(), expected_discovery);
     assert_eq!(turn_metrics.samples(), expected);
 
     let second_skill_path =
@@ -523,7 +529,7 @@ async fn host_world_state_records_catalog_metrics_on_publish_and_change() -> Tes
         "host_world_state",
         /*count*/ 2,
     ));
-    assert!(startup_metrics.samples().is_empty());
+    assert_eq!(startup_metrics.samples(), expected_discovery);
     assert_eq!(turn_metrics.samples(), expected);
 
     Ok(())
@@ -3208,6 +3214,17 @@ impl ExtensionMetrics for RecordingMetrics {
     }
 }
 
+fn expected_catalog_entries(stage: &str, status: &str, count: i64) -> RecordedHistogram {
+    RecordedHistogram {
+        name: "codex.skills.catalog.entries".to_string(),
+        value: count,
+        tags: vec![
+            ("stage".to_string(), stage.to_string()),
+            ("status".to_string(), status.to_string()),
+        ],
+    }
+}
+
 fn expected_catalog_metric_samples(catalog_surface: &str, count: i64) -> Vec<RecordedHistogram> {
     let tags = vec![("catalog_surface".to_string(), catalog_surface.to_string())];
     vec![
@@ -3297,6 +3314,8 @@ fn test_entry(
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TestConfig {
     include_instructions: bool,
+    catalog_deltas_enabled: bool,
+    omit_descriptions: bool,
     bundled_skills_enabled: bool,
     cloud_skill_enabled: bool,
     shadow_selection_enabled: bool,
@@ -3305,6 +3324,8 @@ struct TestConfig {
 fn default_config() -> TestConfig {
     TestConfig {
         include_instructions: true,
+        catalog_deltas_enabled: false,
+        omit_descriptions: false,
         bundled_skills_enabled: true,
         cloud_skill_enabled: true,
         shadow_selection_enabled: false,
@@ -3314,6 +3335,8 @@ fn default_config() -> TestConfig {
 fn skills_extension_config(config: &TestConfig) -> SkillsExtensionConfig {
     SkillsExtensionConfig {
         include_instructions: config.include_instructions,
+        catalog_deltas_enabled: config.catalog_deltas_enabled,
+        omit_descriptions: config.omit_descriptions,
         max_context_tokens: None,
         bundled_skills_enabled: config.bundled_skills_enabled,
         cloud_skill_enabled: config.cloud_skill_enabled,

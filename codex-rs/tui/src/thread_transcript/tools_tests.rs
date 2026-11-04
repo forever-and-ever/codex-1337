@@ -10,8 +10,8 @@ use codex_utils_path_uri::LegacyAppPathString;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-fn command_item(status: CommandExecutionStatus) -> ThreadItem {
-    ThreadItem::CommandExecution {
+fn command_item(status: CommandExecutionStatus) -> ThreadItemPayload {
+    ThreadItemPayload::CommandExecution {
         id: "command".to_string(),
         plugin_id: None,
         script_path: None,
@@ -36,8 +36,8 @@ fn command_item(status: CommandExecutionStatus) -> ThreadItem {
     }
 }
 
-fn mcp_item(server: &str, id: &str) -> ThreadItem {
-    ThreadItem::McpToolCall {
+fn mcp_item(server: &str, id: &str) -> ThreadItemPayload {
+    ThreadItemPayload::McpToolCall {
         id: id.to_string(),
         server: server.to_string(),
         tool: "js".to_string(),
@@ -102,7 +102,7 @@ fn completed_tools_keep_compact_and_detailed_presentations() {
 fn failed_commands_keep_failure_when_exit_code_is_missing_or_zero() {
     for exit in [None, Some(0)] {
         let mut item = command_item(CommandExecutionStatus::Failed);
-        if let ThreadItem::CommandExecution { exit_code, .. } = &mut item {
+        if let ThreadItemPayload::CommandExecution { exit_code, .. } = &mut item {
             *exit_code = exit;
         }
         let command = CommandHistory::from_item(item).unwrap();
@@ -114,12 +114,12 @@ fn failed_commands_keep_failure_when_exit_code_is_missing_or_zero() {
 fn incomplete_tool_payloads_preserve_last_known_status_and_output() {
     let command = command_item(CommandExecutionStatus::InProgress);
     let mut mcp = mcp_item("example", "pending");
-    if let ThreadItem::McpToolCall { status, result, .. } = &mut mcp {
+    if let ThreadItemPayload::McpToolCall { status, result, .. } = &mut mcp {
         *status = McpToolCallStatus::InProgress;
         *result = None;
     }
     let mut missing_result = mcp_item("example", "completed");
-    if let ThreadItem::McpToolCall { result, .. } = &mut missing_result {
+    if let ThreadItemPayload::McpToolCall { result, .. } = &mut missing_result {
         *result = None;
     }
     let cwd = test_path_buf("/workspace").abs();
@@ -144,7 +144,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
     let cwd = test_path_buf("/workspace").abs();
     let exploration = |call_id: &str| {
         let mut item = command_item(CommandExecutionStatus::Completed);
-        if let ThreadItem::CommandExecution {
+        if let ThreadItemPayload::CommandExecution {
             id,
             command,
             command_actions,
@@ -207,7 +207,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
         ),
     ] {
         let mut item = command_item(status);
-        if let ThreadItem::CommandExecution {
+        if let ThreadItemPayload::CommandExecution {
             source: item_source,
             command,
             aggregated_output,
@@ -257,7 +257,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
 #[test]
 fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
     let cwd = test_path_buf("/workspace").abs();
-    let agent_call = |id: &str, tool, status| ThreadItem::CollabAgentToolCall {
+    let agent_call = |id: &str, tool, status| ThreadItemPayload::CollabAgentToolCall {
         id: id.to_owned(),
         tool,
         status,
@@ -372,7 +372,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
         .zip(headings)
         {
             let mut item = agent_call("agent-call", tool.clone(), status);
-            if let ThreadItem::CollabAgentToolCall { agents_states, .. } = &mut item {
+            if let ThreadItemPayload::CollabAgentToolCall { agents_states, .. } = &mut item {
                 agents_states.insert(
                     "00000000-0000-0000-0000-000000000002".into(),
                     codex_app_server_protocol::CollabAgentState {
@@ -399,7 +399,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
                     .to_string()
                     .starts_with(&format!("• {heading} "))
             );
-            if let ThreadItem::CollabAgentToolCall {
+            if let ThreadItemPayload::CollabAgentToolCall {
                 receiver_thread_ids,
                 ..
             } = &mut item
@@ -448,7 +448,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
             CollabAgentTool::ResumeAgent,
             CollabAgentToolCallStatus::InProgress,
         );
-        let capture = ThreadItem::FunctionCallOutput {
+        let capture = ThreadItemPayload::FunctionCallOutput {
             id: "resume-result".into(),
             call_id: Some("resume-p".into()),
             name: "resume_agent".into(),

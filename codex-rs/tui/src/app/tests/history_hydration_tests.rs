@@ -165,7 +165,7 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
             .turns
             .iter()
             .flat_map(|turn| &turn.items)
-            .map(ThreadItem::id)
+            .map(codex_app_server_protocol::ThreadItem::id)
             .collect::<Vec<_>>(),
         vec!["item-12-0"]
     );
@@ -187,7 +187,10 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
         panic!("item content");
     };
     assert_eq!(
-        items.iter().map(ThreadItem::id).collect::<Vec<_>>(),
+        items
+            .iter()
+            .map(codex_app_server_protocol::ThreadItem::id)
+            .collect::<Vec<_>>(),
         vec!["item-3-0", "item-5-0"]
     );
     assert_eq!(
@@ -195,7 +198,7 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
             .turns
             .iter()
             .flat_map(|turn| &turn.items)
-            .map(ThreadItem::id)
+            .map(codex_app_server_protocol::ThreadItem::id)
             .collect::<Vec<_>>(),
         vec!["item-3-0", "item-5-0", "item-12-0"]
     );

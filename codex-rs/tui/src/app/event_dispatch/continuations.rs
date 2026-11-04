@@ -62,7 +62,7 @@ impl App {
         }
     }
 
-    pub(super) fn persist_selected_model(
+    pub(in crate::app) fn persist_selected_model(
         &mut self,
         app_server: &AppServerSession,
         model: String,

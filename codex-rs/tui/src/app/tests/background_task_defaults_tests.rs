@@ -1075,3 +1075,120 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
     proxy.await??;
     Ok(())
 }
+
+#[tokio::test]
+async fn command_center_new_session_preserves_existing_checkout() -> Result<()> {
+    let directory = tempdir()?;
+    let source = directory.path().join("project");
+    std::fs::create_dir_all(source.join("subdir"))?;
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(["-c", "commit.gpgSign=false"])
+            .args(args)
+            .current_dir(&source)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-b", "main"]);
+    std::fs::write(source.join("subdir/file"), "default branch")?;
+    git(&["add", "."]);
+    git(&["commit", "-m", "default"]);
+
+    git(&["checkout", "-b", "feature"]);
+    std::fs::write(source.join("subdir/file"), "feature commit")?;
+    git(&["commit", "-am", "feature"]);
+
+    let home = directory.path().join("home");
+    std::fs::create_dir(&home)?;
+    std::fs::write(
+        home.join("config.toml"),
+        format!(
+            "approvals_reviewer = \"auto_review\"\nsandbox_mode = \"workspace-write\"\napproval_policy = \"on-request\"\nwindows.sandbox = \"unelevated\"\n[projects.{:?}]\ntrust_level = \"trusted\"\n",
+            codex_config::loader::project_trust_key(&source),
+        ),
+    )?;
+    let checkout = directory.path().join("checkout");
+    git(&[
+        "worktree",
+        "add",
+        "--detach",
+        checkout.to_str().unwrap(),
+        "feature",
+    ]);
+    let selected = checkout.join("subdir");
+    std::fs::write(selected.join("file"), "dirty edit")?;
+    std::fs::write(selected.join("untracked"), "untracked")?;
+    let (mut app, mut events, _) = make_test_app_with_channels().await;
+    app.config.codex_home = home.clone().abs();
+    app.config.cwd = selected.clone().abs();
+    app.chat_widget.windows_sandbox_local_server = cfg!(target_os = "windows");
+    app.harness_overrides.cwd = Some(selected.clone());
+    trust_launch_folder(&mut app);
+    let (mut server, requests, proxy) = start_recording_app_server_with_history(
+        &app.config,
+        HistoryCapabilities::Current,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+        crate::app_server_session::ThreadParamsMode::Embedded,
+        LoaderOverrides::default(),
+    )
+    .await?;
+    let mut tui = make_test_tui()?;
+    tui.pause_events();
+    let new_session =
+        app.new_agents_overview_session(&mut tui, &mut server, Some(selected.clone().abs()));
+    let size = std::mem::size_of_val(&new_session);
+    assert!(
+        size < 64 * 1024,
+        "new-session wrapper future is {size} bytes"
+    );
+    new_session.await?;
+    let first = app.chat_widget.thread_id().expect("new checkout session");
+    assert!(!crate::session_resume::cwds_differ(
+        app.chat_widget.config_ref().cwd.as_path(),
+        &selected
+    ));
+    // Exercise the menu's ordered events, not the separate profile-selection API.
+    app.chat_widget
+        .set_feature_enabled(Feature::GuardianApproval, /*enabled*/ true);
+    Box::pin(app.handle_event(&mut tui, &mut server, AppEvent::OpenPermissionsPopup)).await?;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while let Some(event) = events.recv().await {
+            let loaded = matches!(&event, AppEvent::PermissionProfilesLoaded { .. });
+            Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+            if loaded {
+                return Ok::<_, color_eyre::Report>(());
+            }
+        }
+        color_eyre::eyre::bail!("permissions menu event stream closed")
+    })
+    .await??;
+    app.chat_widget.handle_key_event(KeyCode::Up.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    while let Ok(event) = events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
+    confirm_permission_selection(&mut app, &mut server, first).await?;
+    assert_eq!(
+        app.chat_widget.config_ref().approvals_reviewer,
+        ApprovalsReviewer::User
+    );
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 0);
+    assert_eq!(
+        std::fs::read_to_string(selected.join("file"))?,
+        "dirty edit"
+    );
+    assert!(selected.join("untracked").exists());
+    server.shutdown().await?;
+    proxy.await??;
+    Ok(())
+}

@@ -1,7 +1,8 @@
 //! Possible ZIP compression methods.
 
 use core::fmt;
-use std::{fmt::Debug, io};
+use std::fmt::Debug;
+use std::io;
 
 use crate::format::compression::Compression;
 
@@ -636,7 +637,8 @@ impl<R: io::BufRead> Decompressor<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompressionMethod, SUPPORTED_COMPRESSION_METHODS};
+    use super::CompressionMethod;
+    use super::SUPPORTED_COMPRESSION_METHODS;
 
     #[test]
     fn from_eq_to() {

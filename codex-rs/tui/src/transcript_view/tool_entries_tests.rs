@@ -11,7 +11,7 @@ use crate::multi_agents::AgentMetadata;
 use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::agent_wait::AgentWaitCompletion;
 use codex_protocol::agent_wait::AgentWaitOutcome;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -47,7 +47,7 @@ fn completed_thought_discloses_only_readable_reasoning() {
         let readable = content.iter().any(|text| !text.trim().is_empty());
         let cells: Vec<Arc<dyn HistoryCell>> =
             vec![Arc::new(crate::history_cell::ThoughtCell::from_item(
-                ThreadItem::Thought {
+                ThreadItemPayload::Thought {
                     id: format!("thought:{label}"),
                     response_id: label.into(),
                     completed_at_ms: 1_700_000_000_000,
@@ -632,17 +632,18 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 label: "tool".into(),
                 tokens: codex_protocol::CensusCount::Counted(12),
             }];
-            let preamble = crate::history_cell::PreambleCell::from_item(ThreadItem::Preamble {
-                id: "provenance-preamble".into(),
-                response_id: "response".into(),
-                completed_at_ms: 0,
-                parts: parts.clone(),
-                sources: sources.clone(),
-                raw: None,
-                window_id: None,
-                change: None,
-                reported_input_tokens: None,
-            });
+            let preamble =
+                crate::history_cell::PreambleCell::from_item(ThreadItemPayload::Preamble {
+                    id: "provenance-preamble".into(),
+                    response_id: "response".into(),
+                    completed_at_ms: 0,
+                    parts: parts.clone(),
+                    sources: sources.clone(),
+                    raw: None,
+                    window_id: None,
+                    change: None,
+                    reported_input_tokens: None,
+                });
             let inventory =
                 crate::history_cell::PreambleCell::inventory(codex_protocol::ContextInventory {
                     parts,
@@ -781,7 +782,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             );
             assert!(tests::text(&folded).contains("Raw Context"));
             let thought = crate::history_cell::ThoughtCell::from_item(
-                ThreadItem::Thought {
+                ThreadItemPayload::Thought {
                     id: "thought-author".into(),
                     response_id: "response".into(),
                     completed_at_ms: 0,
@@ -1101,7 +1102,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             7,
         ),
     ];
-    let agent_item = |kind, id: &str| ThreadItem::SubAgentActivity {
+    let agent_item = |kind, id: &str| ThreadItemPayload::SubAgentActivity {
         id: id.into(),
         kind,
         agent_thread_id: "00000000-0000-0000-0000-000000000001".into(),
@@ -1302,7 +1303,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     insta::assert_snapshot!("empty_return_measurements", examples.join("\n\n"));
 
     // Wait wake evidence survives lifecycle revision without becoming output authority.
-    let wait_item = |status, wait_completion| ThreadItem::CollabAgentToolCall {
+    let wait_item = |status, wait_completion| ThreadItemPayload::CollabAgentToolCall {
         id: "agent-wait".into(),
         tool: CollabAgentTool::Wait,
         status,
@@ -1372,7 +1373,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         [
             interrupted.clone(),
             agent_item(SubAgentActivityKind::Interacted, "message-q"),
-            ThreadItem::FunctionCallOutput {
+            ThreadItemPayload::FunctionCallOutput {
                 id: "interrupt-result".into(),
                 call_id: Some("interrupt-p".into()),
                 name: "interrupt_agent".into(),

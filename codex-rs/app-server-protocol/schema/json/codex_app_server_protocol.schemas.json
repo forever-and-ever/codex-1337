@@ -7596,6 +7596,13 @@
                 ],
                 "title": "ChatgptAccountType",
                 "type": "string"
+              },
+              "workspaceName": {
+                "description": "Display name of the selected ChatGPT workspace, when available.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -7878,6 +7885,103 @@
         },
         "type": "object"
       },
+      "AccountSession": {
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "lastUsedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "selectedWorkspaceAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaces": {
+            "items": {
+              "$ref": "#/definitions/v2/AccountSessionWorkspace"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "isActive",
+          "lastUsedAt",
+          "sessionId",
+          "workspaces"
+        ],
+        "type": "object"
+      },
+      "AccountSessionWorkspace": {
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSessionWorkspaceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "type": "object"
+      },
+      "AccountSessionWorkspaceKind": {
+        "enum": [
+          "personal",
+          "workspace"
+        ],
+        "type": "string"
+      },
       "AccountTokenUsageDailyBucket": {
         "properties": {
           "startDate": {
@@ -7999,6 +8103,13 @@
         "properties": {
           "kind": {
             "$ref": "#/definitions/v2/AdditionalContextKind"
+          },
+          "name": {
+            "description": "Optional name for untrusted context, used to label its tool output.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "value": {
             "type": "string"
@@ -10135,6 +10246,7 @@
               "flexUnavailable",
               "serverOverloaded",
               "modelNotFound",
+              "policyCapacityUnavailable",
               "cyberPolicy",
               "misalignmentPolicyViolation",
               "tooManyDenials",
@@ -11864,6 +11976,16 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/v2/ModelsRequirements"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otel": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/OtelRequirements"
               },
               {
                 "type": "null"
@@ -15484,6 +15606,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "environmentId": {
+            "description": "The owning execution environment, if this hook came from its requirements.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "eventName": {
             "$ref": "#/definitions/v2/HookEventName"
           },
@@ -15655,7 +15784,7 @@
             "default": "unknown"
           },
           "sourcePath": {
-            "$ref": "#/definitions/v2/AbsolutePathBuf"
+            "$ref": "#/definitions/v2/LegacyAppPathString"
           },
           "startedAt": {
             "format": "int64",
@@ -15833,11 +15962,18 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
           "cwds": {
-            "description": "When empty, defaults to the current session working directory.",
+            "description": "Working directories to inspect when no thread is specified. An empty list uses the session cwd.",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "threadId": {
+            "description": "List a loaded thread's hooks, including its selected environments. Omit `cwds` in this mode.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "title": "HooksListParams",
@@ -18158,6 +18294,81 @@
         "title": "ModelProviderCapabilitiesReadResponse",
         "type": "object"
       },
+      "ModelProviderError": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Structured JSON-RPC error data. Unknown errors must retain the client's normal fallback.",
+        "oneOf": [
+          {
+            "properties": {
+              "currentModelProvider": {
+                "type": "string"
+              },
+              "modelProvider": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "modelProviderMismatch"
+                ],
+                "title": "ModelProviderMismatchv2::ModelProviderErrorType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "currentModelProvider",
+              "modelProvider",
+              "type"
+            ],
+            "title": "ModelProviderMismatchv2::ModelProviderError",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "modelProvider": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "modelProviderNotConfigured"
+                ],
+                "title": "ModelProviderNotConfiguredv2::ModelProviderErrorType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "modelProvider",
+              "type"
+            ],
+            "title": "ModelProviderNotConfiguredv2::ModelProviderError",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "modelProvider": {
+                "type": "string"
+              },
+              "requiredModelProvider": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "modelProviderPolicyConflict"
+                ],
+                "title": "ModelProviderPolicyConflictv2::ModelProviderErrorType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "modelProvider",
+              "requiredModelProvider",
+              "type"
+            ],
+            "title": "ModelProviderPolicyConflictv2::ModelProviderError",
+            "type": "object"
+          }
+        ],
+        "title": "ModelProviderError"
+      },
       "ModelProviderOption": {
         "properties": {
           "id": {
@@ -18474,7 +18685,7 @@
             "additionalProperties": {
               "$ref": "#/definitions/v2/NetworkDomainPermission"
             },
-            "description": "Canonical network permission map for `experimental_network`.",
+            "description": "Canonical managed network permission map.",
             "type": [
               "object",
               "null"
@@ -18523,7 +18734,7 @@
             "additionalProperties": {
               "$ref": "#/definitions/v2/NetworkUnixSocketPermission"
             },
-            "description": "Canonical unix socket permission map for `experimental_network`.",
+            "description": "Canonical managed unix socket permission map.",
             "type": [
               "object",
               "null"
@@ -19061,6 +19272,232 @@
           "daily",
           "monthly",
           "weekly"
+        ],
+        "type": "object"
+      },
+      "OtelExporter": {
+        "oneOf": [
+          {
+            "enum": [
+              "none",
+              "statsig"
+            ],
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "otlp-http": {
+                "properties": {
+                  "endpoint": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Header names are retained; values are redacted by the server.",
+                    "type": "object"
+                  },
+                  "protocol": {
+                    "$ref": "#/definitions/v2/OtelHttpProtocol"
+                  },
+                  "tls": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/definitions/v2/OtelTlsConfig"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "endpoint",
+                  "headers",
+                  "protocol"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "otlp-http"
+            ],
+            "title": "OtlpHttpOtelExporter",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "otlp-grpc": {
+                "properties": {
+                  "endpoint": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Header names are retained; values are redacted by the server.",
+                    "type": "object"
+                  },
+                  "tls": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/definitions/v2/OtelTlsConfig"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "endpoint",
+                  "headers"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "otlp-grpc"
+            ],
+            "title": "OtlpGrpcOtelExporter",
+            "type": "object"
+          }
+        ]
+      },
+      "OtelHttpProtocol": {
+        "enum": [
+          "binary",
+          "json"
+        ],
+        "type": "string"
+      },
+      "OtelRequirements": {
+        "properties": {
+          "environment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exporter": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/OtelExporter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "log_agent_responses": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "log_guardian_assessments": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "log_user_prompt": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "metrics_exporter": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/OtelExporter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "span_attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "tool_result": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/OtelToolResultLogConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trace_exporter": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/OtelExporter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tracestate": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "OtelTlsConfig": {
+        "properties": {
+          "ca-certificate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client-certificate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client-private-key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "OtelToolResultLogConfig": {
+        "properties": {
+          "max_bytes": {
+            "format": "uint",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_bytes"
         ],
         "type": "object"
       },
@@ -20727,6 +21164,13 @@
             "description": "Process exit code.",
             "format": "int32",
             "type": "integer"
+          },
+          "outputDrainTimedOut": {
+            "description": "Whether output collection hit its post-exit deadline before seeing EOF or reaching the requested byte cap on either stream. Older servers omit this field.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "processHandle": {
             "description": "Client-supplied, connection-scoped `processHandle` from `process/spawn`.",
@@ -23163,8 +23607,7 @@
       },
       "ReviewDelivery": {
         "enum": [
-          "inline",
-          "detached"
+          "inline"
         ],
         "type": "string"
       },
@@ -23181,7 +23624,7 @@
               }
             ],
             "default": null,
-            "description": "Where to run the review: inline (default) on the current thread or detached on a new thread (returned in `reviewThreadId`). Detached delivery is deprecated and emits `deprecationNotice`. Use `thread/start` followed by an inline review for a separate review thread."
+            "description": "Reviews run inline on the supplied thread. Omit this field or pass `inline`. To review on a separate thread, start a thread first and use its id."
           },
           "target": {
             "$ref": "#/definitions/v2/ReviewTarget"
@@ -23201,7 +23644,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
           "reviewThreadId": {
-            "description": "Identifies the thread where the review runs.\n\nFor inline reviews, this is the original thread id. For detached reviews, this is the id of the new review thread.",
+            "description": "The thread id supplied to `review/start`.",
             "type": "string"
           },
           "turn": {
@@ -26067,6 +26510,7 @@
         "type": "object"
       },
       "ThreadItem": {
+        "description": "A thread item and its recorded lifecycle times. The payload stays flat on the wire.",
         "oneOf": [
           {
             "description": "One ownership layer around an unchanged human-transcript payload.",
@@ -26075,7 +26519,7 @@
                 "$ref": "#/definitions/v2/CodeModeOwner"
               },
               "payload": {
-                "$ref": "#/definitions/v2/ThreadItem"
+                "$ref": "#/definitions/v2/ThreadItemPayload"
               },
               "type": {
                 "enum": [
@@ -27279,6 +27723,14 @@
                 ],
                 "default": null
               },
+              "generationId": {
+                "default": null,
+                "description": "Image generation identifier for the generated image, when provided by the image backend.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "id": {
                 "type": "string"
               },
@@ -27399,7 +27851,28 @@
             "title": "ContextCompactionThreadItem",
             "type": "object"
           }
-        ]
+        ],
+        "properties": {
+          "completedAtMs": {
+            "default": null,
+            "description": "Unix timestamp in milliseconds when the item completed, if recorded.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startedAtMs": {
+            "default": null,
+            "description": "Unix timestamp in milliseconds when the item started, if recorded.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "ThreadItemEntry": {
         "properties": {
@@ -27432,6 +27905,1349 @@
           "turnId"
         ],
         "type": "object"
+      },
+      "ThreadItemPayload": {
+        "oneOf": [
+          {
+            "description": "One ownership layer around an unchanged human-transcript payload.",
+            "properties": {
+              "owner": {
+                "$ref": "#/definitions/v2/CodeModeOwner"
+              },
+              "payload": {
+                "$ref": "#/definitions/v2/ThreadItemPayload"
+              },
+              "type": {
+                "enum": [
+                  "codeModeOwned"
+                ],
+                "title": "CodeModeOwnedThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "owner",
+              "payload",
+              "type"
+            ],
+            "title": "CodeModeOwnedThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "cellId": {
+                "description": "Full runtime identity, including its session generation.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "event": {
+                "$ref": "#/definitions/v2/CodeModeEvent"
+              },
+              "execCallId": {
+                "description": "Original exec invocation: durable within the thread even if a runtime restarts.",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "codeMode"
+                ],
+                "title": "CodeModeThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "createdAt",
+              "event",
+              "execCallId",
+              "id",
+              "type"
+            ],
+            "title": "CodeModeThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "callId": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "$ref": "#/definitions/v2/ToolName"
+              },
+              "payload": {
+                "$ref": "#/definitions/v2/ToolInputPayload"
+              },
+              "type": {
+                "enum": [
+                  "toolInput"
+                ],
+                "title": "ToolInputThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "callId",
+              "id",
+              "name",
+              "payload",
+              "type"
+            ],
+            "title": "ToolInputThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Human-only bill of one model request and what its step admitted, not model input.",
+            "properties": {
+              "admission": {
+                "$ref": "#/definitions/v2/Admission"
+              },
+              "callIds": {
+                "description": "The calls the response made, in order; the step admits their results.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "completedAtMs": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "messageIds": {
+                "default": [],
+                "description": "The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "outputTokens": {
+                "description": "Provider-reported output, less any reported reasoning.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "readTokens": {
+                "description": "Provider-reported input the request read, cached or not.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "responseId": {
+                "type": "string"
+              },
+              "thinkingTokens": {
+                "description": "Provider-reported reasoning, when the provider breaks it out of the output.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "stepAdmission"
+                ],
+                "title": "StepAdmissionThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "admission",
+              "callIds",
+              "completedAtMs",
+              "id",
+              "outputTokens",
+              "readTokens",
+              "responseId",
+              "type"
+            ],
+            "title": "StepAdmissionThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Human-only announcement of context a step admitted after its results.",
+            "properties": {
+              "announcedAtMs": {
+                "description": "When the request that reads it was dispatched.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "$ref": "#/definitions/v2/ArrivalKind"
+              },
+              "label": {
+                "type": "string"
+              },
+              "placement": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/ArrivalPlacement"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "responseId": {
+                "description": "The response whose step admits it.",
+                "type": "string"
+              },
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/v2/ArrivalSource"
+                  }
+                ],
+                "default": {
+                  "kind": "legacy"
+                }
+              },
+              "text": {
+                "description": "Legacy flattened text, without captured block boundaries or provenance.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "arrival"
+                ],
+                "title": "ArrivalThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "announcedAtMs",
+              "id",
+              "kind",
+              "label",
+              "responseId",
+              "type"
+            ],
+            "title": "ArrivalThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "clientId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "content": {
+                "items": {
+                  "$ref": "#/definitions/v2/UserInput"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "sourceResponseItemId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "userMessage"
+                ],
+                "title": "UserMessageThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "id",
+              "type"
+            ],
+            "title": "UserMessageThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "fragments": {
+                "items": {
+                  "$ref": "#/definitions/v2/HookPromptFragment"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "hookPrompt"
+                ],
+                "title": "HookPromptThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "fragments",
+              "id",
+              "type"
+            ],
+            "title": "HookPromptThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "delivery": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/AgentMessageDelivery"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "id": {
+                "type": "string"
+              },
+              "memoryCitation": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/MemoryCitation"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "phase": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/MessagePhase"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "questions": {
+                "default": null,
+                "items": {
+                  "$ref": "#/definitions/v2/AsyncUserInputQuestion"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "agentMessage"
+                ],
+                "title": "AgentMessageThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "type"
+            ],
+            "title": "AgentMessageThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "callId": {
+                "default": null,
+                "description": "Enclosing invocation; absent in older persisted history.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "output": {
+                "$ref": "#/definitions/v2/FunctionCallOutputBody"
+              },
+              "type": {
+                "enum": [
+                  "functionCallOutput"
+                ],
+                "title": "FunctionCallOutputThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "output",
+              "type"
+            ],
+            "title": "FunctionCallOutputThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Measurement metadata, not another tool call or model-context item.",
+            "properties": {
+              "callId": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Approximate text tokens after truncation, measured with local o200k_base.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "toolOutputTokens"
+                ],
+                "title": "ToolOutputTokensThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "callId",
+              "id",
+              "type"
+            ],
+            "title": "ToolOutputTokensThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "EXPERIMENTAL - proposed plan item content. The completed plan item is authoritative and may not match the concatenation of `PlanDelta` text.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "plan"
+                ],
+                "title": "PlanThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "type"
+            ],
+            "title": "PlanThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "content": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "summary": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "reasoning"
+                ],
+                "title": "ReasoningThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "title": "ReasoningThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Human-only aggregate for one completed model response, not additional usage.",
+            "properties": {
+              "completedAtMs": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "content": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "reportedReasoningTokens": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "responseId": {
+                "type": "string"
+              },
+              "summary": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "thought"
+                ],
+                "title": "ThoughtThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "completedAtMs",
+              "content",
+              "id",
+              "responseId",
+              "summary",
+              "type"
+            ],
+            "title": "ThoughtThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Initial context of a window, recorded for inspection and never model input.",
+            "properties": {
+              "change": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/PreambleChange"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "completedAtMs": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "parts": {
+                "items": {
+                  "$ref": "#/definitions/v2/PreamblePart"
+                },
+                "type": "array"
+              },
+              "raw": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reportedInputTokens": {
+                "description": "Provider-reported input of the whole request, conversation included.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "responseId": {
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/definitions/v2/ContextSource"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "preamble"
+                ],
+                "title": "PreambleThreadItemPayloadType",
+                "type": "string"
+              },
+              "windowId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "completedAtMs",
+              "id",
+              "parts",
+              "responseId",
+              "type"
+            ],
+            "title": "PreambleThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "aggregatedOutput": {
+                "description": "The command's output, aggregated from stdout and stderr.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command": {
+                "description": "The command to be executed.",
+                "type": "string"
+              },
+              "commandActions": {
+                "description": "A best-effort parsing of the command to understand the action(s) it will perform. This returns a list of CommandAction objects because a single shell command may be composed of many commands piped together.",
+                "items": {
+                  "$ref": "#/definitions/v2/CommandAction"
+                },
+                "type": "array"
+              },
+              "cwd": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/v2/LegacyAppPathString"
+                  }
+                ],
+                "description": "The command's working directory."
+              },
+              "durationMs": {
+                "description": "The duration of the command execution in milliseconds.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "exitCode": {
+                "description": "The command's exit code.",
+                "format": "int32",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "pluginId": {
+                "default": null,
+                "description": "Trusted first-party plugin id when this command resolves to one plugin script.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "processId": {
+                "description": "Identifier for the underlying PTY process (when available).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scriptPath": {
+                "default": null,
+                "description": "Safe plugin-relative path when this command resolves to one plugin script.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/v2/CommandExecutionSource"
+                  }
+                ],
+                "default": "agent"
+              },
+              "status": {
+                "$ref": "#/definitions/v2/CommandExecutionStatus"
+              },
+              "type": {
+                "enum": [
+                  "commandExecution"
+                ],
+                "title": "CommandExecutionThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "command",
+              "commandActions",
+              "cwd",
+              "id",
+              "status",
+              "type"
+            ],
+            "title": "CommandExecutionThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "changes": {
+                "items": {
+                  "$ref": "#/definitions/v2/FileUpdateChange"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/definitions/v2/PatchApplyStatus"
+              },
+              "type": {
+                "enum": [
+                  "fileChange"
+                ],
+                "title": "FileChangeThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "changes",
+              "id",
+              "status",
+              "type"
+            ],
+            "title": "FileChangeThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "appContext": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/McpToolCallAppContext"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "arguments": true,
+              "durationMs": {
+                "description": "The duration of the MCP tool call in milliseconds.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/McpToolCallError"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "mcpAppResourceUri": {
+                "description": "Legacy compatibility field; prefer `mcpAppUi.resourceUri` when available.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "mcpAppUi": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/McpAppUi"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Presentation captured from the invoked descriptor; absent in older history."
+              },
+              "pluginId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "readOnlyHint": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "result": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/McpToolCallResult"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "server": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/definitions/v2/McpToolCallStatus"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "mcpToolCall"
+                ],
+                "title": "McpToolCallThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "id",
+              "server",
+              "status",
+              "tool",
+              "type"
+            ],
+            "title": "McpToolCallThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "arguments": true,
+              "contentItems": {
+                "items": {
+                  "$ref": "#/definitions/v2/DynamicToolCallOutputContentItem"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "durationMs": {
+                "description": "The duration of the dynamic tool call in milliseconds.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "$ref": "#/definitions/v2/DynamicToolCallStatus"
+              },
+              "success": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "dynamicToolCall"
+                ],
+                "title": "DynamicToolCallThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "id",
+              "status",
+              "tool",
+              "type"
+            ],
+            "title": "DynamicToolCallThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agentsStates": {
+                "additionalProperties": {
+                  "$ref": "#/definitions/v2/CollabAgentState"
+                },
+                "description": "Last known status of the target agents, when available.",
+                "type": "object"
+              },
+              "id": {
+                "description": "Unique identifier for this collab tool call.",
+                "type": "string"
+              },
+              "model": {
+                "description": "Model requested for the spawned agent, when applicable.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "prompt": {
+                "description": "Prompt text sent as part of the collab tool call, when available.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reasoningEffort": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/ReasoningEffort"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Reasoning effort requested for the spawned agent, when applicable."
+              },
+              "receiverThreadIds": {
+                "description": "Thread ID of the receiving agent, when applicable. In case of spawn operation, this corresponds to the newly spawned agent.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "senderThreadId": {
+                "description": "Thread ID of the agent issuing the collab request.",
+                "type": "string"
+              },
+              "status": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/v2/CollabAgentToolCallStatus"
+                  }
+                ],
+                "description": "Current status of the collab tool call."
+              },
+              "tool": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/v2/CollabAgentTool"
+                  }
+                ],
+                "description": "Name of the collab tool that was invoked."
+              },
+              "type": {
+                "enum": [
+                  "collabAgentToolCall"
+                ],
+                "title": "CollabAgentToolCallThreadItemPayloadType",
+                "type": "string"
+              },
+              "waitCompletion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/AgentWaitCompletion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "agentsStates",
+              "id",
+              "receiverThreadIds",
+              "senderThreadId",
+              "status",
+              "tool",
+              "type"
+            ],
+            "title": "CollabAgentToolCallThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agentPath": {
+                "type": "string"
+              },
+              "agentThreadId": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "$ref": "#/definitions/v2/SubAgentActivityKind"
+              },
+              "messagePreview": {
+                "default": null,
+                "description": "Display-only excerpt of sent instructions, at most 512 characters.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "model": {
+                "description": "Resolved model at sub-agent creation; absent from older records and other activities.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reasoningEffort": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/ReasoningEffort"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Resolved reasoning effort at sub-agent creation, when known."
+              },
+              "type": {
+                "enum": [
+                  "subAgentActivity"
+                ],
+                "title": "SubAgentActivityThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentPath",
+              "agentThreadId",
+              "id",
+              "kind",
+              "type"
+            ],
+            "title": "SubAgentActivityThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "action": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/WebSearchAction"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "query": {
+                "type": "string"
+              },
+              "results": {
+                "default": null,
+                "description": "Structured search results returned out-of-band by standalone web search.\n\nThese stay as opaque JSON at the extension/app-server boundary so new result fields and result types can pass through without a Codex release.",
+                "items": true,
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "webSearch"
+                ],
+                "title": "WebSearchThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "query",
+              "type"
+            ],
+            "title": "WebSearchThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "path": {
+                "$ref": "#/definitions/v2/LegacyAppPathString"
+              },
+              "type": {
+                "enum": [
+                  "imageView"
+                ],
+                "title": "ImageViewThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "type"
+            ],
+            "title": "ImageViewThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "description": "Display item emitted by the interruptible `clock.sleep` tool.",
+            "properties": {
+              "durationMs": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "sleep"
+                ],
+                "title": "SleepThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "durationMs",
+              "id",
+              "type"
+            ],
+            "title": "SleepThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "fileId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fileId"
+                ],
+                "title": "FileIdThreadItemPayload",
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "result": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "result"
+                ],
+                "title": "ResultThreadItemPayload",
+                "type": "object"
+              }
+            ],
+            "description": "Either inline generated-image data or its durable attachment-store identity.\n\n`File` must remain first so rollouts written during the migration, which contain both an empty `result` and a `fileId`, retain the file reference when deserialized.",
+            "properties": {
+              "failure": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/ImageGenerationFailure"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "generationId": {
+                "default": null,
+                "description": "Image generation identifier for the generated image, when provided by the image backend.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "inputImages": {
+                "description": "Observed local inputs for a completed generation, absent on older items.",
+                "items": {
+                  "$ref": "#/definitions/v2/ImageGenerationInputImage"
+                },
+                "type": "array"
+              },
+              "revisedPrompt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "savedPath": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/v2/AbsolutePathBuf"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string"
+              },
+              "transparentBackground": {
+                "default": null,
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "imageGeneration"
+                ],
+                "title": "ImageGenerationThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "type"
+            ],
+            "title": "ImageGenerationThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "review": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "enteredReviewMode"
+                ],
+                "title": "EnteredReviewModeThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "review",
+              "type"
+            ],
+            "title": "EnteredReviewModeThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "review": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "exitedReviewMode"
+                ],
+                "title": "ExitedReviewModeThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "review",
+              "type"
+            ],
+            "title": "ExitedReviewModeThreadItemPayload",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "contextCompaction"
+                ],
+                "title": "ContextCompactionThreadItemPayloadType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "title": "ContextCompactionThreadItemPayload",
+            "type": "object"
+          }
+        ]
       },
       "ThreadItemsListAnchor": {
         "description": "An exclusive item position within the requested visible turn.",
@@ -30399,6 +32215,14 @@
               "$ref": "#/definitions/v2/ThreadUsageBreakdownGroup"
             },
             "type": "array"
+          },
+          "nativeUsageUsdMicros": {
+            "description": "Native dollar usage, independent of credit estimates. None means unknown, not zero.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "threadId": {
             "type": "string"

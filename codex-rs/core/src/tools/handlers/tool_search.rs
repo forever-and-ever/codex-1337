@@ -15,7 +15,6 @@ use bm25::Embedder;
 use bm25::EmbedderBuilder;
 use bm25::Language;
 use bm25::Scorer;
-use codex_features::Feature;
 use codex_prompts::ResolvedModelMessages;
 use codex_tools::IndirectNamespacePrefixes;
 use codex_tools::JsonToolOutput;
@@ -255,11 +254,6 @@ impl ToolSearchHandler {
                 query,
                 limit.min(20),
                 &step_context.tool_router,
-                step_context
-                    .turn
-                    .config
-                    .features
-                    .enabled(Feature::CodeModeToolDescriptionFirst),
                 &indirect_prefixes,
             );
             return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
@@ -286,7 +280,7 @@ impl ToolSearchHandler {
         query: &str,
         limit: usize,
         router: &ToolRouter,
-        tool_description_first: bool,
+
         indirect_prefixes: &IndirectNamespacePrefixes<'_>,
     ) -> Vec<CodeModeSearchResult> {
         let mut tools = Vec::new();
@@ -313,7 +307,6 @@ impl ToolSearchHandler {
                 let definitions = prepare_code_mode_tool_definitions(
                     tool.cached_runtime().map(Arc::as_ref),
                     || Cow::Owned(Arc::unwrap_or_clone(tool.spec())),
-                    tool_description_first,
                 );
                 let Some(definition) = definitions.iter().find(|definition| {
                     definition.tool_name.clone().with_default_namespace() == candidate_name

@@ -49,6 +49,7 @@ pub(super) fn spawn_startup_thread_start(
 pub(super) struct FreshStartupDefaults {
     pub(super) server_defaults_read: bool,
     pub(super) prompt_windows_sandbox: bool,
+    pub(super) approval_policy: Option<codex_protocol::protocol::AskForApproval>,
 }
 
 pub(super) async fn prepare_fresh_startup_config(
@@ -70,7 +71,7 @@ pub(super) async fn prepare_fresh_startup_config(
         defaults_cwd,
     )
     .await?;
-    let mut prompt_windows_sandbox = false;
+    let mut projectless = crate::projectless::AppliedDefaults::default();
     if let Some(defaults) = defaults.as_ref() {
         super::new_session::overlay_new_session_defaults(
             config,
@@ -78,7 +79,7 @@ pub(super) async fn prepare_fresh_startup_config(
             cli_kv_overrides,
             harness_overrides,
         );
-        prompt_windows_sandbox = crate::projectless::apply_defaults(
+        projectless = crate::projectless::apply_defaults(
             config,
             harness_overrides,
             app_server,
@@ -94,7 +95,8 @@ pub(super) async fn prepare_fresh_startup_config(
     );
     Ok(FreshStartupDefaults {
         server_defaults_read: defaults.is_some(),
-        prompt_windows_sandbox,
+        prompt_windows_sandbox: projectless.prompt_windows_sandbox,
+        approval_policy: projectless.approval_policy,
     })
 }
 
@@ -418,6 +420,10 @@ impl App {
                 }
             },
         };
+        launch_choices.apply_projectless_approval_policy(
+            startup_defaults.approval_policy,
+            bootstrap.allowed_approval_policies.as_deref(),
+        );
         tracing::debug!(
             has_platform_family = app_server.app_server_platform_family().is_some(),
             has_platform_os = app_server.app_server_platform_os().is_some(),
@@ -904,10 +910,7 @@ impl App {
         }
         chat_widget.remote_connection = remote_connection;
         chat_widget.snapshot_local_images = app_server_target.uses_remote_workspace();
-        chat_widget.set_agents_navigation_enabled(matches!(
-            app_server_target,
-            AppServerTarget::LocalDaemon { .. }
-        ));
+        chat_widget.set_command_center_enabled(app_server_target.supports_command_center());
         let thread_and_widget_ms = thread_and_widget_started_at.elapsed().as_millis();
         chat_widget.windows_sandbox_local_server = !app_server_target.uses_remote_workspace()
             && app_server.app_server_platform_os() == Some("windows");
@@ -925,6 +928,14 @@ impl App {
             app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::StartupWarningsCell::new(vec![warning]),
             )));
+        }
+        // Automatic NFS detection is Linux-only; manual migration supports Unix.
+        #[cfg(target_os = "linux")]
+        if !app_server_target.uses_remote_workspace() {
+            tokio::spawn(startup_warnings::warn_about_nfs_migration(
+                config.sqlite_config().clone(),
+                app_event_tx.clone(),
+            ));
         }
         let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
         let runtime_keymap =
@@ -1090,7 +1101,7 @@ See the Codex keymap documentation for supported actions and examples."
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
-        } else if !matches!(app.app_server_target, AppServerTarget::Embedded) {
+        } else if app.app_server_target.supports_command_center() {
             app.refresh_agents_overview_threads(&app_server);
         }
         if let Some(entry) = startup_hooks_browser {
@@ -1306,6 +1317,8 @@ See the Codex keymap documentation for supported actions and examples."
             }),
             None => exit_reason_result,
         };
+        // Let the pending terminal poll unwind while the app server shuts down.
+        tui.pause_events();
         app.chat_widget.mention_usage_mut().flush().await;
         if let Err(err) = backends.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");

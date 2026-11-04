@@ -9,7 +9,8 @@ use crate::datetime::DateTime;
 use crate::extra_fields::CustomExtraField;
 use crate::format::ffi;
 use crate::format::system::System;
-use crate::result::{ZipResult, invalid};
+use crate::result::ZipResult;
+use crate::result::invalid;
 use crate::zipcrypto::ZipCryptoKeys;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

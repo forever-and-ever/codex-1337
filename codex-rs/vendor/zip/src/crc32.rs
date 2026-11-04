@@ -1,6 +1,7 @@
 //! Helper module to compute a CRC32 checksum
 
-use std::io::{self, Read};
+use std::io::Read;
+use std::io::{self};
 
 use crc32fast::Hasher;
 

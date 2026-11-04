@@ -46,7 +46,8 @@ impl ChatWidget {
                 display.text_elements,
                 display.local_images,
                 display.remote_image_urls,
-            );
+            )
+            .with_async_replies(display.replies, self.config.cwd.as_path());
             cell.prompt_identity = identity;
             cell.timestamp = timestamp;
             self.add_to_history(cell);

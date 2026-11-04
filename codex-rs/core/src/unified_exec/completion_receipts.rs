@@ -12,9 +12,10 @@ use super::UnifiedExecError;
 use super::UnifiedExecProcess;
 use super::UnifiedExecProcessManager;
 use super::WriteStdinRequest;
-use super::format_output_omission_marker;
+use super::output::CapturedStream;
 use crate::session::session::Session;
 use crate::tools::context::ExecCommandToolOutput;
+use codex_utils_head_tail_buffer::format_output_omission_marker;
 use codex_utils_output_truncation::approx_tokens_from_byte_count;
 
 const MAX_RECEIPTS: usize = 64;
@@ -92,16 +93,19 @@ impl CompletionReceipts {
         Some(ExecCommandToolOutput {
             event_call_id: receipt.call_id.clone(),
             chunk_id: receipt.chunk_id.clone(),
-            raw_output: output,
+            raw_output: CapturedStream {
+                text: String::from_utf8_lossy(&output).into_owned(),
+                omitted_bytes: receipt.omitted_bytes.map_or(0, NonZeroUsize::get),
+            },
             process_id: None,
             exit_code: receipt.exit_code,
             wall_time: Duration::ZERO,
             original_token_count: Some(receipt.original_token_count),
-            output_omitted_bytes: receipt.omitted_bytes,
             truncation_policy: request.truncation_policy,
             max_output_tokens: request.max_output_tokens,
             // Re-observation is not another command completion or hook execution.
             hook_context: None,
+            tool_cwd: None,
         })
     }
 }

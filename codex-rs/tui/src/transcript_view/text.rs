@@ -57,7 +57,7 @@ use logical::logical_lines;
 use ratatui::text::Line;
 
 /// One cell's logical text and its width-dependent display rows.
-pub(super) struct TextLayout {
+pub(crate) struct TextLayout {
     logical: Vec<LogicalLine>,
     text: String,
     rows: Vec<TextRow>,
@@ -217,7 +217,7 @@ impl TextLayout {
         ranges
     }
 
-    pub(super) fn new(lines: Vec<HyperlinkLine>, width: u16) -> Self {
+    pub(crate) fn new(lines: Vec<HyperlinkLine>, width: u16) -> Self {
         let logical = logical_lines(&lines);
         Self::from_logical(logical, width, false)
     }
@@ -237,6 +237,30 @@ impl TextLayout {
             .map(|line| line.origin.range.len() + 1)
             .sum::<usize>()
             .saturating_sub(usize::from(self.logical.len() == header_lines))
+    }
+
+    /// Freeze the exact painted rows of a plain-text viewport, including tab stops.
+    /// Trim the selectable source so word and keyboard selection stay inside the viewport.
+    pub(crate) fn visible_plaintext(mut self, start: usize, height: u16) -> Self {
+        if start == 0 && self.rows.len() <= usize::from(height) {
+            return self;
+        }
+        self.rows.truncate(start + usize::from(height));
+        self.rows.drain(..start.min(self.rows.len()));
+        let from = self.rows.first().map_or(0, |row| row.source.start);
+        let to = self.rows.last().map_or(from, |row| row.source.end);
+        self.text = self.text[from..to].to_owned();
+        let lines = self
+            .text
+            .split('\n')
+            .map(|line| line.to_owned().into())
+            .collect::<Vec<_>>();
+        self.logical = logical_lines(&lines);
+        for row in &mut self.rows {
+            row.source = row.source.start - from..row.source.end - from;
+            row.line_end = row.line_end.map(|end| end.min(to) - from);
+        }
+        self
     }
 
     /// Reflow the same displayed content revision, retaining styles, links and disclosure label.
@@ -441,7 +465,7 @@ impl TextLayout {
         &self.text
     }
 
-    pub(super) fn row_count(&self) -> usize {
+    pub(crate) fn row_count(&self) -> usize {
         self.rows.len()
     }
 
@@ -479,7 +503,7 @@ impl TextLayout {
     }
 
     /// Paint visible rows, including inherited styles on empty rows and trailing columns.
-    pub(super) fn render(&self, area: Rect, buf: &mut Buffer, start_row: usize) {
+    pub(crate) fn render(&self, area: Rect, buf: &mut Buffer, start_row: usize) {
         for (screen_row, row) in self.visible_rows(area, start_row) {
             let mut row_area =
                 Rect::new(area.x, area.y + screen_row, area.width, /*height*/ 1);

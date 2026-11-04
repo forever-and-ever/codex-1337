@@ -1,6 +1,8 @@
 //! Pagination boundaries preserve grouped item rendering and attach completion metadata once.
 
 use super::*;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::TurnItemsView;
 use pretty_assertions::assert_eq;
 
@@ -10,12 +12,13 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
         root_turn_id: None,
         items: item_ids
             .iter()
-            .map(|id| ThreadItem::UserMessage {
+            .map(|id| ThreadItemPayload::UserMessage {
                 source_response_item_id: None,
                 id: id.to_string(),
                 client_id: None,
                 content: Vec::new(),
             })
+            .map(ThreadItem::untimed)
             .collect(),
         items_view: TurnItemsView::Summary,
         status,
@@ -49,12 +52,40 @@ fn multiple_turns_keep_item_groups_and_completion_order() {
         turn("first", TurnStatus::Completed, &["a", "b"]),
         turn("second", TurnStatus::Completed, &["c", "d"]),
     ];
-    let items = turns.iter().flat_map(|turn| turn.items.clone()).collect();
+    let items = turns
+        .iter()
+        .flat_map(|turn| turn.items.iter())
+        .cloned()
+        .collect();
     assert_eq!(
         group_turn_items(items, &turns),
         vec![
             (turns[0].items.clone(), Some(&turns[0])),
             (turns[1].items.clone(), Some(&turns[1])),
         ],
+    );
+}
+
+#[test]
+fn unsuccessful_and_running_turns_separate_groups_without_completion_metadata() {
+    let turns = vec![
+        turn("failed", TurnStatus::Failed, &["a"]),
+        turn("interrupted", TurnStatus::Interrupted, &["b"]),
+        turn("running", TurnStatus::InProgress, &["c"]),
+    ];
+    let items = turns
+        .iter()
+        .flat_map(|turn| turn.items.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        group_turn_items(items, &turns),
+        turns
+            .iter()
+            .map(|turn| (
+                turn.items.clone(),
+                (turn.status == TurnStatus::Failed).then_some(turn)
+            ))
+            .collect::<Vec<_>>(),
     );
 }

@@ -214,7 +214,8 @@ impl App {
         let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
         let defaults_cwd = match server.thread_params_mode() {
             crate::app_server_session::ThreadParamsMode::Embedded => cwd.clone(),
-            crate::app_server_session::ThreadParamsMode::Remote => server
+            crate::app_server_session::ThreadParamsMode::Remote
+            | crate::app_server_session::ThreadParamsMode::Cloud => server
                 .remote_cwd_override()
                 .unwrap_or(Path::new("."))
                 .to_path_buf(),

@@ -16,7 +16,7 @@ use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::items::UserMessageItem;
@@ -39,13 +39,13 @@ pub(crate) use computer_groups::older_computer_group;
 
 pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 
-fn is_activity_metadata(item: &ThreadItem) -> bool {
+fn is_activity_metadata(item: &ThreadItemPayload) -> bool {
     matches!(
         item,
-        ThreadItem::Reasoning { .. }
-            | ThreadItem::ToolOutputTokens { .. }
-            | ThreadItem::StepAdmission(_)
-            | ThreadItem::ToolInput(_)
+        ThreadItemPayload::Reasoning { .. }
+            | ThreadItemPayload::ToolOutputTokens { .. }
+            | ThreadItemPayload::StepAdmission(_)
+            | ThreadItemPayload::ToolInput(_)
     ) || crate::history_cell::ToolOutputCell::is_item(item)
 }
 
@@ -134,7 +134,7 @@ pub(crate) fn thread_to_transcript_cells(
             &mut owned,
             thread_id,
             &cwd,
-            turn.items,
+            turn.items.into_iter().map(|entry| entry.payload),
             raw_reasoning_visibility,
             config,
             metadata,
@@ -151,7 +151,7 @@ pub(crate) fn thread_to_transcript_cells(
 pub(crate) fn thread_items_to_transcript_cells(
     thread_id: Option<ThreadId>,
     cwd: &AbsolutePathBuf,
-    items: impl IntoIterator<Item = ThreadItem>,
+    items: impl IntoIterator<Item = ThreadItemPayload>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
@@ -180,7 +180,7 @@ fn append_thread_items(
     owned: &mut crate::code_mode_transcript::Reducers,
     thread_id: Option<ThreadId>,
     cwd: &AbsolutePathBuf,
-    items: impl IntoIterator<Item = ThreadItem>,
+    items: impl IntoIterator<Item = ThreadItemPayload>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
@@ -190,7 +190,7 @@ fn append_thread_items(
     });
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
-        if let ThreadItem::CodeModeOwned(scope) = item {
+        if let ThreadItemPayload::CodeModeOwned(scope) = item {
             flush_computer(&mut pending, cells);
             let display = thread_id.unwrap_or(scope.owner.thread_id);
             match owned.admit(
@@ -240,7 +240,7 @@ fn append_thread_items(
             }
             continue;
         }
-        if matches!(item, ThreadItem::Reasoning { .. })
+        if matches!(item, ThreadItemPayload::Reasoning { .. })
             && let Some(group) = &mut pending
             && !cells
                 .iter()
@@ -273,7 +273,7 @@ fn append_thread_items(
             continue;
         }
         match item {
-            item @ ThreadItem::McpToolCall { .. } => {
+            item @ ThreadItemPayload::McpToolCall { .. } => {
                 let Some(call) = tools::McpHistory::from_item(item) else {
                     flush_computer(&mut pending, cells);
                     continue;
@@ -286,7 +286,7 @@ fn append_thread_items(
                     push_activity_cell(cells, Arc::new(cell));
                 }
             }
-            item @ ThreadItem::CommandExecution { .. } => {
+            item @ ThreadItemPayload::CommandExecution { .. } => {
                 flush_computer(&mut pending, cells);
                 if let Some(command) = tools::CommandHistory::from_item(item) {
                     push_activity_cell(cells, Arc::new(command.into_cell()));
@@ -339,7 +339,7 @@ fn append_thread_items(
 
 /// Project one item without changing the active widget or its turn lifecycle.
 fn item_to_cells(
-    item: ThreadItem,
+    item: ThreadItemPayload,
     cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
@@ -347,16 +347,16 @@ fn item_to_cells(
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
-        item @ ThreadItem::Thought { .. } => cells.push(Arc::new(
+        item @ ThreadItemPayload::Thought { .. } => cells.push(Arc::new(
             crate::history_cell::ThoughtCell::from_item(item, cwd.as_path()),
         )),
-        item @ ThreadItem::Preamble { .. } => {
+        item @ ThreadItemPayload::Preamble { .. } => {
             cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
         }
-        ThreadItem::Arrival(item) => {
+        ThreadItemPayload::Arrival(item) => {
             cells.push(Arc::new(crate::history_cell::ArrivalCell::new(item)));
         }
-        ThreadItem::UserMessage {
+        ThreadItemPayload::UserMessage {
             id,
             client_id,
             source_response_item_id,
@@ -383,26 +383,37 @@ fn item_to_cells(
                     .collect(),
             };
             let message = item.message();
-            let reply_text = crate::async_question_reply::display_text(&message);
-            let text_elements = if reply_text.is_some() {
-                Vec::new()
+            let replies = crate::async_question_reply::parse(&message).unwrap_or_default();
+            let (message, elements) = if replies.is_empty() {
+                (message, item.text_elements())
             } else {
-                item.text_elements()
+                (
+                    crate::async_question_reply::display_replies(&replies),
+                    Vec::new(),
+                )
             };
-            cells.push(Arc::new(UserHistoryCell {
-                timestamp: None,
-                spoken: false,
-                prompt_identity: crate::prompt_order::UserPromptIdentity {
-                    client_id,
-                    source_response_item_id,
-                },
-                message: reply_text.unwrap_or(message),
-                text_elements,
-                local_image_paths: item.local_image_paths(),
-                remote_image_urls: item.image_urls(),
-            }));
+            cells.push(Arc::new(
+                UserHistoryCell {
+                    timestamp: None,
+                    presentation: Default::default(),
+                    prompt_identity: crate::prompt_order::UserPromptIdentity {
+                        client_id,
+                        source_response_item_id,
+                    },
+                    message,
+                    text_elements: elements,
+                    local_image_paths: item.local_image_paths(),
+                    remote_image_urls: item.image_urls(),
+                }
+                .with_async_replies(replies, cwd.as_path()),
+            ));
         }
-        ThreadItem::AgentMessage { id, text, .. } => {
+        ThreadItemPayload::AgentMessage {
+            id,
+            text,
+            questions,
+            ..
+        } => {
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 let mut cell = AgentMarkdownCell::new_with_inline_visualizations(
@@ -410,11 +421,12 @@ fn item_to_cells(
                     cwd.as_path(),
                     inline_visualization_context,
                 );
+                cell = cell.with_questions(questions.as_deref().unwrap_or_default());
                 cell.item_id = Some(id);
                 cells.push(Arc::new(cell));
             }
         }
-        ThreadItem::FunctionCallOutput {
+        ThreadItemPayload::FunctionCallOutput {
             id,
             call_id,
             name,
@@ -438,7 +450,7 @@ fn item_to_cells(
                 cells.push(Arc::new(cell));
             }
         }
-        ThreadItem::Plan { text, .. } => {
+        ThreadItemPayload::Plan { text, .. } => {
             if !text.trim().is_empty() {
                 cells.push(Arc::new(crate::history_cell::new_proposed_plan(
                     text,
@@ -446,7 +458,7 @@ fn item_to_cells(
                 )));
             }
         }
-        ThreadItem::Reasoning {
+        ThreadItemPayload::Reasoning {
             id,
             summary,
             content,
@@ -471,7 +483,7 @@ fn item_to_cells(
                 cells.push(Arc::new(cell));
             }
         }
-        item @ ThreadItem::CommandExecution { .. } => {
+        item @ ThreadItemPayload::CommandExecution { .. } => {
             if let Some(command) = tools::CommandHistory::from_item(item) {
                 cells.push(Arc::new(command.into_cell()));
             }
@@ -483,15 +495,15 @@ fn item_to_cells(
 
 /// Project a scoped child without entering the widget's ordinary active-cell lifecycle.
 pub(crate) fn scoped_item_cells(
-    item: ThreadItem,
+    item: ThreadItemPayload,
     cwd: &AbsolutePathBuf,
     source: crate::code_mode_transcript::Source,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
-    if let ThreadItem::ToolInput(input) = item {
+    if let ThreadItemPayload::ToolInput(input) = item {
         return vec![Arc::new(crate::history_cell::ToolInputCell(input))];
     }
-    if let ThreadItem::CollabAgentToolCall { .. } = &item {
+    if let ThreadItemPayload::CollabAgentToolCall { .. } = &item {
         return crate::multi_agents::tool_call_history_cell(
             &item, /*cached_spawn_request*/ None, metadata,
         )
@@ -500,7 +512,7 @@ pub(crate) fn scoped_item_cells(
         .collect();
     }
     if source == crate::code_mode_transcript::Source::Live
-        && let ThreadItem::FileChange {
+        && let ThreadItemPayload::FileChange {
             id,
             changes,
             status: codex_app_server_protocol::PatchApplyStatus::InProgress,
@@ -518,7 +530,7 @@ pub(crate) fn scoped_item_cells(
     // A frozen MCP invocation still has exact semantic arguments. Do not flatten
     // historical page prefixes into an opaque status string before formatting.
     if (source == crate::code_mode_transcript::Source::Live
-        || matches!(&item, ThreadItem::McpToolCall { .. }))
+        || matches!(&item, ThreadItemPayload::McpToolCall { .. }))
         && let Some(cell) = tools::pending_tool_cell(&item)
     {
         return vec![cell];

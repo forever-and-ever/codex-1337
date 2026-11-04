@@ -1,9 +1,13 @@
 //! Extraction
 
-use crate::result::{ZipResult, invalid};
-use crate::{ZipArchive, result::ZipError};
+use crate::ZipArchive;
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
 use std::ffi::OsStr;
-use std::io::{self, Read, Seek};
+use std::io::Read;
+use std::io::Seek;
+use std::io::{self};
 use std::path::Path;
 
 use indexmap::IndexMap;

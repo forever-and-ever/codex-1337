@@ -3,6 +3,7 @@
 
 use super::markdown_render_cache::MarkdownRenderCache;
 use super::*;
+use crate::async_question_reply::AsyncQuestionReply;
 use crate::style::accent_color_on;
 use crate::terminal_hyperlinks::annotate_web_urls;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
@@ -19,8 +20,23 @@ pub(crate) struct UserHistoryCell {
     pub text_elements: Vec<TextElement>,
     pub local_image_paths: Vec<PathBuf>,
     pub remote_image_urls: Vec<String>,
-    pub(crate) spoken: bool,
     pub(crate) prompt_identity: crate::prompt_order::UserPromptIdentity,
+    pub(crate) presentation: UserMessagePresentation,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) enum UserMessagePresentation {
+    #[default]
+    Plain,
+    Spoken,
+    /// Render each submitted answer as Markdown beneath its question caption.
+    AsyncReplies {
+        /// Keep the decoded pairs so the two-row limit applies only to question captions.
+        /// In the flattened message, an answer's own blockquotes can look like captions.
+        replies: Vec<AsyncQuestionReply>,
+        /// Capture the session directory so relative Markdown links resolve the same way on reflow.
+        cwd: PathBuf,
+    },
 }
 
 /// Remove CSI sequences and control characters, preserving tabs and newlines.
@@ -153,7 +169,38 @@ fn build_user_message_lines_with_elements(
     raw_lines
 }
 
+fn user_message_element_style(style: Style, accent: Color) -> Style {
+    let unresolved_background = match style.bg {
+        Some(Color::Indexed(index)) => index < 16,
+        Some(Color::Rgb(..) | Color::Reset) | None => false,
+        Some(_) => true,
+    };
+    if accent == Color::Reset || unresolved_background {
+        style
+    } else {
+        style.fg(accent)
+    }
+}
+
 impl UserHistoryCell {
+    pub(crate) fn with_async_replies(
+        mut self,
+        replies: Vec<AsyncQuestionReply>,
+        cwd: &Path,
+    ) -> Self {
+        if !replies.is_empty() {
+            self.presentation = UserMessagePresentation::AsyncReplies {
+                replies,
+                cwd: cwd.to_owned(),
+            };
+        }
+        self
+    }
+
+    pub(crate) fn is_spoken(&self) -> bool {
+        matches!(self.presentation, UserMessagePresentation::Spoken)
+    }
+
     pub(crate) fn has_visible_content(&self) -> bool {
         !sanitize_user_text(Cow::Borrowed(&self.message))
             .trim()
@@ -194,8 +241,20 @@ impl HistoryCell for UserHistoryCell {
         presentation::user_lines(self, width, presentation::Surface::Transcript)
     }
 
+    fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.transcript_hyperlink_lines(width)
+    }
+
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.display_hyperlink_lines(width)
+        let mut lines = self.display_hyperlink_lines(width);
+        if self.is_spoken() {
+            for line in &mut lines {
+                if let Some(source) = &line.source {
+                    line.line.style.fg = source.line_style.fg;
+                }
+            }
+        }
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -218,10 +277,10 @@ fn wrap_user_message(
     text_elements: &[TextElement],
     style: Style,
     wrap_width: u16,
-) -> Option<Vec<HyperlinkLine>> {
-    let element_style = style.fg(accent_color_on(style.bg));
+) -> Vec<HyperlinkLine> {
+    let element_style = user_message_element_style(style, accent_color_on(style.bg));
     if message.is_empty() && text_elements.is_empty() {
-        return None;
+        return Vec::new();
     }
 
     let wrap_options =
@@ -263,7 +322,7 @@ fn wrap_user_message(
     }) {
         wrapped.pop();
     }
-    (!wrapped.is_empty()).then_some(wrapped)
+    wrapped
 }
 
 #[derive(Debug)]
@@ -451,6 +510,7 @@ pub(crate) struct AgentMarkdownCell {
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
     rendered_lines: Option<MarkdownRenderCache>,
     spoken_artifacts: bool,
+    question_titles: Vec<std::ops::Range<usize>>,
 }
 
 impl AgentMarkdownCell {
@@ -492,7 +552,17 @@ impl AgentMarkdownCell {
             inline_visualization_context,
             rendered_lines,
             spoken_artifacts: false,
+            question_titles: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_questions(
+        mut self,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
+    ) -> Self {
+        self.question_titles =
+            super::async_questions::title_ranges(&self.markdown_source, questions);
+        self
     }
 
     pub(crate) fn new_spoken(markdown_source: String, cwd: &Path) -> Self {
@@ -646,15 +716,15 @@ pub(crate) fn new_user_prompt(
         text_elements,
         local_image_paths,
         remote_image_urls,
-        spoken: false,
         timestamp: None,
         prompt_identity: Default::default(),
+        presentation: UserMessagePresentation::Plain,
     }
 }
 
 pub(crate) fn new_spoken_user_prompt(message: String) -> UserHistoryCell {
     let mut cell = new_user_prompt(message, Vec::new(), Vec::new(), Vec::new());
-    cell.spoken = true;
+    cell.presentation = UserMessagePresentation::Spoken;
     cell
 }
 

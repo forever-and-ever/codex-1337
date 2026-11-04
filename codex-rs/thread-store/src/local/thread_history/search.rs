@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::strip_user_message_prefix;
@@ -76,7 +76,7 @@ pub(in crate::local) async fn search_thread_occurrences(
     )?;
     let matcher = LiteralMatcher::new(params.search_term.as_str());
     let lineage = store
-        .resolve_rollout_lineage(params.thread_id, /*initial_path*/ None)
+        .resolve_rollout_lineage_for_history_page(params.thread_id)
         .await?;
     let cursor_segment = cursor
         .as_ref()
@@ -307,10 +307,10 @@ fn invalid_cursor(cursor: &str) -> ThreadStoreError {
     }
 }
 
-fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
+fn searchable_text(item: &ThreadItemPayload) -> Option<Cow<'_, str>> {
     match item {
-        ThreadItem::CodeModeOwned(owned) => searchable_text(owned.payload()),
-        ThreadItem::UserMessage { content, .. } => {
+        ThreadItemPayload::CodeModeOwned(owned) => searchable_text(owned.payload()),
+        ThreadItemPayload::UserMessage { content, .. } => {
             let mut text_parts = content
                 .iter()
                 .filter_map(|input| match input {
@@ -334,34 +334,34 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
                 }
             }
         }
-        ThreadItem::AgentMessage { text, .. } => {
+        ThreadItemPayload::AgentMessage { text, .. } => {
             let text = markdown_to_search_text(text);
             (!text.is_empty()).then_some(Cow::Owned(text))
         }
-        ThreadItem::HookPrompt { .. }
-        | ThreadItem::FunctionCallOutput { .. }
-        | ThreadItem::ToolOutputTokens { .. }
-        | ThreadItem::CodeMode(_)
-        | ThreadItem::Plan { .. }
-        | ThreadItem::Reasoning { .. }
-        | ThreadItem::Thought { .. }
-        | ThreadItem::Preamble { .. }
-        | ThreadItem::StepAdmission(_)
-        | ThreadItem::ToolInput(_)
-        | ThreadItem::Arrival(_)
-        | ThreadItem::CommandExecution { .. }
-        | ThreadItem::FileChange { .. }
-        | ThreadItem::McpToolCall { .. }
-        | ThreadItem::DynamicToolCall { .. }
-        | ThreadItem::CollabAgentToolCall { .. }
-        | ThreadItem::SubAgentActivity { .. }
-        | ThreadItem::WebSearch(_)
-        | ThreadItem::ImageView { .. }
-        | ThreadItem::Sleep(_)
-        | ThreadItem::ImageGeneration(_)
-        | ThreadItem::EnteredReviewMode { .. }
-        | ThreadItem::ExitedReviewMode { .. }
-        | ThreadItem::ContextCompaction { .. } => None,
+        ThreadItemPayload::HookPrompt { .. }
+        | ThreadItemPayload::FunctionCallOutput { .. }
+        | ThreadItemPayload::ToolOutputTokens { .. }
+        | ThreadItemPayload::CodeMode(_)
+        | ThreadItemPayload::Plan { .. }
+        | ThreadItemPayload::Reasoning { .. }
+        | ThreadItemPayload::Thought { .. }
+        | ThreadItemPayload::Preamble { .. }
+        | ThreadItemPayload::StepAdmission(_)
+        | ThreadItemPayload::ToolInput(_)
+        | ThreadItemPayload::Arrival(_)
+        | ThreadItemPayload::CommandExecution { .. }
+        | ThreadItemPayload::FileChange { .. }
+        | ThreadItemPayload::McpToolCall { .. }
+        | ThreadItemPayload::DynamicToolCall { .. }
+        | ThreadItemPayload::CollabAgentToolCall { .. }
+        | ThreadItemPayload::SubAgentActivity { .. }
+        | ThreadItemPayload::WebSearch(_)
+        | ThreadItemPayload::ImageView { .. }
+        | ThreadItemPayload::Sleep(_)
+        | ThreadItemPayload::ImageGeneration(_)
+        | ThreadItemPayload::EnteredReviewMode { .. }
+        | ThreadItemPayload::ExitedReviewMode { .. }
+        | ThreadItemPayload::ContextCompaction { .. } => None,
     }
 }
 

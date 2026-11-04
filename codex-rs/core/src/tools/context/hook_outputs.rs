@@ -77,11 +77,13 @@ impl HookToolOutput for ExecCommandToolOutput {
             return None;
         }
         let context = self.hook_context.as_ref()?;
-        Some(PostToolUsePayload::new(
+        let mut payload = PostToolUsePayload::new(
             &context.tool_name,
             &self.event_call_id,
             serde_json::json!({ "command": context.command }),
             Value::String(self.truncated_output_with_policy(self.model_output_policy())),
-        ))
+        );
+        payload.tool_cwd = self.tool_cwd.clone();
+        Some(payload)
     }
 }

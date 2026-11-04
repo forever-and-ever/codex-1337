@@ -1,11 +1,18 @@
 //! Code related to reader
 
-use crate::compression::{CompressionMethod, Decompressor};
+use crate::compression::CompressionMethod;
+use crate::compression::Decompressor;
 use crate::crc32::Crc32Reader;
-use crate::result::{ZipError, ZipResult};
+use crate::result::ZipError;
+use crate::result::ZipResult;
 use crate::types::ZipFileData;
-use crate::zipcrypto::{ZipCryptoReader, ZipCryptoReaderValid, ZipCryptoValidator};
-use std::io::{self, Read, Seek, SeekFrom};
+use crate::zipcrypto::ZipCryptoReader;
+use crate::zipcrypto::ZipCryptoReaderValid;
+use crate::zipcrypto::ZipCryptoValidator;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::{self};
 
 pub(crate) enum ZipFileSeekReader<'a, R: ?Sized> {
     Raw(SeekableTake<'a, R>),

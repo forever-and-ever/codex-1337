@@ -21,10 +21,12 @@ pub(crate) const READ_ONLY_TEMPLATE: &str =
     include_str!("../../templates/permissions/sandbox_mode/read_only.md");
 pub(crate) const WRITABLE_ROOT_TEMPLATE: &str = " The writable root is {{ roots }}.";
 pub(crate) const WRITABLE_ROOTS_TEMPLATE: &str = " The writable roots are {{ roots }}.";
+pub(crate) const DENIED_READS_TEMPLATE: &str = "## Denied filesystem reads\n{{ denied_reads }}";
 
 /// Resolved approval-policy text; policy and tool selection remain with the consumer.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ResolvedApprovalMessages<'a> {
+    pub(crate) catalog: Option<&'a ApprovalMessages>,
     pub(crate) never: ResolvedMessage<'a>,
     pub(crate) on_request: ResolvedMessage<'a>,
     pub(crate) on_request_auto_review: ResolvedMessage<'a>,
@@ -34,6 +36,7 @@ pub(crate) struct ResolvedApprovalMessages<'a> {
 impl<'a> ResolvedApprovalMessages<'a> {
     pub(crate) fn new(messages: Option<&'a ApprovalMessages>) -> Self {
         Self {
+            catalog: messages,
             never: ResolvedMessage::new(
                 messages.and_then(|m| m.never.as_deref()),
                 APPROVAL_POLICY_NEVER,
@@ -62,6 +65,8 @@ pub(crate) struct ResolvedPermissionMessages<'a> {
     pub(crate) read_only: ResolvedMessage<'a>,
     pub(crate) writable_root: ResolvedMessage<'a>,
     pub(crate) writable_roots: ResolvedMessage<'a>,
+    pub(crate) omitted_paths: ResolvedMessage<'a>,
+    pub(crate) denied_reads: ResolvedMessage<'a>,
 }
 
 impl<'a> ResolvedPermissionMessages<'a> {
@@ -86,6 +91,14 @@ impl<'a> ResolvedPermissionMessages<'a> {
             writable_roots: ResolvedMessage::new(
                 messages.and_then(|m| m.writable_roots.as_deref()),
                 WRITABLE_ROOTS_TEMPLATE,
+            ),
+            omitted_paths: ResolvedMessage::new(
+                messages.and_then(|m| m.omitted_paths.as_deref()),
+                "",
+            ),
+            denied_reads: ResolvedMessage::new(
+                messages.and_then(|m| m.denied_reads.as_deref()),
+                DENIED_READS_TEMPLATE,
             ),
         }
     }

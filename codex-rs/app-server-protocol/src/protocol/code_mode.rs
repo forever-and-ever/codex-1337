@@ -2,7 +2,7 @@
 
 use crate::ExperimentalApi;
 use crate::ServerNotification;
-use crate::ThreadItem;
+use crate::ThreadItemPayload;
 pub use codex_protocol::code_mode::CodeModeOwned;
 pub use codex_protocol::code_mode::CodeModeOwner;
 use codex_protocol::code_mode::CodeModePayload;
@@ -19,20 +19,20 @@ impl CodeModePayload for ServerNotification {
     fn is_code_mode_owned(&self) -> bool {
         match self {
             Self::CodeModeOwned(_) => true,
-            Self::ItemStarted(item) => item.item.is_code_mode_owned(),
-            Self::ItemCompleted(item) => item.item.is_code_mode_owned(),
+            Self::ItemStarted(item) => item.item.payload.is_code_mode_owned(),
+            Self::ItemCompleted(item) => item.item.payload.is_code_mode_owned(),
             _ => false,
         }
     }
 }
 
-impl CodeModePayload for ThreadItem {
+impl CodeModePayload for ThreadItemPayload {
     fn is_code_mode_owned(&self) -> bool {
         matches!(self, Self::CodeModeOwned(_))
     }
 }
 
-impl ThreadItem {
+impl ThreadItemPayload {
     pub fn into_native_item(self) -> Self {
         match self {
             Self::CodeModeOwned(owned) => *owned.into_parts().1,

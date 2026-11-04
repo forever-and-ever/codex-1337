@@ -35,7 +35,8 @@ impl AnthropicStreamProgress {
                 | ResponseEvent::ServerReasoningIncluded(_)
                 | ResponseEvent::Completed { .. }
                 | ResponseEvent::RateLimits(_)
-                | ResponseEvent::ModelsEtag(_),
+                | ResponseEvent::ModelsEtag(_)
+                | ResponseEvent::GuardianAssessment(_),
             ) => self,
         }
     }

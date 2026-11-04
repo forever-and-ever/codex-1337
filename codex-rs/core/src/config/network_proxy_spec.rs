@@ -136,6 +136,12 @@ impl NetworkProxySpec {
             enabled,
             ..NetworkProxyConstraints::default()
         };
+        validate_policy_against_constraints(&config, &constraints).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("network proxy constraints are invalid: {err}"),
+            )
+        })?;
         Ok(Self {
             base_config,
             requirements,

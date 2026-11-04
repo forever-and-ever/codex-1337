@@ -10,6 +10,7 @@ use crate::model::ConversationPart;
 use crate::model::ConversationRole;
 use crate::model::ExecutionStatus;
 use crate::model::ProducerRef;
+use crate::model::RolloutStatus;
 use crate::model::ToolCallKind;
 use crate::model::ToolCallSummary;
 use crate::payload::RawPayloadKind;
@@ -25,7 +26,8 @@ use crate::reducer::test_support::trace_context;
 use crate::replay_bundle;
 
 #[test]
-fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> anyhow::Result<()> {
+fn request_snapshots_reuse_history_across_reload_without_deduping_new_identical_items()
+-> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
@@ -37,6 +39,17 @@ fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> any
         }),
     )?;
     append_inference_start(&writer, "inference-1", "turn-1", first_request)?;
+
+    // Reload reopens the same logical thread, retaining its original start and history.
+    let before_reload = replay_bundle(temp.path())?;
+    writer.append(RawTraceEventPayload::ThreadEnded {
+        thread_id: "thread-root".to_string(),
+        status: RolloutStatus::Completed,
+    })?;
+    writer.append(RawTraceEventPayload::ThreadResumed {
+        thread_id: "thread-root".to_string(),
+    })?;
+    assert_eq!(replay_bundle(temp.path())?.threads, before_reload.threads);
     start_turn(&writer, "turn-2")?;
 
     let second_request = writer.write_json_payload(
@@ -51,6 +64,26 @@ fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> any
     )?;
     append_inference_start(&writer, "inference-2", "turn-2", second_request)?;
 
+    // Moving identical items left must not reuse the first match twice.
+    for (id, input) in [
+        (
+            "inference-3",
+            vec![
+                message("assistant", "ack"),
+                message("user", "ok"),
+                message("user", "ok"),
+            ],
+        ),
+        (
+            "inference-4",
+            vec![message("user", "ok"), message("user", "ok")],
+        ),
+    ] {
+        let request = writer
+            .write_json_payload(RawPayloadKind::InferenceRequest, &json!({"input": input}))?;
+        append_inference_start(&writer, id, "turn-2", request)?;
+    }
+
     let rollout = replay_bundle(temp.path())?;
     let first = &rollout.inference_calls["inference-1"].request_item_ids;
     let second = &rollout.inference_calls["inference-2"].request_item_ids;
@@ -59,6 +92,14 @@ fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> any
     assert_eq!(second.len(), 3);
     assert_eq!(second[0], first[0]);
     assert_ne!(second[2], first[0]);
+    assert_eq!(
+        rollout.inference_calls["inference-3"].request_item_ids,
+        vec![second[1].clone(), second[0].clone(), second[2].clone()]
+    );
+    assert_eq!(
+        rollout.inference_calls["inference-4"].request_item_ids,
+        vec![second[0].clone(), second[2].clone()]
+    );
     assert_eq!(rollout.conversation_items.len(), 3);
     assert_eq!(
         rollout.threads["thread-root"].conversation_item_ids,
@@ -66,6 +107,19 @@ fn request_snapshots_reuse_history_without_deduping_new_identical_items() -> any
     );
 
     Ok(())
+}
+
+#[test]
+fn resume_from_an_earlier_trace_is_unsupported() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let writer = create_started_writer(&temp)?;
+    writer.append(RawTraceEventPayload::ThreadResumed {
+        thread_id: "previous-trace-child".to_string(),
+    })?;
+    expect_replay_error(
+        &temp,
+        "resuming threads from an earlier trace is not supported",
+    )
 }
 
 #[test]
@@ -102,17 +156,25 @@ fn repeated_image_output_matches_content_instead_of_payload_location() -> anyhow
     );
     assert_eq!(rollout.conversation_items.len(), 2);
 
-    // Keeping the call and item IDs must not hide a changed image.
+    // A changed rendering gets its own item without overwriting the earlier image.
     output["output"][1]["image_url"] = json!("data:image/png;base64,second");
     let request = writer.write_json_payload(
         RawPayloadKind::InferenceRequest,
         &json!({"input": [output]}),
     )?;
     append_inference_start(&writer, "inference-3", "turn-1", request)?;
-    expect_replay_error(
-        &temp,
-        "model-visible call id call-image was reused with different content",
-    )
+    let updated = replay_bundle(temp.path())?;
+    let original_id = &rollout.inference_calls["inference-1"].request_item_ids[0];
+    assert_eq!(
+        updated.conversation_items[original_id],
+        rollout.conversation_items[original_id]
+    );
+    assert_ne!(
+        &updated.inference_calls["inference-3"].request_item_ids[0],
+        original_id
+    );
+    assert_eq!(updated.conversation_items.len(), 3);
+    Ok(())
 }
 
 #[test]
@@ -291,6 +353,8 @@ fn later_full_request_reuses_prior_json_tool_call_by_position() -> anyhow::Resul
     let temp = TempDir::new()?;
     let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
+    // The display summary's byte limit falls inside a three-byte character.
+    let arguments = json!({"cmd": "界".repeat(100)}).to_string();
 
     let request = writer.write_json_payload(
         RawPayloadKind::InferenceRequest,
@@ -307,11 +371,12 @@ fn later_full_request_reuses_prior_json_tool_call_by_position() -> anyhow::Resul
             "output_items": [{
                 "type": "function_call",
                 "name": "shell",
-                "arguments": "{\"cmd\":\"cargo test\"}",
+                "arguments": arguments,
                 "call_id": "call-1"
             }]
         }),
     )?;
+    let response_payload_id = response.raw_payload_id.clone();
     append_inference_completion(&writer, "inference-1", "resp-1", response)?;
     start_turn(&writer, "turn-2")?;
 
@@ -323,7 +388,7 @@ fn later_full_request_reuses_prior_json_tool_call_by_position() -> anyhow::Resul
                 {
                     "type": "function_call",
                     "name": "shell",
-                    "arguments": "{\"cmd\":\"cargo test\"}",
+                    "arguments": arguments,
                     "call_id": "call-1"
                 }
             ]
@@ -343,6 +408,15 @@ fn later_full_request_reuses_prior_json_tool_call_by_position() -> anyhow::Resul
         ],
     );
     assert_eq!(rollout.conversation_items.len(), 2);
+    assert_eq!(
+        rollout.conversation_items[&first.response_item_ids[0]].body,
+        ConversationBody {
+            parts: vec![ConversationPart::Json {
+                summary: format!("{{\"cmd\":\"{}...", "界".repeat(77)),
+                raw_payload_id: response_payload_id,
+            }],
+        },
+    );
 
     Ok(())
 }
@@ -479,8 +553,7 @@ fn request_reuses_prior_tool_outputs_with_internal_metadata() -> anyhow::Result<
 }
 
 #[test]
-fn tool_output_call_id_reuse_with_different_nested_metadata_is_reducer_error() -> anyhow::Result<()>
-{
+fn tool_output_versions_preserve_different_nested_metadata() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
@@ -523,10 +596,15 @@ fn tool_output_call_id_reuse_with_different_nested_metadata_is_reducer_error() -
     )?;
     append_inference_start(&writer, "inference-2", "turn-2", conflicting_request)?;
 
-    expect_replay_error(
-        &temp,
-        "model-visible call id call-search was reused with different content",
-    )
+    let rollout = replay_bundle(temp.path())?;
+    let first = &rollout.inference_calls["inference-1"].request_item_ids[0];
+    let second = &rollout.inference_calls["inference-2"].request_item_ids[0];
+    assert_ne!(first, second);
+    assert_ne!(
+        rollout.conversation_items[first].body,
+        rollout.conversation_items[second].body
+    );
+    Ok(())
 }
 
 #[test]
@@ -1127,12 +1205,19 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
             )
         };
         let user = message("user", "count files");
+        let output = json!({
+            "type": "function_call_output", "id": "output-1", "call_id": "call-1",
+            "output": "full tool output"
+        });
+        let mut trimmed_output = output.clone();
+        trimmed_output["output"] =
+            json!("Output exceeded the available model context and was truncated");
         let request = writer.write_json_payload(
             RawPayloadKind::InferenceRequest,
             &if native {
                 json!({"system": system, "messages": [wire_user]})
             } else {
-                json!({ "input": [developer, user] })
+                json!({ "input": [developer, user, output] })
             },
         )?;
         append_request("inference-1", "turn-1", request)?;
@@ -1150,13 +1235,13 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         let replacement_history = if native {
             json!([compaction_summary, user, summary])
         } else {
-            json!([user, summary, compaction_summary])
+            json!([user, summary, compaction_summary, trimmed_output])
         };
         let checkpoint = writer.write_json_payload(
             RawPayloadKind::CompactionCheckpoint,
             &json!({
                 "request_protocol": protocol,
-                "input_history": [developer, user],
+                "input_history": if native { json!([developer, user]) } else { json!([developer, user, trimmed_output]) },
                 "replacement_history": replacement_history
             }),
         )?;
@@ -1176,7 +1261,7 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
                     {"role": "assistant", "content": [wire_checkpoint]}, wire_user, wire_summary
                 ]})
             } else {
-                json!({ "input": [developer, user, summary, compaction_summary] })
+                json!({ "input": [developer, user, summary, compaction_summary, trimmed_output] })
             },
         )?;
         append_request("inference-2", "turn-2", post_compaction_request)?;
@@ -1222,8 +1307,13 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         let second = &rollout.inference_calls["inference-2"];
         let compaction = &rollout.compactions["compaction-1"];
 
-        assert_eq!(compaction.input_item_ids, first.request_item_ids);
-        assert_eq!(second.request_item_ids.len(), 4);
+        if native {
+            assert_eq!(compaction.input_item_ids, first.request_item_ids);
+        } else {
+            assert_eq!(compaction.input_item_ids[..2], first.request_item_ids[..2]);
+            assert_ne!(compaction.input_item_ids[2], first.request_item_ids[2]);
+        }
+        assert_eq!(second.request_item_ids.len(), if native { 4 } else { 5 });
         assert_eq!(
             &second.request_item_ids[1..],
             compaction.replacement_item_ids.as_slice()
@@ -1293,6 +1383,23 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
                     .contains("native-signature-secret")
             );
         } else {
+            assert_eq!(
+                rollout.conversation_items[&first.request_item_ids[2]]
+                    .body
+                    .parts,
+                vec![ConversationPart::Text {
+                    text: "full tool output".to_string()
+                }]
+            );
+            assert_eq!(
+                rollout.conversation_items[&second.request_item_ids[4]]
+                    .body
+                    .parts,
+                vec![ConversationPart::Text {
+                    text: "Output exceeded the available model context and was truncated"
+                        .to_string()
+                }]
+            );
             assert_eq!(
                 *parts,
                 vec![ConversationPart::Encoded {
@@ -1376,7 +1483,7 @@ fn context_compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> 
 }
 
 #[test]
-fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> {
+fn late_tool_start_links_model_call_and_output_versions_in_order() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let writer = create_started_writer(&temp)?;
     start_turn(&writer, "turn-1")?;
@@ -1384,7 +1491,8 @@ fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> 
     let request = writer.write_json_payload(
         RawPayloadKind::InferenceRequest,
         &json!({
-            "input": [message("user", "run tests")]
+            // Cross the 9/10 item-ID boundary so lexical order differs from history order.
+            "input": vec![message("user", "run tests"); 7]
         }),
     )?;
     append_inference_start(&writer, "inference-1", "turn-1", request)?;
@@ -1402,6 +1510,25 @@ fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> 
         }),
     )?;
     append_inference_completion(&writer, "inference-1", "resp-1", response)?;
+    start_turn(&writer, "turn-2")?;
+    let followup = writer.write_json_payload(
+        RawPayloadKind::InferenceRequest,
+        &json!({
+            "previous_response_id": "resp-1",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": "tests passed"
+            }, {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": "trimmed output"
+            }]
+        }),
+    )?;
+    append_inference_start(&writer, "inference-2", "turn-2", followup)?;
+
+    // Buffered dispatch events may arrive after inference has recorded the outputs.
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallStarted {
@@ -1418,6 +1545,19 @@ fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> 
             invocation_payload: None,
         },
     )?;
+    let runtime = writer.write_json_payload(
+        RawPayloadKind::ToolRuntimeEvent,
+        &json!({"command": ["cargo", "test"], "cwd": "/repo"}),
+    )?;
+    writer.append_with_context(
+        trace_context("turn-1"),
+        RawTraceEventPayload::ToolCallRuntimeStarted {
+            kind: ToolCallKind::ExecCommand,
+            tool_call_id: "tool-1".to_string(),
+            runtime_payload: runtime,
+        },
+    )?;
+
     writer.append_with_context(
         trace_context("turn-1"),
         RawTraceEventPayload::ToolCallEnded {
@@ -1427,28 +1567,11 @@ fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> 
         },
     )?;
 
-    start_turn(&writer, "turn-2")?;
-    let followup = writer.write_json_payload(
-        RawPayloadKind::InferenceRequest,
-        &json!({
-            "previous_response_id": "resp-1",
-            "input": [{
-                "type": "function_call_output",
-                "call_id": "call-1",
-                "output": "tests passed"
-            }]
-        }),
-    )?;
-    append_inference_start(&writer, "inference-2", "turn-2", followup)?;
-
     let rollout = replay_bundle(temp.path())?;
     let first_inference = &rollout.inference_calls["inference-1"];
     let second_inference = &rollout.inference_calls["inference-2"];
     let tool_call = &rollout.tool_calls["tool-1"];
-    let output_item_id = second_inference
-        .request_item_ids
-        .last()
-        .expect("follow-up output item");
+    let output_item_ids = &second_inference.request_item_ids[8..];
 
     assert_eq!(
         first_inference.tool_call_ids_started_by_response,
@@ -1458,16 +1581,19 @@ fn tool_call_links_model_call_and_followup_output_items() -> anyhow::Result<()> 
         tool_call.model_visible_call_item_ids,
         first_inference.response_item_ids,
     );
+    assert_eq!(tool_call.model_visible_output_item_ids, output_item_ids,);
     assert_eq!(
-        tool_call.model_visible_output_item_ids,
-        vec![output_item_id.clone()],
+        rollout.terminal_operations["terminal_operation:1"].model_observations[0].output_item_ids,
+        output_item_ids,
     );
-    assert_eq!(
-        rollout.conversation_items[output_item_id].produced_by,
-        vec![ProducerRef::Tool {
-            tool_call_id: "tool-1".to_string(),
-        }],
-    );
+    for output_item_id in output_item_ids {
+        assert_eq!(
+            rollout.conversation_items[output_item_id].produced_by,
+            vec![ProducerRef::Tool {
+                tool_call_id: "tool-1".to_string(),
+            }],
+        );
+    }
 
     Ok(())
 }

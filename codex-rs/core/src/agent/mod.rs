@@ -3,6 +3,8 @@ pub(crate) mod api;
 pub(crate) mod child_config;
 pub(crate) mod control;
 pub(crate) mod farm;
+mod history;
+pub(crate) mod host;
 pub(crate) mod model_catalog;
 mod registry;
 pub(crate) mod role;

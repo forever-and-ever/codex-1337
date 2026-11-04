@@ -104,7 +104,11 @@ pub(crate) async fn history_rejected(
         return false;
     }
     let modalities = &turn_context.model_info().input_modalities;
-    let input = sess.clone_history().await.for_prompt(modalities);
+    let input = sess
+        .clone_history()
+        .await
+        .for_prompt(modalities, sess.services.image_store.as_ref())
+        .await;
     !salvage_anthropic_history(input, modalities)
         .repairs
         .is_empty()
@@ -162,7 +166,12 @@ pub(crate) async fn run_native_compaction(
     let trace_input_history = compaction_trace
         .is_enabled()
         .then(|| history.raw_items().cloned().collect::<Vec<_>>());
-    let mut whole = history.for_prompt(&turn_context.model_info().input_modalities);
+    let mut whole = history
+        .for_prompt(
+            &turn_context.model_info().input_modalities,
+            sess.services.image_store.as_ref(),
+        )
+        .await;
     sess.services
         .executed_tool_calls
         .attach_to_compaction_prompt(&mut whole);

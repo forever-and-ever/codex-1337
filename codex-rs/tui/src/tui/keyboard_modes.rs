@@ -8,6 +8,8 @@
 
 use std::fmt;
 use std::io::Write;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
@@ -18,6 +20,7 @@ use crossterm::event::PushKeyboardEnhancementFlags;
 use ratatui::crossterm::execute;
 
 const DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
+static REPORTS_KEY_RELEASES: AtomicBool = AtomicBool::new(/*v*/ false);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VscodeDetection {
@@ -210,6 +213,7 @@ mod windows_term_program_tests;
 pub(super) fn enable_keyboard_enhancement(writer: &mut impl Write) -> super::tmux::MouseCapture {
     let tmux_options = super::tmux::options();
     if keyboard_enhancement_disabled() {
+        set_reports_key_releases(/*reports*/ false);
         return tmux_options.mouse_capture;
     }
 
@@ -230,14 +234,16 @@ pub(super) fn enable_keyboard_enhancement(writer: &mut impl Write) -> super::tmu
     let hosted = crate::reload::worker::is_hosted();
     #[cfg(not(target_os = "linux"))]
     let hosted = false;
-    if hosted {
+    let result = if hosted {
         // Killed renderers cannot pop a stack. The terminal host leases the modes;
         // workers replace the current frame instead of accumulating pushed frames.
-        let _ = write!(writer, "\x1b[={}u", flags.bits());
-        let _ = writer.flush();
+        write!(writer, "\x1b[={}u", flags.bits()).and_then(|()| writer.flush())
     } else {
-        let _ = execute!(writer, PushKeyboardEnhancementFlags(flags));
-    }
+        execute!(writer, PushKeyboardEnhancementFlags(flags))
+    };
+    set_reports_key_releases(
+        result.is_ok() && flags.contains(KeyboardEnhancementFlags::REPORT_EVENT_TYPES),
+    );
 
     if tmux_should_enable_modify_other_keys_for(running_in_tmux_session, tmux_extended_keys_format)
     {
@@ -267,6 +273,14 @@ fn keyboard_enhancement_flags(
     }
 }
 
+pub(super) fn reports_key_releases() -> bool {
+    REPORTS_KEY_RELEASES.load(Ordering::Relaxed)
+}
+
+pub(super) fn set_reports_key_releases(reports: bool) {
+    REPORTS_KEY_RELEASES.store(reports, Ordering::Relaxed);
+}
+
 fn running_in_tmux_session() -> bool {
     tmux_session_detected(
         std::env::var("TMUX").ok().as_deref(),
@@ -289,8 +303,12 @@ fn tmux_should_enable_modify_other_keys_for(
 }
 
 pub(super) fn restore_keyboard_enhancement_stack(writer: &mut impl Write) {
-    let _ = pop_keyboard_frame(writer);
-    let _ = execute!(writer, DisableModifyOtherKeys);
+    if pop_keyboard_frame(writer)
+        .and_then(|()| execute!(writer, DisableModifyOtherKeys))
+        .is_ok()
+    {
+        set_reports_key_releases(false);
+    }
 }
 
 pub(super) fn reset_keyboard_reporting_after_exit(writer: &mut impl Write) {
@@ -299,12 +317,16 @@ pub(super) fn reset_keyboard_reporting_after_exit(writer: &mut impl Write) {
         restore_keyboard_enhancement_stack(writer);
         return;
     }
-    let _ = execute!(
+    if execute!(
         writer,
         PopKeyboardEnhancementFlags,
         ResetKeyboardEnhancementFlags,
         DisableModifyOtherKeys
-    );
+    )
+    .is_ok()
+    {
+        set_reports_key_releases(/*reports*/ false);
+    }
 }
 
 pub(super) fn pop_keyboard_frame(writer: &mut impl Write) -> std::io::Result<()> {

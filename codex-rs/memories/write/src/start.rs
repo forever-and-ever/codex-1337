@@ -57,6 +57,17 @@ pub fn start_memories_startup_task(
             config.as_ref(),
             source.clone(),
         ));
+        if context
+            .provider()
+            .memory_extraction_preferred_model()
+            .is_none()
+            && context
+                .provider()
+                .memory_consolidation_preferred_model()
+                .is_none()
+        {
+            continue;
+        }
         tokio::spawn(async move {
             if context.memory_store().await.is_none() {
                 warn!("state db unavailable for memories startup pipeline; skipping");

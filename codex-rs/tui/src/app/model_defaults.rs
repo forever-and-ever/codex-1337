@@ -7,6 +7,7 @@ mod continuations;
 
 use super::App;
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::ThreadSettingsOwner;
 use crate::service_tier_resolution;
 use codex_app_server_protocol::ConfigEdit;
 use codex_app_server_protocol::WriteStatus;
@@ -17,6 +18,34 @@ use codex_protocol::openai_models::ReasoningEffort;
 use color_eyre::eyre::Result;
 
 impl App {
+    pub(super) async fn apply_default_model_selection(
+        &mut self,
+        app_server: &mut AppServerSession,
+        model: String,
+        effort: Option<ReasoningEffort>,
+    ) {
+        if self
+            .active_thread_model_setting_update_params(model.clone())
+            .is_some_and(|params| params.permissions.is_some())
+            && self.reject_pending_permission_change()
+        {
+            return;
+        }
+        let model_changed = self.chat_widget.current_model() != model
+            || self.chat_widget.current_collaboration_mode().model() != model;
+        if model_changed {
+            self.chat_widget.set_model(&model);
+            self.sync_active_thread_model_setting(app_server, model.clone(), /*effort*/ None)
+                .await;
+            self.sync_active_thread_service_tier_to_cached_session()
+                .await;
+        }
+        self.on_update_reasoning_effort(effort.clone());
+        self.sync_active_thread_reasoning_setting(app_server, effort.clone())
+            .await;
+        self.persist_selected_model(app_server, model, effort);
+    }
+
     pub(super) async fn select_session_model(
         &mut self,
         app_server: &mut AppServerSession,
@@ -32,7 +61,13 @@ impl App {
         } else {
             self.active_thread_reasoning_setting_update_params(effort.clone())
         };
+        let server_owned =
+            app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server;
         let Some(mut params) = params else {
+            if server_owned {
+                self.reject_cloud_model_fallback();
+                return;
+            }
             self.model_selection_generation.advance();
             self.apply_selected_session_model(
                 model,
@@ -68,6 +103,10 @@ impl App {
         let generation = self.model_selection_generation;
         let origin = self.active_thread_id;
         if !app_server.operation_settings_supported() {
+            if server_owned {
+                self.reject_cloud_model_fallback();
+                return;
+            }
             if unsupported_speed {
                 self.chat_widget.add_error_message(
                     "Model selection requires an app server with thread/settings/update support."
@@ -96,6 +135,10 @@ impl App {
                 }
                 match result {
                     Ok(true) => {}
+                    Ok(false) if server_owned => {
+                        app.reject_cloud_model_fallback();
+                        return;
+                    }
                     Ok(false) if !unsupported_speed => {}
                     Ok(false) => {
                         app.chat_widget.add_error_message(

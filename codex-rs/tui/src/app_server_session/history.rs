@@ -2,6 +2,7 @@
 
 use color_eyre::eyre::eyre;
 
+use codex_app_server_protocol::ThreadItem;
 use std::collections::HashSet;
 
 use super::AppServerSession;
@@ -15,7 +16,6 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadHistoryMode;
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
@@ -398,7 +398,7 @@ fn rendered_history_rows(
     thread_items_to_transcript_cells(
         Some(thread_id),
         &thread.cwd,
-        items,
+        items.into_iter().map(|item| item.payload),
         visibility,
         Some(config),
         &|_| crate::multi_agents::AgentMetadata::default(),

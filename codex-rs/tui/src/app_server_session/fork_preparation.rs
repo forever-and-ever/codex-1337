@@ -228,6 +228,9 @@ impl ForkPreparation {
         };
         let mut custody = SubscriptionCustody::None;
         let result = Box::pin(async {
+            if mode == ThreadParamsMode::Cloud {
+                color_eyre::eyre::bail!("Cloud conversations cannot be forked in the TUI yet.");
+            }
             let fork_parent = match presentation {
                 ForkPresentation::Regular => read_thread(policy, &handle, parent).await.ok(),
                 ForkPresentation::SideConversation => None,

@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use super::*;
 use crate::ThreadHistoryBuilder;
 use crate::protocol::v2::ThreadItem;
+use crate::protocol::v2::ThreadItemPayload;
 use crate::protocol::v2::TurnError;
 
 #[test]
@@ -73,7 +74,7 @@ fn owned_capture_survives_live_history_and_independent_page_projection() {
         vec![projected.changed_items[0].item.clone()]
     );
     assert_eq!(history[0].items[0].id(), "output-1");
-    let ThreadItem::CodeModeOwned(owned) = &history[0].items[0] else {
+    let ThreadItemPayload::CodeModeOwned(owned) = &history[0].items[0].payload else {
         panic!("capture lost its ownership");
     };
     assert_eq!(owned.owner, owner);
@@ -105,7 +106,10 @@ fn owned_capture_survives_live_history_and_independent_page_projection() {
         builder.handle_rollout_item(&canonical);
         builder.handle_rollout_item(&canonical);
         let turns = builder.finish();
-        assert_eq!(turns[0].items, vec![ThreadItem::ToolInput(input)]);
+        assert_eq!(
+            turns[0].items[0].payload,
+            ThreadItemPayload::ToolInput(input)
+        );
         assert_eq!(turns[0].items[0], projected.changed_items[0].item);
     }
 }
@@ -142,9 +146,9 @@ fn thought_completion_is_self_contained_and_response_scoped() {
     builder.handle_event(&next);
     let turns = builder.finish();
     assert_eq!(
-        turns[0].items,
+        turns[0].item_payloads().collect::<Vec<_>>(),
         vec![
-            ThreadItem::Thought {
+            &ThreadItemPayload::Thought {
                 id: "thought:turn-1:response-1".into(),
                 response_id: "response-1".into(),
                 completed_at_ms: 12345,
@@ -152,7 +156,7 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 content: vec!["Readable content".into()],
                 reported_reasoning_tokens: Some(1300),
             },
-            ThreadItem::Thought {
+            &ThreadItemPayload::Thought {
                 id: "thought:turn-1:response-2".into(),
                 response_id: "response-2".into(),
                 completed_at_ms: 12345,
@@ -169,8 +173,6 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 changed_items: vec![ThreadHistoryItemChange {
                     turn_id: "turn-1".into(),
                     item: item.clone(),
-                    started_at_ms: None,
-                    completed_at_ms: Some(12345),
                 }],
                 ..Default::default()
             }
@@ -309,18 +311,22 @@ fn projects_completed_canonical_turn_items() {
         user_changes.changed_items,
         vec![ThreadHistoryItemChange {
             turn_id: "turn-1".to_string(),
-            item: ThreadItem::from(user_item),
-            started_at_ms: Some(100),
-            completed_at_ms: Some(123),
+            item: ThreadItem {
+                payload: ThreadItemPayload::from(user_item),
+                started_at_ms: Some(100),
+                completed_at_ms: Some(123)
+            }
         }]
     );
     assert_eq!(
         agent_changes.changed_items,
         vec![ThreadHistoryItemChange {
             turn_id: "turn-1".to_string(),
-            item: ThreadItem::from(agent_item),
-            started_at_ms: Some(100),
-            completed_at_ms: Some(123),
+            item: ThreadItem {
+                payload: ThreadItemPayload::from(agent_item),
+                started_at_ms: Some(100),
+                completed_at_ms: Some(123)
+            }
         }]
     );
 }
@@ -352,9 +358,11 @@ fn projects_optional_completed_item_lifecycle_timestamps() {
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
                     turn_id: "turn-1".to_string(),
-                    item: ThreadItem::from(item.clone()),
-                    started_at_ms,
-                    completed_at_ms: expected_completed_at_ms,
+                    item: ThreadItem {
+                        payload: ThreadItemPayload::from(item.clone()),
+                        started_at_ms,
+                        completed_at_ms: expected_completed_at_ms
+                    }
                 }],
                 ..Default::default()
             }

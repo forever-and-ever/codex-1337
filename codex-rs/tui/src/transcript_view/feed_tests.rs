@@ -18,7 +18,7 @@ use codex_app_server_protocol::CodeModeItem;
 use codex_app_server_protocol::CodeModeOwner;
 use codex_app_server_protocol::CodeModeStatus;
 use codex_app_server_protocol::CommandExecutionSource;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
@@ -30,7 +30,7 @@ const CLOCK_MS: i64 = 1_700_000_000_000;
 
 fn thought(response: &str) -> Arc<dyn HistoryCell> {
     Arc::new(ThoughtCell::from_item(
-        ThreadItem::Thought {
+        ThreadItemPayload::Thought {
             id: format!("thought:{response}"),
             response_id: response.into(),
             completed_at_ms: CLOCK_MS,
@@ -51,7 +51,7 @@ fn message(id: &str, text: &str) -> Arc<dyn HistoryCell> {
 /// A finished Code Mode block with optional nested activity and exact returned text.
 fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<dyn HistoryCell> {
     let fact = |suffix: &str, event| {
-        ThreadItem::CodeMode(CodeModeItem {
+        ThreadItemPayload::CodeMode(CodeModeItem {
             id: format!("code-mode:{exec}:{suffix}"),
             cell_id: None,
             exec_call_id: exec.into(),
@@ -90,7 +90,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
         )),
     }));
     if let Some(command) = command {
-        reduce(ThreadItem::CommandExecution {
+        reduce(ThreadItemPayload::CommandExecution {
             sandbox_type: None,
             model_context: None,
             id: "call-status".into(),
@@ -108,7 +108,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
         });
     }
     if let Some(output) = output {
-        reduce(ThreadItem::FunctionCallOutput {
+        reduce(ThreadItemPayload::FunctionCallOutput {
             id: format!("{exec}-output"),
             call_id: Some(exec.into()),
             name: "exec".into(),
@@ -180,7 +180,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            spoken: false,
+            presentation: Default::default(),
         }),
         message("msg-1", "I'll run the tests first."),
         Arc::new(exec),
@@ -206,7 +206,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            spoken: false,
+            presentation: Default::default(),
         }),
         script_block("exec-1", Some("git status"), None),
         message("msg-4", "No step billed this reply."),
@@ -523,7 +523,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     // identities also survive reflow and a new immutable revision of the same semantic item.
     let raw = "<instructions>\n  Be exact.\n</instructions>\n<tools>exec</tools>\n<context>needle Ω</context>";
     let preamble = |id: &str, raw: &str| -> Arc<dyn HistoryCell> {
-        Arc::new(PreambleCell::from_item(ThreadItem::Preamble {
+        Arc::new(PreambleCell::from_item(ThreadItemPayload::Preamble {
             id: id.into(),
             response_id: id.into(),
             completed_at_ms: CLOCK_MS,
@@ -641,7 +641,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     let mut cells = vec![
         script_block("cot-source-only", None, Some("public result")),
         Arc::new(ThoughtCell::from_item(
-            ThreadItem::Thought {
+            ThreadItemPayload::Thought {
                 id: "thought:cot-source-step".into(),
                 response_id: "cot-source-step".into(),
                 completed_at_ms: CLOCK_MS,
@@ -1069,7 +1069,7 @@ fn dialogue_mode_keeps_prompts_and_replies() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            spoken: false,
+            presentation: Default::default(),
         })
     };
     let notice = || -> Arc<dyn HistoryCell> {
@@ -1207,7 +1207,7 @@ fn dialogue_mode_keeps_prompts_and_replies() {
         let cells = vec![
             user("Question"),
             Arc::new(ThoughtCell::from_item(
-                ThreadItem::Thought {
+                ThreadItemPayload::Thought {
                     id: "thought:final-step".into(),
                     response_id: "final-step".into(),
                     completed_at_ms: CLOCK_MS,

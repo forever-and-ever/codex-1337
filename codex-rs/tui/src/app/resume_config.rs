@@ -1,6 +1,6 @@
 //! Folder-entry consent and configuration for command-center dispatch and resume.
 //! Keeps CLI/runtime cwd precedence, remote-workspace checks, and interactive prompts aligned.
-//! Carries local preferences alongside the resolved configuration for session replacement.
+//! Stored-backend settings stay with the candidate; active-backend resume refreshes preferences.
 
 use super::*;
 use codex_config::types::ResumeCwdMode;

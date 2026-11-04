@@ -17,8 +17,8 @@ use super::render::turn_summary;
 use super::same_thread;
 use crate::request_processors::ThreadCoordinationService;
 use codex_app_server_protocol::SortDirection;
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemEntry;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadSortKey;
@@ -267,88 +267,91 @@ pub(super) async fn wait(
                         };
                     }
                     let latest_assistant_message = latest_turn.as_ref().and_then(|turn| {
-                        turn.items.iter().rev().find_map(|item| match item {
-                            ThreadItem::AgentMessage {
-                                id, text, phase, ..
-                            } => Some(json!({
-                                "id": id,
-                                "turnId": turn.id,
-                                "phase": phase,
-                                "text": text
-                            })),
-                            _ => None,
-                        })
+                        turn.items
+                            .iter()
+                            .rev()
+                            .find_map(|item| match &item.payload {
+                                ThreadItemPayload::AgentMessage {
+                                    id, text, phase, ..
+                                } => Some(json!({
+                                    "id": id,
+                                    "turnId": turn.id,
+                                    "phase": phase,
+                                    "text": text
+                                })),
+                                _ => None,
+                            })
                     });
-                    let latest_tool_marker = latest_turn
-                        .as_ref()
-                        .zip(latest_items.as_ref())
-                        .and_then(|(turn, items)| {
-                            items
+                    let latest_tool_marker =
+                        latest_turn.as_ref().zip(latest_items.as_ref()).and_then(
+                            |(turn, items)| {
+                                items
                                 .iter()
-                                .find_map(|entry| match entry.item.native_item() {
-                                    ThreadItem::CodeModeOwned(_) => {
+                                .find_map(|entry| match entry.item.payload.native_item() {
+                                    ThreadItemPayload::CodeModeOwned(_) => {
                                         unreachable!("ownership ingress rejects nesting")
                                     }
-                                    ThreadItem::CommandExecution { id, status, .. } => {
+                                    ThreadItemPayload::CommandExecution { id, status, .. } => {
                                         Some(json!({
                                             "id": id, "turnId": turn.id, "type": "commandExecution",
                                             "name": "commandExecution", "status": status
                                         }))
                                     }
-                                    ThreadItem::FileChange { id, status, .. } => Some(json!({
+                                    ThreadItemPayload::FileChange { id, status, .. } => Some(json!({
                                         "id": id, "turnId": turn.id, "type": "fileChange",
                                         "name": "fileChange", "status": status
                                     })),
-                                    ThreadItem::ImageGeneration(item) => Some(json!({
+                                    ThreadItemPayload::ImageGeneration(item) => Some(json!({
                                         "id": item.id, "turnId": turn.id, "type": "imageGeneration",
                                         "name": "imageGeneration", "status": item.status
                                     })),
-                                    ThreadItem::McpToolCall {
+                                    ThreadItemPayload::McpToolCall {
                                         id, tool, status, ..
                                     } => Some(json!({
                                         "id": id, "turnId": turn.id, "type": "mcpToolCall",
                                         "name": tool, "status": status
                                     })),
-                                    ThreadItem::DynamicToolCall {
+                                    ThreadItemPayload::DynamicToolCall {
                                         id, tool, status, ..
                                     } => Some(json!({
                                         "id": id, "turnId": turn.id, "type": "dynamicToolCall",
                                         "name": tool, "status": status
                                     })),
-                                    ThreadItem::CollabAgentToolCall {
+                                    ThreadItemPayload::CollabAgentToolCall {
                                         id, tool, status, ..
                                     } => Some(json!({
                                         "id": id, "turnId": turn.id, "type": "collabAgentToolCall",
                                         "name": tool, "status": status
                                     })),
-                                    ThreadItem::Sleep(item) => Some(json!({
+                                    ThreadItemPayload::Sleep(item) => Some(json!({
                                         "id": item.id, "turnId": turn.id, "type": "sleep",
                                         "name": "sleep", "status": null
                                     })),
-                                    ThreadItem::WebSearch(item) => Some(json!({
+                                    ThreadItemPayload::WebSearch(item) => Some(json!({
                                         "id": item.id, "turnId": turn.id, "type": "webSearch",
                                         "name": "webSearch", "status": null
                                     })),
-                                    ThreadItem::UserMessage { .. }
-                                    | ThreadItem::FunctionCallOutput { .. }
-                                    | ThreadItem::ToolOutputTokens { .. }
-                                    | ThreadItem::CodeMode(_)
-                                    | ThreadItem::HookPrompt { .. }
-                                    | ThreadItem::AgentMessage { .. }
-                                    | ThreadItem::Plan { .. }
-                                    | ThreadItem::Reasoning { .. }
-                                    | ThreadItem::Thought { .. }
-                                    | ThreadItem::Preamble { .. }
-                                    | ThreadItem::StepAdmission(_)
-                                    | ThreadItem::ToolInput(_)
-                                    | ThreadItem::Arrival(_)
-                                    | ThreadItem::SubAgentActivity { .. }
-                                    | ThreadItem::ImageView { .. }
-                                    | ThreadItem::EnteredReviewMode { .. }
-                                    | ThreadItem::ExitedReviewMode { .. }
-                                    | ThreadItem::ContextCompaction { .. } => None,
+                                    ThreadItemPayload::UserMessage { .. }
+                                    | ThreadItemPayload::FunctionCallOutput { .. }
+                                    | ThreadItemPayload::ToolOutputTokens { .. }
+                                    | ThreadItemPayload::CodeMode(_)
+                                    | ThreadItemPayload::HookPrompt { .. }
+                                    | ThreadItemPayload::AgentMessage { .. }
+                                    | ThreadItemPayload::Plan { .. }
+                                    | ThreadItemPayload::Reasoning { .. }
+                                    | ThreadItemPayload::Thought { .. }
+                                    | ThreadItemPayload::Preamble { .. }
+                                    | ThreadItemPayload::StepAdmission(_)
+                                    | ThreadItemPayload::ToolInput(_)
+                                    | ThreadItemPayload::Arrival(_)
+                                    | ThreadItemPayload::SubAgentActivity { .. }
+                                    | ThreadItemPayload::ImageView { .. }
+                                    | ThreadItemPayload::EnteredReviewMode { .. }
+                                    | ThreadItemPayload::ExitedReviewMode { .. }
+                                    | ThreadItemPayload::ContextCompaction { .. } => None,
                                 })
-                        });
+                            },
+                        );
                     polls.push(json!({
                                 "schemaVersion": 1,
                                 "thread": {"id": thread.id, "status": thread.status},

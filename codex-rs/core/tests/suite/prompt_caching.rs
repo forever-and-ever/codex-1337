@@ -144,6 +144,7 @@ async fn prompt_tools_are_consistent_across_requests(
         ModelsResponse {
             models: vec![model],
         },
+        codex_models_manager::ModelOrigin::ExplicitConfig,
     ));
 
     let server = start_mock_server().await;

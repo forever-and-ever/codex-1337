@@ -52,6 +52,7 @@ pub(super) fn spawn_stream(
         rx_event,
         upstream_request_id,
         interrupt: None,
+        routing_affinity: None,
     }
 }
 

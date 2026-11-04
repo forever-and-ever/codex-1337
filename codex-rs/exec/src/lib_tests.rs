@@ -1,5 +1,7 @@
 use super::*;
 use codex_app_server_protocol::AuthRecoveryNotification;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload as AppServerThreadItemPayload;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
@@ -273,6 +275,7 @@ fn turn_items_for_thread_returns_matching_turn_items() {
         section_entered_at: None,
         project_id: None,
         daybreak_enabled: None,
+        theme: None,
         comms: Default::default(),
         context_role: None,
         history_mode: Default::default(),
@@ -300,14 +303,16 @@ fn turn_items_for_thread_returns_matching_turn_items() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
-                items: vec![AppServerThreadItem::AgentMessage {
-                    id: "msg-1".to_string(),
-                    text: "hello".to_string(),
-                    phase: None,
-                    memory_citation: None,
-                    delivery: None,
-                    questions: None,
-                }],
+                items: vec![ThreadItem::untimed(
+                    AppServerThreadItemPayload::AgentMessage {
+                        id: "msg-1".to_string(),
+                        text: "hello".to_string(),
+                        phase: None,
+                        memory_citation: None,
+                        delivery: None,
+                        questions: None,
+                    },
+                )],
                 status: codex_app_server_protocol::TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -318,10 +323,10 @@ fn turn_items_for_thread_returns_matching_turn_items() {
                 id: "turn-2".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
-                items: vec![AppServerThreadItem::Plan {
+                items: vec![ThreadItem::untimed(AppServerThreadItemPayload::Plan {
                     id: "plan-1".to_string(),
                     text: "ship it".to_string(),
-                }],
+                })],
                 status: codex_app_server_protocol::TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -333,14 +338,16 @@ fn turn_items_for_thread_returns_matching_turn_items() {
 
     assert_eq!(
         turn_items_for_thread(&thread, "turn-1"),
-        Some(vec![AppServerThreadItem::AgentMessage {
-            id: "msg-1".to_string(),
-            text: "hello".to_string(),
-            phase: None,
-            memory_citation: None,
-            delivery: None,
-            questions: None,
-        }])
+        Some(vec![ThreadItem::untimed(
+            AppServerThreadItemPayload::AgentMessage {
+                id: "msg-1".to_string(),
+                text: "hello".to_string(),
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            }
+        )])
     );
     assert_eq!(turn_items_for_thread(&thread, "missing-turn"), None);
 }
@@ -784,6 +791,7 @@ fn sample_thread_start_response() -> ThreadStartResponse {
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
+            theme: None,
             comms: Default::default(),
             context_role: None,
             history_mode: Default::default(),

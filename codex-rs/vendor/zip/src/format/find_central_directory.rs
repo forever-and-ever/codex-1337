@@ -1,16 +1,24 @@
 //! Find central directory function
 
-use crate::format::blocks::{
-    CentralDirectoryEndInfo, Zip32CentralDirectoryEnd, Zip64CDELocatorBlock,
-    Zip64CentralDirectoryEnd, Zip64CentralDirectoryEndLocator, ZipCentralEntryBlock,
-};
+use crate::format::blocks::CentralDirectoryEndInfo;
+use crate::format::blocks::Zip32CentralDirectoryEnd;
+use crate::format::blocks::Zip64CDELocatorBlock;
+use crate::format::blocks::Zip64CentralDirectoryEnd;
+use crate::format::blocks::Zip64CentralDirectoryEndLocator;
+use crate::format::blocks::ZipCentralEntryBlock;
 use crate::format::magic::Magic;
 use crate::read::ArchiveOffset;
-use crate::read::magic_finder::{Backwards, Forward, MagicFinder, OptimisticMagicFinder};
-use crate::result::{ZipResult, invalid};
+use crate::read::magic_finder::Backwards;
+use crate::read::magic_finder::Forward;
+use crate::read::magic_finder::MagicFinder;
+use crate::read::magic_finder::OptimisticMagicFinder;
+use crate::result::ZipResult;
+use crate::result::invalid;
 
 use core::mem;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 
 /// Finds the EOCD and possibly the EOCD64 block and determines the archive offset.
 ///

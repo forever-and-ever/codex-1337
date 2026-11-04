@@ -20,6 +20,7 @@ use super::ThreadId;
 use super::ThreadParamsMode;
 use super::ThreadResumeParams;
 use super::ThreadResumeResponse;
+use super::ThreadSettingsOwner;
 use super::ThreadStartParams;
 use super::ThreadStartSource;
 use super::TypedRequestError;
@@ -202,9 +203,11 @@ impl AppServerSession {
                     self.remote_cwd_override.as_deref(),
                     source,
                 );
-                params.model_provider = self.explicit_model_provider(config);
-                params.daybreak_enabled =
-                    (config.daybreak_enabled && !config.ephemeral).then_some(true);
+                if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
+                    params.model_provider = self.explicit_model_provider(config);
+                    params.daybreak_enabled =
+                        (config.daybreak_enabled && !config.ephemeral).then_some(true);
+                }
                 params
             }
             ThreadStartChoice::Provider(provider) => {
@@ -214,7 +217,9 @@ impl AppServerSession {
                     self.remote_cwd_override.as_deref(),
                     None,
                 );
-                params.model_provider = Some(provider);
+                if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
+                    params.model_provider = Some(provider);
+                }
                 params
             }
         };
@@ -264,6 +269,12 @@ impl StartPreparation {
         let mut custody = SubscriptionCustody::NewThreadUncertain;
         let selected_profile = params.permissions.is_some();
         let result = async {
+            if mode.settings_owner() == ThreadSettingsOwner::Server && selected_profile {
+                custody = SubscriptionCustody::None;
+                color_eyre::eyre::bail!(
+                    "Cloud conversations currently use server-selected permissions."
+                );
+            }
             let request_id = RequestId::String(format!("tui-start-{}", Uuid::new_v4()));
             let (response, support, task_tools_available) =
                 request_thread_start_with_history_fallback(&handle, request_id, params)
@@ -514,7 +525,9 @@ impl AppServerSession {
             model_settings,
             permission_overrides,
         );
-        if model_settings == ResumeModelSettings::OverrideFromCurrentConfig {
+        if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client
+            && model_settings == ResumeModelSettings::OverrideFromCurrentConfig
+        {
             params.model_provider = self.explicit_model_provider(&config);
         }
         ResumePreparation {

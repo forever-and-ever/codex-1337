@@ -430,6 +430,19 @@ impl App {
         config: &mut Config,
         scope: RuntimePolicyOverrideScope,
     ) -> Result<()> {
+        self.apply_runtime_policy_overrides_with_reviewer(
+            config,
+            scope,
+            self.config.approvals_reviewer,
+        )
+    }
+
+    pub(super) fn apply_runtime_policy_overrides_with_reviewer(
+        &mut self,
+        config: &mut Config,
+        scope: RuntimePolicyOverrideScope,
+        restored_reviewer: ApprovalsReviewer,
+    ) -> Result<()> {
         if let Some(policy) = self.runtime_approval_policy_override
             && (scope == RuntimePolicyOverrideScope::All
                 || matches!(policy, RuntimeApprovalPolicyOverride::Explicit(_)))
@@ -459,7 +472,7 @@ impl App {
                 .filter(|profile| {
                     profile.turn_override == RuntimePermissionProfileTurnOverride::Preserve
                 })
-                .map(|_| self.config.approvals_reviewer)
+                .map(|_| restored_reviewer)
         }) {
             config
                 .config_layer_stack
@@ -801,10 +814,12 @@ impl App {
         resume_model_settings_for_overrides(&self.config, &self.harness_overrides)
     }
 
-    pub(super) fn reject_remote_resume_permission_override(&mut self, config: &Config) -> bool {
-        if self.app_server_target.thread_params_mode()
-            != crate::app_server_session::ThreadParamsMode::Remote
-        {
+    pub(super) fn reject_remote_resume_permission_override(
+        &mut self,
+        config: &Config,
+        target: &AppServerTarget,
+    ) -> bool {
+        if target.thread_params_mode() != crate::app_server_session::ThreadParamsMode::Remote {
             return false;
         }
         let explicitly_selected =

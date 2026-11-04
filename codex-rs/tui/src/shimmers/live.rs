@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use codex_app_server_protocol::CodeModeOwnedNotification;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
 use codex_protocol::code_mode::CodeModeEvent;
 use libshimmer::Glyphs;
@@ -505,18 +505,18 @@ fn event(notification: &ServerNotification) -> Option<(&str, Event<'_>)> {
     Some(match notification {
         ServerNotification::TurnStarted(turn) => (turn.thread_id.as_str(), Event::TurnStarted),
         ServerNotification::TurnCompleted(turn) => (turn.thread_id.as_str(), Event::TurnCompleted),
-        ServerNotification::ItemStarted(started) if waits(&started.item) => (
+        ServerNotification::ItemStarted(started) if waits(&started.item.payload) => (
             started.thread_id.as_str(),
             Event::ToolStarted {
                 id: started.item.id(),
-                size: Some(size(&started.item)),
+                size: Some(size(&started.item.payload)),
             },
         ),
-        ServerNotification::ItemCompleted(completed) if waits(&completed.item) => (
+        ServerNotification::ItemCompleted(completed) if waits(&completed.item.payload) => (
             completed.thread_id.as_str(),
             Event::ToolCompleted {
                 id: completed.item.id(),
-                size: Some(size(&completed.item)),
+                size: Some(size(&completed.item.payload)),
             },
         ),
         ServerNotification::CommandExecutionOutputDelta(delta) => (
@@ -551,7 +551,7 @@ fn cell(owned: &CodeModeOwnedNotification) -> Option<(&str, Event<'_>)> {
             },
         )),
         ServerNotification::ItemCompleted(completed) => {
-            let ThreadItem::CodeMode(fact) = &completed.item else {
+            let ThreadItemPayload::CodeMode(fact) = &completed.item.payload else {
                 return None;
             };
             let event = match &fact.event {
@@ -590,7 +590,7 @@ fn cell(owned: &CodeModeOwnedNotification) -> Option<(&str, Event<'_>)> {
 }
 
 /// The length of `item`'s JSON, tallied without building it.
-fn size(item: &ThreadItem) -> usize {
+fn size(item: &ThreadItemPayload) -> usize {
     struct Tally(usize);
     impl std::io::Write for Tally {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -607,18 +607,18 @@ fn size(item: &ThreadItem) -> usize {
 }
 
 /// Whether the turn waits on this item while it runs: a tool, not the model's own output.
-fn waits(item: &ThreadItem) -> bool {
+fn waits(item: &ThreadItemPayload) -> bool {
     matches!(
         item,
-        ThreadItem::CommandExecution { .. }
-            | ThreadItem::FileChange { .. }
-            | ThreadItem::McpToolCall { .. }
-            | ThreadItem::DynamicToolCall { .. }
-            | ThreadItem::CollabAgentToolCall { .. }
-            | ThreadItem::WebSearch(_)
-            | ThreadItem::ImageView { .. }
-            | ThreadItem::Sleep(_)
-            | ThreadItem::ImageGeneration(_)
+        ThreadItemPayload::CommandExecution { .. }
+            | ThreadItemPayload::FileChange { .. }
+            | ThreadItemPayload::McpToolCall { .. }
+            | ThreadItemPayload::DynamicToolCall { .. }
+            | ThreadItemPayload::CollabAgentToolCall { .. }
+            | ThreadItemPayload::WebSearch(_)
+            | ThreadItemPayload::ImageView { .. }
+            | ThreadItemPayload::Sleep(_)
+            | ThreadItemPayload::ImageGeneration(_)
     )
 }
 

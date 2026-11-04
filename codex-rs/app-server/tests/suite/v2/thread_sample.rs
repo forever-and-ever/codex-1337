@@ -563,6 +563,7 @@ async fn sample_skips_inherited_stop_hooks() -> Result<()> {
     let list_id = client
         .send_hooks_list_request(HooksListParams {
             cwds: vec![home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let hooks: HooksListResponse = client.read_response(list_id).await?;
@@ -658,7 +659,7 @@ async fn sample_returns_null_for_custom_tool_calls() -> Result<()> {
 #[test_case(false, true, false; "inherit MCPs by default")]
 #[test_case(true, true, false; "disable MCPs with incremental tools")]
 #[test_case(true, false, false; "retain MCPs without incremental tools")]
-#[test_case(true, true, true; "opt in to inherited MCP declarations")]
+#[test_case(true, true, true; "preserve inherited MCP declarations")]
 #[tokio::test]
 async fn sample_blocks_mcp_execution_without_changing_parent_tools(
     disable_mcp: bool,

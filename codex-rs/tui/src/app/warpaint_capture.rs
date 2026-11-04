@@ -18,7 +18,7 @@ use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnItemsView;
@@ -109,7 +109,9 @@ async fn drive() -> Result<()> {
         let rerun = matches!(
             &notification,
             ServerNotification::ItemStarted(ItemStartedNotification {
-                item: ThreadItem::CommandExecution { id, .. },
+                item: codex_app_server_protocol::ThreadItem {
+                    payload: ThreadItemPayload::CommandExecution { id, .. }, ..
+                },
                 ..
             }) if id == "exec-2"
         );
@@ -251,20 +253,21 @@ impl Session<'_> {
 fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
     let at = |seconds: i64| (STARTED_AT + seconds) * 1_000;
     let started = |seconds, item| {
-        ServerNotification::ItemStarted(ItemStartedNotification {
-            thread_id: thread.to_string(),
-            turn_id: TURN.to_string(),
-            started_at_ms: at(seconds),
+        ServerNotification::ItemStarted(ItemStartedNotification::new(
+            thread.to_string(),
+            TURN.to_string(),
             item,
-        })
+            at(seconds),
+        ))
     };
     let completed = |seconds, item| {
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: thread.to_string(),
-            turn_id: TURN.to_string(),
-            completed_at_ms: at(seconds),
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            thread.to_string(),
+            TURN.to_string(),
             item,
-        })
+            None,
+            at(seconds),
+        ))
     };
     let turn = |status, completed_at: Option<i64>| Turn {
         id: TURN.to_string(),
@@ -278,32 +281,33 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
         duration_ms: completed_at.map(|seconds| seconds * 1_000),
     };
     let input = |id: &str| {
-        ThreadItem::ToolInput(ToolInput {
+        ThreadItemPayload::ToolInput(ToolInput {
             id: format!("input:{id}"),
             call_id: id.to_string(),
             name: ToolName::plain("exec_command"),
             payload: ToolInputPayload::Json(format!(r#"{{"cmd":"{COMMAND}"}}"#)),
         })
     };
-    let exec = |id: &str, status, output: Option<&str>, exit_code| ThreadItem::CommandExecution {
-        model_context: None,
-        sandbox_type: None,
-        id: id.to_string(),
-        command: COMMAND.to_string(),
-        cwd: cwd.clone().into(),
-        process_id: None,
-        plugin_id: None,
-        script_path: None,
-        source: CommandExecutionSource::Agent,
-        status,
-        command_actions: vec![CommandAction::Unknown {
+    let exec =
+        |id: &str, status, output: Option<&str>, exit_code| ThreadItemPayload::CommandExecution {
+            model_context: None,
+            sandbox_type: None,
+            id: id.to_string(),
             command: COMMAND.to_string(),
-        }],
-        aggregated_output: output.map(str::to_string),
-        exit_code,
-        duration_ms: exit_code.map(|_| 1_840),
-    };
-    let patch = |status| ThreadItem::FileChange {
+            cwd: cwd.clone().into(),
+            process_id: None,
+            plugin_id: None,
+            script_path: None,
+            source: CommandExecutionSource::Agent,
+            status,
+            command_actions: vec![CommandAction::Unknown {
+                command: COMMAND.to_string(),
+            }],
+            aggregated_output: output.map(str::to_string),
+            exit_code,
+            duration_ms: exit_code.map(|_| 1_840),
+        };
+    let patch = |status| ThreadItemPayload::FileChange {
         id: "patch-1".to_string(),
         changes: vec![FileUpdateChange {
             path: "src/parser.rs".to_string(),
@@ -319,7 +323,7 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
         }),
         completed(
             0,
-            ThreadItem::UserMessage {
+            ThreadItemPayload::UserMessage {
                 source_response_item_id: None,
                 id: "prompt-1".to_string(),
                 client_id: None,
@@ -361,7 +365,7 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
         ),
         completed(
             30,
-            ThreadItem::Arrival(ArrivalItem {
+            ThreadItemPayload::Arrival(ArrivalItem {
                 id: "arrival-1".to_string(),
                 response_id: "response-1".to_string(),
                 announced_at_ms: at(30),
@@ -380,7 +384,7 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
         }),
         completed(
             41,
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 id: "answer-1".to_string(),
                 text: ANSWER.to_string(),
                 phase: None,
@@ -392,7 +396,7 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
         // A response's thought follows its members, as the server announces it.
         completed(
             41,
-            ThreadItem::Thought {
+            ThreadItemPayload::Thought {
                 id: "thought-1".to_string(),
                 response_id: "response-2".to_string(),
                 completed_at_ms: at(41),

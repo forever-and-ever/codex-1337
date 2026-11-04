@@ -5,38 +5,59 @@ use crate::compression::CompressionMethod;
 use crate::datetime::DateTime;
 use crate::extra_fields::DataStreamAlignment;
 use crate::extra_fields::ExtraFields;
-use crate::extra_fields::{Zip64ExtendedInformation, Zip64Sizes};
-use crate::format::blocks::{
-    FixedSizeBlock, Zip32CDEBlock, Zip32CentralDirectoryEnd, Zip64CentralDirectoryEnd,
-    Zip64CentralDirectoryEndLocator, ZipCentralEntryBlock, ZipLocalEntryBlock,
-};
+use crate::extra_fields::Zip64ExtendedInformation;
+use crate::extra_fields::Zip64Sizes;
+use crate::format::ZIP64_BYTES_THR;
+use crate::format::ZIP64_BYTES_THR_U32;
+use crate::format::ZIP64_ENTRY_THR;
+use crate::format::blocks::FixedSizeBlock;
+use crate::format::blocks::Zip32CDEBlock;
+use crate::format::blocks::Zip32CentralDirectoryEnd;
+use crate::format::blocks::Zip64CentralDirectoryEnd;
+use crate::format::blocks::Zip64CentralDirectoryEndLocator;
+use crate::format::blocks::ZipCentralEntryBlock;
+use crate::format::blocks::ZipLocalEntryBlock;
 use crate::format::ffi;
 use crate::format::flags::ZipFlags;
 use crate::format::magic::Magic;
-use crate::format::{ZIP64_BYTES_THR, ZIP64_BYTES_THR_U32, ZIP64_ENTRY_THR};
-use crate::read::{Config, ZipArchive, ZipFile};
-use crate::result::{ZipError, ZipResult, invalid};
-use crate::types::{MIN_VERSION, ZipFileData, ZipRawValues};
+use crate::read::Config;
+use crate::read::ZipArchive;
+use crate::read::ZipFile;
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
+use crate::types::MIN_VERSION;
+use crate::types::ZipFileData;
+use crate::types::ZipRawValues;
 use crate::write::options::EncryptWith;
 
 use core::default::Default;
-use core::fmt::{Debug, Formatter};
-use core::mem::{self, offset_of, size_of};
-use core::str::{Utf8Error, from_utf8};
+use core::fmt::Debug;
+use core::fmt::Formatter;
+use core::mem::offset_of;
+use core::mem::size_of;
+use core::mem::{self};
+use core::str::Utf8Error;
+use core::str::from_utf8;
 use crc32fast::Hasher;
 use indexmap::IndexMap;
+use std::io::BufReader;
 use std::io::Cursor;
 use std::io::ErrorKind;
-use std::io::{self, Read, Seek, Write};
-use std::io::{BufReader, SeekFrom};
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Write;
+use std::io::{self};
 use std::path::Path;
 
 pub(crate) mod options;
 
 // re-export from types
-pub use crate::write::options::{
-    ExtendedFileOptions, FileOptions, FullFileOptions, SimpleFileOptions,
-};
+pub use crate::write::options::ExtendedFileOptions;
+pub use crate::write::options::FileOptions;
+pub use crate::write::options::FullFileOptions;
+pub use crate::write::options::SimpleFileOptions;
 
 #[allow(clippy::large_enum_variant)]
 enum MaybeEncrypted<W> {
@@ -150,13 +171,14 @@ impl<W: Write + Seek> Debug for GenericZipWriter<W> {
 
 // Put the struct declaration in a private module to convince rustdoc to display ZipWriter nicely
 pub(crate) mod zip_writer {
-    use crate::{
-        types::ZipFileData,
-        write::{GenericZipWriter, ZipWriterStats},
-    };
-    use core::fmt::{Debug, Formatter};
+    use crate::types::ZipFileData;
+    use crate::write::GenericZipWriter;
+    use crate::write::ZipWriterStats;
+    use core::fmt::Debug;
+    use core::fmt::Formatter;
     use indexmap::IndexMap;
-    use std::io::{Seek, Write};
+    use std::io::Seek;
+    use std::io::Write;
 
     /// ZIP archive generator
     ///
@@ -2592,7 +2614,10 @@ impl<W: Write> Seek for StreamWriter<W> {
 #[allow(clippy::needless_update)] // So we can use the same FileOptions decls with and without zopfli_buffer_size
 #[allow(clippy::octal_escapes)] // many false positives in converted fuzz cases
 mod tests {
-    use super::{ExtendedFileOptions, FileOptions, FullFileOptions, ZipWriter};
+    use super::ExtendedFileOptions;
+    use super::FileOptions;
+    use super::FullFileOptions;
+    use super::ZipWriter;
     use crate::CompressionMethod::Stored;
     use crate::ZipArchive;
     use crate::compression::CompressionMethod;
@@ -2602,9 +2627,10 @@ mod tests {
     use crate::write::EncryptWith::ZipCrypto;
     use crate::write::SimpleFileOptions;
     use crate::zipcrypto::ZipCryptoKeys;
+    use std::io::Cursor;
     #[cfg(feature = "deflate-flate2")]
     use std::io::Read;
-    use std::io::{Cursor, Write};
+    use std::io::Write;
     use std::marker::PhantomData;
     use std::path::PathBuf;
 
@@ -3583,7 +3609,8 @@ mod tests {
     /// https://github.com/zip-rs/zip2/commit/e3ccaf6e005a855e87d2244a5ccdff9c18279b0c
     fn test_fuzz_crash_2024_06_14d() -> ZipResult<()> {
         use crate::extra_fields::CustomExtraField;
-        use crate::format::aes::{AesMode, AesVendorVersion};
+        use crate::format::aes::AesMode;
+        use crate::format::aes::AesVendorVersion;
         use crate::write::EncryptWith;
         use CompressionMethod::Deflated;
 
@@ -4121,7 +4148,8 @@ mod tests {
     #[cfg(all(feature = "_bzip2_any", feature = "aes-crypto", not(miri)))]
     #[test]
     fn test_fuzz_crash_2024_06_18b() -> ZipResult<()> {
-        use crate::format::aes::{AesMode, AesVendorVersion};
+        use crate::format::aes::AesMode;
+        use crate::format::aes::AesVendorVersion;
         use crate::write::options::EncryptWith;
 
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
@@ -4301,7 +4329,8 @@ mod tests {
     #[cfg(feature = "aes-crypto")]
     fn fuzz_crash_2024_07_19a() -> ZipResult<()> {
         use crate::extra_fields::CustomExtraField;
-        use crate::format::aes::{AesMode, AesVendorVersion};
+        use crate::format::aes::AesMode;
+        use crate::format::aes::AesVendorVersion;
         use crate::write::EncryptWith;
 
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));

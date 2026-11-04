@@ -18,16 +18,17 @@ fn delta(chat: &mut ChatWidget, id: &str, text: &str) {
 
 fn complete(chat: &mut ChatWidget, id: &str) {
     chat.handle_server_notification(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 0,
-            item: AppServerThreadItem::Reasoning {
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            AppServerThreadItemPayload::Reasoning {
                 id: id.to_string(),
                 summary: Vec::new(),
                 content: Vec::new(),
             },
-        }),
+            /*started_at_ms*/ None,
+            /*completed_at_ms*/ 0,
+        )),
         /*replay_kind*/ None,
     );
 }
@@ -212,14 +213,13 @@ async fn reasoning_status_replay_retains_last_usable_heading() {
         ("third", Vec::new(), "Second heading"),
     ] {
         chat.handle_thread_item(
-            AppServerThreadItem::Reasoning {
+            codex_app_server_protocol::ThreadItem::untimed(AppServerThreadItemPayload::Reasoning {
                 id: id.to_string(),
                 summary,
                 content: Vec::new(),
-            },
+            }),
             "turn-1".to_string(),
             ThreadItemRenderSource::Replay(ReplayKind::ThreadSnapshot),
-            /*timestamp*/ None,
         );
         assert_eq!(
             chat.reasoning_header.as_deref().unwrap_or("Working"),
@@ -272,14 +272,15 @@ async fn completed_reasoning_stays_in_expanded_transcript_for_live_and_replay() 
         ] {
             if replay {
                 chat.handle_thread_item(
-                    AppServerThreadItem::Reasoning {
-                        id: id.to_string(),
-                        summary: vec![summary.to_string()],
-                        content: Vec::new(),
-                    },
+                    codex_app_server_protocol::ThreadItem::untimed(
+                        AppServerThreadItemPayload::Reasoning {
+                            id: id.to_string(),
+                            summary: vec![summary.to_string()],
+                            content: Vec::new(),
+                        },
+                    ),
                     "turn-1".to_string(),
                     ThreadItemRenderSource::Replay(ReplayKind::ThreadSnapshot),
-                    /*timestamp*/ None,
                 );
             } else {
                 handle_agent_reasoning_started(&mut chat, id);

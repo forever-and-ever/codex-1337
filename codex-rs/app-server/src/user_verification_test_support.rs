@@ -167,6 +167,7 @@ impl Harness {
             state_db: None,
             alarm_owner: None,
             config_warnings: Vec::new(),
+            startup_warnings_tx: mpsc::unbounded_channel().0,
             session_source: SessionSource::Cli,
             auth_manager: Arc::clone(&auth),
             user_verification: Arc::clone(&service),

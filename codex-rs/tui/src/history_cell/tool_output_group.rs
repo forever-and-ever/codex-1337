@@ -10,6 +10,7 @@ use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use ratatui::text::Line;
 use std::collections::HashSet;
@@ -293,10 +294,10 @@ impl ToolOutputGroup {
                 && items.iter().all(|item| {
                     ids.contains(item.id())
                         || matches!(
-                            item,
-                            ThreadItem::Reasoning { .. }
-                                | ThreadItem::ToolOutputTokens { .. }
-                                | ThreadItem::StepAdmission(_)
+                            &item.payload,
+                            ThreadItemPayload::Reasoning { .. }
+                                | ThreadItemPayload::ToolOutputTokens { .. }
+                                | ThreadItemPayload::StepAdmission(_)
                         )
                 }))
             .then(|| Self::from_cells([Arc::clone(older), Arc::clone(newer)]))

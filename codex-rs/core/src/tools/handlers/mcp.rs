@@ -86,7 +86,7 @@ impl McpHandlerDefinition {
 
 pub struct McpHandler {
     definition: Arc<McpHandlerDefinition>,
-    code_mode_tool_definitions: OnceLock<(bool, Vec<codex_code_mode::ToolDefinition>)>,
+    code_mode_tool_definitions: OnceLock<Vec<codex_code_mode::ToolDefinition>>,
 }
 
 #[cfg(test)]
@@ -250,7 +250,8 @@ impl McpHandler {
             .map(TruncationPolicy::Tokens)
             .unwrap_or(step_context.settings.model_info.truncation_policy.into());
         let started = Instant::now();
-        let result = handle_mcp_tool_call(
+        // Bound the compiler's async-layout query depth for approval and dispatch.
+        let result = Box::pin(handle_mcp_tool_call(
             Arc::clone(&session),
             &step_context,
             &cancellation_token,
@@ -261,7 +262,7 @@ impl McpHandler {
             tool_name,
             &source,
             payload,
-        )
+        ))
         .await;
 
         Ok(boxed_tool_output(McpToolOutput {
@@ -297,20 +298,14 @@ impl CoreToolRuntime for McpHandler {
         Some(&self.definition.spec)
     }
 
-    fn cached_code_mode_definitions(
-        &self,
-        tool_description_first: bool,
-    ) -> Option<&[codex_code_mode::ToolDefinition]> {
-        let (cached_order, definitions) = self.code_mode_tool_definitions.get_or_init(|| {
-            (
-                tool_description_first,
-                codex_tools::collect_code_mode_tool_definitions(
-                    std::iter::once(self.definition.spec.as_ref()),
-                    tool_description_first,
-                ),
-            )
+    fn cached_code_mode_definitions(&self) -> Option<&[codex_code_mode::ToolDefinition]> {
+        let definitions = self.code_mode_tool_definitions.get_or_init(|| {
+            let definitions = codex_tools::collect_code_mode_tool_definitions(std::iter::once(
+                self.definition.spec.as_ref(),
+            ));
+            definitions
         });
-        (*cached_order == tool_description_first).then_some(definitions.as_slice())
+        Some(definitions.as_slice())
     }
 
     fn wait_until_ready<'a>(&'a self, session: &'a Arc<Session>) -> Option<BoxFuture<'a, ()>> {
@@ -748,6 +743,7 @@ mod tests {
         assert_eq!(
             handler.post_tool_use_payload(&invocation, &output),
             Some(PostToolUsePayload {
+                tool_cwd: None,
                 tool_name: ToolName::namespaced("filesystem", "read_file"),
                 tool_use_id: "call-mcp-post".to_string(),
                 tool_input: json!({
@@ -816,21 +812,16 @@ mod tests {
         ));
 
         let first = handler
-            .cached_code_mode_definitions(/*tool_description_first*/ false)
+            .cached_code_mode_definitions()
             .expect("MCP definitions should be cached");
         assert_eq!(first.len(), 1);
         assert!(first[0].input_schema.is_some());
         assert!(first[0].output_schema.is_some());
 
         let second = handler
-            .cached_code_mode_definitions(/*tool_description_first*/ false)
+            .cached_code_mode_definitions()
             .expect("MCP definitions should be cached");
         assert!(std::ptr::eq(first, second));
-        assert!(
-            handler
-                .cached_code_mode_definitions(/*tool_description_first*/ true)
-                .is_none()
-        );
     }
 
     #[test]

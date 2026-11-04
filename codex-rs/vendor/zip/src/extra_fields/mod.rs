@@ -17,9 +17,11 @@ pub use aex_encryption::AexEncryption;
 pub use custom_extra_field::CustomExtraField;
 pub use data_stream_alignment::DataStreamAlignment;
 pub use extended_timestamp::ExtendedTimestamp;
-pub use extra_field::{ExtraField, ExtraFields};
+pub use extra_field::ExtraField;
+pub use extra_field::ExtraFields;
 pub use ntfs::Ntfs;
-pub use zip64_extended_information::{Zip64ExtendedInformation, Zip64Sizes};
+pub use zip64_extended_information::Zip64ExtendedInformation;
+pub use zip64_extended_information::Zip64Sizes;
 pub use zipinfo_utf8::UnicodeExtraField;
 
 // re-export

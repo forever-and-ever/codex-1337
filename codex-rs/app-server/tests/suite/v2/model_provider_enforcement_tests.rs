@@ -4,14 +4,12 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server::in_process;
-use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadQueueAddParams;
 use codex_app_server_protocol::ThreadQueueAddResponse;
 use codex_app_server_protocol::ThreadQueueListParams;
@@ -130,12 +128,18 @@ base_url = "{}/v1"
         requirements.replace(gateway.uri(), &other.uri())
     };
     std::fs::write(requirements_path, updated)?;
+    let provider_error =
+        codex_app_server_protocol::ModelProviderError::ModelProviderPolicyConflict {
+            model_provider: "gateway".into(),
+            required_model_provider: required_selection.into(),
+        };
     let expected_error = JSONRPCErrorError {
         code: -32600,
-        message: "failed to load configuration: Your organization's required model provider settings changed. Restart Codex to apply them; this request was not sent".to_string(),
-        data: None,
+        message: provider_error.to_string(),
+        data: Some(serde_json::to_value(provider_error)?),
     };
     for (method, params) in [
+        ("thread/resume", json!({"threadId": started.thread.id})),
         (
             "thread/goal/set",
             json!({"threadId": started.thread.id, "objective": "Blocked objective"}),
@@ -151,10 +155,6 @@ base_url = "{}/v1"
         (
             "review/start",
             json!({ "threadId": started.thread.id, "target": { "type": "custom", "instructions": "Review this change." }, "delivery": "inline" }),
-        ),
-        (
-            "review/start",
-            json!({ "threadId": started.thread.id, "target": { "type": "custom", "instructions": "Review this change." }, "delivery": "detached" }),
         ),
     ] {
         let id = server.send_raw_request(method, Some(params)).await?;
@@ -267,6 +267,8 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
     mock_server::run(&[&provider], async {
         let home = TempDir::new()?;
         MockResponsesConfig::new(&provider.uri()).write(home.path())?;
+        let path = home.path().join("config.toml");
+        let original = std::fs::read_to_string(&path)?;
         let mut server = TestAppServer::builder()
             .with_codex_home(home.path())
             .build_initialized()
@@ -275,13 +277,19 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
         let requests = responses::mount_sse_sequence(
             &provider,
             vec![
-                responses::sse(vec![responses::ev_completed("first")]),
-                responses::sse(vec![responses::ev_completed("second")]),
+                responses::sse(vec![responses::ev_completed("selected-other")]),
+                responses::sse(vec![responses::ev_completed("restored")]),
             ],
         )
         .await;
-        for local_settings in ["model_provider = 'openai'", "invalid toml !!!"] {
-            std::fs::write(home.path().join("config.toml"), local_settings)?;
+        for config in [
+            original.replace(
+                "model_provider = \"mock_provider\"",
+                "model_provider = \"openai\"",
+            ),
+            original,
+        ] {
+            std::fs::write(&path, config)?;
             let id = server
                 .send_turn_start_request(TurnStartParams {
                     thread_id: started.thread.id.clone(),
@@ -296,6 +304,15 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
             server
                 .read_stream_until_notification_message("turn/completed")
                 .await?;
+            let id = server
+                .send_raw_request(
+                    "thread/read",
+                    Some(json!({"threadId": started.thread.id, "includeTurns": false})),
+                )
+                .await?;
+            let read: codex_app_server_protocol::ThreadReadResponse =
+                server.read_response(id).await?;
+            assert_eq!(read.thread.model_provider, "mock_provider");
         }
         assert_eq!(requests.requests().len(), 2);
         Ok(())
@@ -304,7 +321,7 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result<()> {
+async fn malformed_system_defaults_reject_input_until_provider_can_be_resolved() -> Result<()> {
     let provider = MockServer::start().await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&provider.uri()).write(home.path())?;
@@ -319,7 +336,7 @@ async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result
             .build()
             .await?,
     );
-    let mut client = in_process::start(InProcessStartArgs {
+    let client = in_process::start(InProcessStartArgs {
         arg0_paths: Arg0DispatchPaths::default(),
         config,
         cli_overrides: Vec::new(),
@@ -374,23 +391,9 @@ async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result
             },
         })
         .await?
-        .expect("turn/start should succeed");
-    let _: TurnStartResponse = serde_json::from_value(response)?;
-    timeout(Duration::from_secs(/*secs*/ 60), async {
-        loop {
-            let Some(event) = client.next_event().await else {
-                anyhow::bail!("app-server stopped before turn/completed");
-            };
-            if let InProcessServerEvent::ServerNotification(notification) = event
-                && let ServerNotification::TurnCompleted(completed) = notification.as_ref()
-                && completed.thread_id == started.thread.id
-            {
-                return Ok::<(), anyhow::Error>(());
-            }
-        }
-    })
-    .await??;
-    assert_eq!(requests.requests().len(), 1);
+        .expect_err("cannot verify the selected provider from malformed configuration");
+    assert_eq!(response.code, -32600);
+    assert!(requests.requests().is_empty());
     client.shutdown().await?;
     Ok(())
 }

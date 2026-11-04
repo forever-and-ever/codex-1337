@@ -59,6 +59,8 @@ fn profile_and_managed_requirements_reject_misspelled_mitm_matchers() {
         .replace("[[actions.", "[[permissions.test.network.mitm.actions.")
         .replace("[hooks.", "[permissions.test.network.mitm.hooks.");
     let profile = format!("[permissions.test.network.mitm]\n{profile}");
+    toml::from_str::<crate::config_toml::ConfigToml>(&profile).unwrap();
+    toml::from_str::<crate::ConfigRequirementsToml>(&profile).unwrap();
     for (key, value) in [
         ("header", r#"{ x-tenant = ["allowed"] }"#),
         ("port", "[443]"),

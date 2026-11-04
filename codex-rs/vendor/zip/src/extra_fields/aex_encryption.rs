@@ -2,12 +2,18 @@
 
 #![cfg(feature = "aes-crypto")]
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
 
 use crate::CompressionMethod;
 use crate::extra_fields::UsedExtraField;
-use crate::format::aes::{AesMode, AesVendorVersion};
-use crate::result::{ZipError, ZipResult, invalid, invalid_archive_const};
+use crate::format::aes::AesMode;
+use crate::format::aes::AesVendorVersion;
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
+use crate::result::invalid_archive_const;
 use crate::unstable::LittleEndianReadExt;
 
 /// AeX Encryption extra field
@@ -107,7 +113,8 @@ mod tests {
     fn test_create_aex() {
         use super::AexEncryption;
         use crate::CompressionMethod;
-        use crate::format::aes::{AesMode, AesVendorVersion};
+        use crate::format::aes::AesMode;
+        use crate::format::aes::AesVendorVersion;
 
         let aex_encryption = AexEncryption::new(
             AesVendorVersion::Ae2,
@@ -143,7 +150,8 @@ mod tests {
     fn test_serialize_parse() {
         use super::AexEncryption;
         use crate::CompressionMethod;
-        use crate::format::aes::{AesMode, AesVendorVersion};
+        use crate::format::aes::AesMode;
+        use crate::format::aes::AesVendorVersion;
         use std::io::Cursor;
 
         let aex_encryption = AexEncryption::new(

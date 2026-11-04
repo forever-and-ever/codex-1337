@@ -223,7 +223,42 @@ fn default_owned_screen_entry_paints_before_sync_ends_and_exit_clears_inline_dra
         (1, (u16::try_from(composer_row)?, 2), false),
         "first owned-screen frame must contain one composer with its visible cursor"
     );
-    terminal.exit_with_input(b"\x1b[99;5u")?;
+    let exit_start = terminal.output.len();
+    terminal.write_input(b"\x1b[99;5u")?;
+    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    while !contains_bytes(&terminal.output[exit_start..], b"\x1b[c") {
+        terminal.ensure_running()?;
+        ensure!(Instant::now() < deadline, "missing exit DA1 query");
+        terminal.read_output(Duration::from_millis(/*millis*/ 50))?;
+    }
+    assert_eq!(
+        terminal.parser.screen().mouse_protocol_mode(),
+        vt100::MouseProtocolMode::None
+    );
+    // The DA1 reply straddles the first 1 KiB of in-flight mouse reports.
+    let mut reports = b"\x1b[<51;23;56M".repeat(85);
+    reports.extend_from_slice(b"\x1b[?1;2c");
+    terminal.write_input(&reports)?;
+    loop {
+        terminal.read_output(Duration::from_millis(/*millis*/ 50))?;
+        if let Some(status) = terminal.child.try_wait()? {
+            ensure!(status.success(), "owned screen exited with {status}");
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "owned screen did not exit; screen:\n{}",
+            terminal.screen_contents()
+        );
+    }
+    terminal.write_input(b"shell\n")?;
+    let mut shell_input = [0; 6];
+    terminal.slave.read_exact(&mut shell_input)?;
+    assert_eq!(&shell_input, b"shell\n");
+    ensure!(
+        !terminal.parser.screen().alternate_screen(),
+        "alternate screen was not restored"
+    );
     ensure!(
         !terminal
             .screen_contents()
@@ -257,6 +292,7 @@ fn fullscreen_transcript_defaults_to_the_owned_screen() -> Result<()> {
 
 pub(super) struct PtyCodex {
     master: File,
+    slave: File,
     child: Child,
     parser: vt100::Parser,
     output: Vec<u8>,
@@ -349,12 +385,13 @@ impl PtyCodex {
             .env("CODEX_ALLOW_EMBEDDED_SERVER", "1")
             .stdin(stdin)
             .stdout(stdout)
-            .stderr(slave)
+            .stderr(slave.try_clone()?)
             .spawn()
             .context("start Codex in focus-test pseudo-terminal")?;
 
         Ok(Self {
             master,
+            slave,
             child,
             parser: vt100::Parser::new(
                 window_size.ws_row,
@@ -427,8 +464,10 @@ impl PtyCodex {
             self.cursor_answered = true;
         }
 
-        if !self.keyboard_answered && contains_bytes(&self.output, b"\x1b[?u") {
-            self.write_input(b"\x1b[?7u")?;
+        if !self.keyboard_answered && contains_bytes(&self.output, b"\x1b[c") {
+            if contains_bytes(&self.output, b"\x1b[?u") {
+                self.write_input(b"\x1b[?7u")?;
+            }
             self.write_input(b"\x1b[?1;2c")?;
             self.keyboard_answered = true;
         }

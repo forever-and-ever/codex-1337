@@ -4,11 +4,13 @@ use crate::codex_thread::BackgroundTerminalInfo;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
 use crate::sandboxing::ExecRequest;
+use crate::sandboxing::SandboxPermissions;
 use crate::session::session::Session;
 use crate::session::tests::make_session_and_context;
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::unified_exec::WriteStdinRequest;
+use crate::unified_exec::output::CapturedStream;
 use codex_exec_server::ExecProcess;
 use codex_exec_server::ExecProcessEventReceiver;
 use codex_exec_server::ExecProcessFuture;
@@ -27,7 +29,6 @@ use core_test_support::skip_if_sandbox;
 use core_test_support::test_codex::test_env as remote_test_env;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -183,8 +184,7 @@ async fn exec_command_with_tty(
         collected_output.total_bytes(),
     ))
     .unwrap_or(usize::MAX);
-    let output_omitted_bytes = NonZeroUsize::new(collected_output.omitted_bytes());
-    let collected = collected_output.to_bytes_with_omission_marker();
+    let collected = CapturedStream::from(&collected_output);
     let has_exited = process.has_exited();
     let exit_code = process.exit_code();
     let response_process_id = if process_started_alive && !has_exited {
@@ -216,11 +216,11 @@ async fn exec_command_with_tty(
         process_id: response_process_id,
         exit_code,
         original_token_count: Some(original_token_count),
-        output_omitted_bytes,
         hook_context: Some(crate::tools::context::ExecHookContext {
             tool_name: codex_tools::ToolName::plain("exec_command"),
             command: cmd.to_string(),
         }),
+        tool_cwd: None,
     })
 }
 
@@ -604,15 +604,10 @@ async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -
     for receipt in [first?, second?] {
         assert_eq!(receipt.exit_code, Some(17));
         assert_eq!(receipt.process_id, None);
-        assert!(
-            receipt
-                .raw_output
-                .windows(b"completion-tail".len())
-                .any(|part| part == b"completion-tail")
-        );
-        assert!(receipt.raw_output.len() < 17 * 1024);
-        assert!(receipt.raw_output.starts_with(b"... "));
-        assert!(receipt.output_omitted_bytes.is_some());
+        assert!(receipt.raw_output.text.contains("completion-tail"));
+        assert!(receipt.raw_output.text.len() < 17 * 1024);
+        assert!(receipt.raw_output.text.starts_with("... "));
+        assert!(receipt.raw_output.omitted_bytes > 0);
         assert!(receipt.hook_context.is_none());
     }
     assert!(matches!(

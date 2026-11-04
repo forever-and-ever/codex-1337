@@ -1243,7 +1243,10 @@ impl App {
             }
             _ => None,
         };
-        if loaded.is_none() && self.reject_remote_resume_permission_override(&config) {
+        let app_server_target = self.app_server_target.clone();
+        if loaded.is_none()
+            && self.reject_remote_resume_permission_override(&config, &app_server_target)
+        {
             return AppRunControl::Continue;
         }
         let purpose = ResumePurpose::from_source(source, &config);

@@ -17,6 +17,7 @@ impl Clone for AgentMarkdownCell {
                 .as_ref()
                 .map(|_| MarkdownRenderCache::default()),
             spoken_artifacts: self.spoken_artifacts,
+            question_titles: self.question_titles.clone(),
         }
     }
 }

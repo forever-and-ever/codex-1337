@@ -60,6 +60,7 @@ pub(super) fn sampler_failure_reason(error: &LunaSamplerError) -> &'static str {
             | ApiError::BioPolicy { .. }
             | ApiError::MisalignmentPolicyViolation { .. } => "policy_error",
             ApiError::ServerOverloaded { .. } => "server_overloaded",
+            ApiError::PolicyCapacityUnavailable { .. } => "policy_capacity_unavailable",
             ApiError::FlexUnavailable => "flex_unavailable",
         },
     }
@@ -147,17 +148,10 @@ pub(super) fn record_section_costs(
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum RequestAdmission {
-    Admitted,
-    Rejected,
-}
-
 pub(super) fn record_request_tokens(
     metrics: Option<&dyn ExtensionMetrics>,
     existing: usize,
     total: usize,
-    admission: RequestAdmission,
 ) {
     let Some(metrics) = metrics else {
         return;
@@ -169,7 +163,7 @@ pub(super) fn record_request_tokens(
     ] {
         let mut tags = vec![("target", "async"), ("component", component)];
         // Histogram Count grouped by token_bucket counts only admitted complete inputs.
-        if component == "total" && matches!(admission, RequestAdmission::Admitted) {
+        if component == "total" {
             tags.push((
                 "token_bucket",
                 codex_guardian_context::request_token_bucket(total),

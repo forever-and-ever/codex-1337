@@ -24,7 +24,9 @@ use crate::render::AvailableSkillsRender;
 use crate::render::SkillRenderReport;
 use crate::world_state_catalogs::CatalogBudgetAllocation;
 
+pub(crate) const SKILLS_WORLD_STATE_ID: &str = "skills";
 pub(crate) const CLOUD_SKILLS_WORLD_STATE_ID: &str = "cloud_skills";
+pub(crate) const HOST_SKILLS_WORLD_STATE_ID: &str = "host_skills";
 const UNCHANGED_NOTE: &str = "Skills not named below are unchanged.";
 const OMITTED_HOST_SKILLS: &str = "Host skills are available but omitted from the model-visible skills list because the skills context budget was exceeded.";
 
@@ -40,7 +42,7 @@ struct Voice {
 }
 
 static EXECUTOR: Voice = Voice {
-    id: "skills",
+    id: SKILLS_WORLD_STATE_ID,
     heading: "## Skills update",
     nothing: "No selected-environment skills are currently available.",
     hidden: "Selected-environment skills are not listed automatically. Explicit skill mentions can still be resolved when available.",
@@ -56,7 +58,7 @@ static CLOUD: Voice = Voice {
 };
 
 static HOST: Voice = Voice {
-    id: "host_skills",
+    id: HOST_SKILLS_WORLD_STATE_ID,
     heading: "## Host skills update",
     nothing: "No host skills are currently available.",
     hidden: "Host skills are not listed automatically. Explicit skill mentions can still be resolved when available.",

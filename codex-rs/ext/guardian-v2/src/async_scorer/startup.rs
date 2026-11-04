@@ -114,7 +114,8 @@ pub(super) async fn sampler_config(
     };
     let max_input_tokens = luna_model.as_ref().map_or(
         if native {
-            0
+            // The native snapshot path admits the encoded request after account-scoped discovery.
+            usize::MAX
         } else {
             codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS
         },

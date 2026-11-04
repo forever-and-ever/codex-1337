@@ -1,8 +1,11 @@
 //! Code related to the MagicFinder
 
 use crate::result::ZipResult;
-use memchr::memmem::{Finder, FinderRev};
-use std::io::{Read, Seek, SeekFrom};
+use memchr::memmem::Finder;
+use memchr::memmem::FinderRev;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 
 const MAGIC_LENGTH: usize = 4;
 type MagicLengthByteArray = [u8; MAGIC_LENGTH];

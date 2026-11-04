@@ -126,6 +126,7 @@ pub fn create_fake_rollout_with_token_usage(
                 codex_rollout_budget_units: None,
                 cost: None,
             },
+            last_usage_includes_reasoning: None,
             last_token_usage: TokenUsage {
                 input_tokens: 70,
                 cached_input_tokens: 10,

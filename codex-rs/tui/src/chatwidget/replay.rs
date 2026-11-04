@@ -54,13 +54,17 @@ impl ChatWidget {
             ServerNotification::ItemCompleted(
                 codex_app_server_protocol::ItemCompletedNotification {
                     turn_id,
-                    item: ThreadItem::Reasoning { id, .. },
+                    item:
+                        codex_app_server_protocol::ThreadItem {
+                            payload: ThreadItemPayload::Reasoning { id, .. },
+                            ..
+                        },
                     ..
                 },
             ) => (turn_id, id),
             ServerNotification::ItemStarted(item)
                 if resumed_turn_id == item.turn_id
-                    && !matches!(item.item, ThreadItem::UserMessage { .. })
+                    && !matches!(item.item.payload, ThreadItemPayload::UserMessage { .. })
                     && self.status_state.reasoning_item_id.as_deref() != Some(item.item.id()) =>
             {
                 // A new item closes a trailing snapshot that was already complete at resume.
@@ -75,16 +79,16 @@ impl ChatWidget {
             return false;
         }
         self.restore_active_reasoning_item(
-            codex_app_server_protocol::ItemStartedNotification {
-                thread_id: self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
-                turn_id: turn_id.clone(),
-                item: ThreadItem::Reasoning {
+            codex_app_server_protocol::ItemStartedNotification::new(
+                self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
+                turn_id.clone(),
+                ThreadItemPayload::Reasoning {
                     id: item_id.clone(),
                     summary: Vec::new(),
                     content: Vec::new(),
                 },
-                started_at_ms: 0,
-            },
+                /*started_at_ms*/ 0,
+            ),
             /*parts*/ None,
         );
         true
@@ -127,16 +131,16 @@ impl ChatWidget {
             let Turn {
                 id: turn_id,
                 root_turn_id,
-                items_view: _,
                 items,
                 status,
                 mut error,
                 started_at,
                 completed_at,
                 duration_ms,
+                ..
             } = turn;
             let delegated = items.iter().any(|item| {
-                matches!(item, ThreadItem::UserMessage { content, .. }
+                matches!(&item.payload, ThreadItemPayload::UserMessage { content, .. }
                     if realtime::realtime_delegation_input(content).is_some())
             });
             if matches!(status, TurnStatus::InProgress) {
@@ -151,13 +155,16 @@ impl ChatWidget {
             let trailing_reasoning_id = (status == TurnStatus::InProgress)
                 .then(|| items.last())
                 .flatten()
-                .and_then(|item| match item {
-                    ThreadItem::Reasoning { id, .. } => Some(id.clone()),
+                .and_then(|item| match &item.payload {
+                    ThreadItemPayload::Reasoning { id, .. } => Some(id.clone()),
                     _ => None,
                 });
             let mut replaying_delegation = false;
-            for item in items {
-                if matches!(&item, ThreadItem::UserMessage { content, .. }
+            for entry in items {
+                let started_at_ms = entry.started_at_ms;
+                let completed_at_ms = entry.completed_at_ms;
+                let item = entry.payload;
+                if matches!(&item, ThreadItemPayload::UserMessage { content, .. }
                     if realtime::realtime_delegation_input(content).is_some())
                 {
                     replaying_delegation = true;
@@ -167,31 +174,41 @@ impl ChatWidget {
                 if replaying_delegation && realtime::is_private_realtime_agent_item(&item) {
                     continue;
                 }
-                if hidden_nested_review_turn && matches!(item, ThreadItem::UserMessage { .. }) {
+                if hidden_nested_review_turn
+                    && matches!(item, ThreadItemPayload::UserMessage { .. })
+                {
                     continue;
                 }
                 if trailing_reasoning_id.as_deref() == Some(item.id())
-                    && let ThreadItem::Reasoning {
+                    && let ThreadItemPayload::Reasoning {
                         id,
                         summary,
                         content,
                     } = item
                 {
                     self.restore_active_reasoning_item(
-                        codex_app_server_protocol::ItemStartedNotification {
-                            thread_id: self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
-                            turn_id: turn_id.clone(),
-                            item: ThreadItem::Reasoning {
+                        codex_app_server_protocol::ItemStartedNotification::new(
+                            self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
+                            turn_id.clone(),
+                            ThreadItemPayload::Reasoning {
                                 id,
                                 summary: Vec::new(),
                                 content: Vec::new(),
                             },
-                            started_at_ms: 0,
-                        },
+                            started_at_ms.unwrap_or_default(),
+                        ),
                         Some((summary, content)),
                     );
                 } else {
-                    self.replay_thread_item(item, turn_id.clone(), replay_kind);
+                    self.handle_thread_item(
+                        ThreadItem {
+                            payload: item,
+                            started_at_ms,
+                            completed_at_ms,
+                        },
+                        turn_id.clone(),
+                        ThreadItemRenderSource::Replay(replay_kind),
+                    );
                 }
             }
             let status = if hidden_nested_review_turn {
@@ -241,21 +258,21 @@ impl ChatWidget {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn replay_thread_item(
         &mut self,
-        item: ThreadItem,
+        item: ThreadItemPayload,
         turn_id: String,
         replay_kind: ReplayKind,
     ) {
         match item {
-            ThreadItem::CodeModeOwned(owned) => {
+            ThreadItemPayload::CodeModeOwned(owned) => {
                 self.admit_code_mode_snapshot(owned, turn_id);
             }
             item => self.handle_thread_item(
-                item,
+                codex_app_server_protocol::ThreadItem::untimed(item),
                 turn_id,
                 ThreadItemRenderSource::Replay(replay_kind),
-                /*timestamp*/ None,
             ),
         }
     }
@@ -265,24 +282,31 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         render_source: ThreadItemRenderSource,
-        timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
-        if let ThreadItem::CodeModeOwned(owned) = item {
+        let ThreadItem {
+            payload: item,
+            started_at_ms,
+            completed_at_ms,
+        } = item;
+        let timestamp = completed_at_ms.and_then(history_cell::HistoryTimestamp::from_millis);
+        if let ThreadItemPayload::CodeModeOwned(owned) = item {
             self.admit_code_mode_snapshot(owned, turn_id);
             return;
         }
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
         match item {
-            ThreadItem::CodeModeOwned(_) => unreachable!("owned items enter the scoped reducer"),
-            ThreadItem::CodeMode(item) => {
+            ThreadItemPayload::CodeModeOwned(_) => {
+                unreachable!("owned items enter the scoped reducer")
+            }
+            ThreadItemPayload::CodeMode(item) => {
                 self.flush_active_cell();
                 self.add_to_history(history_cell::CodeModeFactCell(
                     item,
                     self.local_settings.tui.animations && self.local_settings.tui.effects.progress,
                 ));
             }
-            ThreadItem::UserMessage {
+            ThreadItemPayload::UserMessage {
                 content,
                 client_id,
                 source_response_item_id,
@@ -310,7 +334,7 @@ impl ChatWidget {
                     timestamp,
                 );
             }
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 id,
                 text,
                 phase,
@@ -321,7 +345,7 @@ impl ChatWidget {
             } => {
                 if self.complete_realtime_delegated_agent_item(
                     &turn_id,
-                    &ThreadItem::AgentMessage {
+                    &ThreadItemPayload::AgentMessage {
                         id: id.clone(),
                         text: text.clone(),
                         phase: phase.clone(),
@@ -365,18 +389,20 @@ impl ChatWidget {
                     from_replay,
                 );
             }
-            ThreadItem::Plan { text, .. } => self.on_plan_item_completed(text),
-            item @ ThreadItem::Thought { .. } => {
+            ThreadItemPayload::Plan { text, .. } => self.on_plan_item_completed(text),
+            item @ ThreadItemPayload::Thought { .. } => {
                 // Reasoning has no live row; its disclosure owns formatting, not insertion probes.
                 self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
                     history_cell::ThoughtCell::from_item(item, &self.config.cwd),
                 )));
             }
-            item @ ThreadItem::Preamble { .. } => {
+            item @ ThreadItemPayload::Preamble { .. } => {
                 self.add_to_history(history_cell::PreambleCell::from_item(item));
             }
-            ThreadItem::Arrival(item) => self.add_to_history(history_cell::ArrivalCell::new(item)),
-            ThreadItem::Reasoning {
+            ThreadItemPayload::Arrival(item) => {
+                self.add_to_history(history_cell::ArrivalCell::new(item))
+            }
+            ThreadItemPayload::Reasoning {
                 id,
                 summary,
                 content,
@@ -409,38 +435,51 @@ impl ChatWidget {
                 }
                 self.on_agent_reasoning_final();
             }
-            item @ ThreadItem::CommandExecution {
+            item @ ThreadItemPayload::CommandExecution {
                 status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
                 ..
             } => self.on_command_execution_started(item),
-            item @ ThreadItem::CommandExecution {
+            item @ ThreadItemPayload::CommandExecution {
                 source: ExecCommandSource::Agent | ExecCommandSource::UnifiedExecStartup,
                 status:
                     codex_app_server_protocol::CommandExecutionStatus::Completed
                     | codex_app_server_protocol::CommandExecutionStatus::Failed,
                 ..
-            } if from_replay => {
-                self.handle_command_execution_completed_now(CompletedItem { item, timestamp })
-            }
-            item @ ThreadItem::CommandExecution { .. } => {
-                self.on_command_execution_completed(CompletedItem { item, timestamp })
-            }
-            ThreadItem::FileChange {
+            } if from_replay => self.handle_command_execution_completed_now(ThreadItem {
+                payload: item,
+                started_at_ms,
+                completed_at_ms,
+            }),
+            item @ ThreadItemPayload::CommandExecution { .. } => self
+                .on_command_execution_completed(ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                }),
+            ThreadItemPayload::FileChange {
                 id,
                 changes,
                 status: codex_app_server_protocol::PatchApplyStatus::InProgress,
             } => self.on_patch_apply_begin(id, file_update_changes_to_display(changes)),
-            item @ ThreadItem::FileChange { .. } => {
-                self.on_file_change_completed(CompletedItem { item, timestamp })
+            item @ ThreadItemPayload::FileChange { .. } => {
+                self.on_file_change_completed(ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                })
             }
-            item @ ThreadItem::McpToolCall {
+            item @ ThreadItemPayload::McpToolCall {
                 status: codex_app_server_protocol::McpToolCallStatus::InProgress,
                 ..
             } => self.on_mcp_tool_call_started(item),
-            item @ ThreadItem::McpToolCall { .. } => {
-                self.on_mcp_tool_call_completed(CompletedItem { item, timestamp })
+            item @ ThreadItemPayload::McpToolCall { .. } => {
+                self.on_mcp_tool_call_completed(ThreadItem {
+                    payload: item,
+                    started_at_ms,
+                    completed_at_ms,
+                })
             }
-            ThreadItem::WebSearch(item) => {
+            ThreadItemPayload::WebSearch(item) => {
                 self.on_web_search_begin(item.id.clone());
                 self.on_web_search_end(
                     item.id,
@@ -450,10 +489,10 @@ impl ChatWidget {
                     timestamp,
                 );
             }
-            ThreadItem::ImageView { id, path } => {
+            ThreadItemPayload::ImageView { id, path } => {
                 self.on_view_image_tool_call(id, path, timestamp);
             }
-            ThreadItem::ImageGeneration(item) => {
+            ThreadItemPayload::ImageGeneration(item) => {
                 self.on_image_generation_end(
                     item.id,
                     item.status,
@@ -462,18 +501,18 @@ impl ChatWidget {
                     timestamp,
                 );
             }
-            ThreadItem::EnteredReviewMode { review, .. } => {
+            ThreadItemPayload::EnteredReviewMode { review, .. } => {
                 if from_replay {
                     self.enter_review_mode_with_hint(review, /*from_replay*/ true);
                 }
             }
-            ThreadItem::ExitedReviewMode { .. } => {
+            ThreadItemPayload::ExitedReviewMode { .. } => {
                 self.exit_review_mode_after_item();
             }
-            ThreadItem::ContextCompaction { id } => {
+            ThreadItemPayload::ContextCompaction { id } => {
                 self.on_context_compaction_completed(&id, from_replay);
             }
-            ThreadItem::FunctionCallOutput {
+            ThreadItemPayload::FunctionCallOutput {
                 id,
                 call_id,
                 name,
@@ -497,20 +536,20 @@ impl ChatWidget {
                     self.add_to_history(cell);
                 }
             }
-            ThreadItem::HookPrompt { .. } => {}
-            ThreadItem::ToolInput(input) => {
+            ThreadItemPayload::HookPrompt { .. } => {}
+            ThreadItemPayload::ToolInput(input) => {
                 if let Some(thread_id) = self.thread_id() {
                     self.app_event_tx
                         .send(AppEvent::RecordToolInput { thread_id, input });
                 }
             }
-            ThreadItem::StepAdmission(item) => {
+            ThreadItemPayload::StepAdmission(item) => {
                 if let Some(thread_id) = self.thread_id() {
                     self.app_event_tx
                         .send(AppEvent::RecordStepAdmission { thread_id, item });
                 }
             }
-            ThreadItem::ToolOutputTokens {
+            ThreadItemPayload::ToolOutputTokens {
                 id,
                 call_id,
                 tokens,
@@ -524,7 +563,7 @@ impl ChatWidget {
                     });
                 }
             }
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id,
                 tool,
                 status,
@@ -536,7 +575,7 @@ impl ChatWidget {
                 agents_states,
                 wait_completion,
             } => self.on_collab_agent_tool_call(
-                ThreadItem::CollabAgentToolCall {
+                ThreadItemPayload::CollabAgentToolCall {
                     id,
                     tool,
                     status,
@@ -550,9 +589,9 @@ impl ChatWidget {
                 },
                 timestamp,
             ),
-            item @ ThreadItem::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
-            item @ ThreadItem::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
-            ThreadItem::Sleep(_) => {}
+            item @ ThreadItemPayload::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
+            item @ ThreadItemPayload::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
+            ThreadItemPayload::Sleep(_) => {}
         }
 
         if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot)) && turn_id.is_empty() {

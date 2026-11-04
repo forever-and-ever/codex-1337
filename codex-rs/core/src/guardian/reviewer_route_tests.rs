@@ -113,6 +113,7 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
         ModelsResponse {
             models: vec![turn.model_info().as_ref().clone()],
         },
+        codex_models_manager::ModelOrigin::Provider,
     ));
     turn.provider = create_model_provider(config.model_provider.clone(), Some(Arc::clone(&auth)));
     turn.auth_manager = Some(auth);

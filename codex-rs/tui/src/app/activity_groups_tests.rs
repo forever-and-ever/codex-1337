@@ -2,10 +2,10 @@
 
 use super::*;
 use crate::app::test_support::make_test_app;
-use crate::chatwidget::CompletedItem;
 use crate::history_cell::activity_parts::FoldState;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::thread_items_to_transcript_cells;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnItemsView;
 use pretty_assertions::assert_eq;
 
@@ -15,7 +15,7 @@ enum ActivityKind {
     Exploration,
 }
 
-fn call(id: &str, kind: ActivityKind, status: &str) -> ThreadItem {
+fn call(id: &str, kind: ActivityKind, status: &str) -> ThreadItemPayload {
     let value = match kind {
         ActivityKind::Computer => serde_json::json!({
             "type": "mcpToolCall", "id": id, "server": "cua_repl", "tool": "js",
@@ -33,8 +33,8 @@ fn call(id: &str, kind: ActivityKind, status: &str) -> ThreadItem {
     serde_json::from_value(value).expect("activity fixture")
 }
 
-fn reasoning(id: &str) -> ThreadItem {
-    ThreadItem::Reasoning {
+fn reasoning(id: &str) -> ThreadItemPayload {
+    ThreadItemPayload::Reasoning {
         id: id.to_owned(),
         summary: vec![format!(
             "**Considering {id}**\n\nRetained reasoning for {id}."
@@ -43,11 +43,11 @@ fn reasoning(id: &str) -> ThreadItem {
     }
 }
 
-fn turn(items: Vec<ThreadItem>) -> Turn {
+fn turn(items: Vec<ThreadItemPayload>) -> Turn {
     Turn {
         id: "turn".to_owned(),
         root_turn_id: None,
-        items,
+        items: items.into_iter().map(ThreadItem::untimed).collect(),
         items_view: TurnItemsView::Full,
         status: TurnStatus::Completed,
         error: None,
@@ -57,8 +57,8 @@ fn turn(items: Vec<ThreadItem>) -> Turn {
     }
 }
 
-fn code_mode(exec: &str, event: codex_app_server_protocol::CodeModeEvent) -> ThreadItem {
-    ThreadItem::CodeMode(codex_app_server_protocol::CodeModeItem {
+fn code_mode(exec: &str, event: codex_app_server_protocol::CodeModeEvent) -> ThreadItemPayload {
+    ThreadItemPayload::CodeMode(codex_app_server_protocol::CodeModeItem {
         id: format!("fact:{exec}:{event:?}"),
         cell_id: Some("reused-runtime-cell".into()),
         exec_call_id: exec.into(),
@@ -87,25 +87,26 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         cell_id: None,
         started_at_ms: 0,
     };
-    let owned_item = |owner: &CodeModeOwner, mut item: ThreadItem| {
-        if let ThreadItem::CodeMode(fact) = &mut item {
+    let owned_item = |owner: &CodeModeOwner, mut item: ThreadItemPayload| {
+        if let ThreadItemPayload::CodeMode(fact) = &mut item {
             fact.cell_id = owner.cell_id.clone();
         }
-        ThreadItem::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(item)))
+        ThreadItemPayload::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(item)))
     };
-    let notification = |owner: &CodeModeOwner, item: ThreadItem| {
-        let ThreadItem::CodeModeOwned(owned) = owned_item(owner, item) else {
+    let notification = |owner: &CodeModeOwner, item: ThreadItemPayload| {
+        let ThreadItemPayload::CodeModeOwned(owned) = owned_item(owner, item) else {
             unreachable!()
         };
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: thread.to_string(),
-            turn_id: "turn".into(),
-            item: *owned.into_parts().1,
-            completed_at_ms: 0,
-        })
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            thread.to_string(),
+            "turn".into(),
+            *owned.into_parts().1,
+            None,
+            0,
+        ))
         .with_code_mode_owner(owner)
     };
-    let output = |id: &str, call: &str, text: &str| ThreadItem::FunctionCallOutput {
+    let output = |id: &str, call: &str, text: &str| ThreadItemPayload::FunctionCallOutput {
         id: id.into(),
         call_id: Some(call.into()),
         name: "exec".into(),
@@ -197,7 +198,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         ),
         (&a, {
             let mut item = call("child-a", ActivityKind::Exploration, "inProgress");
-            if let ThreadItem::CommandExecution { process_id, .. } = &mut item {
+            if let ThreadItemPayload::CommandExecution { process_id, .. } = &mut item {
                 *process_id = Some("proc-a".into());
             }
             item
@@ -307,17 +308,17 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         ),
         output("notify-a", "exec-a", "{\"answer\":42}"),
         output("returned-a", "exec-a", "Exact accepted return"),
-        ThreadItem::ToolOutputTokens {
+        ThreadItemPayload::ToolOutputTokens {
             id: "tool-output-tokens:notify-a".into(),
             call_id: "exec-a".into(),
             tokens: Some(3),
         },
-        ThreadItem::ToolOutputTokens {
+        ThreadItemPayload::ToolOutputTokens {
             id: "tool-output-tokens:returned-a".into(),
             call_id: "exec-a".into(),
             tokens: Some(7),
         },
-        ThreadItem::ToolOutputTokens {
+        ThreadItemPayload::ToolOutputTokens {
             id: "tool-output-tokens:returned-a".into(),
             call_id: "exec-a".into(),
             tokens: Some(7),
@@ -531,7 +532,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
 
     // A raw execution ID is not ownership: legacy reconciliation must not absorb scoped rows.
     let scoped: Arc<dyn HistoryCell> = Arc::new(terminal.clone());
-    let ThreadItem::CodeMode(fact) = code_mode(
+    let ThreadItemPayload::CodeMode(fact) = code_mode(
         "exec-a",
         CodeModeEvent::ToolCall {
             call_id: "legacy-child".into(),
@@ -565,23 +566,24 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     assert!(Arc::ptr_eq(&legacy.members()[0], &unowned));
 
     // Snapshot-native scopes normalize once; a live scope cannot borrow another routed thread.
-    let started = ServerNotification::ItemStarted(ItemStartedNotification {
-        thread_id: thread.to_string(),
-        turn_id: "turn".into(),
-        item: owned_item(&a, output("snapshot", "exec-a", "Snapshot")),
-        started_at_ms: 0,
-    });
+    let started = ServerNotification::ItemStarted(ItemStartedNotification::new(
+        thread.to_string(),
+        "turn".into(),
+        owned_item(&a, output("snapshot", "exec-a", "Snapshot")),
+        0,
+    ));
     assert!(
         Admission::notification(&started, Source::Historical)
             .unwrap()
             .is_some()
     );
-    let misrouted = ServerNotification::ItemCompleted(ItemCompletedNotification {
-        thread_id: fork.to_string(),
-        turn_id: "turn".into(),
-        item: owned_item(&a, output("misrouted", "exec-a", "Rejected")),
-        completed_at_ms: 0,
-    });
+    let misrouted = ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+        fork.to_string(),
+        "turn".into(),
+        owned_item(&a, output("misrouted", "exec-a", "Rejected")),
+        None,
+        0,
+    ));
     assert!(Admission::notification(&misrouted, Source::Live).is_err());
 
     let history = vec![
@@ -675,7 +677,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             ),
             owned_item(
                 &a,
-                ThreadItem::ToolInput(codex_protocol::tool_input::ToolInput {
+                ThreadItemPayload::ToolInput(codex_protocol::tool_input::ToolInput {
                     id: "input:metadata-only".into(),
                     call_id: "metadata-only".into(),
                     name: codex_protocol::ToolName::plain("fs"),
@@ -823,7 +825,7 @@ async fn assert_prompt_arrival_ordering() {
             .all(|cell| cell.transcript_timestamp().is_none())
     );
     let receipt_time = 1_700_000_000_000;
-    let user = |name: &str, client_id| ThreadItem::UserMessage {
+    let user = |name: &str, client_id| ThreadItemPayload::UserMessage {
         id: format!("ui-{name}"),
         client_id,
         source_response_item_id: Some(ResponseItemId::from_server(format!("msg-{name}"))),
@@ -833,7 +835,7 @@ async fn assert_prompt_arrival_ordering() {
         }],
     };
     let arrival = |id: &str, anchor: Option<&str>, side: ArrivalSide, response: &str| {
-        ThreadItem::Arrival(ArrivalItem {
+        ThreadItemPayload::Arrival(ArrivalItem {
             id: id.into(),
             response_id: response.into(),
             announced_at_ms: 0,
@@ -876,13 +878,13 @@ async fn assert_prompt_arrival_ordering() {
     let mut held = None;
     for (index, item) in items.iter().enumerate() {
         app.chat_widget.handle_server_notification(
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: thread.to_string(),
-                turn_id: "turn".into(),
-                item: item.clone(),
-                completed_at_ms: receipt_time
-                    + i64::try_from(index).expect("short receipt sequence") * 60_000,
-            }),
+            ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+                thread.to_string(),
+                "turn".into(),
+                item.clone(),
+                None,
+                receipt_time + i64::try_from(index).expect("short receipt sequence") * 60_000,
+            )),
             None,
         );
         drain(&mut app, &mut rx, &mut tui);
@@ -952,9 +954,13 @@ async fn assert_prompt_arrival_ordering() {
     for (index, item) in items.iter().enumerate() {
         clocks.record(&codex_app_server_protocol::ThreadItemEntry {
             turn_id: "turn".into(),
-            item: item.clone(),
             started_at_ms: None,
-            completed_at_ms: Some(receipt_time + i64::try_from(index).unwrap() * 60_000),
+            completed_at_ms: None,
+            item: ThreadItem {
+                payload: item.clone(),
+                started_at_ms: None,
+                completed_at_ms: Some(receipt_time + i64::try_from(index).unwrap() * 60_000),
+            },
         });
     }
     let timestamps = |cells: &[Arc<dyn HistoryCell>]| {
@@ -993,11 +999,14 @@ async fn assert_prompt_arrival_ordering() {
     }
 }
 
-fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
+fn project(
+    app: &App,
+    items: &[impl std::borrow::Borrow<ThreadItemPayload>],
+) -> Vec<Arc<dyn HistoryCell>> {
     thread_items_to_transcript_cells(
         /*thread_id*/ None,
         &app.config.cwd,
-        items.iter().cloned(),
+        items.iter().map(|entry| entry.borrow().clone()),
         RawReasoningVisibility::Hidden,
         Some(&app.config),
         &|_| crate::multi_agents::AgentMetadata::default(),
@@ -1013,7 +1022,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     tui.set_owned_screen(/*owned*/ true).unwrap();
     let snapshot = |digest: char| serde_json::json!({"uri":"file:///workspace/receipt.rs", "sha256":digest.to_string().repeat(64), "bytes":4});
-    let edit: ThreadItem = serde_json::from_value(serde_json::json!({
+    let edit: ThreadItemPayload = serde_json::from_value(serde_json::json!({
         "type":"mcpToolCall", "id":"receipt-edit", "server":"semedit", "tool":"edit", "status":"completed",
         "arguments":{}, "durationMs":1,
         "result":{"content":[], "_meta":{"codex/fileChanges":{"version":1,"outcome":"applied","omittedFiles":0,"files":[{
@@ -1042,7 +1051,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
                 call_id: "native-edit".into(),
             },
         ),
-        ThreadItem::FileChange {
+        ThreadItemPayload::FileChange {
             id: "native-edit".into(),
             changes: vec![
                 codex_app_server_protocol::FileUpdateChange {
@@ -1065,7 +1074,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             },
         ),
     ]);
-    for item in &current.items {
+    for item in current.item_payloads() {
         app.chat_widget.replay_thread_item(
             item.clone(),
             current.id.clone(),
@@ -1228,7 +1237,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     insta::assert_snapshot!("metadata_only_code_mode_receipt", file_snapshots.join("\n"));
     // A later model-visible return contributes one bill; receipt bytes and replay never do.
     app.chat_widget.replay_thread_item(
-        ThreadItem::FunctionCallOutput {
+        ThreadItemPayload::FunctionCallOutput {
             id: "receipt-model-output".into(),
             call_id: Some("receipt-exec".into()),
             name: "exec".into(),
@@ -1274,7 +1283,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
     let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
     let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     tui.set_owned_screen(/*owned*/ true).unwrap();
-    let output = |id: &str, call: &str, name: &str| ThreadItem::FunctionCallOutput {
+    let output = |id: &str, call: &str, name: &str| ThreadItemPayload::FunctionCallOutput {
         id: id.into(),
         call_id: Some(call.into()),
         name: name.into(),
@@ -1324,7 +1333,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
                 call_id: "view-a".into(),
             },
         ),
-        ThreadItem::ImageView {
+        ThreadItemPayload::ImageView {
             id: "view-a".into(),
             path: codex_utils_path_uri::LegacyAppPathString::from_string("diagram.png"),
         },
@@ -1334,7 +1343,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
                 call_id: "image-a".into(),
             },
         ),
-        ThreadItem::ImageGeneration(codex_app_server_protocol::ImageGenerationItem {
+        ThreadItemPayload::ImageGeneration(codex_app_server_protocol::ImageGenerationItem {
             id: "image-a".into(),
             status: "completed".into(),
             revised_prompt: Some("A precise diagram".into()),
@@ -1381,9 +1390,9 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
         output("wait-output-a", "wait-a", "wait"),
     ]);
     let mut selected_before_completion = None;
-    for item in &current.items {
+    for item in current.item_payloads() {
         if selected_before_completion.is_none()
-            && matches!(item, ThreadItem::CodeMode(fact) if matches!(fact.event, CodeModeEvent::Finished { .. }))
+            && matches!(item, ThreadItemPayload::CodeMode(fact) if matches!(fact.event, CodeModeEvent::Finished { .. }))
         {
             let area = Rect::new(
                 /*x*/ 0, /*y*/ 0, /*width*/ 90, /*height*/ 40,
@@ -1461,12 +1470,13 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
         }
         app.chat_widget.handle_server_notification(
             codex_app_server_protocol::ServerNotification::ItemCompleted(
-                codex_app_server_protocol::ItemCompletedNotification {
-                    thread_id: ThreadId::default().to_string(),
-                    turn_id: current.id.clone(),
-                    item: item.clone(),
-                    completed_at_ms: 0,
-                },
+                codex_app_server_protocol::ItemCompletedNotification::new(
+                    ThreadId::default().to_string(),
+                    current.id.clone(),
+                    item.clone(),
+                    None,
+                    0,
+                ),
             ),
             /*replay_kind*/ None,
         );
@@ -1489,8 +1499,8 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .collect::<Vec<_>>()
     };
     // Persisted thread history materializes lifecycle updates by item identity.
-    let mut materialized = Vec::<ThreadItem>::new();
-    for item in &current.items {
+    let mut materialized = Vec::<ThreadItemPayload>::new();
+    for item in current.item_payloads() {
         if let Some(old) = materialized.iter_mut().find(|old| old.id() == item.id()) {
             *old = item.clone();
         } else {
@@ -1589,7 +1599,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
     use codex_protocol::models::FunctionCallOutputContentItem;
 
     let emitted = "  chosen porcelain:  exact\n{\"content\":[{\"type\":\"text\",\"text\":\"repeat\"}],\"structuredContent\":\"repeat\"}\n{\"content\":[{\"type\":\"text\",\"text\":\"repeat\"}],\"structuredContent\":\"repeat\"}\n";
-    let output = |id: &str| ThreadItem::FunctionCallOutput {
+    let output = |id: &str| ThreadItemPayload::FunctionCallOutput {
         id: id.to_owned(),
         call_id: Some(if id == "b" { "a" } else { id }.to_owned()),
         name: "exec".into(),
@@ -1632,7 +1642,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         let command = |id| {
             let mut item = call(id, kind, "completed");
             if ordinary
-                && let ThreadItem::CommandExecution {
+                && let ThreadItemPayload::CommandExecution {
                     command,
                     command_actions,
                     ..
@@ -1747,7 +1757,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 .filter_map(|line| line.source.as_ref())
                 .any(|source| source.text.as_ref() == "  chosen porcelain:  exact")
         );
-        if let ThreadItem::FunctionCallOutput {
+        if let ThreadItemPayload::FunctionCallOutput {
             id,
             call_id,
             name,
@@ -1775,20 +1785,20 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         // Nested calls and notify() outputs share a call; a different call starts a new unit.
         // Reconnect and notification backpressure can deliver ownership after visible rows.
         // The live path must reach the same projection as a complete replay without a reload.
-        let (ownership, operations): (Vec<_>, Vec<_>) = current.items.iter().partition(|item| {
-            matches!(item, ThreadItem::CodeMode(fact) if matches!(fact.event,
+        let (ownership, operations): (Vec<_>, Vec<_>) = current.item_payloads().partition(|item| {
+            matches!(item, ThreadItemPayload::CodeMode(fact) if matches!(fact.event,
                 CodeModeEvent::Started { .. } | CodeModeEvent::ToolCall { .. }))
         });
         for item in operations.into_iter().chain(ownership) {
-            if let ThreadItem::Reasoning { id, summary, .. } = item {
+            if let ThreadItemPayload::Reasoning { id, summary, .. } = item {
                 app.chat_widget.handle_server_notification(
                     codex_app_server_protocol::ServerNotification::ItemStarted(
-                        codex_app_server_protocol::ItemStartedNotification {
-                            thread_id: ThreadId::default().to_string(),
-                            turn_id: current.id.clone(),
-                            item: item.clone(),
-                            started_at_ms: 0,
-                        },
+                        codex_app_server_protocol::ItemStartedNotification::new(
+                            ThreadId::default().to_string(),
+                            current.id.clone(),
+                            item.clone(),
+                            0,
+                        ),
                     ),
                     /*replay_kind*/ None,
                 );
@@ -1809,12 +1819,13 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             }
             app.chat_widget.handle_server_notification(
                 codex_app_server_protocol::ServerNotification::ItemCompleted(
-                    codex_app_server_protocol::ItemCompletedNotification {
-                        thread_id: ThreadId::default().to_string(),
-                        turn_id: current.id.clone(),
-                        item: item.clone(),
-                        completed_at_ms: 0,
-                    },
+                    codex_app_server_protocol::ItemCompletedNotification::new(
+                        ThreadId::default().to_string(),
+                        current.id.clone(),
+                        item.clone(),
+                        None,
+                        0,
+                    ),
                 ),
                 /*replay_kind*/ None,
             );
@@ -1935,7 +1946,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
     use codex_app_server_protocol::CollabAgentToolCallStatus;
     use codex_protocol::agent_wait::AgentWaitCompletion;
     use codex_protocol::agent_wait::AgentWaitOutcome;
-    let wait = |status| ThreadItem::CollabAgentToolCall {
+    let wait = |status| ThreadItemPayload::CollabAgentToolCall {
         id: "wait-p".into(),
         tool: CollabAgentTool::Wait,
         status,
@@ -1951,7 +1962,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         }),
     };
     let captured = r#"{"message":"Wait timed out.","timed_out":true}"#;
-    let result = ThreadItem::FunctionCallOutput {
+    let result = ThreadItemPayload::FunctionCallOutput {
         id: "wait-output".into(),
         call_id: Some("wait-p".into()),
         name: "wait_agent".into(),
@@ -1968,7 +1979,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         started_at_ms: 0,
     };
     let scoped = |item| {
-        ThreadItem::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+        ThreadItemPayload::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
             owner.clone(),
             Box::new(item),
         ))
@@ -1977,7 +1988,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         &app,
         &[
             scoped(wait(CollabAgentToolCallStatus::Completed)),
-            scoped(ThreadItem::FunctionCallOutput {
+            scoped(ThreadItemPayload::FunctionCallOutput {
                 id: "outer-output".into(),
                 call_id: Some("outer-exec".into()),
                 name: "exec".into(),
@@ -2138,15 +2149,16 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(copied, captured);
-        for item in &current.items {
+        for item in current.item_payloads() {
             app.chat_widget.handle_server_notification(
                 codex_app_server_protocol::ServerNotification::ItemCompleted(
-                    codex_app_server_protocol::ItemCompletedNotification {
-                        thread_id: ThreadId::default().to_string(),
-                        turn_id: current.id.clone(),
-                        item: item.clone(),
-                        completed_at_ms: 0,
-                    },
+                    codex_app_server_protocol::ItemCompletedNotification::new(
+                        ThreadId::default().to_string(),
+                        current.id.clone(),
+                        item.clone(),
+                        None,
+                        0,
+                    ),
                 ),
                 None,
             );
@@ -2203,7 +2215,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
     use codex_protocol::models::FunctionCallOutputBody;
 
     // Legacy output without explicit script ownership must not inherit a neighboring patch.
-    let output = |id: &str| ThreadItem::FunctionCallOutput {
+    let output = |id: &str| ThreadItemPayload::FunctionCallOutput {
         id: id.into(),
         call_id: Some(id.into()),
         name: "exec".into(),
@@ -2211,7 +2223,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
         output: FunctionCallOutputBody::Text(format!("Returned {id}")),
     };
     let current = turn(vec![
-        ThreadItem::FileChange {
+        ThreadItemPayload::FileChange {
             id: "patch".into(),
             changes: ["alpha.rs", "beta.rs"]
                 .into_iter()
@@ -2250,15 +2262,15 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
             let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
             let mut tui = crate::tui::test_support::make_test_tui().unwrap();
             tui.set_owned_screen(/*owned*/ true).unwrap();
-            let mut pending = current.items[0].clone();
-            if let ThreadItem::FileChange { status, .. } = &mut pending {
+            let mut pending = current.items[0].payload.clone();
+            if let ThreadItemPayload::FileChange { status, .. } = &mut pending {
                 *status = PatchApplyStatus::InProgress;
             }
             let mut unrelated = pending.clone();
-            if let ThreadItem::FileChange { id, .. } = &mut unrelated {
+            if let ThreadItemPayload::FileChange { id, .. } = &mut unrelated {
                 *id = "other-patch".into();
             }
-            let capture = ThreadItem::FunctionCallOutput {
+            let capture = ThreadItemPayload::FunctionCallOutput {
                 id: "patch-output".into(),
                 call_id: Some("patch".into()),
                 name: "apply_patch".into(),
@@ -2290,7 +2302,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                 .collect::<Vec<_>>();
             let unrelated_cells = app.transcript_cells[1..].to_vec();
             let mut terminal = pending.clone();
-            if let ThreadItem::FileChange {
+            if let ThreadItemPayload::FileChange {
                 status: outcome,
                 changes,
                 ..
@@ -2388,12 +2400,12 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
     }
     for (file_count, with_command) in [(2, false), (2, true), (1, true)] {
         let mut current = current.clone();
-        if let ThreadItem::FileChange { changes, .. } = &mut current.items[0] {
+        if let ThreadItemPayload::FileChange { changes, .. } = &mut current.items[0].payload {
             changes.truncate(file_count);
         }
         if with_command {
             let mut command = call("command", ActivityKind::Exploration, "completed");
-            if let ThreadItem::CommandExecution {
+            if let ThreadItemPayload::CommandExecution {
                 command,
                 command_actions,
                 ..
@@ -2402,14 +2414,16 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                 *command = "cargo check".into();
                 command_actions.clear();
             }
-            current.items.insert(/*index*/ 1, command);
+            current
+                .items
+                .insert(/*index*/ 1, ThreadItem::untimed(command));
         }
         let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
         let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(/*owned*/ true).unwrap();
         let expected = project(&app, &current.items);
         assert_eq!(expected.len(), 1 + usize::from(with_command) + 3);
-        for item in &current.items {
+        for item in current.item_payloads() {
             app.chat_widget.replay_thread_item(
                 item.clone(),
                 current.id.clone(),
@@ -2473,10 +2487,11 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         match kind {
             ActivityKind::Computer => {
                 app.chat_widget
-                    .handle_mcp_tool_call_completed_now(CompletedItem {
-                        item: call("newer", kind, "completed"),
-                        timestamp: None,
-                    });
+                    .handle_mcp_tool_call_completed_now(ThreadItem::untimed(call(
+                        "newer",
+                        kind,
+                        "completed",
+                    )));
                 app.chat_widget.handle_mcp_tool_call_started_now(call(
                     "pending",
                     kind,
@@ -2485,10 +2500,11 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
             }
             ActivityKind::Exploration => {
                 app.chat_widget
-                    .handle_command_execution_completed_now(CompletedItem {
-                        item: call("newer", kind, "completed"),
-                        timestamp: None,
-                    });
+                    .handle_command_execution_completed_now(ThreadItem::untimed(call(
+                        "newer",
+                        kind,
+                        "completed",
+                    )));
                 app.chat_widget.handle_command_execution_started_now(call(
                     "pending",
                     kind,
@@ -2532,20 +2548,22 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         match kind {
             ActivityKind::Computer => {
                 app.chat_widget
-                    .handle_mcp_tool_call_completed_now(CompletedItem {
-                        item: call("pending", kind, "completed"),
-                        timestamp: None,
-                    })
+                    .handle_mcp_tool_call_completed_now(ThreadItem::untimed(call(
+                        "pending",
+                        kind,
+                        "completed",
+                    )))
             }
             ActivityKind::Exploration => {
                 app.chat_widget
-                    .handle_command_execution_completed_now(CompletedItem {
-                        item: call("pending", kind, "completed"),
-                        timestamp: None,
-                    })
+                    .handle_command_execution_completed_now(ThreadItem::untimed(call(
+                        "pending",
+                        kind,
+                        "completed",
+                    )))
             }
         }
-        current.items[3] = call("pending", kind, "completed");
+        current.items[3] = ThreadItem::untimed(call("pending", kind, "completed"));
         let expected = project(&app, &current.items);
         match kind {
             ActivityKind::Computer => assert_eq!(
@@ -2574,7 +2592,7 @@ async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() 
         let mut same_turn = reasoning("same-turn-detail");
         let mut next_turn = reasoning("next-turn-detail");
         for item in [&mut same_turn, &mut next_turn] {
-            if let ThreadItem::Reasoning { summary, .. } = item {
+            if let ThreadItemPayload::Reasoning { summary, .. } = item {
                 *summary = vec!["Exactly the same reasoning text".to_owned()];
             }
         }
@@ -2620,7 +2638,7 @@ async fn every_page_split_folds_reasoning_before_answer_and_completion_boundarie
             let mut app = make_test_app().await;
             let mut items = vec![call("call", kind, "completed"), reasoning("detail")];
             if let Some(text) = answer {
-                items.push(ThreadItem::AgentMessage {
+                items.push(ThreadItemPayload::AgentMessage {
                     id: "answer".to_owned(),
                     text: text.to_owned(),
                     phase: None,
@@ -2677,7 +2695,7 @@ async fn failed_exploration_retains_following_reasoning_at_every_page_split() {
     let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     let mut app = make_test_app().await;
     let mut failed = call("failed", ActivityKind::Exploration, "failed");
-    if let ThreadItem::CommandExecution { exit_code, .. } = &mut failed {
+    if let ThreadItemPayload::CommandExecution { exit_code, .. } = &mut failed {
         *exit_code = Some(1);
     }
     let current = turn(vec![

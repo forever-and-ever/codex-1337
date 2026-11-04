@@ -54,7 +54,7 @@ use serde_json::json;
 use test_case::test_case;
 use wiremock::MockServer;
 
-struct TestAgentControl {
+pub(super) struct TestAgentControl {
     thread_id: ThreadId,
     service_tier: Mutex<Option<String>>,
     mail: Mutex<Vec<PendingAgentMessage>>,
@@ -63,7 +63,7 @@ struct TestAgentControl {
 }
 
 impl TestAgentControl {
-    fn new(thread_id: ThreadId) -> Self {
+    pub(super) fn new(thread_id: ThreadId) -> Self {
         Self {
             thread_id,
             service_tier: Mutex::default(),

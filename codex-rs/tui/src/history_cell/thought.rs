@@ -8,7 +8,7 @@ use super::output_provenance::mark_lines;
 use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
@@ -32,8 +32,8 @@ impl ThoughtCell {
         !self.text.is_empty()
     }
 
-    pub(crate) fn from_item(item: ThreadItem, cwd: &Path) -> Self {
-        let ThreadItem::Thought {
+    pub(crate) fn from_item(item: ThreadItemPayload, cwd: &Path) -> Self {
+        let ThreadItemPayload::Thought {
             id,
             response_id,
             completed_at_ms,

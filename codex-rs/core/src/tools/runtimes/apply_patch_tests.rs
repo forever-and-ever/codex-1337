@@ -94,7 +94,7 @@ async fn approval_action_preserves_patch_path_uris() {
         permissions_preapproved: false,
     };
 
-    let approval_action = ApplyPatchRuntime::build_approval_action(&request, "call-1");
+    let approval_action = request.approval_action("call-1");
 
     assert_eq!(
         approval_action,

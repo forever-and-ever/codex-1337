@@ -63,6 +63,7 @@ pub(super) async fn open_session(
     let mut stream = host
         .open_session(Request::new(proto::OpenSessionRequest {
             cell_execution_limits: None,
+            output_truncation: None,
         }))
         .await
         .expect("open code-mode session")
@@ -171,6 +172,7 @@ async fn execute_stream_starts_immediately_and_wait_preserves_missing_cells() {
             cell_id: cell_id.clone(),
             wait_id: "wait-1".to_string(),
             yield_time_ms: 60_000,
+            max_output_tokens: None,
         }))
         .await
         .expect("wait for completion")
@@ -216,6 +218,7 @@ async fn execute_stream_starts_immediately_and_wait_preserves_missing_cells() {
             cell_id: "missing-cell".to_string(),
             wait_id: "wait-missing".to_string(),
             yield_time_ms: 1,
+            max_output_tokens: None,
         }))
         .await
         .expect("missing cells remain successful wait outcomes")
@@ -409,6 +412,7 @@ async fn cancellation_before_wait_admission_is_preserved() {
             cell_id: cell_id.clone(),
             wait_id: "pre-cancelled".to_string(),
             yield_time_ms: 60_000,
+            max_output_tokens: None,
         }))
         .await
         .unwrap_err();
@@ -417,6 +421,7 @@ async fn cancellation_before_wait_admission_is_preserved() {
     host.terminate(Request::new(proto::TerminateRequest {
         session_id,
         cell_id,
+        max_output_tokens: None,
     }))
     .await
     .unwrap();

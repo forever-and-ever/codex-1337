@@ -30,13 +30,14 @@ use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnEnvironmentParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
@@ -391,10 +392,10 @@ async fn model_mcp_tool_call_uses_session_client_extensions() -> Result<()> {
         .await?;
 
         let completed = wait_for_mcp_tool_call_completed(&mut mcp, call_id).await?;
-        let ThreadItem::McpToolCall {
+        let ThreadItemPayload::McpToolCall {
             result: Some(result),
             ..
-        } = completed.item
+        } = completed.item.payload
         else {
             panic!("expected completed MCP tool call item");
         };
@@ -1009,6 +1010,7 @@ async fn mcp_server_tool_call_forwards_url_elicitation() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mcp_tool_call_completion_notification_contains_truncated_large_result() -> Result<()> {
+    let traces = TempDir::new()?;
     let call_id = "call-large-mcp";
     let namespace = format!("mcp__{TEST_SERVER_NAME}");
     let responses = vec![
@@ -1028,99 +1030,140 @@ async fn mcp_tool_call_completion_notification_contains_truncated_large_result()
     ];
     let responses_server = create_mock_responses_server_sequence(responses).await;
     mock_server::run(&[&responses_server], async {
-        let (mcp_server_url, mcp_server_handle) =
-            start_mcp_server(/*sensitive_action*/ None).await?;
-        let codex_home = TempDir::new()?;
-        mcp_tool_config(
-            &responses_server.uri(),
-            &mcp_server_url,
-            LARGE_OUTPUT_AUTO_COMPACT_LIMIT,
-        )
-        .write(codex_home.path())?;
+    let (mcp_server_url, mcp_server_handle) = start_mcp_server(/*sensitive_action*/ None).await?;
+    let codex_home = TempDir::new()?;
+    mcp_tool_config(
+        &responses_server.uri(),
+        &mcp_server_url,
+        LARGE_OUTPUT_AUTO_COMPACT_LIMIT,
+    )
+    .write(codex_home.path())?;
 
-        let mut mcp = TestAppServer::builder()
-            .with_codex_home(codex_home.path())
-            .build_initialized()
-            .await?;
-        let ThreadStartResponse { thread, .. } = mcp
-            .start_thread(ThreadStartParams {
-                model: Some("mock-model".to_string()),
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .with_env_overrides(&[("CODEX_ROLLOUT_TRACE_ROOT", traces.path().to_str())])
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn, .. } = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id,
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "Call the large MCP tool".to_string(),
+                    text_elements: Vec::new(),
+                }],
                 ..Default::default()
-            })
-            .await?;
-        let TurnStartResponse { turn, .. } = mcp
-            .request(|request_id| ClientRequest::TurnStart {
-                request_id,
-                params: TurnStartParams {
-                    thread_id: thread.id,
-                    client_user_message_id: None,
-                    input: vec![V2UserInput::Text {
-                        text: "Call the large MCP tool".to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                    ..Default::default()
-                },
-            })
-            .await?;
+            },
+        })
+        .await?;
 
-        let completed = wait_for_mcp_tool_call_completed(&mut mcp, call_id).await?;
-        assert_eq!(completed.turn_id, turn.id);
+    let completed = wait_for_mcp_tool_call_completed(&mut mcp, call_id).await?;
+    assert_eq!(completed.turn_id, turn.id);
 
-        let ThreadItem::McpToolCall {
-            id,
-            server,
-            tool,
-            status,
-            result: Some(result),
-            error,
-            ..
-        } = completed.item
-        else {
-            panic!("expected completed MCP tool call item");
-        };
-        assert_eq!(id, call_id);
-        assert_eq!(server, TEST_SERVER_NAME);
-        assert_eq!(tool, TEST_TOOL_NAME);
-        assert_eq!(status, McpToolCallStatus::Completed);
-        assert_eq!(error, None);
-        assert_eq!(result.structured_content, None);
-        assert_eq!(result.meta, None);
-        assert_eq!(result.content.len(), 1);
+    let ThreadItemPayload::McpToolCall {
+        id,
+        server,
+        tool,
+        status,
+        result: Some(result),
+        error,
+        ..
+    } = completed.item.payload
+    else {
+        panic!("expected completed MCP tool call item");
+    };
+    assert_eq!(id, call_id);
+    assert_eq!(server, TEST_SERVER_NAME);
+    assert_eq!(tool, TEST_TOOL_NAME);
+    assert_eq!(status, McpToolCallStatus::Completed);
+    assert_eq!(error, None);
+    assert_eq!(result.structured_content, None);
+    assert_eq!(result.meta, None);
+    assert_eq!(result.content.len(), 1);
 
-        let text = result.content[0]
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .expect("truncated MCP event result should be represented as text content");
-        assert!(text.contains("truncated"));
-        assert!(text.len() < DEFAULT_OUTPUT_BYTES_CAP + 1024);
+    let text = result.content[0]
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .expect("truncated MCP event result should be represented as text content");
+    assert!(text.contains("truncated"));
+    assert!(text.len() < DEFAULT_OUTPUT_BYTES_CAP + 1024);
 
-        let serialized_item = serde_json::to_string(&ThreadItem::McpToolCall {
-            id,
-            server,
-            tool,
-            status,
-            arguments: json!({ "message": LARGE_RESPONSE_MESSAGE }),
-            app_context: None,
-            mcp_app_resource_uri: None,
-            mcp_app_ui: None,
-            plugin_id: None,
-            read_only_hint: None,
-            result: Some(result),
-            error: None,
-            duration_ms: None,
-        })?;
-        assert!(serialized_item.len() < DEFAULT_OUTPUT_BYTES_CAP * 2 + 2048);
+    let serialized_item = serde_json::to_string(&ThreadItemPayload::McpToolCall {
+        id,
+        server,
+        tool,
+        status,
+        arguments: json!({ "message": LARGE_RESPONSE_MESSAGE }),
+        app_context: None,
+        mcp_app_resource_uri: None,
+        mcp_app_ui: None,
+        plugin_id: None,
+        read_only_hint: None,
+        result: Some(result),
+        error: None,
+        duration_ms: None,
+    })?;
+    assert!(serialized_item.len() < DEFAULT_OUTPUT_BYTES_CAP * 2 + 2048);
 
-        timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_stream_until_notification_message("turn/completed"),
-        )
-        .await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
 
-        mcp_server_handle.abort();
-        let _ = mcp_server_handle.await;
+    assert!(mcp.shutdown_gracefully().await?.success());
 
-        Ok(())
+    // The UI receives a truncated result, but the trace retains the original
+    // content and metadata, including audio removed during model sanitization.
+    let bundles = std::fs::read_dir(traces.path())?.collect::<std::io::Result<Vec<_>>>()?;
+    assert_eq!(bundles.len(), 1);
+    let bundle = bundles[0].path();
+    let events = std::fs::read_to_string(bundle.join("trace.jsonl"))?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<serde_json::Result<Vec<_>>>()?;
+    let completions: Vec<_> = events
+        .iter()
+        .map(|event| &event["payload"])
+        .filter(|event| {
+            event["type"] == "tool_call_runtime_ended" && event["tool_call_id"] == call_id
+        })
+        .collect();
+    assert_eq!(completions.len(), 1);
+    let payload_path = completions[0]["runtime_payload"]["path"]
+        .as_str()
+        .expect("MCP runtime payload path");
+    let payload: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(bundle.join(payload_path))?)?;
+    let expected = json!({
+        "content": [
+            {"type": "text", "text": "large-mcp-content-".repeat(DEFAULT_OUTPUT_BYTES_CAP / 8)},
+            {"type": "audio", "data": "UklGRg==", "mimeType": "audio/wav"}
+        ],
+        "structuredContent": {"large": "structured-value-".repeat(DEFAULT_OUTPUT_BYTES_CAP / 8)},
+        "isError": false,
+        "_meta": {
+            "calledBy": "mcp-app",
+        }
+    });
+    // Avoid constructing a text diff of the intentionally oversized response.
+    assert!(
+        payload["result"]["Ok"] == expected,
+        "trace did not retain the full MCP response"
+    );
+
+    mcp_server_handle.abort();
+    let _ = mcp_server_handle.await;
+
+    Ok(())
     })
     .await
 }
@@ -1210,7 +1253,7 @@ async fn mcp_tool_call_hint_survives_mid_call_thread_read_and_resume() -> Result
             ..
         } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
 
-        let expected_item = ThreadItem::McpToolCall {
+        let expected_item = ThreadItemPayload::McpToolCall {
             id: call_id.to_string(),
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -1228,8 +1271,8 @@ async fn mcp_tool_call_hint_survives_mid_call_thread_read_and_resume() -> Result
         let resumed_item = resumed_thread
             .turns
             .iter()
-            .flat_map(|turn| &turn.items)
-            .find(|item| matches!(item, ThreadItem::McpToolCall { id, .. } if id == call_id))
+            .flat_map(Turn::item_payloads)
+            .find(|item| matches!(item, ThreadItemPayload::McpToolCall { id, .. } if id == call_id))
             .expect("resumed thread should include the in-progress MCP tool call");
         assert_eq!(resumed_item, &expected_item);
 
@@ -1245,11 +1288,11 @@ async fn mcp_tool_call_hint_survives_mid_call_thread_read_and_resume() -> Result
 
         let completed = wait_for_mcp_tool_call_completed(&mut mcp, call_id).await?;
         assert_eq!(completed.turn_id, turn.id);
-        let ThreadItem::McpToolCall {
+        let ThreadItemPayload::McpToolCall {
             status,
             read_only_hint,
             ..
-        } = &completed.item
+        } = &completed.item.payload
         else {
             panic!("expected the completed MCP tool call item");
         };
@@ -1275,10 +1318,10 @@ async fn mcp_tool_call_hint_survives_mid_call_thread_read_and_resume() -> Result
         let persisted_item = completed_read
             .turns
             .iter()
-            .flat_map(|turn| &turn.items)
-            .find(|item| matches!(item, ThreadItem::McpToolCall { id, .. } if id == call_id))
+            .flat_map(Turn::item_payloads)
+            .find(|item| matches!(item, ThreadItemPayload::McpToolCall { id, .. } if id == call_id))
             .expect("completed thread history should include the persisted MCP tool call");
-        assert_eq!(persisted_item, &completed.item);
+        assert_eq!(persisted_item, &completed.item.payload);
 
         mcp_server_handle.abort();
         let _ = mcp_server_handle.await;
@@ -1461,7 +1504,10 @@ impl ServerHandler for ToolAppsMcpServer {
             let mut result = CallToolResult::structured(json!({
                 "large": "structured-value-".repeat(DEFAULT_OUTPUT_BYTES_CAP / 8),
             }));
-            result.content = vec![ContentBlock::text(large_text)];
+            result.content = vec![
+                ContentBlock::text(large_text),
+                ContentBlock::audio("UklGRg==", "audio/wav"),
+            ];
             result.meta = Some(meta);
             return Ok(result.into());
         }
@@ -1627,7 +1673,8 @@ async fn wait_for_mcp_tool_call_completed(
             mcp.read_notification("item/completed"),
         )
         .await??;
-        if matches!(&completed.item, ThreadItem::McpToolCall { id, .. } if id == call_id) {
+        if matches!(&completed.item.payload, ThreadItemPayload::McpToolCall { id, .. } if id == call_id)
+        {
             return Ok(completed);
         }
     }

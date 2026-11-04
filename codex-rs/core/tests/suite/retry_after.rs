@@ -1524,6 +1524,11 @@ async fn websocket_connection_limit_retries_with_local_backoff() -> Result<()> {
     5; "capacity"
 )]
 #[test_case::test_case(
+    json!({"type": "error", "status": 503,
+        "error": {"code": "policy_capacity_unavailable", "message": "Policy-restricted capacity is unavailable."}}),
+    5; "policy_capacity"
+)]
+#[test_case::test_case(
     json!({"type": "error", "status": 429,
         "error": {"type": "rate_limit_error", "code": "rate_limit_exceeded",
             "message": "Rate limit exceeded.", "headers": {"Retry-After": "1"}}}),

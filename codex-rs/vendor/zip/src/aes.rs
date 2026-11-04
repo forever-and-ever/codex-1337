@@ -4,15 +4,24 @@
 //! Note that using CRC with AES depends on the used encryption specification, AE-1 or AE-2.
 //! If the file is marked as encrypted with AE-2 the CRC field is ignored, even if it isn't set to 0.
 
+use crate::aes_ctr;
 use crate::aes_ctr::AesCipher;
 use crate::format::aes::AesMode;
-use crate::result::{ZipResult, invalid};
-use crate::{aes_ctr, result::ZipError};
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
 use constant_time_eq::constant_time_eq;
-use hmac::{KeyInit, Mac, SimpleHmacReset};
+use hmac::KeyInit;
+use hmac::Mac;
+use hmac::SimpleHmacReset;
 use sha1::Sha1;
-use std::io::{self, Error, ErrorKind, Read, Write};
-use zeroize::{Zeroize, Zeroizing};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
+use std::io::{self};
+use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 /// The length of the password verification value in bytes
 pub const PWD_VERIFY_LENGTH: usize = 2;
@@ -447,13 +456,14 @@ impl<W: Write> Write for AesWriter<W> {
 
 #[cfg(all(test, feature = "aes-crypto"))]
 mod tests {
-    use std::io::{self, Read, Write};
+    use std::io::Read;
+    use std::io::Write;
+    use std::io::{self};
 
-    use crate::{
-        aes::{AesReader, AesWriter},
-        format::aes::AesMode,
-        result::ZipError,
-    };
+    use crate::aes::AesReader;
+    use crate::aes::AesWriter;
+    use crate::format::aes::AesMode;
+    use crate::result::ZipError;
 
     /// Checks whether `AesReader` can successfully decrypt what `AesWriter` produces.
     fn roundtrip(aes_mode: AesMode, password: &[u8], plaintext: &[u8]) -> Result<bool, ZipError> {

@@ -2,7 +2,8 @@
 
 use crate::format::magic::Magic;
 use core::mem;
-use std::io::{self, Write};
+use std::io::Write;
+use std::io::{self};
 
 /// Zip Data descriptor
 #[derive(Debug, Copy, Clone, PartialEq)]

@@ -194,6 +194,8 @@ pub struct McpConfig {
     pub reserved_native_tool_namespaces: Vec<String>,
     /// Protocol mode for servers other than the host-owned Codex Apps registration.
     pub protocol_mode: McpProtocolMode,
+    /// Try protocol discovery before initializing eligible local stdio servers.
+    pub discover_local_stdio: bool,
     /// Refresh ordinary server catalogs after tools/list_changed notifications.
     pub mcp_tool_list_changed: bool,
     /// Independent protocol mode for the trusted, HTTP Codex Apps registration.

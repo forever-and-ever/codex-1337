@@ -39,6 +39,7 @@ use codex_tools::FunctionsNamespaceFunctionPrefixes;
 use codex_tools::ToolName;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
+use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use indexmap::map::Entry;
@@ -60,6 +61,11 @@ pub use codex_tools::ToolExposure;
 /// Implementers provide the shared `ToolExecutor` behavior plus optional
 /// core-owned metadata for hooks, telemetry, tool search, and argument diffs.
 pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
+    /// Opts this invocation into synchronous native-call review before the handler runs.
+    fn requires_guardian_review(&self, _invocation: &ToolInvocation) -> bool {
+        false
+    }
+
     /// The handler observes its cancellation token and must finish before dispatch is aborted.
     fn finishes_on_cancellation(&self) -> bool {
         false
@@ -76,11 +82,8 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
     }
 
     /// Returns lazily cached, augmented Code Mode definitions owned by this runtime.
-    /// Retains executable schemas for on-demand contract and raw-schema inspection.
-    fn cached_code_mode_definitions(
-        &self,
-        _tool_description_first: bool,
-    ) -> Option<&[codex_code_mode::ToolDefinition]> {
+    /// Retains executable schemas for on-demand contract inspection.
+    fn cached_code_mode_definitions(&self) -> Option<&[codex_code_mode::ToolDefinition]> {
         None
     }
 
@@ -168,6 +171,16 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
             tool_name: invocation.tool_name.clone(),
             tool_input: function_hook_tool_input(arguments),
         })
+    }
+
+    /// Resolves a local execution cwd exposed in `PreToolUse` stdin, when the tool
+    /// supports a per-call working directory. Remote commands return `None` to
+    /// retain the host cwd. This does not move the hook process.
+    fn pre_tool_use_cwd(
+        &self,
+        _invocation: &ToolInvocation,
+    ) -> Result<Option<PathUri>, FunctionCallError> {
+        Ok(None)
     }
 
     /// Rebuilds a tool invocation from hook-facing `tool_input`.
@@ -678,6 +691,15 @@ impl ToolRegistry {
         call_state: Option<Arc<ToolCallState>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         invocation.tool_name = invocation.tool_name.with_default_namespace();
+        // Standalone dispatch has no outer task to reserve the ID for it.
+        let standalone;
+        let reservation = if let Some(state) = &call_state {
+            &state.invocation
+        } else {
+            standalone = crate::agent::host::InvocationReservation::default();
+            standalone.reserve(&invocation.session, &invocation.turn, &invocation.call_id)?;
+            &standalone
+        };
         let cancellation_token = invocation.cancellation_token.clone();
         let tool_name = invocation.tool_name.clone();
         let call_id_owned = invocation.call_id.clone();
@@ -765,6 +787,17 @@ impl ToolRegistry {
         crate::tools::code_mode::transcript::capture_input(&invocation).await;
 
         let fail_before_execution = async |invocation: &ToolInvocation, err: FunctionCallError| {
+            let log_payload = tool_log_payload(&invocation.payload, &invocation.source);
+            otel.tool_result_with_tags(
+                &tool_name,
+                &call_id_owned,
+                log_payload.as_ref(),
+                Duration::ZERO,
+                /*success*/ false,
+                &err.to_string(),
+                &tool_result_tags,
+                &extra_trace_fields,
+            );
             if tool.is_builtin_control_tool() {
                 let mut analytics = ControlToolCallGuard::new(invocation);
                 analytics.finish(ControlToolCallStatus::Failed);
@@ -789,12 +822,17 @@ impl ToolRegistry {
             Err(err) => return Err(fail_before_execution(&invocation, err).await),
         };
         if let Some(pre_tool_use_payload) = tool.pre_tool_use_payload(&invocation) {
+            let tool_cwd = match tool.pre_tool_use_cwd(&invocation) {
+                Ok(cwd) => cwd,
+                Err(err) => return Err(fail_before_execution(&invocation, err).await),
+            };
             match run_pre_tool_use_hooks(
                 &invocation.session,
                 invocation.step_context.as_ref(),
                 invocation.call_id.clone(),
                 &pre_tool_use_payload.tool_name,
                 &pre_tool_use_payload.tool_input,
+                tool_cwd,
                 &invocation.environments.hook_ids(),
             )
             .or_cancel_tool(&cancellation_token)
@@ -829,6 +867,13 @@ impl ToolRegistry {
             }
         }
 
+        if tool.requires_guardian_review(&invocation)
+            && let Err(err) = super::review_native_tool_call(&invocation).await
+        {
+            return Err(fail_before_execution(&invocation, err).await);
+        }
+
+        let invocation_guard = reservation.activate(&invocation);
         if tool.mcp_server_name().is_none() {
             notify_tool_start(&invocation, /*mcp_tool*/ None)
                 .or_cancel_tool(&cancellation_token)
@@ -897,10 +942,7 @@ impl ToolRegistry {
                 run_post_tool_use_hooks(
                     &invocation.session,
                     invocation.step_context.as_ref(),
-                    post_tool_use_payload.tool_use_id,
-                    post_tool_use_payload.tool_name,
-                    post_tool_use_payload.tool_input,
-                    post_tool_use_payload.tool_response,
+                    post_tool_use_payload,
                     &invocation.environments.hook_ids(),
                 )
                 .or_cancel_tool(&cancellation_token)
@@ -936,6 +978,7 @@ impl ToolRegistry {
                 handler_executed: true,
             },
         };
+        drop(invocation_guard);
         notify_tool_finish_if_unclaimed(&invocation, call_state.as_deref(), lifecycle_outcome)
             .await;
 

@@ -67,6 +67,7 @@ impl ChatWidget {
         &mut self,
         controller: StreamController,
         completed: Option<&str>,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
     ) -> Option<StreamController> {
         if !controller.is_background() {
             return Some(controller);
@@ -79,6 +80,7 @@ impl ChatWidget {
         let timestamp = controller.timestamp;
         let authoritative = completed.is_some();
         let completed = completed.map(str::to_owned);
+        let questions = questions.to_vec();
         let cwd = self.config.cwd.to_path_buf();
         let context = crate::inline_visualization::InlineVisualizationContext::from_config(
             &self.config,
@@ -100,6 +102,7 @@ impl ChatWidget {
             let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
                 visible, &cwd, context,
             )
+            .with_questions(&questions)
             .with_copy_source(Some(source));
             cell.item_id = Some(item_id.clone());
             cell.timestamp = timestamp;
@@ -167,9 +170,10 @@ impl ChatWidget {
     pub(super) fn take_prepared_answer_stream(
         &mut self,
         completed: Option<&str>,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
     ) -> Option<StreamController> {
         let controller = self.stream_controller.take()?;
-        self.prepare_answer_stream(controller, completed)
+        self.prepare_answer_stream(controller, completed, questions)
     }
 
     #[expect(
@@ -231,7 +235,10 @@ impl ChatWidget {
                 .as_ref()
                 .is_some_and(StreamController::is_background)
             {
-                self.finalize_completed_assistant_message(Some(message));
+                self.finalize_completed_assistant_message(
+                    Some(message),
+                    item.questions.as_deref().unwrap_or_default(),
+                );
                 self.transcript.agent_timestamp = None;
                 self.status_state.pending_status_indicator_restore = item.questions.is_some()
                     || match item.phase {

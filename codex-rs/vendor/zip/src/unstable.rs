@@ -14,11 +14,14 @@ zip = \"="]
 use std::borrow::Cow;
 use std::io;
 use std::io::Read;
-use std::path::{Component, MAIN_SEPARATOR, Path};
+use std::path::Component;
+use std::path::MAIN_SEPARATOR;
+use std::path::Path;
 
 /// Provides high level API for reading from a stream.
 pub mod stream {
-    pub use crate::read::stream::{ZipStreamReader, ZipStreamVisitor};
+    pub use crate::read::stream::ZipStreamReader;
+    pub use crate::read::stream::ZipStreamVisitor;
 }
 
 /// Zip format
@@ -27,8 +30,10 @@ pub mod format {
 }
 /// Types for creating ZIP archives.
 pub mod write {
-    use crate::result::{ZipError, ZipResult};
-    use crate::write::{FileOptionExtension, FileOptions};
+    use crate::result::ZipError;
+    use crate::result::ZipResult;
+    use crate::write::FileOptionExtension;
+    use crate::write::FileOptions;
     /// Unstable methods for [`FileOptions`].
     pub trait FileOptionsExt<'k> {
         /// Write the file with the given password using the deprecated `ZipCrypto` algorithm.

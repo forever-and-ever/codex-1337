@@ -38,7 +38,7 @@ impl DraftState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct ComposerMentionBinding {
     pub(super) sigil: char,
     pub(super) mention: String,

@@ -3,6 +3,7 @@
 use super::AgentMarkdownCell;
 use super::AgentMessageCell;
 use super::UserHistoryCell;
+use super::UserMessagePresentation;
 use super::normalize_whitespace_only_hyperlink_lines;
 use super::sanitize_user_text;
 use super::spoken;
@@ -49,7 +50,7 @@ pub(super) fn user_lines(
     surface: Surface,
 ) -> Vec<HyperlinkLine> {
     let sanitized_message = sanitize_user_text((&cell.message).into());
-    let message = if cell.spoken {
+    let message = if cell.is_spoken() {
         sanitized_message.trim_start()
     } else {
         sanitized_message.as_ref()
@@ -70,15 +71,26 @@ pub(super) fn user_lines(
     if surface == Surface::Inline {
         lines = prefix_hyperlink_lines(lines, "  ".into(), "  ".into());
     }
-    if let Some(mut wrapped_message) = wrap_user_message(message, text_elements, style, wrap_width)
-    {
+    let replies = matches!(
+        cell.presentation,
+        UserMessagePresentation::AsyncReplies { .. }
+    );
+    let mut wrapped_message = match &cell.presentation {
+        UserMessagePresentation::AsyncReplies { replies, cwd } => {
+            super::super::async_replies::render(replies, cwd, usize::from(wrap_width))
+        }
+        UserMessagePresentation::Plain | UserMessagePresentation::Spoken => {
+            wrap_user_message(message, text_elements, style, wrap_width)
+        }
+    };
+    if !wrapped_message.is_empty() {
         if !lines.is_empty() {
             lines.push(HyperlinkLine::new(Line::from("").style(style)));
         }
-        if surface == Surface::Inline {
+        if surface == Surface::Inline && !replies {
             wrapped_message = prefix_hyperlink_lines(
                 wrapped_message,
-                if cell.spoken {
+                if cell.is_spoken() {
                     "› ".red().bold()
                 } else {
                     "› ".bold().dim()
@@ -96,7 +108,7 @@ pub(super) fn user_lines(
         }
         if let Some(source) = &mut line.source {
             source.right_reserve = 1;
-            source.copy_as_prose = true;
+            source.copy_as_prose |= !replies;
         }
     }
     spoken(lines, Bracket::Prompt)
@@ -151,19 +163,31 @@ pub(super) fn markdown_lines(
                 Bracket::Response,
             );
         };
-        let mut lines = crate::markdown::render_markdown_agent_with_list_spacing(
-            &cell.markdown_source,
-            Some(wrap_width),
-            Some(cell.cwd.as_path()),
-            cell.inline_visualization_context.as_ref(),
-            list_spacing,
-        );
-        if cell.spoken_artifacts {
-            super::super::spoken_artifacts::annotate_spoken_artifacts(&mut lines, &cell.cwd);
-        }
-        if surface == Surface::Inline {
-            lines = prefix_hyperlink_lines(lines, agent_prefix(true), agent_prefix(false));
-        }
+        let markdown = |source: &str| {
+            crate::markdown::render_markdown_agent_with_list_spacing(
+                source,
+                Some(wrap_width),
+                Some(cell.cwd.as_path()),
+                cell.inline_visualization_context.as_ref(),
+                list_spacing,
+            )
+        };
+        let lines = if cell.question_titles.is_empty() {
+            let mut lines = markdown(&cell.markdown_source);
+            if cell.spoken_artifacts {
+                super::super::spoken_artifacts::annotate_spoken_artifacts(&mut lines, &cell.cwd);
+            }
+            if surface == Surface::Inline {
+                lines = prefix_hyperlink_lines(lines, agent_prefix(true), agent_prefix(false));
+            }
+            lines
+        } else {
+            super::super::async_questions::render(
+                &cell.markdown_source,
+                &cell.question_titles,
+                markdown,
+            )
+        };
         spoken(
             normalize_whitespace_only_hyperlink_lines(lines),
             Bracket::Response,

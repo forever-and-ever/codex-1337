@@ -13,14 +13,13 @@ use std::sync::Arc;
 fn required_context(text: String) -> ComposedContext {
     let action = PlannedAction {
         tool_descriptions: None,
-        json: text,
-        kind: PlannedActionKind::Command,
+        kind: PlannedActionKind::Command { json: text },
         reason: None,
     };
     let context = super::super::prompt::collect_guardian_context(
         &Vec::<ResponseItem>::new(),
-        super::super::GUARDIAN_MAX_TOOL_ENTRY_TOKENS,
-        &[],
+        &ContextProfile::synchronous(),
+        /*root_conversation_candidates*/ None,
         &[],
         Some(&action),
         /*permissions*/ None,
@@ -211,7 +210,11 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
     let persisted = session
         .clone_history()
         .await
-        .for_prompt(&step.settings.model_info.input_modalities);
+        .for_prompt(
+            &step.settings.model_info.input_modalities,
+            session.services.image_store.as_ref(),
+        )
+        .await;
     assert_eq!(prompt.input, persisted);
     assert!(
         persisted

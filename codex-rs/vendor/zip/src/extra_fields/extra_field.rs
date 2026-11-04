@@ -16,8 +16,10 @@ use crate::result::ZipResult;
 use crate::result::invalid;
 use crate::types::ZipFileData;
 use crate::unstable::LittleEndianReadExt;
+use std::io::Cursor;
 use std::io::ErrorKind;
-use std::io::{Cursor, Read, Write};
+use std::io::Read;
+use std::io::Write;
 
 /// contains one extra field
 #[derive(Debug, Clone, PartialEq)]

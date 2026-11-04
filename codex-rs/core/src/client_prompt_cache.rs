@@ -270,6 +270,7 @@ impl ModelClient {
             return stream;
         };
         let thread = self.state.thread_id;
+        let routing_affinity = stream.routing_affinity.take();
         let interrupt = stream.interrupt.take();
         let consumer_dropped = CancellationToken::new();
         let dropped = consumer_dropped.clone();
@@ -316,6 +317,7 @@ impl ModelClient {
             }
         });
         ResponseStream {
+            routing_affinity,
             rx_event,
             interrupt,
             consumer_dropped,

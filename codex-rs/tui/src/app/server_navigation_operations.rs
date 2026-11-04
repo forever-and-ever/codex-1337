@@ -64,7 +64,6 @@ use super::ThreadEventAttachment;
 use super::ThreadEventStore;
 use super::ThreadId;
 use super::ThreadInputState;
-use super::ThreadItem;
 use super::ThreadSessionState;
 use super::ThreadStartSource;
 use super::TomlValue;
@@ -552,7 +551,8 @@ impl App {
             crate::app_server_session::ThreadParamsMode::Embedded => {
                 preparation.config.cwd.to_path_buf()
             }
-            crate::app_server_session::ThreadParamsMode::Remote => server
+            crate::app_server_session::ThreadParamsMode::Remote
+            | crate::app_server_session::ThreadParamsMode::Cloud => server
                 .remote_cwd_override()
                 .unwrap_or(Path::new("."))
                 .to_path_buf(),

@@ -2,6 +2,9 @@
 //! Informative accents meet minimum contrast on known backgrounds and supported palettes.
 
 mod contrast;
+mod history_prompt;
+
+pub(crate) use history_prompt::history_prompt_style;
 
 use crate::color::blend;
 use crate::color::is_light;

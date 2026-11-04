@@ -1,10 +1,14 @@
 //! Zip utils functions
 
 use crate::CompressionMethod;
-use crate::format::aes::{AesMode, AesVendorVersion};
-use crate::format::flags::{ZipFileFlags, ZipFlags};
+use crate::format::DEFAULT_VERSION;
+use crate::format::MIN_VERSION;
+use crate::format::aes::AesMode;
+use crate::format::aes::AesVendorVersion;
+use crate::format::ffi;
+use crate::format::flags::ZipFileFlags;
+use crate::format::flags::ZipFlags;
 use crate::format::system::System;
-use crate::format::{DEFAULT_VERSION, MIN_VERSION, ffi};
 
 #[inline]
 pub(crate) fn is_dir(filename: &[u8]) -> bool {

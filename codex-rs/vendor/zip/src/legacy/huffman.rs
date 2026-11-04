@@ -1,6 +1,10 @@
-use std::io::{self, Error, Seek};
+use std::io::Error;
+use std::io::Seek;
+use std::io::{self};
 
-use bitstream_io::{BitRead, BitReader, Endianness};
+use bitstream_io::BitRead;
+use bitstream_io::BitReader;
+use bitstream_io::Endianness;
 
 #[derive(Default, Clone, Copy)]
 pub struct TableEntry {
@@ -179,7 +183,8 @@ impl HuffmanDecoder {
 mod tests {
     use std::io::Cursor;
 
-    use bitstream_io::{BitReader, LittleEndian};
+    use bitstream_io::BitReader;
+    use bitstream_io::LittleEndian;
 
     use super::HuffmanDecoder;
     #[test]

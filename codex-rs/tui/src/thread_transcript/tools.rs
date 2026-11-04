@@ -19,7 +19,7 @@ use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::McpToolCallStatus;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::parse_command::ParsedCommand;
 use ratatui::style::Stylize as _;
@@ -28,9 +28,9 @@ use ratatui::text::Line;
 /// Preserve status and output when replay cannot reconstruct a rich completed tool cell.
 /// Declined commands never ran, and historical terminal interactions do not carry stdin details.
 /// Pending items retain their last known state without starting a running clock.
-pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistoryCell> {
+pub(crate) fn historical_tool_fallback(item: &ThreadItemPayload) -> Option<PlainHistoryCell> {
     let lines = match item {
-        ThreadItem::CommandExecution {
+        ThreadItemPayload::CommandExecution {
             command,
             source,
             status,
@@ -74,7 +74,7 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistory
             }
             lines
         }
-        ThreadItem::McpToolCall {
+        ThreadItemPayload::McpToolCall {
             server,
             tool,
             status,
@@ -89,7 +89,7 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistory
             };
             vec![format!("mcp tool: {server}/{tool} · {status}").dim().into()]
         }
-        ThreadItem::CollabAgentToolCall {
+        ThreadItemPayload::CollabAgentToolCall {
             tool:
                 tool @ (CollabAgentTool::SpawnAgent
                 | CollabAgentTool::SendInput
@@ -114,10 +114,10 @@ fn replay_command_args(command: &str) -> Option<Vec<String>> {
 
 /// Share the native active row builders with the scoped transcript reducer.
 pub(crate) fn pending_tool_cell(
-    item: &ThreadItem,
+    item: &ThreadItemPayload,
 ) -> Option<Arc<dyn crate::history_cell::HistoryCell>> {
     match item {
-        ThreadItem::CommandExecution {
+        ThreadItemPayload::CommandExecution {
             id,
             command,
             source,
@@ -143,7 +143,7 @@ pub(crate) fn pending_tool_cell(
             }
             Some(Arc::new(cell))
         }
-        ThreadItem::McpToolCall {
+        ThreadItemPayload::McpToolCall {
             id,
             server,
             tool,
@@ -174,8 +174,8 @@ pub(crate) struct CommandHistory {
 }
 
 impl CommandHistory {
-    pub(crate) fn from_item(item: ThreadItem) -> Option<Self> {
-        let ThreadItem::CommandExecution {
+    pub(crate) fn from_item(item: ThreadItemPayload) -> Option<Self> {
+        let ThreadItemPayload::CommandExecution {
             id,
             command,
             source,
@@ -238,8 +238,8 @@ pub(crate) struct McpHistory {
 }
 
 impl McpHistory {
-    pub(crate) fn from_item(item: ThreadItem) -> Option<Self> {
-        let ThreadItem::McpToolCall {
+    pub(crate) fn from_item(item: ThreadItemPayload) -> Option<Self> {
+        let ThreadItemPayload::McpToolCall {
             id,
             server,
             tool,

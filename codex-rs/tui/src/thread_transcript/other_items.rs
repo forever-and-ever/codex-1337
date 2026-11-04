@@ -8,7 +8,7 @@ use crate::app_server_approval_conversions::file_update_changes_to_display;
 use crate::history_cell;
 use crate::history_cell::PlainHistoryCell;
 use crate::multi_agents;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::WebSearchAction;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -16,21 +16,21 @@ use ratatui::style::Stylize as _;
 use std::sync::Arc;
 
 pub(super) fn cells(
-    item: ThreadItem,
+    item: ThreadItemPayload,
     cwd: &AbsolutePathBuf,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
     let call_id = matches!(
         item,
-        ThreadItem::FileChange { .. }
-            | ThreadItem::CollabAgentToolCall { .. }
-            | ThreadItem::ImageView { .. }
-            | ThreadItem::ImageGeneration(_)
+        ThreadItemPayload::FileChange { .. }
+            | ThreadItemPayload::CollabAgentToolCall { .. }
+            | ThreadItemPayload::ImageView { .. }
+            | ThreadItemPayload::ImageGeneration(_)
     )
     .then(|| item.id().to_owned());
     let mut cells: TranscriptCells = Vec::new();
     match item {
-        item @ ThreadItem::CodeModeOwned(_) => {
+        item @ ThreadItemPayload::CodeModeOwned(_) => {
             cells.extend(super::thread_items_to_transcript_cells(
                 /*thread_id*/ None,
                 cwd,
@@ -40,10 +40,10 @@ pub(super) fn cells(
                 metadata,
             ))
         }
-        ThreadItem::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(
+        ThreadItemPayload::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(
             item, /*animations_enabled*/ false,
         ))),
-        ThreadItem::FileChange {
+        ThreadItemPayload::FileChange {
             id,
             changes,
             status,
@@ -57,15 +57,17 @@ pub(super) fn cells(
             .into_iter()
             .map(|cell| Arc::new(cell) as Arc<dyn history_cell::HistoryCell>),
         )),
-        ThreadItem::WebSearch(item) => cells.push(Arc::new(history_cell::new_web_search_call(
-            item.id,
-            item.query,
-            item.action.unwrap_or(WebSearchAction::Other),
-        ))),
-        ThreadItem::ImageView { path, .. } => {
+        ThreadItemPayload::WebSearch(item) => {
+            cells.push(Arc::new(history_cell::new_web_search_call(
+                item.id,
+                item.query,
+                item.action.unwrap_or(WebSearchAction::Other),
+            )))
+        }
+        ThreadItemPayload::ImageView { path, .. } => {
             cells.push(Arc::new(history_cell::new_view_image_tool_call(path)))
         }
-        ThreadItem::ImageGeneration(item) => {
+        ThreadItemPayload::ImageGeneration(item) => {
             cells.push(Arc::new(history_cell::new_image_generation_call(
                 item.id,
                 &item.status,
@@ -73,33 +75,33 @@ pub(super) fn cells(
                 item.saved_path,
             )));
         }
-        item @ ThreadItem::CollabAgentToolCall { .. } => {
+        item @ ThreadItemPayload::CollabAgentToolCall { .. } => {
             if let Some(cell) = multi_agents::tool_call_history_cell(
                 &item, /*cached_spawn_request*/ None, metadata,
             ) {
                 cells.push(Arc::new(cell));
             }
         }
-        item @ ThreadItem::SubAgentActivity { .. } => {
+        item @ ThreadItemPayload::SubAgentActivity { .. } => {
             if let Some(cell) = multi_agents::sub_agent_activity_history_cell(&item) {
                 cells.push(Arc::from(cell));
             }
         }
-        ThreadItem::EnteredReviewMode { review, .. } => {
+        ThreadItemPayload::EnteredReviewMode { review, .. } => {
             cells.push(Arc::new(history_cell::new_review_status_line(format!(
                 ">> Code review started: {review} <<"
             ))));
         }
-        ThreadItem::ExitedReviewMode { review, .. } => {
+        ThreadItemPayload::ExitedReviewMode { review, .. } => {
             cells.push(Arc::new(history_cell::new_review_status_line(format!(
                 "<< Code review finished: {review} >>"
             ))));
         }
-        ThreadItem::ContextCompaction { id } => {
+        ThreadItemPayload::ContextCompaction { id } => {
             cells.push(Arc::new(history_cell::CompactionCell { id, elapsed: None }));
         }
         // These items do not have richer history-cell presentations yet.
-        ThreadItem::HookPrompt { fragments, .. } => {
+        ThreadItemPayload::HookPrompt { fragments, .. } => {
             if !fragments.is_empty() {
                 cells.push(Arc::new(PlainHistoryCell::new(
                     fragments
@@ -115,25 +117,25 @@ pub(super) fn cells(
                 )));
             }
         }
-        item @ ThreadItem::DynamicToolCall { .. } => {
+        item @ ThreadItemPayload::DynamicToolCall { .. } => {
             if let Some(cell) = history_cell::DynamicToolCallCell::from_item(item) {
                 cells.push(Arc::new(cell));
             }
         }
-        ThreadItem::UserMessage { .. }
-        | ThreadItem::AgentMessage { .. }
-        | ThreadItem::FunctionCallOutput { .. }
-        | ThreadItem::ToolOutputTokens { .. }
-        | ThreadItem::Plan { .. }
-        | ThreadItem::Reasoning { .. }
-        | ThreadItem::Thought { .. }
-        | ThreadItem::Preamble { .. }
-        | ThreadItem::StepAdmission(_)
-        | ThreadItem::ToolInput(_)
-        | ThreadItem::Arrival(_)
-        | ThreadItem::CommandExecution { .. }
-        | ThreadItem::McpToolCall { .. }
-        | ThreadItem::Sleep(_) => {}
+        ThreadItemPayload::UserMessage { .. }
+        | ThreadItemPayload::AgentMessage { .. }
+        | ThreadItemPayload::FunctionCallOutput { .. }
+        | ThreadItemPayload::ToolOutputTokens { .. }
+        | ThreadItemPayload::Plan { .. }
+        | ThreadItemPayload::Reasoning { .. }
+        | ThreadItemPayload::Thought { .. }
+        | ThreadItemPayload::Preamble { .. }
+        | ThreadItemPayload::StepAdmission(_)
+        | ThreadItemPayload::ToolInput(_)
+        | ThreadItemPayload::Arrival(_)
+        | ThreadItemPayload::CommandExecution { .. }
+        | ThreadItemPayload::McpToolCall { .. }
+        | ThreadItemPayload::Sleep(_) => {}
     }
     match call_id {
         Some(call_id) => {

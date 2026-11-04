@@ -1,8 +1,9 @@
 //! Extended Timestamp extra field
 //! Defined in <https://libzip.org/specifications/extrafld.txt>
 
+use crate::result::ZipError;
+use crate::result::ZipResult;
 use crate::result::invalid;
-use crate::result::{ZipError, ZipResult};
 use crate::unstable::LittleEndianReadExt;
 use core::mem;
 use std::io::Read;

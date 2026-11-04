@@ -5,10 +5,10 @@
 //! reading build does not know. Readers omit such an item, as rollout replay and projection
 //! skip a line they cannot parse, so no stored item can make a thread unreadable.
 
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 
-/// Reads a stored [`ThreadItem`], or omits it when this build cannot.
-pub fn legible_item(item_id: &str, item_json: &[u8]) -> Option<ThreadItem> {
+/// Reads a stored [`ThreadItemPayload`], or omits it when this build cannot.
+pub fn legible_item(item_id: &str, item_json: &[u8]) -> Option<ThreadItemPayload> {
     serde_json::from_slice(item_json)
         .inspect_err(|err| {
             tracing::debug!(

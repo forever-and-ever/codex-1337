@@ -27,6 +27,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     let selected_account = Some(StatusAccountDisplay::ChatGpt {
         email: Some("main@example.com".into()),
         plan: Some("Pro".into()),
+        workspace: None,
     });
     app.chat_widget
         .set_status_account_display(selected_account.clone());

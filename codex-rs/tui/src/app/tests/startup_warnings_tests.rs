@@ -65,7 +65,7 @@ async fn deprecation_delivery_deduplicates_retained_transcript() -> Result<()> {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            spoken: false,
+            presentation: Default::default(),
         }),
     );
     app.open_transcript_overlay(&mut tui);
@@ -152,7 +152,7 @@ async fn startup_warnings_preserve_stream_repair_and_backtrack_selection() -> Re
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-        spoken: false,
+        presentation: Default::default(),
     })];
     app.transcript_reflow.mark_resize_requested_during_stream();
     insert_warnings(&mut app, &mut tui, &["First warning"]);

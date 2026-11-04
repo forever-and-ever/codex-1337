@@ -67,7 +67,8 @@ impl TryFrom<chrono::NaiveDateTime> for DateTime {
     type Error = DateTimeRangeError;
 
     fn try_from(value: chrono::NaiveDateTime) -> Result<Self, Self::Error> {
-        use chrono::{Datelike, Timelike};
+        use chrono::Datelike;
+        use chrono::Timelike;
 
         DateTime::from_date_and_time(
             value.year().try_into()?,
@@ -400,7 +401,9 @@ impl TryFrom<DateTime> for time::PrimitiveDateTime {
     type Error = time::error::ComponentRange;
 
     fn try_from(dt: DateTime) -> Result<Self, Self::Error> {
-        use time::{Date, Month, Time};
+        use time::Date;
+        use time::Month;
+        use time::Time;
         let date =
             Date::from_calendar_date(i32::from(dt.year()), Month::try_from(dt.month())?, dt.day())?;
         let time = Time::from_hms(dt.hour(), dt.minute(), dt.second())?;
@@ -726,7 +729,8 @@ mod tests {
     #[test]
     fn time_at_january() {
         use super::DateTime;
-        use time::{OffsetDateTime, PrimitiveDateTime};
+        use time::OffsetDateTime;
+        use time::PrimitiveDateTime;
 
         // 2020-01-01 00:00:00
         let clock = OffsetDateTime::from_unix_timestamp(1_577_836_800).unwrap();

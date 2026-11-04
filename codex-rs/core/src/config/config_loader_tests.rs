@@ -1911,6 +1911,67 @@ enabled = true
         .expect("managed profile should be active");
     assert_eq!(active_permission_profile.id, "managed-standard");
 
+    let network = config
+        .network_proxy_spec_for_active_permission_profile(
+            &active_permission_profile,
+            config.permissions.permission_profile(),
+        )?
+        .expect("managed profile should retain its network proxy configuration");
+    assert_eq!(Some(&network), config.permissions.network.as_ref());
+    assert_eq!(network.proxy_host_and_port(), "127.0.0.1:43128");
+    assert!(!network.socks_enabled());
+    Ok(())
+}
+
+#[tokio::test]
+async fn network_requirements_start_proxy_for_legacy_and_permission_configs() -> anyhow::Result<()>
+{
+    let mut policies = Vec::new();
+    for config_toml in [
+        "sandbox_mode = 'workspace-write'\n[sandbox_workspace_write]\nnetwork_access = true\n",
+        "default_permissions = 'dev'\n[permissions.dev]\nextends = ':workspace'\n[permissions.dev.network]\nenabled = true\n",
+        "default_permissions = 'network'\n[permissions.network]\nextends = ':workspace'\n[permissions.network.network]\nenabled = true\n",
+    ] {
+        for table in ["network_proxy", "experimental_network"] {
+            let requirements_toml = format!(
+                "[{table}]\nenabled = true\n[{table}.domains]\n'api.example.com' = 'allow'\n"
+            );
+            let codex_home = tempdir()?;
+            tokio::fs::write(codex_home.path().join(CONFIG_TOML_FILE), config_toml).await?;
+            let config = ConfigBuilder::without_managed_config_for_tests()
+                .codex_home(codex_home.path().to_path_buf())
+                .fallback_cwd(Some(codex_home.path().to_path_buf()))
+                .cloud_config_bundle(
+                    CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                        &requirements_toml,
+                    ),
+                )
+                .build()
+                .await?;
+
+            assert!(!config.features.enabled(Feature::NetworkProxy));
+            assert!(config.managed_network_requirements_enabled());
+            assert!(
+                config
+                    .permissions
+                    .network
+                    .as_ref()
+                    .expect("managed network requirements should configure the proxy")
+                    .enabled()
+            );
+            policies.push(
+                config
+                    .config_layer_stack
+                    .requirements()
+                    .network
+                    .as_ref()
+                    .expect("managed network constraints")
+                    .value
+                    .clone(),
+            );
+        }
+    }
+    assert!(policies.windows(2).all(|pair| pair[0] == pair[1]));
     Ok(())
 }
 

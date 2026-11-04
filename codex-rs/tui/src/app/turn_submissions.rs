@@ -55,7 +55,6 @@ use super::ThreadEventAttachment;
 use super::ThreadEventStore;
 use super::ThreadId;
 use super::ThreadInputState;
-use super::ThreadItem;
 use super::ThreadSessionState;
 use super::ThreadSettingsUpdateParams;
 use super::ThreadStartSource;

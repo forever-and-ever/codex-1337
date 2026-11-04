@@ -8,7 +8,7 @@ use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use std::collections::BTreeMap;
@@ -70,10 +70,6 @@ impl CommandStarts {
         true
     }
 
-    pub(crate) fn contains(&self, id: &str) -> bool {
-        self.0.contains_key(id)
-    }
-
     pub(crate) fn remove(&mut self, id: &str) -> bool {
         self.0.remove(id).is_some()
     }
@@ -90,7 +86,7 @@ impl CommandStarts {
                 continue;
             };
             let mut item = sentinel.notification.item;
-            let ThreadItem::CommandExecution { status, .. } = &mut item else {
+            let ThreadItemPayload::CommandExecution { status, .. } = &mut item.payload else {
                 unreachable!("only command starts acquire sentinels");
             };
             // Core reports interrupted executions as failed, not declined. Only a
@@ -102,15 +98,16 @@ impl CommandStarts {
             sentinel
                 .outgoing
                 .send_server_notification(ServerNotification::ItemCompleted(
-                    ItemCompletedNotification {
-                        thread_id: sentinel.notification.thread_id,
-                        turn_id: sentinel.notification.turn_id,
-                        completed_at_ms: SystemTime::now()
+                    ItemCompletedNotification::new(
+                        sentinel.notification.thread_id,
+                        sentinel.notification.turn_id,
+                        item.payload,
+                        item.started_at_ms,
+                        SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
                             .unwrap_or_default(),
-                        item,
-                    },
+                    ),
                 ))
                 .await;
         }

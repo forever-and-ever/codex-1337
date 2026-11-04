@@ -26,6 +26,9 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
+use codex_direct_tool_timing::ToolAdmission;
+use codex_direct_tool_timing::ToolBatchTiming;
+use codex_direct_tool_timing::ToolGateTiming;
 use codex_extension_api::ToolCallOutcome;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::error::CodexErr;
@@ -50,6 +53,25 @@ pub(crate) struct ToolCallRuntime {
     tracker: SharedTurnDiffTracker,
     parallel_execution: Arc<RwLock<()>>,
     pub(crate) batch: Arc<super::fence::ResponseBatch>,
+    timing: Option<DirectToolTiming>,
+}
+
+#[derive(Clone, Default)]
+struct DirectToolTiming {
+    gate: ToolGateTiming,
+    batch: ToolBatchTiming,
+}
+
+// Remove this boundary when CodeMode and subagent dependencies have runtime capture.
+fn direct_path_supported(tool_name: &codex_tools::ToolName, source: &ToolCallSource) -> bool {
+    !(matches!(source, ToolCallSource::CodeMode { .. })
+        || (tool_name.is_default_namespace()
+            && matches!(tool_name.name.as_str(),
+                crate::tools::code_mode::PUBLIC_TOOL_NAME | crate::tools::code_mode::WAIT_TOOL_NAME))
+        // Multi-agent tool namespaces can be overridden by the tool catalog.
+        || matches!(tool_name.name.as_str(), "spawn_agent" | "send_input"
+            | "close_agent" | "resume_agent" | "wait_agent" | "list_agents"
+            | "followup_task" | "interrupt_agent" | "send_message"))
 }
 
 impl ToolCallRuntime {
@@ -58,12 +80,19 @@ impl ToolCallRuntime {
         step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
     ) -> Self {
+        let timing = step_context
+            .turn
+            .config
+            .features
+            .enabled(codex_features::Feature::CriticalPathTiming)
+            .then(DirectToolTiming::default);
         Self {
             session,
             step_context,
             tracker,
             parallel_execution: Arc::new(RwLock::new(())),
             batch: Arc::default(),
+            timing,
         }
     }
 
@@ -127,7 +156,7 @@ impl ToolCallRuntime {
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub(super) fn handle_tool_call_with_source(
+    pub(crate) fn handle_tool_call_with_source(
         self,
         step_context: Arc<StepContext>,
         call: ToolCall,
@@ -136,6 +165,13 @@ impl ToolCallRuntime {
         call_state: Arc<ToolCallState>,
         admission: Option<super::fence::Admission>,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
+        if let Err(err) =
+            call_state
+                .invocation
+                .reserve(&self.session, &step_context.turn, &call.call_id)
+        {
+            return Either::Left(std::future::ready(Err(err)));
+        }
         let fence = super::fence::Prerequisite::current();
         let coordinator = super::fence::is_coordinator(&call.tool_name);
         self.session
@@ -157,6 +193,35 @@ impl ToolCallRuntime {
         let lock = Arc::clone(&self.parallel_execution);
         let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
+        if turn
+            .config
+            .features
+            .enabled(codex_features::Feature::CriticalPathTiming)
+            && !direct_path_supported(
+                &tool_runtime
+                    .as_ref()
+                    .map_or_else(|| call.tool_name.clone(), |runtime| runtime.tool_name()),
+                &source,
+            )
+        {
+            turn.turn_timing_state.invalidate_critical_path();
+        }
+        let work_timing = self.timing.and_then(|timing| match &source {
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
+                let work = turn
+                    .turn_timing_state
+                    .direct_tool_timings
+                    .start_turn_direct_call(
+                        &call.call_id,
+                        &turn.sub_id,
+                        timing.batch,
+                        started,
+                        turn.turn_timing_state.snapshot_path(started),
+                    );
+                Some((timing.gate, work))
+            }
+            ToolCallSource::CodeMode { .. } => None,
+        });
         let mut tool_call_timing_guard = ToolCallTimingGuard::capture(
             started,
             &session.thread_id,
@@ -199,10 +264,16 @@ impl ToolCallRuntime {
             otel.name = %call.tool_name,
             tool_name = %call.tool_name,
             thread.id = %session.thread_id,
+            conversation.id = %session.thread_id,
+            turn.id = %turn.sub_id,
+            turn_id = %turn.sub_id,
+            tool_source = trace_source.as_str(),
             call_id = call.call_id.as_str(),
+            codex.tool.phase = "dispatch",
             aborted = false,
         );
         let abort_dispatch_span = dispatch_span.clone();
+        let runtime_dispatch_span = dispatch_span.clone();
 
         let mut dispatch_handle = AbortOnDropHandle::new(tokio::spawn(
             async move {
@@ -213,24 +284,51 @@ impl ToolCallRuntime {
                             &source,
                             &dispatch_call.tool_name,
                         )?;
-                        // Waiting is cancellable even for handlers that must settle their own lifecycle.
-                        let guard = async {
+                        // Readiness and admission remain cancellable even when the handler must finish.
+                        let (guard, admission_started) = async {
                             if let Some(tool_runtime) = tool_runtime
                                 && let Some(readiness) = tool_runtime.wait_until_ready(&session)
                             {
-                                readiness.await;
+                                readiness
+                                    .instrument(trace_span!("tool_dispatch.wait_until_ready"))
+                                    .await;
                             }
-                            // Coordinators cannot hold the operation lock while awaiting nested work.
-                            if coordinator {
+
+                            let admission_started = Instant::now();
+                            let guard = if coordinator {
                                 None
                             } else if supports_parallel {
-                                Some(Either::Left(lock.read().await))
+                                Some(Either::Left(
+                                    lock.read()
+                                        .instrument(trace_span!("tool_dispatch.parallel_lock"))
+                                        .await,
+                                ))
                             } else {
-                                Some(Either::Right(lock.write().await))
-                            }
+                                Some(Either::Right(
+                                    lock.write()
+                                        .instrument(trace_span!("tool_dispatch.exclusive_lock"))
+                                        .await,
+                                ))
+                            };
+                            (guard, admission_started)
                         }
                         .or_cancel_tool(&invocation_cancellation_token)
                         .await?;
+                        // Publish the completed path before releasing the admission lock,
+                        // including when cancellation drops the handler future.
+                        let _admitted_timing = work_timing.map(|(gate, work)| {
+                            gate.admit(
+                                work,
+                                if supports_parallel {
+                                    ToolAdmission::Parallel
+                                } else {
+                                    ToolAdmission::Exclusive
+                                },
+                                admission_started,
+                            )
+                        });
+                        // Admission through the parallel-execution gate marks the end
+                        // of dispatch waiting and the start of handler execution.
                         if let Some(execution_started_at) = execution_started_at {
                             let _ = execution_started_at.set(Instant::now());
                         }
@@ -243,10 +341,11 @@ impl ToolCallRuntime {
                                 tracker,
                                 dispatch_call,
                                 source,
-                                dispatch_call_state,
+                                Arc::clone(&dispatch_call_state),
                             )
-                            .instrument(dispatch_span.clone())
+                            .instrument(runtime_dispatch_span)
                             .await;
+                        drop(_admitted_timing);
                         drop(guard);
                         result
                     })
@@ -262,24 +361,34 @@ impl ToolCallRuntime {
                         &dispatch_tool_name,
                         &dispatch_call_id,
                         trace_source,
+                        started.elapsed(),
                     );
+                }
+                // Finished calls release their IDs even if their results have not been collected.
+                // Otherwise the outer task may still need the ID for its abort callback.
+                if dispatch_call_state.terminal_outcome.get().is_some() {
+                    drop(dispatch_call_state.invocation.take());
                 }
                 result
             }
-            .in_current_span(),
+            .instrument(dispatch_span.clone().or_current()),
         ));
 
-        async move {
+        let completion = async move {
             let mut tool_call_timing_guard = tool_call_timing_guard;
+            let join_error = |err| {
+                drop(call_state.invocation.take());
+                Self::tool_task_join_error(err)
+            };
             let mut result = tokio::select! {
-                res = &mut dispatch_handle => res.map_err(Self::tool_task_join_error)?,
+                res = &mut dispatch_handle => res.map_err(join_error)?,
                 _ = cancellation_token.cancelled() => {
                     // Dynamic handlers observe the token and publish their terminal item themselves.
                     if finishes_on_cancellation
                         || call_state.terminal_outcome.get().is_some()
                         || dispatch_handle.is_finished()
                     {
-                        dispatch_handle.await.map_err(Self::tool_task_join_error)?
+                        dispatch_handle.await.map_err(join_error)?
                     } else {
                         let secs = started.elapsed().as_secs_f32().max(0.1);
                         abort_dispatch_span.record("aborted", true);
@@ -287,6 +396,7 @@ impl ToolCallRuntime {
                         match dispatch_handle.await {
                             Ok(result) => result,
                             Err(err) if err.is_cancelled() => {
+                                let _reservation = call_state.invocation.take();
                                 let response = Self::aborted_response(&call, Some(secs));
                                 call_trace::result_ready(
                                     thread_id,
@@ -294,6 +404,7 @@ impl ToolCallRuntime {
                                     &call.tool_name,
                                     &call.call_id,
                                     trace_source,
+                                    started.elapsed(),
                                 );
                                 let _ = call_state.terminal_outcome.set(ToolCallOutcome::Aborted);
                                 notify_tool_aborted(
@@ -311,7 +422,8 @@ impl ToolCallRuntime {
                     }
                 },
             };
-            // A cancelled wait may finish before the registry claims a terminal outcome.
+            let _reservation = call_state.invocation.take();
+            // Cancellation outside the handler can return before the registry reports an outcome.
             if cancellation_token.is_cancelled()
                 && call_state
                     .terminal_outcome
@@ -347,11 +459,16 @@ impl ToolCallRuntime {
             }
             result
         }
-        .in_current_span()
+        .instrument(dispatch_span.or_current());
+        Either::Right(completion)
     }
 }
 
 impl ToolCallRuntime {
+    pub(crate) fn batch_timing(&self) -> Option<ToolBatchTiming> {
+        self.timing.as_ref().map(|timing| timing.batch.clone())
+    }
+
     fn tool_task_join_error(err: JoinError) -> FunctionCallError {
         FunctionCallError::Fatal(format!("tool task failed to receive: {err:?}"))
     }
@@ -535,6 +652,40 @@ mod tests {
     use tracing_test::internal::MockWriter;
 
     #[test]
+    fn unsupported_handlers_remain_incomplete_after_namespace_resolution() {
+        let handler = crate::tools::multi_agent_tool::multi_agent_v2_handler(
+            crate::tools::handlers::multi_agents_v2::WaitAgentHandler::default(),
+            Some("custom_collaboration"),
+            /*description_override*/ None,
+            /*parameters_override*/ None,
+        );
+        let registry = ToolRegistry::from_tools([handler]);
+        let registered = registry
+            .registered_tool(&codex_tools::ToolName::namespaced(
+                "custom_collaboration",
+                "wait_agent",
+            ))
+            .unwrap();
+        assert!(!direct_path_supported(
+            &registered.runtime.tool_name(),
+            &ToolCallSource::Direct
+        ));
+        for name in [
+            crate::tools::code_mode::PUBLIC_TOOL_NAME,
+            crate::tools::code_mode::WAIT_TOOL_NAME,
+        ] {
+            assert!(!direct_path_supported(
+                &codex_tools::ToolName::plain(name).with_default_namespace(),
+                &ToolCallSource::Direct
+            ));
+        }
+        assert!(direct_path_supported(
+            &codex_tools::ToolName::namespaced("mcp", "exec"),
+            &ToolCallSource::Direct
+        ));
+    }
+
+    #[test]
     fn tool_call_timing_guard_ignores_code_mode_source() {
         let buffer: &'static std::sync::Mutex<Vec<u8>> =
             Box::leak(Box::new(std::sync::Mutex::new(Vec::new())));
@@ -627,13 +778,34 @@ mod tests {
         });
     }
 
-    #[test_case::test_case(false; "ordinary_handler")]
-    #[test_case::test_case(true; "dynamic_handler")]
+    #[test_case::test_case(false, false; "ordinary_capture_disabled")]
+    #[test_case::test_case(false, true; "ordinary_capture_enabled")]
+    #[test_case::test_case(true, false; "dynamic_capture_disabled")]
+    #[test_case::test_case(true, true; "dynamic_capture_enabled")]
     #[tokio::test]
     async fn cancellation_before_dispatch_admission_logs_dispatch_only_timing(
         dynamic: bool,
+        critical_path_timing: bool,
     ) -> anyhow::Result<()> {
-        let (session, turn_context) = crate::session::tests::make_session_and_context().await;
+        let (session, mut turn_context) = crate::session::tests::make_session_and_context().await;
+        Arc::make_mut(&mut turn_context.config)
+            .features
+            .enable(codex_features::Feature::RuntimeMetrics)
+            .unwrap();
+        Arc::make_mut(&mut turn_context.config)
+            .features
+            .set_enabled(
+                codex_features::Feature::CriticalPathTiming,
+                critical_path_timing,
+            )
+            .unwrap();
+        if critical_path_timing {
+            turn_context.turn_timing_state.enable_critical_path();
+        }
+        turn_context
+            .turn_timing_state
+            .mark_turn_started(Instant::now())
+            .await;
         let session = Arc::new(session);
         let turn_context = Arc::new(turn_context);
         let tool_name = codex_tools::ToolName::plain("test_tool");
@@ -666,6 +838,8 @@ mod tests {
         let step_context = step_context.with_tool_router_for_test(router);
         let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
         let runtime = ToolCallRuntime::new(session, step_context, tracker);
+        let batch = runtime.batch_timing();
+        assert_eq!(batch.is_some(), critical_path_timing);
         let execution_gate = Arc::clone(&runtime.parallel_execution);
         let execution_gate_guard = execution_gate
             .try_write_owned()
@@ -723,6 +897,11 @@ mod tests {
             .expect("cancelled tool response task should join")
             .expect("cancelled tool call should produce a response");
 
+        assert_eq!(
+            batch.and_then(|batch| batch.completed()).is_some(),
+            critical_path_timing,
+            "capture requires its own gate and must finish before cancellation returns"
+        );
         let logs = String::from_utf8(
             buffer
                 .lock()
@@ -936,3 +1115,7 @@ mod tests {
 #[cfg(test)]
 #[path = "parallel_observation_tests.rs"]
 mod observation_tests;
+
+#[cfg(test)]
+#[path = "parallel_trace_tests.rs"]
+mod trace_tests;

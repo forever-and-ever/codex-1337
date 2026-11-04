@@ -13,7 +13,7 @@ use codex_app_server_protocol::GatewayOAuthLoginResponse;
 use codex_app_server_protocol::GatewayOAuthReadResponse;
 use codex_app_server_protocol::GatewayOAuthStatus;
 use codex_app_server_protocol::InitializeResponse;
-use codex_app_server_protocol::ModelListResponse;
+use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ServerNotification;
 use codex_core::config::ConfigBuilder;
 use codex_login::AuthManager;
@@ -255,10 +255,37 @@ delivery = {{ kind = "header", name = "X-Gateway-Authorization" }}
         json!({"id": 2, "method": "model/list", "params": {}}),
     )
     .await;
-    let response: ModelListResponse = read_response(&mut outgoing, /*request_id*/ 2).await;
+    let error = timeout(Duration::from_secs(/*secs*/ 10), async {
+        loop {
+            if let OutgoingEnvelope::ToConnection {
+                message: OutgoingMessage::Error(error),
+                ..
+            } = outgoing
+                .recv()
+                .await
+                .expect("outgoing channel open during request")
+            {
+                break error.error;
+            }
+        }
+    })
+    .await?;
     assert_eq!(
-        response.model_provider,
-        Some(codex_model_provider_info::OPENAI_PROVIDER_ID.to_owned())
+        error,
+        JSONRPCErrorError {
+            code: -32600,
+            message: codex_app_server_protocol::ModelProviderError::ModelProviderPolicyConflict {
+                model_provider: "gateway".into(),
+                required_model_provider: "openai".into(),
+            }
+            .to_string(),
+            data: Some(serde_json::to_value(
+                codex_app_server_protocol::ModelProviderError::ModelProviderPolicyConflict {
+                    model_provider: "gateway".into(),
+                    required_model_provider: "openai".into(),
+                }
+            )?),
+        }
     );
     assert!(server.received_requests().await.unwrap().is_empty());
     processor.shutdown_threads().await;

@@ -1,9 +1,11 @@
 use crate::ToolName;
+use codex_utils_path_uri::PathUri;
 use serde_json::Value;
 
 /// One completed tool invocation's hook-visible receipt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PostToolUsePayload {
+    pub tool_cwd: Option<PathUri>,
     pub tool_name: ToolName,
     pub tool_use_id: String,
     pub tool_input: Value,
@@ -18,6 +20,7 @@ impl PostToolUsePayload {
         tool_response: Value,
     ) -> Self {
         Self {
+            tool_cwd: None,
             tool_name: tool_name.clone(),
             tool_use_id: tool_use_id.to_string(),
             tool_input,

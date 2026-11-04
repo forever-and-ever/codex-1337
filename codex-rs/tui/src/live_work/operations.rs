@@ -23,7 +23,7 @@ use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
@@ -55,7 +55,7 @@ enum Stage {
 
 #[derive(Debug)]
 enum Pending {
-    Item(Box<ThreadItem>),
+    Item(Box<ThreadItemPayload>),
     Call(String),
 }
 
@@ -222,13 +222,13 @@ impl Operations {
         // Reconcile terminal facts before older starts, without retaining the transcript's terminals.
         let finished = turns
             .iter()
-            .flat_map(|turn| &turn.items)
+            .flat_map(Turn::item_payloads)
             .filter_map(|item| {
-                let ThreadItem::CodeModeOwned(owned) = item else {
+                let ThreadItemPayload::CodeModeOwned(owned) = item else {
                     return None;
                 };
                 (owned.owner.thread_id == thread_id
-                    && matches!(owned.payload().as_ref(), ThreadItem::CodeMode(fact)
+                    && matches!(owned.payload().as_ref(), ThreadItemPayload::CodeMode(fact)
                     if matches!(fact.event, CodeModeEvent::Finished { .. })))
                 .then_some((owned.owner.exec_call_id.clone(), owned))
             })
@@ -247,8 +247,8 @@ impl Operations {
             }
         }
         for turn in turns {
-            for item in &turn.items {
-                if let ThreadItem::CodeModeOwned(owned) = item {
+            for item in turn.item_payloads() {
+                if let ThreadItemPayload::CodeModeOwned(owned) = item {
                     if owned.owner.thread_id == thread_id
                         && !finished.contains_key(&owned.owner.exec_call_id)
                     {
@@ -301,10 +301,10 @@ impl Operations {
         if let Some(admission) = admission {
             match admission.native_notification() {
                 ServerNotification::ItemStarted(n) => {
-                    self.owned_item(&admission.owner, &n.item, Source::Live, Some(true));
+                    self.owned_item(&admission.owner, &n.item.payload, Source::Live, Some(true));
                 }
                 ServerNotification::ItemCompleted(n) => {
-                    self.owned_item(&admission.owner, &n.item, Source::Live, Some(false));
+                    self.owned_item(&admission.owner, &n.item.payload, Source::Live, Some(false));
                 }
                 _ => {}
             }
@@ -314,7 +314,7 @@ impl Operations {
         match native {
             ServerNotification::TurnStarted(n) if !self.closed_turns.contains(&n.turn.id) => {
                 self.reconcile_turn(Some(n.turn.id.clone()));
-                for item in &n.turn.items {
+                for item in n.turn.item_payloads() {
                     self.direct_item(&n.turn.id, item, Source::Historical, None);
                 }
             }
@@ -326,10 +326,10 @@ impl Operations {
                 }
             }
             ServerNotification::ItemStarted(n) if self.accepts_turn(&n.turn_id) => {
-                self.direct_item(&n.turn_id, &n.item, Source::Live, Some(true));
+                self.direct_item(&n.turn_id, &n.item.payload, Source::Live, Some(true));
             }
             ServerNotification::ItemCompleted(n) => {
-                self.direct_item(&n.turn_id, &n.item, Source::Live, Some(false));
+                self.direct_item(&n.turn_id, &n.item.payload, Source::Live, Some(false));
             }
             ServerNotification::RawResponseItemCompleted(n) if self.accepts_turn(&n.turn_id) => {
                 self.raw_call(&n.turn_id, &n.item);
@@ -362,7 +362,7 @@ impl Operations {
     fn direct_item(
         &mut self,
         turn: &str,
-        item: &ThreadItem,
+        item: &ThreadItemPayload,
         source: Source,
         started: Option<bool>,
     ) {
@@ -372,7 +372,13 @@ impl Operations {
         self.item(Custody::Turn(turn.to_owned()), item, source, started);
     }
 
-    fn item(&mut self, custody: Custody, item: &ThreadItem, source: Source, started: Option<bool>) {
+    fn item(
+        &mut self,
+        custody: Custody,
+        item: &ThreadItemPayload,
+        source: Source,
+        started: Option<bool>,
+    ) {
         if let Some(call) = output_call(item) {
             finish_call(&mut self.items, &call.to_owned());
         } else if let Some(pending) = pending(item, started) {
@@ -447,7 +453,7 @@ impl Operations {
     fn owned_item(
         &mut self,
         owner: &CodeModeOwner,
-        item: &ThreadItem,
+        item: &ThreadItemPayload,
         source: Source,
         started: Option<bool>,
     ) {
@@ -475,7 +481,7 @@ impl Operations {
         if execution.owner.cell_id.is_none() {
             execution.owner.cell_id.clone_from(&owner.cell_id);
         }
-        if let ThreadItem::CodeMode(fact) = item {
+        if let ThreadItemPayload::CodeMode(fact) = item {
             if fact.exec_call_id != owner.exec_call_id
                 || fact
                     .cell_id
@@ -707,32 +713,34 @@ fn finish_call<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, key: &K) {
     }
 }
 
-fn output_call(item: &ThreadItem) -> Option<&str> {
+fn output_call(item: &ThreadItemPayload) -> Option<&str> {
     match item {
-        ThreadItem::FunctionCallOutput { call_id, .. } => call_id.as_deref(),
-        ThreadItem::ToolOutputTokens { call_id, .. } => Some(call_id),
+        ThreadItemPayload::FunctionCallOutput { call_id, .. } => call_id.as_deref(),
+        ThreadItemPayload::ToolOutputTokens { call_id, .. } => Some(call_id),
         _ => None,
     }
 }
 
-fn pending(item: &ThreadItem, started: Option<bool>) -> Option<bool> {
+fn pending(item: &ThreadItemPayload, started: Option<bool>) -> Option<bool> {
     Some(match item {
-        ThreadItem::CommandExecution { status, .. } => {
+        ThreadItemPayload::CommandExecution { status, .. } => {
             *status == CommandExecutionStatus::InProgress
         }
-        ThreadItem::FileChange { status, .. } => *status == PatchApplyStatus::InProgress,
-        ThreadItem::McpToolCall { status, .. } => *status == McpToolCallStatus::InProgress,
-        ThreadItem::DynamicToolCall { status, .. } => *status == DynamicToolCallStatus::InProgress,
-        ThreadItem::CollabAgentToolCall { status, .. } => {
+        ThreadItemPayload::FileChange { status, .. } => *status == PatchApplyStatus::InProgress,
+        ThreadItemPayload::McpToolCall { status, .. } => *status == McpToolCallStatus::InProgress,
+        ThreadItemPayload::DynamicToolCall { status, .. } => {
+            *status == DynamicToolCallStatus::InProgress
+        }
+        ThreadItemPayload::CollabAgentToolCall { status, .. } => {
             *status == CollabAgentToolCallStatus::InProgress
         }
-        ThreadItem::WebSearch(item) => started.unwrap_or(item.action.is_none()),
-        ThreadItem::ImageGeneration(item) => {
+        ThreadItemPayload::WebSearch(item) => started.unwrap_or(item.action.is_none()),
+        ThreadItemPayload::ImageGeneration(item) => {
             started.unwrap_or(item.status.is_empty() || item.status == "in_progress")
         }
-        ThreadItem::Sleep(_)
-        | ThreadItem::ImageView { .. }
-        | ThreadItem::ContextCompaction { .. } => started?,
+        ThreadItemPayload::Sleep(_)
+        | ThreadItemPayload::ImageView { .. }
+        | ThreadItemPayload::ContextCompaction { .. } => started?,
         _ => return None,
     })
 }
@@ -745,22 +753,22 @@ fn revision_row(thread: ThreadId, key: Key, id: &str, revision: &Revision) -> Op
     let summary = match work {
         Pending::Call(name) => name.clone(),
         Pending::Item(item) => match item.as_ref() {
-            ThreadItem::CommandExecution { command, cwd, .. } => {
+            ThreadItemPayload::CommandExecution { command, cwd, .. } => {
                 details.push(line(format!("Directory {cwd}")));
                 let command = strip_bash_lc_and_escape(&split_command_string(command));
                 format!("Command · {}", command.lines().next().unwrap_or_default())
             }
-            ThreadItem::McpToolCall { server, tool, .. } => format!("{server}.{tool}"),
-            ThreadItem::DynamicToolCall {
+            ThreadItemPayload::McpToolCall { server, tool, .. } => format!("{server}.{tool}"),
+            ThreadItemPayload::DynamicToolCall {
                 namespace, tool, ..
             } => namespace
                 .as_ref()
                 .map_or_else(|| tool.clone(), |namespace| format!("{namespace}.{tool}")),
-            ThreadItem::FileChange { changes, .. } => {
+            ThreadItemPayload::FileChange { changes, .. } => {
                 details.extend(changes.iter().map(|change| line(change.path.clone())));
                 "Editing files".to_owned()
             }
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 tool,
                 receiver_thread_ids,
                 ..
@@ -775,17 +783,17 @@ fn revision_row(thread: ThreadId, key: Key, id: &str, revision: &Revision) -> Op
                     _ => format!("Agent operation · {tool:?}"),
                 }
             }
-            ThreadItem::WebSearch(item) => {
+            ThreadItemPayload::WebSearch(item) => {
                 if item.query.is_empty() {
                     "Searching the web".to_owned()
                 } else {
                     format!("Web search · {}", item.query)
                 }
             }
-            ThreadItem::ImageGeneration(_) => "Generating an image".to_owned(),
-            ThreadItem::ImageView { path, .. } => format!("Viewing image · {path}"),
-            ThreadItem::Sleep(item) => format!("Sleeping · {} ms", item.duration_ms),
-            ThreadItem::ContextCompaction { .. } => "Compacting context".to_owned(),
+            ThreadItemPayload::ImageGeneration(_) => "Generating an image".to_owned(),
+            ThreadItemPayload::ImageView { path, .. } => format!("Viewing image · {path}"),
+            ThreadItemPayload::Sleep(item) => format!("Sleeping · {} ms", item.duration_ms),
+            ThreadItemPayload::ContextCompaction { .. } => "Compacting context".to_owned(),
             _ => return None,
         },
     };

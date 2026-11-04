@@ -18,58 +18,58 @@ use std::borrow::Cow;
 /// gives a more detailed explanation for each error kind.
 #[non_exhaustive]
 pub enum Error {
-	/// The clipboard contents were not available in the requested format.
-	/// This could either be due to the clipboard being empty or the clipboard contents having
-	/// an incompatible format to the requested one (eg when calling `get_image` on text)
-	ContentNotAvailable,
+    /// The clipboard contents were not available in the requested format.
+    /// This could either be due to the clipboard being empty or the clipboard contents having
+    /// an incompatible format to the requested one (eg when calling `get_image` on text)
+    ContentNotAvailable,
 
-	/// The selected clipboard is not supported by the current configuration (system and/or environment).
-	///
-	/// This can be caused by a few conditions:
-	/// - Using the Primary clipboard with an older Wayland compositor (that doesn't support version 2)
-	/// - Using the Secondary clipboard on Wayland
-	ClipboardNotSupported,
+    /// The selected clipboard is not supported by the current configuration (system and/or environment).
+    ///
+    /// This can be caused by a few conditions:
+    /// - Using the Primary clipboard with an older Wayland compositor (that doesn't support version 2)
+    /// - Using the Secondary clipboard on Wayland
+    ClipboardNotSupported,
 
-	/// The native clipboard is not accessible due to being held by another party.
-	///
-	/// This "other party" could be a different process or it could be within
-	/// the same program. So for example you may get this error when trying
-	/// to interact with the clipboard from multiple threads at once.
-	///
-	/// Note that it's OK to have multiple `Clipboard` instances. The underlying
-	/// implementation will make sure that the native clipboard is only
-	/// opened for transferring data and then closed as soon as possible.
-	ClipboardOccupied,
+    /// The native clipboard is not accessible due to being held by another party.
+    ///
+    /// This "other party" could be a different process or it could be within
+    /// the same program. So for example you may get this error when trying
+    /// to interact with the clipboard from multiple threads at once.
+    ///
+    /// Note that it's OK to have multiple `Clipboard` instances. The underlying
+    /// implementation will make sure that the native clipboard is only
+    /// opened for transferring data and then closed as soon as possible.
+    ClipboardOccupied,
 
-	/// The image or the text that was about the be transferred to/from the clipboard could not be
-	/// converted to the appropriate format.
-	ConversionFailure,
+    /// The image or the text that was about the be transferred to/from the clipboard could not be
+    /// converted to the appropriate format.
+    ConversionFailure,
 
-	/// Any error that doesn't fit the other error types.
-	///
-	/// The `description` field is only meant to help the developer and should not be relied on as a
-	/// means to identify an error case during runtime.
-	Unknown { description: String },
+    /// Any error that doesn't fit the other error types.
+    ///
+    /// The `description` field is only meant to help the developer and should not be relied on as a
+    /// means to identify an error case during runtime.
+    Unknown { description: String },
 }
 
 impl std::fmt::Display for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
 			Error::ContentNotAvailable => f.write_str("The clipboard contents were not available in the requested format or the clipboard is empty."),
 			Error::ClipboardNotSupported => f.write_str("The selected clipboard is not supported with the current system configuration."),
 			Error::ClipboardOccupied => f.write_str("The native clipboard is not accessible due to being held by another party."),
 			Error::ConversionFailure => f.write_str("The image or the text that was about the be transferred to/from the clipboard could not be converted to the appropriate format."),
 			Error::Unknown { description } => f.write_fmt(format_args!("Unknown error while interacting with the clipboard: {description}")),
 		}
-	}
+    }
 }
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Debug for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		use Error::*;
-		macro_rules! kind_to_str {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
+        macro_rules! kind_to_str {
 			($( $e: pat ),*) => {
 				match self {
 					$(
@@ -78,21 +78,23 @@ impl std::fmt::Debug for Error {
 				}
 			}
 		}
-		let name = kind_to_str!(
-			ContentNotAvailable,
-			ClipboardNotSupported,
-			ClipboardOccupied,
-			ConversionFailure,
-			Unknown { .. }
-		);
-		f.write_fmt(format_args!("{name} - \"{self}\""))
-	}
+        let name = kind_to_str!(
+            ContentNotAvailable,
+            ClipboardNotSupported,
+            ClipboardOccupied,
+            ConversionFailure,
+            Unknown { .. }
+        );
+        f.write_fmt(format_args!("{name} - \"{self}\""))
+    }
 }
 
 impl Error {
-	pub(crate) fn unknown<M: Into<String>>(message: M) -> Self {
-		Error::Unknown { description: message.into() }
-	}
+    pub(crate) fn unknown<M: Into<String>>(message: M) -> Self {
+        Error::Unknown {
+            description: message.into(),
+        }
+    }
 }
 
 /// Stores pixel data of an image.
@@ -125,57 +127,59 @@ impl Error {
 #[cfg(feature = "image-data")]
 #[derive(Debug, Clone)]
 pub struct ImageData<'a> {
-	pub width: usize,
-	pub height: usize,
-	pub bytes: Cow<'a, [u8]>,
+    pub width: usize,
+    pub height: usize,
+    pub bytes: Cow<'a, [u8]>,
 }
 
 #[cfg(feature = "image-data")]
 impl ImageData<'_> {
-	/// Returns a the bytes field in a way that it's guaranteed to be owned.
-	/// It moves the bytes if they are already owned and clones them if they are borrowed.
-	pub fn into_owned_bytes(self) -> Cow<'static, [u8]> {
-		self.bytes.into_owned().into()
-	}
+    /// Returns a the bytes field in a way that it's guaranteed to be owned.
+    /// It moves the bytes if they are already owned and clones them if they are borrowed.
+    pub fn into_owned_bytes(self) -> Cow<'static, [u8]> {
+        self.bytes.into_owned().into()
+    }
 
-	/// Returns an image data that is guaranteed to own its bytes.
-	/// It moves the bytes if they are already owned and clones them if they are borrowed.
-	pub fn to_owned_img(&self) -> ImageData<'static> {
-		ImageData {
-			width: self.width,
-			height: self.height,
-			bytes: self.bytes.clone().into_owned().into(),
-		}
-	}
+    /// Returns an image data that is guaranteed to own its bytes.
+    /// It moves the bytes if they are already owned and clones them if they are borrowed.
+    pub fn to_owned_img(&self) -> ImageData<'static> {
+        ImageData {
+            width: self.width,
+            height: self.height,
+            bytes: self.bytes.clone().into_owned().into(),
+        }
+    }
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 pub(crate) struct ScopeGuard<F: FnOnce()> {
-	callback: Option<F>,
+    callback: Option<F>,
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 impl<F: FnOnce()> ScopeGuard<F> {
-	#[cfg_attr(all(windows, not(feature = "image-data")), allow(dead_code))]
-	pub(crate) fn new(callback: F) -> Self {
-		ScopeGuard { callback: Some(callback) }
-	}
+    #[cfg_attr(all(windows, not(feature = "image-data")), allow(dead_code))]
+    pub(crate) fn new(callback: F) -> Self {
+        ScopeGuard {
+            callback: Some(callback),
+        }
+    }
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 impl<F: FnOnce()> Drop for ScopeGuard<F> {
-	fn drop(&mut self) {
-		if let Some(callback) = self.callback.take() {
-			(callback)();
-		}
-	}
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.take() {
+            (callback)();
+        }
+    }
 }
 
 /// Common trait for sealing platform extension traits.
 pub(crate) mod private {
-	pub trait Sealed {}
+    pub trait Sealed {}
 
-	impl Sealed for crate::Get<'_> {}
-	impl Sealed for crate::Set<'_> {}
-	impl Sealed for crate::Clear<'_> {}
+    impl Sealed for crate::Get<'_> {}
+    impl Sealed for crate::Set<'_> {}
+    impl Sealed for crate::Clear<'_> {}
 }

@@ -36,7 +36,7 @@ struct Stage {
     pending: Vec<Receipt>,
 }
 
-pub(super) struct Admission {
+pub(crate) struct Admission {
     requirements: Vec<Receipt>,
     completion: watch::Sender<Option<Verdict>>,
     call_id: String,

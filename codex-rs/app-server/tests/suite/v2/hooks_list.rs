@@ -208,6 +208,7 @@ async fn hooks_list_shows_discovered_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -233,6 +234,7 @@ async fn hooks_list_shows_discovered_hook() -> Result<()> {
                 source_path: config_path,
                 source: HookSource::User,
                 plugin_id: None,
+                environment_id: None,
                 display_order: 0,
                 enabled: true,
                 is_managed: false,
@@ -288,6 +290,7 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -316,6 +319,7 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
                 source_path: plugin_hooks_path,
                 source: HookSource::Plugin,
                 plugin_id: Some("demo@test".to_string()),
+                environment_id: None,
                 display_order: 0,
                 enabled: true,
                 is_managed: false,
@@ -383,6 +387,7 @@ async fn plugin_upgrade_refreshes_hook_runtime_for_loaded_session() -> Result<()
     let hooks_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -507,7 +512,8 @@ async fn plugin_upgrade_refreshes_hook_runtime_for_loaded_session() -> Result<()
 
     let hooks_list_id = mcp
         .send_hooks_list_request(HooksListParams {
-            cwds: vec![codex_home.path().to_path_buf()],
+            thread_id: Some(thread.id.clone()),
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -593,6 +599,7 @@ async fn loaded_session_refreshes_externally_updated_plugin_hooks() -> Result<()
     let list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } = timeout(DEFAULT_TIMEOUT, mcp.read_response(list_id)).await??;
@@ -663,6 +670,7 @@ async fn loaded_session_refreshes_externally_updated_plugin_hooks() -> Result<()
         let list_id = mcp
             .send_hooks_list_request(HooksListParams {
                 cwds: vec![codex_home.path().to_path_buf()],
+                ..Default::default()
             })
             .await?;
         let HooksListResponse { data } =
@@ -851,6 +859,7 @@ source = "{}"
     let hooks_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -924,6 +933,7 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -953,6 +963,7 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
                 source_path,
                 source: HookSource::Plugin,
                 plugin_id: Some("demo@test".to_string()),
+                environment_id: None,
                 display_order: 0,
                 enabled: true,
                 is_managed: false,
@@ -1019,6 +1030,7 @@ enabled = false
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1045,6 +1057,7 @@ enabled = false
                 source_path,
                 source: HookSource::Plugin,
                 plugin_id: Some(plugin_id),
+                environment_id: None,
                 display_order: 1,
                 enabled: false,
                 is_managed: false,
@@ -1101,6 +1114,7 @@ async fn hooks_list_warms_plugin_capabilities_for_thread_start() -> Result<()> {
     let hooks_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let _: HooksListResponse = timeout(DEFAULT_TIMEOUT, mcp.read_response(hooks_list_id)).await??;
@@ -1144,6 +1158,7 @@ async fn hooks_list_shows_plugin_hook_load_warnings() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1202,6 +1217,7 @@ timeout = 5
                 codex_home.path().to_path_buf(),
                 workspace.path().to_path_buf(),
             ],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1236,6 +1252,7 @@ timeout = 5
                     source_path: project_config_path,
                     source: HookSource::Project,
                     plugin_id: None,
+                    environment_id: None,
                     display_order: 0,
                     enabled: true,
                     is_managed: false,
@@ -1290,6 +1307,7 @@ async fn hooks_list_uses_root_repo_hooks_for_linked_worktrees() -> Result<()> {
     let list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![repo_root.clone(), worktree_root.clone()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } = timeout(DEFAULT_TIMEOUT, mcp.read_response(list_id)).await??;
@@ -1338,6 +1356,7 @@ async fn hooks_list_uses_root_repo_hooks_for_linked_worktrees() -> Result<()> {
     let list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![worktree_root],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } = timeout(DEFAULT_TIMEOUT, mcp.read_response(list_id)).await??;
@@ -1361,6 +1380,7 @@ async fn config_batch_write_toggles_user_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1390,6 +1410,7 @@ async fn config_batch_write_toggles_user_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1420,6 +1441,7 @@ async fn config_batch_write_toggles_user_hook() -> Result<()> {
     let request_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![cwd.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1480,6 +1502,7 @@ command = "python3 {}"
     let hook_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1537,6 +1560,7 @@ command = "python3 {}"
     let hook_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1596,6 +1620,7 @@ command = "python3 {}"
     let hook_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =
@@ -1683,6 +1708,7 @@ command = "python3 {}"
     let hook_list_id = mcp
         .send_hooks_list_request(HooksListParams {
             cwds: vec![codex_home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let HooksListResponse { data } =

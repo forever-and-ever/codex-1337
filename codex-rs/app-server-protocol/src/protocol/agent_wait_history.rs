@@ -1,23 +1,23 @@
 use super::v2::CollabAgentTool;
 use super::v2::CollabAgentToolCallStatus;
-use super::v2::ThreadItem;
+use super::v2::ThreadItemPayload;
 
 /// Current-turn tracking also sees the legacy events emitted after each canonical item.
 /// They cannot erase richer wait completion evidence or revive a terminal operation.
-pub(super) fn retain_wait(existing: &ThreadItem, incoming: &ThreadItem) -> bool {
+pub(super) fn retain_wait(existing: &ThreadItemPayload, incoming: &ThreadItemPayload) -> bool {
     match (existing, incoming) {
-        (ThreadItem::CodeModeOwned(old), ThreadItem::CodeModeOwned(new)) => {
+        (ThreadItemPayload::CodeModeOwned(old), ThreadItemPayload::CodeModeOwned(new)) => {
             old.owner == new.owner && retain_wait(old.payload(), new.payload())
         }
         (
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id: old_id,
                 tool: CollabAgentTool::Wait,
                 status: old_status,
                 wait_completion: old_completion,
                 ..
             },
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id: new_id,
                 tool: CollabAgentTool::Wait,
                 status: new_status,
@@ -80,9 +80,12 @@ pub(crate) fn assert_wait_history_retains_completion(wait: &codex_protocol::item
                 event
             }
         };
-        let expected = ThreadItem::from(wait.clone());
+        let expected = ThreadItemPayload::from(wait.clone());
         let expected = if owned {
-            ThreadItem::CodeModeOwned(crate::CodeModeOwned::new(owner.clone(), Box::new(expected)))
+            ThreadItemPayload::CodeModeOwned(crate::CodeModeOwned::new(
+                owner.clone(),
+                Box::new(expected),
+            ))
         } else {
             expected
         };
@@ -115,11 +118,19 @@ pub(crate) fn assert_wait_history_retains_completion(wait: &codex_protocol::item
             if index >= 2 {
                 // Check every canonical/legacy prefix, not only a final canonical winner.
                 assert_eq!(
-                    history.active_turn_snapshot().unwrap().items,
+                    history
+                        .active_turn_snapshot()
+                        .unwrap()
+                        .item_payloads()
+                        .cloned()
+                        .collect::<Vec<_>>(),
                     vec![expected.clone()]
                 );
                 assert_eq!(
-                    build_turns_from_rollout_items(&rollout)[0].items,
+                    build_turns_from_rollout_items(&rollout)[0]
+                        .item_payloads()
+                        .cloned()
+                        .collect::<Vec<_>>(),
                     vec![expected.clone()]
                 );
             }

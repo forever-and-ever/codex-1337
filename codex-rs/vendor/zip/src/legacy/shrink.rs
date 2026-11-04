@@ -1,6 +1,11 @@
-use std::io::{self, Error, Read};
+use std::io::Error;
+use std::io::Read;
+use std::io::{self};
 
-use bitstream_io::{BitRead, BitReader, Endianness, LittleEndian};
+use bitstream_io::BitRead;
+use bitstream_io::BitReader;
+use bitstream_io::Endianness;
+use bitstream_io::LittleEndian;
 
 const MIN_CODE_SIZE: u8 = 9;
 const MAX_CODE_SIZE: u8 = 13;

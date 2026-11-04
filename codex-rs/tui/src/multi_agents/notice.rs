@@ -22,15 +22,15 @@ use crate::history_cell::HistoryCell;
 use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
 
 pub(super) fn tool_call_history_cell(
-    item: &ThreadItem,
+    item: &ThreadItemPayload,
     cached_spawn_request: Option<&SpawnRequestSummary>,
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
 ) -> Option<AgentToolHistoryCell> {
-    let ThreadItem::CollabAgentToolCall {
+    let ThreadItemPayload::CollabAgentToolCall {
         id,
         tool,
         status,
@@ -143,8 +143,10 @@ fn unavailable_recipient(
     collab_event(title, details)
 }
 
-pub(super) fn sub_agent_activity_history_cell(item: &ThreadItem) -> Option<Box<dyn HistoryCell>> {
-    let ThreadItem::SubAgentActivity {
+pub(super) fn sub_agent_activity_history_cell(
+    item: &ThreadItemPayload,
+) -> Option<Box<dyn HistoryCell>> {
+    let ThreadItemPayload::SubAgentActivity {
         id,
         kind,
         agent_path,

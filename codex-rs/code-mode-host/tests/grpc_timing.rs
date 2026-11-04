@@ -86,7 +86,7 @@ async fn background_completion_reports_outcome_without_consuming_yielded_output(
             let terminal = if expected == codex_code_mode::CellOutcome::Terminated {
                 Some(
                     session
-                        .terminate(cell_id.clone())
+                        .terminate(cell_id.clone().into())
                         .await
                         .map_err(anyhow::Error::msg)?,
                 )
@@ -113,6 +113,7 @@ async fn background_completion_reports_outcome_without_consuming_yielded_output(
                         WaitRequest {
                             cell_id,
                             yield_time_ms: 5_000,
+                            max_output_tokens: None,
                         },
                         /*preempt*/ None,
                     )
@@ -140,6 +141,7 @@ async fn execution_timing_includes_javascript_but_excludes_delayed_reads() -> Re
     let mut events = client
         .open_session(grpc::OpenSessionRequest {
             cell_execution_limits: None,
+            output_truncation: None,
         })
         .await?
         .into_inner();
@@ -340,6 +342,7 @@ async fn observation_timing_excludes_previous_requests_and_background_time() -> 
                     WaitRequest {
                         cell_id: cell_id.clone(),
                         yield_time_ms: 50,
+                        max_output_tokens: None,
                     },
                     /*preempt*/ None,
                 )
@@ -365,7 +368,7 @@ async fn observation_timing_excludes_previous_requests_and_background_time() -> 
 
         let observed = Instant::now();
         let terminated = session
-            .terminate(cell_id.clone())
+            .terminate(cell_id.clone().into())
             .await
             .map_err(anyhow::Error::msg)?;
         let duration = terminated
@@ -387,6 +390,7 @@ async fn observation_timing_excludes_previous_requests_and_background_time() -> 
                 WaitRequest {
                     cell_id: cell_id.clone(),
                     yield_time_ms: 50,
+                    max_output_tokens: None,
                 },
                 /*preempt*/ None,
             )

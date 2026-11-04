@@ -94,8 +94,8 @@ impl McpServerView {
             .refresh_if_changed(
                 refresh,
                 || client.client.tool_list_revision().current(),
-                || {
-                    list_tools_for_client_uncached(
+                || async {
+                    let relist = list_tools_for_client_uncached(
                         server_name,
                         /*is_codex_apps_mcp_server*/ false,
                         "list_changed",
@@ -103,7 +103,9 @@ impl McpServerView {
                         self.tool_timeout,
                         self.catalog_item_limit,
                         client.server_instructions.as_deref(),
-                    )
+                    );
+                    // Bound relist layouts for both revision checks and binding capture.
+                    Box::pin(client.with_active_shared_lease(relist)).await?
                 },
             )
             .await
@@ -436,6 +438,26 @@ impl McpConnectionSet {
             &[("path", "legacy"), ("trigger", "explicit")],
         );
         Ok(tools)
+    }
+
+    pub(crate) async fn apps_tools_from_mcp_client(&self) -> Vec<ToolInfo> {
+        let Some(client) = self
+            .servers
+            .get(crate::CODEX_APPS_MCP_SERVER_NAME)
+            .filter(|view| {
+                view.connection
+                    .client
+                    .codex_apps_tools_cache_context
+                    .is_none()
+            })
+            .and_then(|view| view.connection.client.ready_client())
+        else {
+            return Vec::new();
+        };
+        client
+            .tool_catalog
+            .read(|catalog| catalog.tools.to_vec())
+            .await
     }
 
     /// Publishes the exact client catalog and returns both raw inventories.

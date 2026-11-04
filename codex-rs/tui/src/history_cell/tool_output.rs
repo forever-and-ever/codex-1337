@@ -143,10 +143,10 @@ impl ToolOutputCell {
         self.name.name == "wait_agent"
     }
 
-    pub(crate) fn is_item(item: &codex_app_server_protocol::ThreadItem) -> bool {
+    pub(crate) fn is_item(item: &codex_app_server_protocol::ThreadItemPayload) -> bool {
         matches!(
             item,
-            codex_app_server_protocol::ThreadItem::FunctionCallOutput { .. }
+            codex_app_server_protocol::ThreadItemPayload::FunctionCallOutput { .. }
         )
     }
 

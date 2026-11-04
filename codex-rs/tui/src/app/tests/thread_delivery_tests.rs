@@ -44,12 +44,11 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
         test_path_buf("/tmp/project"),
     ));
     while effects.try_recv().is_ok() {}
-    let earlier =
-        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
-            thread_id: thread_id.to_string(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 0,
-            item: ThreadItem::UserMessage {
+    let earlier = ServerNotification::ItemCompleted(
+        codex_app_server_protocol::ItemCompletedNotification::new(
+            thread_id.to_string(),
+            "turn-1".to_string(),
+            ThreadItemPayload::UserMessage {
                 source_response_item_id: None,
                 id: "earlier-user".to_string(),
                 client_id: None,
@@ -58,7 +57,10 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
                     text_elements: Vec::new(),
                 }],
             },
-        });
+            None,
+            0,
+        ),
+    );
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
     app.enqueue_thread_notification(thread_id, earlier).await?;
     app.enqueue_thread_request(thread_id, request.clone())

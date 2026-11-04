@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::models::MessagePhase;
@@ -20,8 +20,8 @@ use crate::history_cell::status_output;
 
 pub(crate) fn final_response(turn: &Turn) -> Option<&str> {
     (turn.status == TurnStatus::Completed).then_some(())?;
-    turn.items.iter().rev().find_map(|item| match item {
-        ThreadItem::AgentMessage {
+    turn.item_payloads().rev().find_map(|item| match item {
+        ThreadItemPayload::AgentMessage {
             id,
             phase: Some(MessagePhase::FinalAnswer) | None,
             ..

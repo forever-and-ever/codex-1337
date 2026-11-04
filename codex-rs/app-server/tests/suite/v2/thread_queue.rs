@@ -20,7 +20,7 @@ use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::QueuedSubmission;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
@@ -77,6 +77,7 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
     ])
     .await?;
     mock_server::run(&[&server], async {
+
     let thread_id = app
         .start_thread(ThreadStartParams::default())
         .await?
@@ -108,9 +109,9 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
     // Old frontends can still use queue/add. Retiring the Codex message class
     // must not interfere with another server's identically named queued tool.
     let request = app.send_raw_request("thread/queue/add", Some(json!({
-        "threadId": thread_id, "clientUserMessageId": "legacy-codex-message",
-        "toolOutput": {"namespace": "codex_tui", "name": "send_message_to_thread", "output": "obsolete message"}
-    }))).await?;
+    "threadId": thread_id, "clientUserMessageId": "legacy-codex-message",
+    "toolOutput": {"namespace": "codex_tui", "name": "send_message_to_thread", "output": "obsolete message"}
+}))).await?;
     let error: JSONRPCError = timeout(
         READ_TIMEOUT,
         app.read_stream_until_error_message(RequestId::Integer(request)),
@@ -520,9 +521,9 @@ async fn idle_queue_dispatch_preserves_client_id() -> Result<()> {
         );
         let started: ItemStartedNotification =
             timeout(READ_TIMEOUT, app.read_notification("item/started")).await??;
-        let ThreadItem::UserMessage {
+        let ThreadItemPayload::UserMessage {
             client_id, content, ..
-        } = started.item
+        } = started.item.payload
         else {
             anyhow::bail!("queued turn did not begin with its user message");
         };
@@ -676,9 +677,9 @@ async fn cold_thread_resume_dispatches_a_persisted_queued_submission() -> Result
 
         let started: ItemStartedNotification =
             timeout(READ_TIMEOUT, resumed.read_notification("item/started")).await??;
-        let ThreadItem::UserMessage {
+        let ThreadItemPayload::UserMessage {
             client_id, content, ..
-        } = started.item
+        } = started.item.payload
         else {
             anyhow::bail!("cold resume did not start the persisted queued user message");
         };
@@ -890,14 +891,14 @@ async fn queue_start_while_active_returns_busy_and_preserves_the_queue() -> Resu
         let started_item: ItemStartedNotification =
             timeout(READ_TIMEOUT, app.read_notification("item/started")).await??;
         if matches!(
-            &started_item.item,
-            ThreadItem::UserMessage { client_id, .. }
+            &started_item.item.payload,
+            ThreadItemPayload::UserMessage { client_id, .. }
                 if client_id.as_deref() == Some("active-queued-client-id")
         ) {
             break started_item;
         }
     };
-    let ThreadItem::UserMessage { client_id, .. } = started_item.item else {
+    let ThreadItemPayload::UserMessage { client_id, .. } = started_item.item.payload else {
         anyhow::bail!("queued message did not start after the active turn completed");
     };
     assert_eq!(client_id.as_deref(), Some("active-queued-client-id"));
@@ -967,8 +968,8 @@ async fn queue_start_without_id_starts_the_head_when_idle() -> Result<()> {
             let started_item: ItemStartedNotification =
                 timeout(READ_TIMEOUT, app.read_notification("item/started")).await??;
             if matches!(
-                &started_item.item,
-                ThreadItem::UserMessage { client_id, .. }
+                &started_item.item.payload,
+                ThreadItemPayload::UserMessage { client_id, .. }
                     if client_id.as_deref() == Some(first.client_user_message_id.as_str())
             ) {
                 break started_item;

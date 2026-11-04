@@ -16,6 +16,7 @@ fn stream(event: CodexResult<ResponseEvent>) -> ResponseStream {
     let (tx, rx_event) = tokio::sync::mpsc::channel(/*buffer*/ 1);
     tx.try_send(event).unwrap();
     ResponseStream {
+        routing_affinity: None,
         rx_event,
         interrupt: None,
         consumer_dropped: CancellationToken::new(),

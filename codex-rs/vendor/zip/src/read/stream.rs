@@ -2,20 +2,30 @@
 
 use crate::ZipReadOptions;
 use crate::extra_fields::ExtraFields;
-use crate::format::blocks::{FixedSizeBlock, Pod, ZipCentralEntryBlock, ZipLocalEntryBlock};
+use crate::format::blocks::FixedSizeBlock;
+use crate::format::blocks::Pod;
+use crate::format::blocks::ZipCentralEntryBlock;
+use crate::format::blocks::ZipLocalEntryBlock;
 use crate::format::magic::Magic;
-use crate::read::extract::{MAX_SYMLINK_TARGET_LEN, make_symlink_as_file};
-use crate::read::extract::{make_symlink, make_symlink_as_file_utf8};
-use crate::read::{
-    SymlinkExtractAction, ZipFile, ZipFileData, ZipFileEntry, ZipResult,
-    central_header_to_zip_file_inner,
-};
-use crate::result::{ZipError, invalid};
+use crate::read::SymlinkExtractAction;
+use crate::read::ZipFile;
+use crate::read::ZipFileData;
+use crate::read::ZipFileEntry;
+use crate::read::ZipResult;
+use crate::read::central_header_to_zip_file_inner;
+use crate::read::extract::MAX_SYMLINK_TARGET_LEN;
+use crate::read::extract::make_symlink;
+use crate::read::extract::make_symlink_as_file;
+use crate::read::extract::make_symlink_as_file_utf8;
+use crate::result::ZipError;
+use crate::result::invalid;
 
 use indexmap::IndexMap;
 use std::borrow::Cow;
-use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 
 /// Stream decoder for zip.
 #[derive(Debug)]
@@ -306,10 +316,12 @@ pub fn read_zipfile_from_stream_with_options<'a, R: Read>(
 mod tests {
     use crate::read::ZipFile;
     use crate::read::ZipFileEntry;
-    use crate::read::stream::{ZipStreamReader, ZipStreamVisitor};
+    use crate::read::stream::ZipStreamReader;
+    use crate::read::stream::ZipStreamVisitor;
     use crate::result::ZipResult;
     use std::collections::BTreeSet;
-    use std::io::{Cursor, Read};
+    use std::io::Cursor;
+    use std::io::Read;
 
     #[test]
     fn zip_read_streaming_visitor() {

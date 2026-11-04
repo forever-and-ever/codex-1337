@@ -9,7 +9,7 @@ use crate::transcript_view::TranscriptView;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::models::FunctionCallOutputBody;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ fn file_disclosures_are_independent_and_not_copied() {
     use codex_protocol::tool_input::ToolInput;
     use codex_protocol::tool_input::ToolInputPayload;
     let source = "*** Begin Patch\n*** Add File: alpha.rs\n+alpha body\n*** Add File: beta.rs\n+beta body\n*** End Patch";
-    let returned = ThreadItem::FunctionCallOutput {
+    let returned = ThreadItemPayload::FunctionCallOutput {
         id: "batch".into(),
         call_id: Some("patch-call".into()),
         name: "apply_patch".into(),
@@ -37,7 +37,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         None,
         &test_path_buf("/project").abs(),
         [
-            ThreadItem::FileChange {
+            ThreadItemPayload::FileChange {
                 id: "patch-call".into(),
                 changes: ["alpha", "beta"]
                     .map(|name| FileUpdateChange {
@@ -204,7 +204,7 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
         crate::thread_transcript::thread_items_to_transcript_cells(
             None,
             &test_path_buf("/project").abs(),
-            [ThreadItem::FileChange {
+            [ThreadItemPayload::FileChange {
                 id: id.into(),
                 changes: ["alpha", "beta"]
                     .map(|file| FileUpdateChange {

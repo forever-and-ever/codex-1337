@@ -11,7 +11,8 @@ use crate::format::flags::ZipFileFlags;
 use crate::format::system::System;
 use crate::read::ExtraField;
 use crate::read::extract::RootDirFilter;
-use crate::read::readers::{ZipFileReader, ZipFileSeekReader};
+use crate::read::readers::ZipFileReader;
+use crate::read::readers::ZipFileSeekReader;
 use crate::result::ZipResult;
 use crate::result::invalid;
 use crate::types::ZipFileData;
@@ -20,8 +21,15 @@ use crate::write::options::SimpleFileOptions;
 use core::mem::replace;
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::io::{self, Cursor, Read, Seek, SeekFrom, copy, sink};
-use std::path::{Path, PathBuf};
+use std::io::Cursor;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::copy;
+use std::io::sink;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 
 /// A struct for reading a zip file
 ///

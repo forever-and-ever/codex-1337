@@ -237,7 +237,7 @@ async fn transcript_flag_off_preserves_viewer() -> Result<()> {
                 text_elements: Vec::new(),
                 local_image_paths: Vec::new(),
                 remote_image_urls: Vec::new(),
-                spoken: false,
+                presentation: Default::default(),
             }) as Arc<dyn HistoryCell>
         })
         .to_vec();

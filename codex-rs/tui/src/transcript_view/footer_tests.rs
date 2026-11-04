@@ -438,11 +438,11 @@ impl HistoryCell for ActivityCell {
 #[test]
 fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting() {
     use crate::test_support::PathBufExt;
-    use codex_app_server_protocol::ThreadItem;
+    use codex_app_server_protocol::ThreadItemPayload;
     use codex_protocol::models::FunctionCallOutputBody;
 
     let cwd = crate::test_support::test_path_buf("/project").abs();
-    let items = ["first", "second"].map(|id| ThreadItem::FunctionCallOutput {
+    let items = ["first", "second"].map(|id| ThreadItemPayload::FunctionCallOutput {
         id: id.into(),
         call_id: Some(id.into()),
         name: "exec".into(),

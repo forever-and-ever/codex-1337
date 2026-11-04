@@ -3,7 +3,7 @@ use codex_app_server_protocol::delegation::DelegatedMessage;
 
 use codex_app_server_protocol::ImageReference;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::UserInput;
@@ -37,11 +37,11 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
         .items
         .iter()
         .rev()
-        .filter_map(|item| Some(match item.native_item() {
-            ThreadItem::CodeModeOwned(_) => unreachable!("ownership ingress rejects nesting"),
-            ThreadItem::ToolOutputTokens { .. } | ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } | ThreadItem::Preamble { .. } | ThreadItem::StepAdmission(_)
-        | ThreadItem::ToolInput(_) | ThreadItem::Arrival(_) => return None,
-            ThreadItem::UserMessage { id, content, .. } => json!({
+        .filter_map(|item| Some(match item.payload.native_item() {
+            ThreadItemPayload::CodeModeOwned(_) => unreachable!("ownership ingress rejects nesting"),
+            ThreadItemPayload::ToolOutputTokens { .. } | ThreadItemPayload::CodeMode(_) | ThreadItemPayload::Thought { .. } | ThreadItemPayload::Preamble { .. } | ThreadItemPayload::StepAdmission(_)
+        | ThreadItemPayload::ToolInput(_) | ThreadItemPayload::Arrival(_) => return None,
+            ThreadItemPayload::UserMessage { id, content, .. } => json!({
                 "type": "userMessage",
                 "id": id,
                 "content": content.iter().map(|input| match input {
@@ -73,10 +73,10 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                     UserInput::Mention { name, path } => json!({"type": "mention", "name": name, "path": path}),
                 }).collect::<Vec<_>>()
             }),
-            ThreadItem::HookPrompt { id, fragments } => json!({
+            ThreadItemPayload::HookPrompt { id, fragments } => json!({
                 "type": "hookPrompt", "id": id, "fragmentCount": fragments.len()
             }),
-            ThreadItem::FunctionCallOutput {
+            ThreadItemPayload::FunctionCallOutput {
                 id,
                 call_id: _,
                 name,
@@ -104,13 +104,13 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 }
                 item
             }
-            ThreadItem::AgentMessage { id, text, phase, .. } => json!({
+            ThreadItemPayload::AgentMessage { id, text, phase, .. } => json!({
                 "type": "agentMessage", "id": id, "text": text, "phase": phase
             }),
-            ThreadItem::Plan { id, text } => json!({
+            ThreadItemPayload::Plan { id, text } => json!({
                 "type": "plan", "id": id, "text": truncate(text, DEFAULT_OUTPUT_CHARS)
             }),
-            ThreadItem::Reasoning {
+            ThreadItemPayload::Reasoning {
                 id,
                 summary,
                 content,
@@ -127,7 +127,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 }
                 item
             }
-            ThreadItem::CommandExecution {
+            ThreadItemPayload::CommandExecution {
                 id,
                 command,
                 cwd,
@@ -151,7 +151,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 }
                 item
             }
-            ThreadItem::FileChange {
+            ThreadItemPayload::FileChange {
                 id,
                 changes,
                 status,
@@ -167,7 +167,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                     item
                 }).collect::<Vec<_>>()
             }),
-            ThreadItem::McpToolCall {
+            ThreadItemPayload::McpToolCall {
                 id,
                 server,
                 tool,
@@ -179,7 +179,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 "type": "mcpToolCall", "id": id, "server": server, "tool": tool,
                 "arguments": arguments, "status": status, "durationMs": duration_ms
             }),
-            ThreadItem::DynamicToolCall {
+            ThreadItemPayload::DynamicToolCall {
                 id,
                 namespace,
                 tool,
@@ -193,7 +193,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 "tool": tool, "arguments": arguments, "status": status,
                 "success": success, "durationMs": duration_ms
             }),
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id,
                 tool,
                 status,
@@ -209,7 +209,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 "receiverThreadIds": receiver_thread_ids, "prompt": prompt,
                 "model": model, "reasoningEffort": reasoning_effort
             }),
-            ThreadItem::SubAgentActivity {
+            ThreadItemPayload::SubAgentActivity {
                 id,
                 kind,
                 agent_thread_id,
@@ -219,17 +219,17 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 "type": "subAgentActivity", "id": id, "kind": kind,
                 "agentThreadId": agent_thread_id, "agentPath": agent_path
             }),
-            ThreadItem::WebSearch(item) => json!({
+            ThreadItemPayload::WebSearch(item) => json!({
                 "type": "webSearch", "id": item.id,
                 "query": truncate(&item.query, DEFAULT_OUTPUT_CHARS), "action": item.action
             }),
-            ThreadItem::ImageView { id, path } => json!({
+            ThreadItemPayload::ImageView { id, path } => json!({
                 "type": "imageView", "id": id, "path": path
             }),
-            ThreadItem::Sleep(item) => json!({
+            ThreadItemPayload::Sleep(item) => json!({
                 "type": "sleep", "id": item.id, "durationMs": item.duration_ms
             }),
-            ThreadItem::ImageGeneration(item) => {
+            ThreadItemPayload::ImageGeneration(item) => {
                 let mut image = json!({
                     "type": "imageGeneration", "id": item.id, "status": item.status,
                     "revisedPrompt": item.revised_prompt.as_deref().map(|prompt| truncate(prompt, DEFAULT_OUTPUT_CHARS)),
@@ -247,13 +247,13 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                 }
                 image
             }
-            ThreadItem::EnteredReviewMode { id, review } => json!({
+            ThreadItemPayload::EnteredReviewMode { id, review } => json!({
                 "type": "enteredReviewMode", "id": id, "review": truncate(review, DEFAULT_OUTPUT_CHARS)
             }),
-            ThreadItem::ExitedReviewMode { id, review } => json!({
+            ThreadItemPayload::ExitedReviewMode { id, review } => json!({
                 "type": "exitedReviewMode", "id": id, "review": truncate(review, DEFAULT_OUTPUT_CHARS)
             }),
-            ThreadItem::ContextCompaction { id } => json!({
+            ThreadItemPayload::ContextCompaction { id } => json!({
                 "type": "contextCompaction", "id": id
             }),
         }))

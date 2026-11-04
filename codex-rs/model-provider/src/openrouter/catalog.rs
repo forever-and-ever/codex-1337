@@ -7,6 +7,8 @@ use codex_config::read_openrouter_config;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::CatalogModel;
+use codex_models_manager::ModelOrigin;
 use codex_models_manager::ModelsManagerConfig;
 use codex_models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use codex_models_manager::manager::ModelsManager;
@@ -56,6 +58,7 @@ pub(crate) fn catalog_for_provider(
         return Arc::new(StaticModelsManager::new(
             None,
             ModelsResponse { models: Vec::new() },
+            ModelOrigin::Provider,
         ));
     };
     let runtime = auth.runtime_config();
@@ -181,15 +184,20 @@ impl ModelsManager for Catalog {
         })
     }
 
-    fn raw_model_catalog(
+    fn model_catalog_with_origins(
         &self,
         _strategy: RefreshStrategy,
         _factory: HttpClientFactory,
-    ) -> ModelsManagerFuture<'_, ModelsResponse> {
+    ) -> ModelsManagerFuture<'_, Vec<CatalogModel>> {
         Box::pin(async move {
-            ModelsResponse {
-                models: self.models().await,
-            }
+            self.models()
+                .await
+                .into_iter()
+                .map(|model| CatalogModel {
+                    model,
+                    origin: ModelOrigin::Provider,
+                })
+                .collect()
         })
     }
 

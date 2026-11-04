@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
+use codex_exec_server::ExecOutputStream;
 use regex::Regex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -86,10 +87,11 @@ pub(super) async fn publish_output<const N: usize>(
     buffer: &tokio::sync::Mutex<OutputBuffers<N>>,
     sender: &broadcast::Sender<Vec<u8>>,
     watches: &TerminalWatches,
+    stream: ExecOutputStream,
     chunk: Vec<u8>,
 ) {
     let mut buffer = buffer.lock().await;
-    buffer.push_chunk(&chunk);
+    buffer.push_chunk(stream, &chunk);
     watches.feed(&chunk);
     let _ = sender.send(chunk);
 }

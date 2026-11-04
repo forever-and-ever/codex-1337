@@ -164,8 +164,13 @@ async fn resumed_native_history_replays_tool_failure() {
         supported_efforts: Vec::new(),
         supports_structured_outputs: false,
     });
-    let native = |history: ContextManager| {
-        let input = history.for_prompt(&model.input_modalities);
+    let native = async |history: ContextManager| {
+        let input = history
+            .for_prompt(
+                &model.input_modalities,
+                session.services.image_store.as_ref(),
+            )
+            .await;
         let request = codex_api::encode_anthropic_request(
             &codex_api::AnthropicPrompt {
                 input: &input,
@@ -187,7 +192,7 @@ async fn resumed_native_history_replays_tool_failure() {
         .unwrap();
         serde_json::from_str::<serde_json::Value>(request.body().get()).unwrap()
     };
-    let live = native(session.clone_history().await);
+    let live = native(session.clone_history().await).await;
     let saved = session
         .clone_history()
         .await
@@ -206,7 +211,7 @@ async fn resumed_native_history_replays_tool_failure() {
         .await;
 
     // The failure must survive persistence, or the resumed cache prefix diverges.
-    assert_eq!(native(session.clone_history().await), live);
+    assert_eq!(native(session.clone_history().await).await, live);
     let results = live["messages"]
         .as_array()
         .unwrap()
@@ -1725,6 +1730,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
                     compaction_response_id: None,
                     latest_token_usage_record: None,
                     resume_metadata: current.then(|| codex_history::CompactionResumeMetadata {
+                        dynamic_tools: None,
                         multi_agent_version: None,
                         last_started_turn_id: Some(format!("wake-{window_number}")),
                         turn_attribution: None,

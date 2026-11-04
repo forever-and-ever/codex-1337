@@ -1,6 +1,13 @@
 use super::huffman::HuffmanDecoder;
-use bitstream_io::{BitRead, BitReader, Endianness, LittleEndian};
-use std::io::{self, Cursor, Error, Read, Result};
+use bitstream_io::BitRead;
+use bitstream_io::BitReader;
+use bitstream_io::Endianness;
+use bitstream_io::LittleEndian;
+use std::io::Cursor;
+use std::io::Error;
+use std::io::Read;
+use std::io::Result;
+use std::io::{self};
 
 /// Maximum symbol value in the length Huffman table (6 bits)
 /// When this value is decoded, an additional byte is read for extended length

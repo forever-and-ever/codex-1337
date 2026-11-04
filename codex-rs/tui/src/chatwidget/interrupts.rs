@@ -10,17 +10,11 @@ use crate::approval_events::ExecApprovalRequestEvent;
 use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_app_server_protocol::RequestId as AppServerRequestId;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ToolRequestUserInputParams;
 use codex_protocol::request_permissions::RequestPermissionsEvent;
 
 use super::ChatWidget;
-
-/// Keep the event clock attached while a completion waits behind an input overlay.
-#[derive(Debug)]
-pub(crate) struct CompletedItem {
-    pub(crate) item: ThreadItem,
-    pub(crate) timestamp: Option<crate::history_cell::HistoryTimestamp>,
-}
 
 #[derive(Debug)]
 pub(crate) enum QueuedInterrupt {
@@ -32,8 +26,8 @@ pub(crate) enum QueuedInterrupt {
     },
     RequestPermissions(RequestPermissionsEvent),
     RequestUserInput(ToolRequestUserInputParams),
-    ItemStarted(ThreadItem),
-    ItemCompleted(CompletedItem),
+    ItemStarted(ThreadItemPayload),
+    ItemCompleted(ThreadItem),
 }
 
 #[derive(Default)]
@@ -94,11 +88,11 @@ impl InterruptManager {
         self.queue.push_back(QueuedInterrupt::RequestUserInput(ev));
     }
 
-    pub(crate) fn push_item_started(&mut self, item: ThreadItem) {
+    pub(crate) fn push_item_started(&mut self, item: ThreadItemPayload) {
         self.queue.push_back(QueuedInterrupt::ItemStarted(item));
     }
 
-    pub(crate) fn push_item_completed(&mut self, item: CompletedItem) {
+    pub(crate) fn push_item_completed(&mut self, item: ThreadItem) {
         self.queue.push_back(QueuedInterrupt::ItemCompleted(item));
     }
 
@@ -181,7 +175,7 @@ mod tests {
     use crate::approval_events::ExecApprovalRequestEvent;
     use codex_app_server_protocol::CommandExecutionSource;
     use codex_app_server_protocol::CommandExecutionStatus;
-    use codex_app_server_protocol::ThreadItem;
+    use codex_app_server_protocol::ThreadItemPayload;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use pretty_assertions::assert_eq;
 
@@ -216,8 +210,8 @@ mod tests {
         }
     }
 
-    fn command_execution(call_id: &str) -> ThreadItem {
-        ThreadItem::CommandExecution {
+    fn command_execution(call_id: &str) -> ThreadItemPayload {
+        ThreadItemPayload::CommandExecution {
             model_context: None,
             sandbox_type: None,
             id: call_id.to_string(),

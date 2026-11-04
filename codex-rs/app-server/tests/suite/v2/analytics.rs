@@ -15,7 +15,7 @@ use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadStartParams;
@@ -131,8 +131,17 @@ async fn guardian_review_turns_and_tools_reach_analytics() -> Result<()> {
     mock_server::run(&[&server], async {
         let codex_home = TempDir::new()?;
         mount_analytics_capture(&server, codex_home.path()).await?;
+        let catalog_path = codex_home.path().join("guardian-models.json");
+        std::fs::write(
+            &catalog_path,
+            serde_json::to_vec(&bundled_models_response()?)?,
+        )?;
         MockResponsesConfig::new(&server.uri())
-            .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
+            .with_root_config(&format!(
+                "chatgpt_base_url = \"{}\"\nmodel_catalog_json = {}",
+                server.uri(),
+                serde_json::to_string(&catalog_path)?
+            ))
             .with_provider_config("supports_websockets = false")
             .enable_feature(Feature::GuardianApproval)
             .disable_feature(Feature::Apps)
@@ -440,8 +449,8 @@ async fn multi_agent_v2_tools_emit_collaborator_analytics() -> Result<()> {
         .items;
     let child_thread_id = items
         .iter()
-        .find_map(|item| match item {
-            ThreadItem::SubAgentActivity {
+        .find_map(|item| match &item.payload {
+            ThreadItemPayload::SubAgentActivity {
                 id,
                 agent_thread_id,
                 ..
@@ -452,12 +461,14 @@ async fn multi_agent_v2_tools_emit_collaborator_analytics() -> Result<()> {
     assert!(
         !items
             .iter()
-            .any(|item| matches!(item, ThreadItem::CollabAgentToolCall { .. }))
+            .any(|item| matches!(&item.payload, ThreadItemPayload::CollabAgentToolCall { .. }))
     );
     let activity_ids = items
         .iter()
-        .filter_map(|item| match item {
-            ThreadItem::SubAgentActivity { id, .. } if id.starts_with("call-") => Some(id.as_str()),
+        .filter_map(|item| match &item.payload {
+            ThreadItemPayload::SubAgentActivity { id, .. } if id.starts_with("call-") => {
+                Some(id.as_str())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();

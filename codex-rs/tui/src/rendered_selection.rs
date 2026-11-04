@@ -6,6 +6,7 @@
 use crate::history_cell::HistoryCell;
 #[path = "rendered_surface.rs"]
 mod surface;
+use crate::transcript_view::TextLayout;
 use crate::transcript_view::TranscriptView;
 use crate::transcript_view::ViewAction;
 use crate::tui::TuiEvent;
@@ -27,6 +28,8 @@ pub(crate) struct RenderedSelection {
     pub(crate) view: TranscriptView,
     pub(crate) cells: Vec<Arc<dyn HistoryCell>>,
     pub(crate) areas: Vec<Rect>,
+    /// Source-backed viewport when a widget registers its painted text layout.
+    source_layout: Option<(Rect, TextLayout, usize)>,
     snapshot: Option<Buffer>,
     pressed: Option<MouseEvent>,
 }
@@ -59,6 +62,13 @@ impl RenderedSelection {
         }
     }
 
+    pub(crate) fn register_layout(&mut self, layout: Option<(Rect, TextLayout, usize)>) {
+        if let Some((area, _, _)) = &layout {
+            self.register(*area, /*invalidate*/ false);
+        }
+        self.source_layout = layout;
+    }
+
     pub(crate) fn render(&mut self, buffer: &mut Buffer) {
         if self
             .snapshot
@@ -72,10 +82,11 @@ impl RenderedSelection {
         }
         if let Some(snapshot) = &self.snapshot {
             self.view.render(snapshot.area, buffer, &self.cells);
-            // Keep native hyperlinks and forced glyph widths from the original cells.
+            // Preserve the painted surface, native hyperlinks and forced glyph widths.
             for position in snapshot.area.positions() {
                 buffer[position].set_symbol(snapshot[position].symbol());
                 buffer[position].diff_option = snapshot[position].diff_option;
+                buffer[position].bg = snapshot[position].bg;
             }
         }
     }
@@ -136,7 +147,20 @@ impl RenderedSelection {
                     for position in area.positions() {
                         surface[position] = completed[position].clone();
                     }
-                    self.cells = vec![Arc::new(RenderedSurface(surface_lines(&surface)))];
+                    let layout = match self.source_layout.take() {
+                        Some((source, layout, offset)) if source == area => {
+                            self.cells.clear();
+                            Some(layout.visible_plaintext(offset, area.height))
+                        }
+                        _ => {
+                            self.cells = vec![Arc::new(RenderedSurface(surface_lines(&surface)))];
+                            None
+                        }
+                    };
+                    self.view
+                        .sync_live_layout(area.width, /*key*/ None, |_, _| {
+                            layout.map(|layout| (Arc::new(layout), false))
+                        });
                     self.view.render(area, &mut surface.clone(), &self.cells);
                     self.snapshot = Some(surface);
                 }

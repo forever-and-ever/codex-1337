@@ -6,6 +6,13 @@ use crate::bottom_pane::QuestionSubmission;
 use codex_protocol::items::AsyncUserInputQuestion;
 
 impl ChatWidget {
+    pub(crate) fn has_expanded_questions(&self) -> bool {
+        self.bottom_pane
+            .questions
+            .as_ref()
+            .is_some_and(|q| q.expanded)
+    }
+
     pub(super) fn add_async_questions(
         &mut self,
         message_id: &str,

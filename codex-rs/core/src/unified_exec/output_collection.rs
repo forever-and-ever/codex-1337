@@ -7,8 +7,8 @@ use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use super::head_tail_buffer::HeadTailBuffer;
 use super::process::OutputHandles;
+use codex_utils_head_tail_buffer::HeadTailBuffer;
 
 #[tracing::instrument(
     name = "unified_exec.collect_output",

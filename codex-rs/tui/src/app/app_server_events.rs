@@ -23,7 +23,7 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::SessionSource;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadSource;
@@ -172,7 +172,7 @@ impl App {
     async fn handle_server_notification_event(
         &mut self,
         app_server_client: &AppServerSession,
-        notification: ServerNotification,
+        mut notification: ServerNotification,
     ) {
         if let ServerNotification::ThreadRetired(retired) = &notification {
             let ids = retired
@@ -186,6 +186,18 @@ impl App {
         if let ServerNotification::AccountLoginCompleted(completion) = &notification {
             self.finish_claude_login(completion);
         }
+        if let ServerNotification::TurnModerationMetadata(metadata) = &mut notification
+            && self
+                .primary_thread_id
+                .is_none_or(|id| id.to_string() != metadata.thread_id)
+            && let Some(metadata) = metadata.metadata.as_object_mut()
+        {
+            metadata.remove("safety_block");
+            metadata.remove("safety_recourse");
+        }
+        // A picker can leave an old runtime's close notification queued while the same thread
+        // is resumed. Thread IDs survive reloads, so confirm that the displayed thread is still
+        // unloaded before routing a close that would exit the TUI or switch away from it.
         if let ServerNotification::ThreadClosed(closed) = &notification
             && let Ok(thread_id) = ThreadId::from_string(&closed.thread_id)
             && self.current_displayed_thread_id() == Some(thread_id)
@@ -466,10 +478,10 @@ impl App {
             ServerNotificationThreadTarget::Thread(thread_id) => {
                 if self.current_displayed_thread_id() != Some(thread_id)
                     && let ServerNotification::ItemCompleted(item) = &notification
-                    && let ThreadItem::UserMessage {
+                    && let ThreadItemPayload::UserMessage {
                         client_id: Some(client_id),
                         ..
-                    } = &item.item
+                    } = &item.item.payload
                 {
                     // Acknowledge by ID before routing can discard the receipt. ID-less receipts
                     // cannot safely distinguish identical pending submissions.

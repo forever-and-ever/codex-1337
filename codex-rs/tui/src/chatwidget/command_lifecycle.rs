@@ -18,8 +18,8 @@ impl ChatWidget {
         self.restore_reasoning_status_header();
     }
 
-    pub(super) fn on_command_execution_started(&mut self, item: ThreadItem) {
-        let ThreadItem::CommandExecution {
+    pub(super) fn on_command_execution_started(&mut self, item: ThreadItemPayload) {
+        let ThreadItemPayload::CommandExecution {
             id,
             command,
             process_id,
@@ -132,13 +132,13 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn on_command_execution_completed(&mut self, item: CompletedItem) {
-        let ThreadItem::CommandExecution {
+    pub(super) fn on_command_execution_completed(&mut self, item: ThreadItem) {
+        let ThreadItemPayload::CommandExecution {
             id,
             process_id,
             source,
             ..
-        } = &item.item
+        } = &item.payload
         else {
             return;
         };
@@ -240,8 +240,8 @@ impl ChatWidget {
         }
     }
 
-    pub(crate) fn handle_command_execution_started_now(&mut self, item: ThreadItem) {
-        let ThreadItem::CommandExecution {
+    pub(crate) fn handle_command_execution_started_now(&mut self, item: ThreadItemPayload) {
+        let ThreadItemPayload::CommandExecution {
             id,
             command,
             source,
@@ -304,7 +304,7 @@ impl ChatWidget {
     /// standalone history entry instead of replacing or flushing the unrelated active command
     /// cell. If this method treated every unknown end as "complete the active cell", the UI could
     /// merge unrelated commands and hide still-running work.
-    pub(crate) fn handle_command_execution_completed_now(&mut self, completed: CompletedItem) {
+    pub(crate) fn handle_command_execution_completed_now(&mut self, completed: ThreadItem) {
         enum ExecEndTarget {
             // Normal case: the active exec cell already tracks this call id.
             ActiveTracked,
@@ -315,7 +315,7 @@ impl ChatWidget {
             NewCell,
         }
 
-        let ThreadItem::CommandExecution {
+        let ThreadItemPayload::CommandExecution {
             id,
             command,
             process_id: _,
@@ -326,7 +326,7 @@ impl ChatWidget {
             exit_code,
             duration_ms,
             ..
-        } = completed.item
+        } = completed.payload
         else {
             return;
         };
@@ -398,7 +398,9 @@ impl ChatWidget {
                     .as_mut()
                     .and_then(|c| c.as_any_mut().downcast_mut::<ExecCell>())
                 {
-                    cell.completed_at = completed.timestamp;
+                    cell.completed_at = completed
+                        .completed_at_ms
+                        .and_then(history_cell::HistoryTimestamp::from_millis);
                     let completed = cell.complete_call(&id, output, duration);
                     debug_assert!(completed, "active exec cell should contain {id}");
                     if cell.should_flush() {
@@ -418,7 +420,9 @@ impl ChatWidget {
                     /*interaction_input*/ None,
                     self.local_settings.tui.animations && self.local_settings.tui.effects.progress,
                 );
-                orphan.completed_at = completed.timestamp;
+                orphan.completed_at = completed
+                    .completed_at_ms
+                    .and_then(history_cell::HistoryTimestamp::from_millis);
                 let completed = orphan.complete_call(&id, output, duration);
                 debug_assert!(completed, "new orphan exec cell should contain {id}");
                 self.app_event_tx
@@ -434,7 +438,9 @@ impl ChatWidget {
                     /*interaction_input*/ None,
                     self.local_settings.tui.animations && self.local_settings.tui.effects.progress,
                 );
-                cell.completed_at = completed.timestamp;
+                cell.completed_at = completed
+                    .completed_at_ms
+                    .and_then(history_cell::HistoryTimestamp::from_millis);
                 let completed = cell.complete_call(&id, output, duration);
                 debug_assert!(completed, "new exec cell should contain {id}");
                 self.flush_active_cell();

@@ -566,6 +566,7 @@ impl RouteAwareClientPool {
                     .http_client_factory
                     .network_policy()
                     .requires_enforcement()
+                || self.http_client_factory.protects_sensitive_headers()
                 || self.rustls_clients.is_some())
     }
 

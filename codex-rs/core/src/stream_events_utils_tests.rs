@@ -295,9 +295,10 @@ async fn handle_non_tool_response_item_runs_turn_item_contributors_only_when_req
     assert_eq!(text, "hello world");
 }
 
-fn output_context(session: Arc<Session>, turn_context: Arc<TurnContext>) -> HandleOutputCtx {
+async fn output_context(session: Arc<Session>, turn_context: Arc<TurnContext>) -> HandleOutputCtx {
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
-    let (registry, hosted_specs) = tool_registry_for_test_step(step_context.as_ref());
+    let (registry, hosted_specs) =
+        tool_registry_for_test_step(&session, step_context.as_ref()).await;
     let router = Arc::new(ToolRouter::from_registry(
         step_context.turn.as_ref(),
         step_context.turn.model_info(),
@@ -325,7 +326,7 @@ async fn handle_output_item_done_returns_contributed_last_agent_message() {
     let mut builder = codex_extension_api::ExtensionRegistryBuilder::new();
     builder.turn_item_contributor(Arc::new(RewriteAgentMessageContributor));
     session.services.extensions = Arc::new(builder.build());
-    let mut ctx = output_context(Arc::new(session), Arc::new(turn_context));
+    let mut ctx = output_context(Arc::new(session), Arc::new(turn_context)).await;
     let item = assistant_output_text("original assistant text");
 
     let output = handle_output_item_done(&mut ctx, item, /*previously_active_item*/ None)
@@ -349,7 +350,7 @@ async fn rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume()
         |config| config.update_plan_enabled = true,
     )
     .await;
-    let mut ctx = output_context(Arc::clone(&session), turn_context);
+    let mut ctx = output_context(Arc::clone(&session), turn_context).await;
     let rejected: ResponseItem = serde_json::from_value(json!({
         "type":"rejected_tool_call", "provider":"anthropic", "call_id":"refused-1",
         "name":"update_plan", "input":{"arguments":{"plan":[]}}
@@ -372,7 +373,11 @@ async fn rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume()
     recovered.replace(restored);
     let normalized = recovered
         .clone()
-        .for_prompt(&[codex_protocol::openai_models::InputModality::Text]);
+        .for_prompt(
+            &[codex_protocol::openai_models::InputModality::Text],
+            session.services.image_store.as_ref(),
+        )
+        .await;
     let mut actual: Vec<_> = normalized.iter().map(|item| json!(item)).collect();
     for item in &mut actual {
         let item = item.as_object_mut().unwrap();
@@ -420,7 +425,7 @@ async fn direct_results_keep_their_own_records_when_call_ids_repeat() {
         },
     )
     .await;
-    let mut ctx = output_context(Arc::clone(&session), turn_context);
+    let mut ctx = output_context(Arc::clone(&session), turn_context).await;
     let mut pending = Vec::new();
     for step in ["read", "write"] {
         let arguments = json!({"plan": [{"step": step, "status": "in_progress"}]});

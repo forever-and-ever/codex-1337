@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn image_result_live_and_replay_render_in_the_owning_call() {
-    let item: AppServerThreadItem = serde_json::from_value(json!({
+    let item: AppServerThreadItemPayload = serde_json::from_value(json!({
         "type": "mcpToolCall", "id": "image", "server": "node_repl", "tool": "js",
         "status": "completed", "arguments": {"title": "Inspect screenshot", "code": "showImage()"},
         "result": {"content": [
@@ -18,15 +18,14 @@ async fn image_result_live_and_replay_render_in_the_owning_call() {
             chat.replay_thread_item(item.clone(), "turn-1".into(), ReplayKind::ThreadSnapshot);
         } else {
             let mut started = item.clone();
-            if let AppServerThreadItem::McpToolCall { status, result, .. } = &mut started {
+            if let AppServerThreadItemPayload::McpToolCall { status, result, .. } = &mut started {
                 *status = codex_app_server_protocol::McpToolCallStatus::InProgress;
                 *result = None;
             }
             chat.on_mcp_tool_call_started(started);
-            chat.on_mcp_tool_call_completed(CompletedItem {
-                item: item.clone(),
-                timestamp: None,
-            });
+            chat.on_mcp_tool_call_completed(codex_app_server_protocol::ThreadItem::untimed(
+                item.clone(),
+            ));
         }
         let cells = drain_insert_history(&mut rx);
         assert_eq!(cells.len(), 1);

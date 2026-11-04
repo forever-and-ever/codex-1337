@@ -486,6 +486,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
                 account: Some(Account::Chatgpt {
                     email: Some(format!("{id}@example.com")),
                     plan_type: AccountPlanType::Pro,
+                    workspace_name: None,
                 }),
                 requires_openai_auth: true,
                 workspace_routing: expected_workspace_routing(id),
@@ -729,6 +730,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
                 account: Some(Account::Chatgpt {
                     email: Some(format!("{id}@example.com")),
                     plan_type: AccountPlanType::Pro,
+                    workspace_name: None,
                 }),
                 requires_openai_auth: true,
                 workspace_routing: expected_workspace_routing(id),

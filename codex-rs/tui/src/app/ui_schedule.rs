@@ -517,7 +517,16 @@ pub(super) async fn drive(
         if app.overlay.is_none() {
             if !tui.is_owned_screen() && tui.is_alt_screen_active() {
                 app.close_transcript_overlay(tui);
-            } else if let Err(err) = tui.set_overlay_input(tui::OverlayInput::Default) {
+            } else if let Err(err) = tui.set_mouse_capture(
+                if tui.is_owned_screen()
+                    && !app.chat_widget.has_active_modal()
+                    && app.chat_widget.has_expanded_questions()
+                {
+                    tui::MouseCapture::Disabled
+                } else {
+                    tui::MouseCapture::Inherit
+                },
+            ) {
                 break Err(err.into());
             }
         }
@@ -552,7 +561,9 @@ pub(super) async fn drive(
                 {
                     Either::Left(Box::pin(async move {
                         tokio::time::sleep_until(deadline).await;
-                        color_eyre::eyre::bail!("Server connection could not be restored");
+                        color_eyre::eyre::bail!(
+                            "Automatic reconnect timed out waiting for the server to finish shutting down."
+                        );
                     }))
                 } else {
                     Either::Right(Box::pin(reconnect::reconnect(

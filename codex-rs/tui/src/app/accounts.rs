@@ -284,10 +284,18 @@ impl App {
             && self.chat_widget.has_codex_backend_auth()
             && !self.chat_widget.has_chatgpt_account();
         let (display, plan, chatgpt) = match response.account.clone() {
-            Some(Account::Chatgpt { email, plan_type }) => (
+            Some(Account::Chatgpt {
+                email,
+                plan_type,
+                workspace_name,
+            }) => (
                 Some(StatusAccountDisplay::ChatGpt {
                     email,
                     plan: Some(crate::status::plan_type_display_name(plan_type)),
+                    workspace: crate::app_server_session::workspace_display(
+                        workspace_name,
+                        response.workspace_routing.clone(),
+                    ),
                 }),
                 Some(plan_type),
                 true,

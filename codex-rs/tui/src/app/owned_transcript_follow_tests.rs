@@ -35,17 +35,18 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
             let live = crate::app::thread_events::ThreadEventChannel::new(32);
             let mut reduce = |item| {
                 let notification = codex_app_server_protocol::ServerNotification::ItemCompleted(
-                    codex_app_server_protocol::ItemCompletedNotification {
-                        thread_id: owner.thread_id.to_string(),
-                        turn_id: String::new(),
-                        item: codex_app_server_protocol::ThreadItem::CodeModeOwned(
+                    codex_app_server_protocol::ItemCompletedNotification::new(
+                        owner.thread_id.to_string(),
+                        String::new(),
+                        codex_app_server_protocol::ThreadItemPayload::CodeModeOwned(
                             codex_app_server_protocol::CodeModeOwned::new(
                                 owner.clone(),
                                 Box::new(item),
                             ),
                         ),
-                        completed_at_ms: 0,
-                    },
+                        None,
+                        0,
+                    ),
                 );
                 live.store
                     .try_lock()
@@ -67,7 +68,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     .unwrap()
                     .block
             };
-            reduce(codex_app_server_protocol::ThreadItem::CodeMode(
+            reduce(codex_app_server_protocol::ThreadItemPayload::CodeMode(
                 codex_app_server_protocol::CodeModeItem {
                     id: "code-mode:exec-1:start".into(),
                     cell_id: None,
@@ -79,22 +80,24 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     },
                 },
             ));
-            let block = reduce(codex_app_server_protocol::ThreadItem::CommandExecution {
-                sandbox_type: None,
-                model_context: None,
-                id: "call-test".into(),
-                plugin_id: None,
-                script_path: None,
-                command: "cargo test".into(),
-                cwd: app.config.cwd.clone().into(),
-                process_id: None,
-                source: codex_app_server_protocol::CommandExecutionSource::Agent,
-                status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
-                command_actions: Vec::new(),
-                aggregated_output: None,
-                exit_code: None,
-                duration_ms: None,
-            });
+            let block = reduce(
+                codex_app_server_protocol::ThreadItemPayload::CommandExecution {
+                    sandbox_type: None,
+                    model_context: None,
+                    id: "call-test".into(),
+                    plugin_id: None,
+                    script_path: None,
+                    command: "cargo test".into(),
+                    cwd: app.config.cwd.clone().into(),
+                    process_id: None,
+                    source: codex_app_server_protocol::CommandExecutionSource::Agent,
+                    status: codex_app_server_protocol::CommandExecutionStatus::InProgress,
+                    command_actions: Vec::new(),
+                    aggregated_output: None,
+                    exit_code: None,
+                    duration_ms: None,
+                },
+            );
             app.transcript_cells.push(block);
             app.active_thread_id = Some(owner.thread_id);
             app.thread_event_channels.insert(owner.thread_id, live);

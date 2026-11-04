@@ -4,9 +4,12 @@
 //! different byte order (little endian) than NIST (big endian).
 //! See [`AesCtrZipKeyStream`] for more information.
 
-use crate::result::{ZipError, ZipResult};
-use aes::cipher::{BlockCipherEncrypt, KeyInit};
-use core::{any, fmt};
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use aes::cipher::BlockCipherEncrypt;
+use aes::cipher::KeyInit;
+use core::any;
+use core::fmt;
 
 /// Internal block size of an AES cipher.
 const AES_BLOCK_SIZE: usize = 16;
@@ -149,8 +152,14 @@ fn xor(dest: &mut [u8], src: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Aes128, Aes192, Aes256, AesCipher, AesCtrZipKeyStream, AesKind};
-    use aes::cipher::{BlockCipherEncrypt, KeyInit};
+    use super::Aes128;
+    use super::Aes192;
+    use super::Aes256;
+    use super::AesCipher;
+    use super::AesCtrZipKeyStream;
+    use super::AesKind;
+    use aes::cipher::BlockCipherEncrypt;
+    use aes::cipher::KeyInit;
 
     /// Checks whether `crypt_in_place` produces the correct plaintext after one use and yields the
     /// ciphertext again after applying it again.

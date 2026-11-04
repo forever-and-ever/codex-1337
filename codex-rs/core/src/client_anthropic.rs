@@ -20,11 +20,14 @@ use codex_api::AnthropicRequest;
 use codex_api::AnthropicRequestOptions;
 use codex_api::AnthropicStreamOptions;
 use codex_api::ApiError;
+use codex_api::ReqwestTransport;
 use codex_api::TransportError;
 use codex_api::encode_anthropic_request;
 use codex_config::AnthropicPromptCache;
+use codex_http_client::ClientRouteClass;
 use codex_login::anthropic::AccountId;
 use codex_login::default_client::ClientRedirectPolicy;
+use codex_login::default_client::create_client_for_route;
 use codex_model_provider::AnthropicRequestAuth;
 use codex_otel::SessionTelemetry;
 use codex_protocol::error::CodexErr;
@@ -217,11 +220,15 @@ impl ModelClientSession {
                 RequestRouteTelemetry::for_endpoint("/messages"),
                 self.client.state.auth_env_telemetry.clone(),
             );
-            let transport = self.client.build_api_transport(
-                &provider,
-                "/messages",
-                ClientRedirectPolicy::Reject,
-            )?;
+            let transport = ReqwestTransport::from_http_client(
+                create_client_for_route(
+                    &self.client.http_client_factory,
+                    &provider.url_for_path("/messages"),
+                    ClientRouteClass::Api,
+                    ClientRedirectPolicy::Reject,
+                )
+                .map_err(std::io::Error::from)?,
+            );
             let dispatch = matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))
                 .then(|| {
                     self.client
@@ -246,12 +253,13 @@ impl ModelClientSession {
             );
             match client.stream_request(request.clone(), options).await {
                 Ok(stream) => {
-                    let (stream, _) = map_response_stream(
+                    let stream = map_response_stream(
                         stream,
                         request_telemetry,
                         attempt,
                         Arc::clone(&self.client.state.provider),
                         interceptors,
+                        /*last_response_tx*/ None,
                     );
                     return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
                 }

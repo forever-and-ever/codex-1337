@@ -1,7 +1,7 @@
 use super::HistoryCell;
 use super::PreambleCell;
 use crate::terminal_hyperlinks::visible_lines;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::PreambleChange;
 use codex_protocol::PreamblePart;
 use codex_protocol::PreambleSection;
@@ -19,7 +19,7 @@ fn part(section: PreambleSection, group: Option<&str>, label: &str, tokens: u64)
 fn preamble_discloses_parts_largest_first() -> anyhow::Result<()> {
     use PreambleSection::Context;
     use PreambleSection::Tools;
-    let cell = PreambleCell::from_item(ThreadItem::Preamble {
+    let cell = PreambleCell::from_item(ThreadItemPayload::Preamble {
         id: "preamble:turn:response".to_string(),
         response_id: "response".to_string(),
         completed_at_ms: 0,

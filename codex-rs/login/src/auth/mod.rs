@@ -1,6 +1,7 @@
 mod access_token;
 mod accounts;
 mod agent_identity;
+mod api_key;
 mod auth_headers;
 mod change_state;
 pub mod default_client;
@@ -18,6 +19,7 @@ mod revoke;
 pub use accounts::SavedAccount;
 pub use accounts::activate_account;
 pub use accounts::admit_auth;
+pub use api_key::is_fedramp_api_key;
 pub use auth_headers::AuthHeaders;
 pub use change_state::AuthChangeState;
 pub use error::RefreshTokenFailedError;

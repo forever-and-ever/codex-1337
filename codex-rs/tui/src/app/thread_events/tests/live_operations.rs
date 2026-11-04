@@ -9,24 +9,30 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     use codex_app_server_protocol::CodeModeOwner;
     use codex_app_server_protocol::CodeModeStatus;
 
-    fn event(thread: ThreadId, turn: &str, item: ThreadItem, started: bool) -> ServerNotification {
+    fn event(
+        thread: ThreadId,
+        turn: &str,
+        item: ThreadItemPayload,
+        started: bool,
+    ) -> ServerNotification {
         if started {
-            ServerNotification::ItemStarted(ItemStartedNotification {
-                thread_id: thread.to_string(),
-                turn_id: turn.to_owned(),
+            ServerNotification::ItemStarted(ItemStartedNotification::new(
+                thread.to_string(),
+                turn.to_owned(),
                 item,
-                started_at_ms: 1,
-            })
+                1,
+            ))
         } else {
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: thread.to_string(),
-                turn_id: turn.to_owned(),
+            ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+                thread.to_string(),
+                turn.to_owned(),
                 item,
-                completed_at_ms: 2,
-            })
+                None,
+                2,
+            ))
         }
     }
-    fn dynamic(id: &str, status: &str) -> ThreadItem {
+    fn dynamic(id: &str, status: &str) -> ThreadItemPayload {
         serde_json::from_value(serde_json::json!({
             "type": "dynamicToolCall", "id": id, "namespace": "functions",
             "tool": "python", "arguments": {"source": "1 + 1"}, "status": status,
@@ -34,7 +40,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         }))
         .unwrap()
     }
-    fn command(status: &str) -> ThreadItem {
+    fn command(status: &str) -> ThreadItemPayload {
         serde_json::from_value(serde_json::json!({
             "type": "commandExecution", "id": "command", "command": "/usr/bin/zsh -lc 'sleep 20'",
             "cwd": "/tmp/project", "processId": "session", "status": status,
@@ -52,9 +58,10 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         cell_id: Some("cell".to_owned()),
         started_at_ms: 1,
     };
-    let owned = |item| ThreadItem::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(item)));
+    let owned =
+        |item| ThreadItemPayload::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(item)));
     let fact = |id: &str, event| {
-        owned(ThreadItem::CodeMode(CodeModeItem {
+        owned(ThreadItemPayload::CodeMode(CodeModeItem {
             id: id.to_owned(),
             cell_id: owner.cell_id.clone(),
             exec_call_id: owner.exec_call_id.clone(),
@@ -255,7 +262,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     store.push_notification(event(
         thread_id,
         "turn-2",
-        owned(ThreadItem::ToolOutputTokens {
+        owned(ThreadItemPayload::ToolOutputTokens {
             id: "nested-tokens".to_owned(),
             call_id: "nested".to_owned(),
             tokens: Some(1),
@@ -280,7 +287,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     store.push_notification(event(
         thread_id,
         "turn-2",
-        ThreadItem::ContextCompaction {
+        ThreadItemPayload::ContextCompaction {
             id: "compact".to_owned(),
         },
         true,
@@ -289,7 +296,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         store.push_notification(event(
             thread_id,
             "turn-2",
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 id: format!("message-{index}"),
                 text: "capture".to_owned(),
                 phase: None,
@@ -334,13 +341,13 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     // terminal command or its enclosing cell must retire them without a turn change.
     for status in ["completed", "failed", "declined"] {
         let mut approval = command("inProgress");
-        if let ThreadItem::CommandExecution { id, process_id, .. } = &mut approval {
+        if let ThreadItemPayload::CommandExecution { id, process_id, .. } = &mut approval {
             *id = format!("approval-{status}");
             *process_id = None;
         }
         store.push_notification(event(thread_id, "turn-3", owned(approval.clone()), true));
         assert_eq!(store.operations.rows(thread_id)[0].children.len(), 1);
-        if let ThreadItem::CommandExecution {
+        if let ThreadItemPayload::CommandExecution {
             status: outcome, ..
         } = &mut approval
         {
@@ -350,7 +357,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         assert!(store.operations.rows(thread_id)[0].children.is_empty());
     }
     let mut approval = command("inProgress");
-    if let ThreadItem::CommandExecution { id, process_id, .. } = &mut approval {
+    if let ThreadItemPayload::CommandExecution { id, process_id, .. } = &mut approval {
         *id = "approval-cell-finish".to_owned();
         *process_id = None;
     }
@@ -360,10 +367,11 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         cell_id: Some("other-cell".to_owned()),
         ..owner.clone()
     };
-    let other_owned =
-        |item| ThreadItem::CodeModeOwned(CodeModeOwned::new(other_owner.clone(), Box::new(item)));
+    let other_owned = |item| {
+        ThreadItemPayload::CodeModeOwned(CodeModeOwned::new(other_owner.clone(), Box::new(item)))
+    };
     let mut other_command = command("inProgress");
-    if let ThreadItem::CommandExecution { id, .. } = &mut other_command {
+    if let ThreadItemPayload::CommandExecution { id, .. } = &mut other_command {
         *id = "other-command".to_owned();
     }
     store.push_notification(event(
@@ -383,7 +391,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     store.push_notification(event(thread_id, "turn-3", finished.clone(), false));
     store.push_notification(event(thread_id, "turn-1", started.clone(), false));
     assert_eq!(store.operations.rows(thread_id).len(), 1);
-    if let ThreadItem::CommandExecution { status, .. } = &mut other_command {
+    if let ThreadItemPayload::CommandExecution { status, .. } = &mut other_command {
         *status = codex_app_server_protocol::CommandExecutionStatus::Completed;
     }
     store.push_notification(event(

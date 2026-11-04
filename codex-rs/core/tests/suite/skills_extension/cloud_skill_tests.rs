@@ -165,6 +165,8 @@ text({ names: result.skills.map(skill => skill.name), warnings: result.warnings,
         })),
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
+            catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+            omit_descriptions: false,
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: true,
@@ -510,6 +512,8 @@ async fn production_turn_aliases_discovered_singleton_cloud_locator() -> Result<
         })),
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
+            catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+            omit_descriptions: false,
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: true,
@@ -599,6 +603,8 @@ async fn cloud_skill_reads_run_in_parallel() -> Result<()> {
         })),
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
+            catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+            omit_descriptions: false,
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: true,
@@ -723,6 +729,8 @@ async fn cloud_skill_can_read_referenced_resource_without_an_executor() -> Resul
             SkillProviders::new().with_cloud_provider(provider.clone()),
             |config: &Config| SkillsExtensionConfig {
                 include_instructions: config.include_skill_instructions,
+                catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+                omit_descriptions: false,
                 max_context_tokens: config.skill_max_context_tokens,
                 bundled_skills_enabled: false,
                 cloud_skill_enabled: true,

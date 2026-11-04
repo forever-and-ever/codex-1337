@@ -34,14 +34,8 @@ fn code_mode_materializes_mcp_output_schemas() {
         ..parsed.clone()
     };
     assert_eq!(
-        super::collect_code_mode_tool_definitions(
-            [&ToolSpec::Function(parsed)],
-            /*tool_description_first*/ false,
-        ),
-        super::collect_code_mode_tool_definitions(
-            [&ToolSpec::Function(eager)],
-            /*tool_description_first*/ false,
-        ),
+        super::collect_code_mode_tool_definitions([&ToolSpec::Function(parsed)],),
+        super::collect_code_mode_tool_definitions([&ToolSpec::Function(eager)],),
     );
 }
 
@@ -220,8 +214,7 @@ Apply a patch"#
             output_schema: None,
         })
     );
-    let definitions =
-        super::collect_code_mode_tool_definitions([&spec], /*tool_description_first*/ false);
+    let definitions = super::collect_code_mode_tool_definitions([&spec]);
     let [definition] = definitions.as_slice() else {
         panic!("expected the namespaced custom tool");
     };

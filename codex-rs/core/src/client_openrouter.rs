@@ -111,6 +111,8 @@ impl ModelClient {
             redirect_policy: ClientRedirectPolicy::Reject,
             api_auth: Arc::new(bearer),
             agent_identity_telemetry: None,
+            http_client_factory: self.http_client_factory.clone(),
+            runtime_id: None,
         })
     }
 
@@ -292,6 +294,7 @@ pub(super) fn project_stream(
         return stream;
     };
     let (tx, rx_event) = mpsc::channel(super::RESPONSE_STREAM_CHANNEL_CAPACITY);
+    let routing_affinity = stream.routing_affinity.take();
     let upstream_request_id = stream.upstream_request_id.take();
     let interrupt = stream.interrupt.take();
     tokio::spawn(async move {
@@ -333,6 +336,7 @@ pub(super) fn project_stream(
         }
     });
     ApiResponseStream {
+        routing_affinity,
         rx_event,
         upstream_request_id,
         interrupt,

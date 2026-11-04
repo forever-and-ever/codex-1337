@@ -129,6 +129,7 @@ impl Diagnostics {
             | ApiError::CyberPolicy { .. }
             | ApiError::BioPolicy { .. }
             | ApiError::MisalignmentPolicyViolation { .. }
+            | ApiError::PolicyCapacityUnavailable { .. }
             | ApiError::FlexUnavailable
             | ApiError::ServerOverloaded { .. } => {
                 json!({"kind":"terminal_api_error","message":self.text(&error.to_string())})

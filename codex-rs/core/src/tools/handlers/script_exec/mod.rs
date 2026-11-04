@@ -174,6 +174,29 @@ impl CoreToolRuntime for ScriptExecHandler {
         })
     }
 
+    fn pre_tool_use_cwd(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<Option<codex_utils_path_uri::PathUri>, FunctionCallError> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return Ok(None);
+        };
+        let metadata = parser::parse(input)?;
+        let environment = crate::tools::handlers::selected_executor(
+            &invocation.environments,
+            &invocation.step_context.environments,
+        )?;
+        let cwd = metadata
+            .workdir
+            .as_deref()
+            .map_or_else(
+                || Ok(environment.cwd().clone()),
+                |workdir| environment.cwd().join(workdir),
+            )
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+        Ok((!environment.environment.is_remote()).then_some(cwd))
+    }
+
     fn with_updated_hook_input(
         &self,
         invocation: ToolInvocation,

@@ -107,6 +107,7 @@ use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::ThreadGoal as AppThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus as AppThreadGoalStatus;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadSettings;
 use codex_app_server_protocol::ThreadSettingsUpdatedNotification;
 use codex_app_server_protocol::ToolRequestUserInputParams;
@@ -303,7 +304,6 @@ mod startup_handoff;
 mod startup_submission;
 pub(crate) use session_draft::SessionDraft;
 mod ui_reload;
-pub(crate) use self::interrupts::CompletedItem;
 use self::interrupts::InterruptManager;
 mod keymap_picker;
 mod mcp_startup;
@@ -406,6 +406,7 @@ use self::review::ReviewState;
 mod account_picker;
 mod claude_quota;
 mod safety_buffering;
+mod safety_recourse;
 mod service_tiers;
 mod settings;
 mod settings_popups;
@@ -648,6 +649,7 @@ pub(crate) struct ChatWidget {
     last_unified_wait: Option<UnifiedExecWaitState>,
     unified_exec_wait_streak: Option<UnifiedExecWaitStreak>,
     turn_lifecycle: TurnLifecycleState,
+    safety_recourse: Option<safety_recourse::PendingRecourse>,
     realtime_conversation: RealtimeConversationUiState,
     realtime_conversation_available_for_thread: bool,
     safety_buffering: SafetyBufferingState,

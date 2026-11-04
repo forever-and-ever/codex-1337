@@ -2,11 +2,11 @@
 //! Approval rejections retain their own lifecycle, and sandbox denials remain retryable.
 //! Once started, failure event publication survives caller cancellation.
 
-use super::UnifiedExecRequest;
 use crate::tools::events::ToolEmitter;
 use crate::tools::events::ToolEventCtx;
 use crate::tools::events::ToolEventFailure;
 use crate::tools::events::ToolEventStage;
+use crate::tools::handlers::unified_exec::preparation::PreparedExecCommand;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
 use crate::unified_exec::UnifiedExecProcess;
@@ -16,7 +16,7 @@ use tracing::Instrument;
 
 pub(super) async fn with_launch_failure_events(
     result: Result<UnifiedExecProcess, ToolError>,
-    req: &UnifiedExecRequest,
+    req: &PreparedExecCommand,
     ctx: &ToolCtx,
 ) -> Result<UnifiedExecProcess, ToolError> {
     let Err(ToolError::Rejected(message)) = &result else {

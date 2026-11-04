@@ -5,6 +5,7 @@ use crate::app::test_support::make_test_app;
 use crate::history_cell::ComputerActivityCell;
 use crate::history_cell::FinalMessageSeparator;
 use crate::history_cell::ForkedThreadHistoryCell;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
@@ -15,12 +16,13 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
         root_turn_id: None,
         items: item_ids
             .iter()
-            .map(|id| ThreadItem::UserMessage {
+            .map(|id| ThreadItemPayload::UserMessage {
                 source_response_item_id: None,
                 id: id.to_string(),
                 client_id: None,
                 content: Vec::new(),
             })
+            .map(ThreadItem::untimed)
             .collect(),
         items_view: TurnItemsView::Full,
         status,
@@ -56,7 +58,7 @@ fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
     Arc::new(UserHistoryCell {
         timestamp: None,
         prompt_identity: Default::default(),
-        spoken: false,
+        presentation: Default::default(),
         message: message.to_string(),
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
@@ -142,12 +144,12 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         let expected_completions = usize::from(status == TurnStatus::Completed);
         let mut first = turn("first", status, &[]);
         first.items = vec![
-            ThreadItem::EnteredReviewMode {
+            ThreadItem::untimed(ThreadItemPayload::EnteredReviewMode {
                 id: "enter-review".to_string(),
                 review: "current changes".to_string(),
-            },
+            }),
             computer("older-call"),
-            ThreadItem::UserMessage {
+            ThreadItem::untimed(ThreadItemPayload::UserMessage {
                 source_response_item_id: None,
                 id: "hidden".to_string(),
                 client_id: None,
@@ -155,7 +157,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
                     text: "internal review prompt".to_string(),
                     text_elements: Vec::new(),
                 }],
-            },
+            }),
         ];
         first.completed_at = Some(1_700_000_000);
         first.duration_ms = Some(125_000);
@@ -166,7 +168,8 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         assert_eq!(hidden, HashSet::from(["hidden"]));
         let items = turns
             .iter()
-            .flat_map(|turn| turn.items.clone())
+            .flat_map(|turn| &turn.items)
+            .cloned()
             .collect::<Vec<_>>();
 
         let cells = app.project_older_history_cells(
@@ -220,4 +223,94 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
             0,
         );
     }
+}
+
+#[tokio::test]
+async fn browsing_waits_for_a_prompt_outside_the_initial_history_window() -> Result<()> {
+    let mut app = make_test_app().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(/*owned*/ true)?;
+    app.scrollback_has_older_history = true;
+    app.transcript_cells = vec![
+        user_cell(""),
+        Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
+            "recent answer".into(),
+        ])),
+    ];
+    app.handle_backtrack_esc_key(&mut tui);
+    app.handle_backtrack_esc_key(&mut tui);
+    assert!(app.backtrack.overlay_preview_active && app.browsing_needs_history());
+    app.prepend_older_transcript_cells(vec![
+        user_cell(""),
+        Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
+            "earlier answer".into(),
+        ])),
+    ]);
+    assert!(app.browsing_needs_history());
+    app.prepend_older_transcript_cells(vec![
+        user_cell(""),
+        user_cell("older prompt"),
+        user_cell("latest prompt"),
+    ]);
+    app.apply_backtrack_selection_internal(app.backtrack.nth_user_message);
+    assert_eq!(
+        (
+            app.backtrack.nth_user_message,
+            crate::app_backtrack::nth_user_position(
+                &app.transcript_cells,
+                app.backtrack.nth_user_message
+            )
+        ),
+        (1, Some(2))
+    );
+    assert!(!app.browsing_needs_history());
+    app.apply_backtrack_selection_internal(/*nth_user_message*/ 0);
+    let mut review_turn = turn(
+        "review",
+        TurnStatus::Completed,
+        &["older prompt", "latest prompt"],
+    );
+    for item in &mut review_turn.items {
+        if let ThreadItemPayload::UserMessage { id, content, .. } = &mut item.payload {
+            *content = vec![UserInput::Text {
+                text: id.clone(),
+                text_elements: Vec::new(),
+            }];
+        }
+    }
+    review_turn.items.insert(
+        /*index*/ 0,
+        ThreadItem::untimed(ThreadItemPayload::EnteredReviewMode {
+            id: "enter".to_string(),
+            review: "review".to_string(),
+        }),
+    );
+    review_turn.items.insert(
+        /*index*/ 2,
+        ThreadItem::untimed(ThreadItemPayload::ExitedReviewMode {
+            id: "exit".to_string(),
+            review: "review".to_string(),
+        }),
+    );
+    let turns = [review_turn];
+    app.remove_hidden_review_cells(
+        &mut tui,
+        &turns,
+        &hidden_review_item_ids(&turns),
+        ThreadId::new(),
+        &app.config.cwd.clone(),
+        RawReasoningVisibility::Hidden,
+    );
+    assert!(!app.backtrack.overlay_preview_active);
+    assert_eq!(
+        app.transcript_cells
+            .iter()
+            .filter_map(|cell| cell.as_any().downcast_ref::<UserHistoryCell>())
+            .filter(|cell| !cell.message.is_empty())
+            .map(|cell| cell.message.as_str())
+            .collect::<Vec<_>>(),
+        vec!["latest prompt"]
+    );
+    tui.set_owned_screen(/*owned*/ false)?;
+    Ok(())
 }

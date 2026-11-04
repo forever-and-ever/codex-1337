@@ -69,7 +69,7 @@ impl ChatWidget {
 
     /// Preserve received answer and plan source before ordinary turn termination.
     pub(super) fn flush_answer_and_plan_streams(&mut self) {
-        self.flush_answer_stream(/*completed_message*/ None);
+        self.flush_answer_stream(/*completed_message*/ None, &[]);
         if let Some(mut controller) = self.take_prepared_plan_stream(None) {
             self.clear_active_stream_tail();
             let (cell, source) = controller.finalize();
@@ -97,12 +97,17 @@ impl ChatWidget {
         {
             return;
         }
-        self.flush_answer_stream(/*completed_message*/ None);
+        self.flush_answer_stream(/*completed_message*/ None, &[]);
     }
 
-    fn flush_answer_stream(&mut self, completed_message: Option<&str>) {
+    fn flush_answer_stream(
+        &mut self,
+        completed_message: Option<&str>,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
+    ) {
         let had_stream_controller = self.stream_controller.is_some();
-        if let Some(mut controller) = self.take_prepared_answer_stream(completed_message) {
+        if let Some(mut controller) = self.take_prepared_answer_stream(completed_message, questions)
+        {
             let needs_scrollback_reflow = controller.needs_scrollback_reflow();
             self.clear_active_stream_tail();
             let (cell, streamed_source) = controller.finalize();
@@ -244,7 +249,11 @@ impl ChatWidget {
             })
     }
 
-    pub(super) fn finalize_completed_assistant_message(&mut self, message: Option<&str>) {
+    pub(super) fn finalize_completed_assistant_message(
+        &mut self,
+        message: Option<&str>,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
+    ) {
         if self.stream_controller.is_none()
             && let Some(message) = message
             && !message.is_empty()
@@ -256,7 +265,7 @@ impl ChatWidget {
         }
         // Item completion is authoritative. Use it for consolidation so any
         // deltas dropped by a saturated transport cannot truncate the transcript.
-        self.flush_answer_stream(message);
+        self.flush_answer_stream(message, questions);
         self.handle_stream_finished();
         self.request_redraw();
     }
@@ -475,7 +484,8 @@ impl ChatWidget {
             return;
         }
         let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
-        if from_replay
+        let questions = item.questions.as_deref().unwrap_or_default();
+        if (from_replay || !questions.is_empty())
             && self.stream_controller.is_none()
             && !parsed.visible_markdown.is_empty()
             && !self.completed_agent_message_was_flushed(&message)
@@ -494,14 +504,16 @@ impl ChatWidget {
                 self.config.cwd.as_path(),
                 context,
             );
-            cell = cell.with_copy_source(Some(message.clone()));
+            cell = cell
+                .with_questions(questions)
+                .with_copy_source(Some(message.clone()));
             cell.timestamp = self.transcript.agent_timestamp;
             cell.item_id = Some(item.id.clone());
             self.add_to_history(cell);
             self.handle_stream_finished();
             self.request_redraw();
         } else {
-            self.finalize_completed_assistant_message(Some(&message));
+            self.finalize_completed_assistant_message(Some(&message), questions);
         }
         self.transcript.agent_timestamp = None;
         if !parsed.visible_markdown.is_empty() {

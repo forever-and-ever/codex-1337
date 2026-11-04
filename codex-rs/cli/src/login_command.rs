@@ -6,7 +6,7 @@ use crate::run_claude_account_command;
 use crate::run_login_status;
 use crate::run_login_with_access_token;
 use crate::run_login_with_api_key;
-use crate::run_login_with_chatgpt;
+use crate::run_login_with_browser;
 use crate::run_login_with_claude_subscription;
 use crate::run_login_with_device_code;
 use std::io::BufRead;
@@ -126,7 +126,7 @@ pub(super) async fn run(command: LoginCommand) -> ! {
                 let token = read_access_token_from_stdin();
                 Box::pin(run_login_with_access_token(command.config_overrides, token)).await;
             }
-            Box::pin(run_login_with_chatgpt(command.config_overrides)).await
+            Box::pin(run_login_with_browser(command.config_overrides)).await
         }
     }
 }

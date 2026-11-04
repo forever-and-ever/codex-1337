@@ -1,30 +1,47 @@
 //! Types that specify what is contained in a ZIP.
 
+use crate::CompressionMethod;
+use crate::ExtraField;
+use crate::ZipReadOptions;
 use crate::datetime::DateTime;
 use crate::extra_fields::ExtraFields;
-use crate::format::aes::{AesMode, AesVendorVersion};
-use crate::format::blocks::{FixedSizeBlock, ZipLocalEntryBlock};
-use crate::format::data_descriptor::{
-    Zip64DataDescriptorBlock, ZipDataDescriptor, ZipDataDescriptorBlock,
-};
+use crate::format::ZIP64_BYTES_THR;
+use crate::format::ZIP64_BYTES_THR_U32;
+use crate::format::aes::AesMode;
+use crate::format::aes::AesVendorVersion;
+use crate::format::blocks::FixedSizeBlock;
+use crate::format::blocks::ZipLocalEntryBlock;
+use crate::format::data_descriptor::Zip64DataDescriptorBlock;
+use crate::format::data_descriptor::ZipDataDescriptor;
+use crate::format::data_descriptor::ZipDataDescriptorBlock;
 use crate::format::ffi;
 use crate::format::flags::ZipFileFlags;
 use crate::format::flags::ZipFlags;
-use crate::format::functions::{get_flags, get_unix_mode, get_version_needed, is_dir};
+use crate::format::functions::get_flags;
+use crate::format::functions::get_unix_mode;
+use crate::format::functions::get_version_needed;
+use crate::format::functions::is_dir;
 use crate::format::magic::Magic;
 use crate::format::system::System;
-use crate::format::{ZIP64_BYTES_THR, ZIP64_BYTES_THR_U32};
-use crate::path::{enclosed_name, file_name_sanitized};
-use crate::read::readers::{SeekableTake, ZipFileReader, make_crypto_reader, make_reader};
-use crate::result::{ZipError, ZipResult};
+use crate::path::enclosed_name;
+use crate::path::file_name_sanitized;
+use crate::read::readers::SeekableTake;
+use crate::read::readers::ZipFileReader;
+use crate::read::readers::make_crypto_reader;
+use crate::read::readers::make_reader;
+use crate::result::ZipError;
+use crate::result::ZipResult;
 use crate::write::FileOptionExtension;
 use crate::write::FileOptions;
-use crate::{CompressionMethod, ExtraField, ZipReadOptions};
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::io::{Read, Seek, SeekFrom, Take};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Take;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 pub(crate) struct ZipRawValues {
@@ -34,7 +51,9 @@ pub(crate) struct ZipRawValues {
 }
 
 /// re-export
-pub use crate::format::{DEFAULT_VERSION, MIN_VERSION};
+pub use crate::format::DEFAULT_VERSION;
+/// re-export
+pub use crate::format::MIN_VERSION;
 
 /// Structure representing a ZIP file.
 #[derive(Debug, Clone, Default)]
@@ -529,8 +548,11 @@ impl ZipFileData {
 mod tests {
     #[test]
     fn sanitize() {
-        use super::{CompressionMethod, System, ZipFileData};
-        use std::{path::PathBuf, sync::OnceLock};
+        use super::CompressionMethod;
+        use super::System;
+        use super::ZipFileData;
+        use std::path::PathBuf;
+        use std::sync::OnceLock;
 
         let file_name = "/path/../../../../etc/./passwd\0/etc/shadow".to_string();
         let data = ZipFileData {

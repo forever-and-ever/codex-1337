@@ -3,7 +3,8 @@
 //! The following paper was used to implement the `ZipCrypto` algorithm:
 //! [https://courses.cs.ut.ee/MTAT.07.022/2015_fall/uploads/Main/dmitri-report-f15-16.pdf](https://courses.cs.ut.ee/MTAT.07.022/2015_fall/uploads/Main/dmitri-report-f15-16.pdf)
 
-use core::fmt::{Debug, Formatter};
+use core::fmt::Debug;
+use core::fmt::Formatter;
 use core::hash::Hash;
 use core::num::Wrapping;
 

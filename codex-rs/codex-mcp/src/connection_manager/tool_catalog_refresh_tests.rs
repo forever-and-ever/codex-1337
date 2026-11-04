@@ -66,6 +66,8 @@ impl MutableCatalog {
         )
         .await?;
         let managed_client = ManagedClient {
+            connection_sharing: crate::connection_pool::ConnectionSharing::Private,
+            shared_elicitation: None,
             _auth_change_notifications: None,
             client: Arc::clone(&client),
             server_info: create_test_server_info("Mutable catalog"),
@@ -93,6 +95,7 @@ impl MutableCatalog {
                 tool_catalog_cache_context: None,
                 startup_complete: Arc::new(AtomicBool::new(true)),
                 startup_reconnect: None,
+                connection_slot: None,
                 cancel_token: CancellationToken::new(),
             },
         );

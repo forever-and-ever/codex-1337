@@ -10,7 +10,7 @@ use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::CensusCount;
 use codex_protocol::PreambleChange;
 use codex_protocol::PreamblePart;
@@ -36,8 +36,8 @@ pub(crate) struct PreambleCell {
 }
 
 impl PreambleCell {
-    pub(crate) fn from_item(item: ThreadItem) -> Self {
-        let ThreadItem::Preamble {
+    pub(crate) fn from_item(item: ThreadItemPayload) -> Self {
+        let ThreadItemPayload::Preamble {
             id,
             completed_at_ms,
             parts,

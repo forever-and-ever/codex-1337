@@ -28,6 +28,8 @@ pub(crate) struct LogicalLineSource {
     pub(crate) bracket: Option<crate::warpaint::Bracket>,
     pub(crate) text: Arc<str>,
     pub(crate) copy: Option<Arc<crate::markdown_copy::CopyLine>>,
+    /// Selectable label length and the original body, whose Markdown ranges exclude the label.
+    pub(crate) labelled_body: Option<Arc<(usize, LogicalLineSource)>>,
     /// Literal user text remains prose when copied alongside rendered Markdown.
     pub(crate) copy_as_prose: bool,
     /// Span styles share the text's byte coordinates, including whitespace omitted by wrapping.
@@ -52,6 +54,7 @@ impl LogicalLineSource {
             bracket: None,
             text: text.into(),
             copy: None,
+            labelled_body: None,
             copy_as_prose: false,
             styles: vec![(0..end, Style::default())].into(),
             line_style: Style::default(),
@@ -114,6 +117,7 @@ impl LogicalLineSource {
             bracket: self.bracket,
             text: Arc::clone(&self.text),
             copy: self.copy.clone(),
+            labelled_body: self.labelled_body.clone(),
             copy_as_prose: self.copy_as_prose,
             styles: Arc::clone(&self.styles),
             line_style: self.line_style,

@@ -110,7 +110,7 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-        spoken: false,
+        presentation: Default::default(),
     })];
     let mut view = TranscriptView::default();
     let area = Rect::new(0, 0, 140, 80);
@@ -267,6 +267,7 @@ async fn status_command_waits_for_usage_and_limits_without_status_line() {
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: Some(1_820_000),
@@ -316,10 +317,9 @@ async fn status_command_waits_for_usage_and_limits_without_status_line() {
 }
 
 #[tokio::test]
-async fn status_command_omits_thread_usage_for_non_cbp_enterprise_plans() {
+async fn status_command_omits_thread_usage_for_unsupported_plans() {
     for plan_type in [
         Some(PlanType::Enterprise),
-        Some(PlanType::Ent26),
         Some(PlanType::Pro),
         Some(PlanType::Edu),
         Some(PlanType::SelfServeBusinessUsageBased),
@@ -372,6 +372,7 @@ async fn status_command_reports_usage_failure_and_can_retry() {
         thread_id,
         retry_request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: Some(1_820_000),
@@ -400,6 +401,7 @@ async fn status_command_renders_credits_and_breakdowns_without_usd_estimate() {
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: None,
@@ -453,6 +455,7 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 40_000_000,
             estimated_usage_usd_micros: Some(1_820_000),
@@ -471,6 +474,7 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: None,
@@ -548,6 +552,7 @@ async fn status_command_is_cancelled_when_account_changes_during_usage_refresh()
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: Some(1_820_000),
@@ -579,6 +584,7 @@ async fn status_command_is_cancelled_when_thread_changes_during_usage_refresh() 
         thread_id,
         request_id,
         Ok(ThreadUsageOutcome::Available(ThreadUsage {
+            native_usage_usd_micros: None,
             thread_id: thread_id.to_string(),
             estimated_usage_credits_micros: 50_000_000,
             estimated_usage_usd_micros: Some(1_820_000),

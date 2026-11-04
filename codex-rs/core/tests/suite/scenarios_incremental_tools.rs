@@ -35,8 +35,8 @@ use test_case::test_case;
 use super::super::rmcp_client::remote_aware_environment_id;
 use super::super::rmcp_client::remote_aware_stdio_server_bin;
 
-#[test_case(false; "update MCP declarations by default")]
-#[test_case(true; "preserve inherited declarations when enabled")]
+#[test_case(false; "update MCP declarations when disabled")]
+#[test_case(true; "preserve inherited declarations by default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> Result<()> {
     skip_if_wine_exec!(
@@ -63,9 +63,9 @@ async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> R
                 config.base_instructions = Some("Use the available tools to help the user.".into());
                 config.features.enable(Feature::IncrementalTools)
                     .expect("enable incremental tools");
-                if preserve_parent_tools {
-                    config.features.enable(Feature::PredictionPreserveParentTools)
-                        .expect("enable inherited prediction tools");
+                if !preserve_parent_tools {
+                    config.features.disable(Feature::PredictionPreserveParentTools)
+                        .expect("disable inherited prediction tools");
                 }
                 config.mcp_servers.set(std::collections::HashMap::from([(
                     "echo_service".into(),

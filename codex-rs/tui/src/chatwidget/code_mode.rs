@@ -8,7 +8,7 @@ use super::ReplayKind;
 use super::ServerNotification;
 use super::StatusDetailsCapitalization;
 use super::TerminalTitleStatusKind;
-use super::ThreadItem;
+use super::ThreadItemPayload;
 use super::is_unified_exec_source;
 use super::multi_agents;
 use crate::code_mode_transcript::Admission;
@@ -17,7 +17,7 @@ use crate::code_mode_transcript::Source;
 impl ChatWidget {
     pub(super) fn admit_code_mode_snapshot(
         &mut self,
-        owned: codex_app_server_protocol::CodeModeOwned<Box<ThreadItem>>,
+        owned: codex_app_server_protocol::CodeModeOwned<Box<ThreadItemPayload>>,
         turn: String,
     ) {
         let admission = Admission::item(owned, turn);
@@ -68,8 +68,8 @@ impl ChatWidget {
 
     pub(crate) fn observe_code_mode_notification(&mut self, notification: &ServerNotification) {
         let (item, started) = match notification {
-            ServerNotification::ItemStarted(event) => (&event.item, true),
-            ServerNotification::ItemCompleted(event) => (&event.item, false),
+            ServerNotification::ItemStarted(event) => (&event.item.payload, true),
+            ServerNotification::ItemCompleted(event) => (&event.item.payload, false),
             ServerNotification::CommandExecutionOutputDelta(delta) => {
                 self.track_unified_exec_output_chunk(&delta.item_id, delta.delta.as_bytes());
                 return;
@@ -100,7 +100,7 @@ impl ChatWidget {
             _ => return,
         };
         match item.native_item() {
-            ThreadItem::CommandExecution {
+            ThreadItemPayload::CommandExecution {
                 id,
                 process_id,
                 command,
@@ -120,7 +120,7 @@ impl ChatWidget {
                     self.track_unified_exec_process_end(id, process_id.as_deref());
                 }
             }
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id,
                 tool: CollabAgentTool::SpawnAgent,
                 status,

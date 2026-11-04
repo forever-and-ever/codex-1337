@@ -3,6 +3,10 @@
 #[path = "code_mode_dynamic_tools_tests.rs"]
 mod dynamic_tools;
 
+#[cfg(unix)]
+#[path = "code_mode_host_recovery_tests.rs"]
+mod host_recovery;
+
 use anyhow::Context;
 use anyhow::Result;
 use base64::Engine;
@@ -3578,15 +3582,10 @@ async fn code_mode_complete_calls_preserve_large_arguments() -> Result<()> {
     Ok(())
 }
 
+#[test_case(false; "catalog_search")]
+#[test_case(true; "ranked_search")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[test_case(false, false; "control")]
-#[test_case(true, false; "ranked_search")]
-#[test_case(false, true; "tool_description_first")]
-#[test_case(true, true; "ranked_search_tool_description_first")]
-async fn code_mode_only_searches_and_calls_deferred_app_tools(
-    ranked_search: bool,
-    tool_description_first: bool,
-) -> Result<()> {
+async fn code_mode_only_searches_and_calls_deferred_app_tools(ranked_search: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -3704,13 +3703,6 @@ if (!tool) {
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("test config should allow feature update");
-            config
-                .features
-                .set_enabled(
-                    Feature::CodeModeToolDescriptionFirst,
-                    tool_description_first,
-                )
-                .expect("test config should allow description order update");
             if ranked_search {
                 config
                     .features
@@ -3799,7 +3791,7 @@ if (!tool) {
             "hasDeclaration": true,
             "hasSchemaDescription": true,
             "hasNamespacePrefix": true,
-            "descriptionFirst": tool_description_first,
+            "descriptionFirst": true,
             "isError": false,
             "text": "called calendar_timezone_option_99 for  at  with ",
         })

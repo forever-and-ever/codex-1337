@@ -153,7 +153,7 @@ impl SessionRuntime {
     fn allocate_cell_id(&self) -> Result<CellId, Error> {
         self.inner
             .next_cell_id
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next_cell_id| {
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next_cell_id| {
                 next_cell_id.checked_add(1)
             })
             .map(|cell_id| CellId::new(cell_id.to_string()))
@@ -289,7 +289,6 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
         &self,
         stored_value_writes: HashMap<String, Arc<JsonValue>>,
         event: CellEvent,
-        pending_initial_yield_items: Option<Vec<OutputItem>>,
         cell_state: Arc<CellState>,
     ) -> CompletionCommit {
         let cancellation_token = cell_state.cancellation_token();
@@ -313,7 +312,7 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
                 unreachable!("completion must be terminal")
             }
         };
-        let committed = cell_state.commit_completion(event, pending_initial_yield_items, || {
+        let committed = cell_state.commit_completion(event, || {
             stored_values.extend(stored_value_writes);
         });
         if committed == CompletionCommit::Committed {

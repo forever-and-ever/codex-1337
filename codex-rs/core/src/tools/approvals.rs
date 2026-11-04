@@ -81,6 +81,7 @@ pub(crate) enum ApprovalAction {
         approval_id: String,
         environment_id: String,
         process_id: i32,
+        original_command: String,
         input: String,
         cwd: PathUri,
         tty: bool,
@@ -168,21 +169,24 @@ impl ApprovalAction {
         tool_name: &ToolName,
     ) -> PermissionRequestPayload {
         let attributed_tool = Some(tool_name.clone());
-        match self {
+        let mut payload = match self {
             Self::ExecCommand {
                 hook_command,
                 justification,
+                cwd,
                 ..
             } => PermissionRequestPayload::command(
                 attributed_tool,
                 hook_command.clone(),
                 justification.clone(),
+                cwd.clone(),
             ),
             Self::WriteStdin {
                 id,
                 approval_id,
                 environment_id,
                 process_id,
+                original_command: _,
                 input,
                 cwd,
                 tty,
@@ -191,6 +195,7 @@ impl ApprovalAction {
                 additional_permissions_preapproved: _,
             } => PermissionRequestPayload {
                 tool_name: attributed_tool,
+                tool_cwd: Some(cwd.clone()),
                 tool_input: serde_json::json!({
                     "session_id": process_id, "chars": input, "parent_call_id": id,
                     "approval_id": approval_id, "environment_id": environment_id, "cwd": cwd,
@@ -199,10 +204,12 @@ impl ApprovalAction {
             },
             Self::ApplyPatch { patch, .. } => PermissionRequestPayload {
                 tool_name: attributed_tool,
+                tool_cwd: None,
                 tool_input: serde_json::json!({ "command": patch }),
             },
             Self::McpToolCall { arguments, .. } => PermissionRequestPayload {
                 tool_name: attributed_tool,
+                tool_cwd: None,
                 tool_input: arguments
                     .clone()
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
@@ -210,12 +217,17 @@ impl ApprovalAction {
             Self::NetworkAccess {
                 hook_command,
                 target,
+                cwd,
                 trigger,
                 ..
             } => PermissionRequestPayload::command(
                 trigger.as_ref().map(|trigger| trigger.tool_name.clone()),
                 hook_command.clone(),
                 Some(format!("network-access {target}")),
+                trigger.as_ref().map_or_else(
+                    || PathUri::from_abs_path(cwd),
+                    |trigger| trigger.cwd.clone(),
+                ),
             ),
             Self::RequestPermissions {
                 reason,
@@ -223,9 +235,22 @@ impl ApprovalAction {
                 ..
             } => PermissionRequestPayload {
                 tool_name: attributed_tool,
+                tool_cwd: None,
                 tool_input: serde_json::json!({ "reason": reason, "permissions": permissions }),
             },
+        };
+        // Command hooks run on the host. Keep remote paths in the action's
+        // original tool input, but never use them as the hook's top-level cwd.
+        if matches!(
+            self,
+            Self::ExecCommand { environment_id, .. }
+                | Self::WriteStdin { environment_id, .. }
+                | Self::NetworkAccess { environment_id, .. }
+                if environment_id != codex_exec_server::LOCAL_ENVIRONMENT_ID
+        ) {
+            payload.tool_cwd = None;
         }
+        payload
     }
 
     pub(crate) fn cache_keys(&self) -> Vec<ApprovalCacheKey> {
@@ -305,6 +330,7 @@ impl ApprovalAction {
                 approval_id,
                 environment_id,
                 process_id,
+                original_command,
                 input,
                 cwd,
                 tty,
@@ -316,6 +342,7 @@ impl ApprovalAction {
                 approval_id,
                 environment_id,
                 process_id,
+                original_command,
                 input,
                 cwd,
                 tty,
@@ -591,34 +618,7 @@ impl Session {
         }
         let is_network_approval = matches!(&action, ApprovalAction::NetworkAccess { .. });
         let review_id = new_guardian_review_id();
-        let exec_command_cwd_convention = match &action {
-            ApprovalAction::ExecCommand {
-                environment_id,
-                cwd,
-                ..
-            } => Some(
-                match ctx
-                    .review_context
-                    .environments()
-                    .turn_environments()
-                    .find(|environment| environment.selection.environment_id == *environment_id)
-                    .and_then(|environment| environment.executor_platform_os.as_deref())
-                {
-                    Some("windows") => PathConvention::Windows,
-                    Some(_) => PathConvention::Posix,
-                    // Legacy executors did not report their OS. Preserve the
-                    // previous spelling-based behavior for those executors.
-                    None => cwd
-                        .infer_path_convention()
-                        .unwrap_or_else(PathConvention::native),
-                },
-            ),
-            _ => None,
-        };
-        let action = crate::guardian::ReviewAction::from_approval_action(
-            action,
-            exec_command_cwd_convention,
-        );
+        let action = crate::guardian::from_approval_action(action, &context);
 
         let reasons = ApprovalRequestReasons {
             approval: ctx.approval_reason.clone(),
@@ -720,6 +720,7 @@ impl Session {
                         ExecApprovalKind::Command,
                         ctx.review_context.model_context(),
                         ctx.call_id.clone(),
+                        Some(&ctx.call_id),
                         /*approval_id*/ None,
                         Some(environment_id.clone()),
                         command.clone(),
@@ -750,6 +751,7 @@ impl Session {
                     ExecApprovalKind::WriteStdin,
                     ctx.review_context.model_context(),
                     id.clone(),
+                    Some(&ctx.call_id),
                     Some(approval_id.clone()),
                     Some(environment_id.clone()),
                     vec![
@@ -820,6 +822,7 @@ impl Session {
                 environment_id,
                 command,
                 cwd,
+                trigger,
                 ..
             } => {
                 self.request_command_approval(
@@ -827,6 +830,7 @@ impl Session {
                     ExecApprovalKind::Command,
                     ctx.review_context.model_context(),
                     ctx.call_id.clone(),
+                    trigger.as_ref().map(|trigger| trigger.call_id.as_str()),
                     /*approval_id*/ None,
                     Some(environment_id.clone()),
                     command.clone(),

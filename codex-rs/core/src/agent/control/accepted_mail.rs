@@ -171,7 +171,7 @@ impl LocalAgentControl {
         crate::agent_communication::emit_agent_communication_send(
             record.id.as_str(),
             &context,
-            &communication,
+            crate::agent_communication::send_log_content(&communication).as_deref(),
             recipient,
         );
         Ok(record.id.to_string())

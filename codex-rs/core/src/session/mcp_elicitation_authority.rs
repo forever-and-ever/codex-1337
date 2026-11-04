@@ -425,7 +425,7 @@ async fn review_bound_elicitation(
     Ok(decision.map(|decision| {
         if let Some(reason) = declined_reason {
             warn!(server_name = %request.server_name,
-                request_id = %mcp_elicitation_request_id(&request.request_id), reason,
+                request_id = %request.request_id, reason,
                 "declining Guardian MCP elicitation before review");
             return mcp_elicitation_decline_without_message();
         }

@@ -29,7 +29,6 @@ use super::SelectionAfter;
 use super::ServerCompletion;
 use super::SideThreadState;
 use super::ThreadId;
-use super::ThreadItem;
 use super::UserMessage;
 use super::UserTurnReplay;
 use super::detach;
@@ -51,6 +50,7 @@ use crate::app_server_session::session_preparation::{self as preparation};
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol as api;
+use codex_app_server_protocol::ThreadItemPayload;
 
 pub(super) struct ForkInput {
     origin: OperationOrigin,
@@ -933,9 +933,9 @@ impl App {
                         .iter()
                         .find(|turn| turn.id == retry.turn_id)
                         .into_iter()
-                        .flat_map(|turn| &turn.items)
+                        .flat_map(api::Turn::item_payloads)
                         .filter_map(|item| match item {
-                            ThreadItem::UserMessage { content, .. } => Some(content),
+                            ThreadItemPayload::UserMessage { content, .. } => Some(content),
                             _ => None,
                         })
                         .skip(1)

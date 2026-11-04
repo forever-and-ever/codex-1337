@@ -28,6 +28,7 @@ const MIN_DELAY: Duration = Duration::from_secs(1);
 /// Why the provider pushes back.
 enum Pushback<'a> {
     Capacity,
+    PolicyCapacity,
     /// The provider's explanation, when it gave one.
     RateLimit(Option<&'a str>),
 }
@@ -36,6 +37,7 @@ impl<'a> Pushback<'a> {
     fn of(error: &'a CodexErr) -> Option<Self> {
         match error.details() {
             CodexErrorDetails::ServerOverloaded => Some(Self::Capacity),
+            CodexErrorDetails::PolicyCapacityUnavailable => Some(Self::PolicyCapacity),
             CodexErrorDetails::RateLimitExceeded(message) => Some(Self::RateLimit(
                 Some(message.as_str()).filter(|message| !message.is_empty()),
             )),
@@ -95,6 +97,11 @@ impl Backpressure {
             Pushback::Capacity => (
                 "Selected model is at capacity.",
                 CodexErrorInfo::ServerOverloaded,
+                None,
+            ),
+            Pushback::PolicyCapacity => (
+                "Policy-restricted capacity is unavailable.",
+                CodexErrorInfo::PolicyCapacityUnavailable,
                 None,
             ),
             Pushback::RateLimit(explanation) => (

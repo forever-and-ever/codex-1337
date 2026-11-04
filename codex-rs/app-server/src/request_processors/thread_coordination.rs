@@ -26,6 +26,7 @@ use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::ThreadUnarchiveParams;
+use codex_app_server_protocol::ThreadUnarchivedNotification;
 use codex_app_server_protocol::TurnToolOutput;
 use codex_core::CodexThread;
 use codex_core::TurnInput;
@@ -433,7 +434,8 @@ impl ThreadCoordinationService {
         &self,
         params: ThreadArchiveParams,
     ) -> Result<(), JSONRPCErrorError> {
-        let (_, thread_ids) = self.threads.thread_archive_inner(params).await?;
+        let _thread_list_state_permit = self.threads.acquire_thread_list_state_permit().await?;
+        let (_, thread_ids) = self.threads.thread_archive_response(params).await?;
         for thread_id in thread_ids {
             self.threads
                 .outgoing
@@ -449,11 +451,18 @@ impl ThreadCoordinationService {
         &self,
         params: ThreadUnarchiveParams,
     ) -> Result<(), JSONRPCErrorError> {
-        let (_, notification) = self.threads.thread_unarchive_inner(params).await?;
-        self.threads
-            .outgoing
-            .send_server_notification(ServerNotification::ThreadUnarchived(notification))
-            .await;
+        let _thread_list_state_permit = self.threads.acquire_thread_list_state_permit().await?;
+        let (_, thread_ids) = self.threads.thread_unarchive_response(params).await?;
+        for thread_id in thread_ids {
+            self.threads
+                .outgoing
+                .send_server_notification(ServerNotification::ThreadUnarchived(
+                    ThreadUnarchivedNotification {
+                        thread_id: thread_id.to_string(),
+                    },
+                ))
+                .await;
+        }
         Ok(())
     }
 }

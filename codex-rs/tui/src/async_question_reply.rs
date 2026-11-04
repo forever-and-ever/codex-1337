@@ -4,15 +4,16 @@
 use codex_app_server_protocol::UserInput;
 use codex_context_fragments::AnsweredQuestion;
 use codex_context_fragments::ContextualUserFragment;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AsyncQuestionReply {
     pub(crate) question_item_id: String,
-    question: String,
-    answer: String,
+    pub(crate) question: String,
+    pub(crate) answer: String,
 }
 
 fn split_ide_context(text: &str) -> (&str, &str) {
@@ -47,13 +48,14 @@ pub(crate) fn parse(text: &str) -> Option<Vec<AsyncQuestionReply>> {
 }
 
 pub(crate) fn display_text(text: &str) -> Option<String> {
-    Some(
-        parse(text)?
-            .iter()
-            .map(|reply| format!("> {}\n\n{}", reply.question, reply.answer))
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    )
+    Some(display_replies(&parse(text)?))
+}
+
+pub(crate) fn display_replies(replies: &[AsyncQuestionReply]) -> String {
+    replies
+        .iter()
+        .map(|reply| format!("> {}\n\n{}", reply.question, reply.answer))
+        .join("\n\n")
 }
 
 /// Extend the most recent answer, or collect another reply without nesting envelopes.

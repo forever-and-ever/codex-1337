@@ -74,6 +74,7 @@ async fn pending_request(
             pending_score,
             sampled_at: std::time::SystemTime::now(),
             sampling: LunaSamplingRequest {
+                provider_account_id: None,
                 instructions,
                 input: Vec::new(),
                 ..sample_request(label)

@@ -119,6 +119,7 @@ impl ChatWidget {
                 self.on_thread_settings_updated(notification);
             }
             ServerNotification::TurnStarted(notification) => {
+                self.safety_recourse = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {
@@ -253,7 +254,7 @@ impl ChatWidget {
                             notification.error.additional_details,
                         );
                     }
-                } else {
+                } else if from_replay || !safety_recourse::defer_error(self, &notification) {
                     self.last_non_retry_error = Some((
                         notification.turn_id.clone(),
                         notification.error.message.clone(),
@@ -294,6 +295,11 @@ impl ChatWidget {
             }
             ServerNotification::ModelSafetyBufferingUpdated(notification) => {
                 self.on_model_safety_buffering_updated(notification, replay_kind)
+            }
+            ServerNotification::TurnModerationMetadata(notification) => {
+                if !from_replay {
+                    safety_recourse::on_metadata(self, notification);
+                }
             }
             ServerNotification::AuthRecoveryStarted(notification) => {
                 self.add_info_message(notification.message, /*hint*/ None)
@@ -449,7 +455,6 @@ impl ChatWidget {
             | ServerNotification::ExternalAgentConfigImportProgress(_)
             | ServerNotification::ExternalAgentConfigImportCompleted(_)
             | ServerNotification::FsChanged(_)
-            | ServerNotification::TurnModerationMetadata(_)
             | ServerNotification::FuzzyFileSearchSessionUpdated(_)
             | ServerNotification::FuzzyFileSearchSessionCompleted(_)
             | ServerNotification::ThreadRealtimeItemAdded(_)
@@ -491,6 +496,9 @@ impl ChatWidget {
         // this TUI already rendered locally. Once that turn ends, another
         // client can submit the same text and it still needs its own user cell.
         self.last_rendered_user_message_display = None;
+        let live_turn =
+            replay_kind.is_none() && self.last_turn_id() == Some(notification.turn.id.as_str());
+        let mut recourse = self.safety_recourse.take_if(|_| live_turn);
         let was_replaying_turn_completion = self.thread_usage.replaying_turn_completion;
         self.thread_usage.replaying_turn_completion = replay_kind.is_some();
         match notification.turn.status {
@@ -498,11 +506,10 @@ impl ChatWidget {
                 let last_agent_message =
                     notification
                         .turn
-                        .items
-                        .iter()
+                        .item_payloads()
                         .rev()
                         .find_map(|item| match item {
-                            ThreadItem::AgentMessage {
+                            ThreadItemPayload::AgentMessage {
                                 id,
                                 text,
                                 phase: Some(MessagePhase::FinalAnswer) | None,
@@ -525,11 +532,10 @@ impl ChatWidget {
                         })
                 {
                     self.handle_thread_item(
-                        item.clone(),
+                        codex_app_server_protocol::ThreadItem::untimed(item.clone()),
                         notification.turn.id.clone(),
                         replay_kind
                             .map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
-                        /*timestamp*/ None,
                     );
                 }
                 if replay_kind.is_none()
@@ -574,7 +580,11 @@ impl ChatWidget {
                 self.request_redraw();
             }
             TurnStatus::Failed => {
-                if let Some(error) = notification.turn.error {
+                let error = notification
+                    .turn
+                    .error
+                    .or_else(|| recourse.as_mut()?.deferred_error.take());
+                if let Some(error) = error {
                     if replay_kind.is_none()
                         && error.codex_error_info
                             == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
@@ -583,6 +593,8 @@ impl ChatWidget {
                             Some(notification.turn.id.clone()),
                             error.misalignment,
                         );
+                        self.last_non_retry_error = None;
+                    } else if safety_recourse::render_failure(self, recourse, &error) {
                         self.last_non_retry_error = None;
                     } else if self.last_non_retry_error.as_ref()
                         == Some(&(notification.turn.id.clone(), error.message.clone()))
@@ -618,19 +630,19 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
-        match notification.item {
-            ThreadItem::UserMessage { content, .. } if replay_kind.is_none() => {
+        match notification.item.payload {
+            ThreadItemPayload::UserMessage { content, .. } if replay_kind.is_none() => {
                 self.note_realtime_user_item_started(&notification.turn_id, &content);
             }
-            ThreadItem::UserMessage { content, .. }
+            ThreadItemPayload::UserMessage { content, .. }
                 if realtime::realtime_delegation_input(&content).is_some() =>
             {
                 self.remember_realtime_delegated_reasoning_turn(&notification.turn_id);
             }
-            ThreadItem::Plan { id, .. } => {
+            ThreadItemPayload::Plan { id, .. } => {
                 self.transcript.streaming_plan_item = Some(id);
             }
-            ThreadItem::AgentMessage { id, .. } => {
+            ThreadItemPayload::AgentMessage { id, .. } => {
                 self.transcript.streaming_agent_item = Some(id.clone());
                 self.transcript.agent_timestamp =
                     history_cell::HistoryTimestamp::from_millis(notification.started_at_ms);
@@ -638,7 +650,7 @@ impl ChatWidget {
                     self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
                 }
             }
-            ThreadItem::Reasoning { id, .. } => {
+            ThreadItemPayload::Reasoning { id, .. } => {
                 if replay_kind.is_none()
                     && !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
                 {
@@ -655,7 +667,7 @@ impl ChatWidget {
                     self.on_reasoning_item_started(id);
                 }
             }
-            ThreadItem::ContextCompaction { id }
+            ThreadItemPayload::ContextCompaction { id }
                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) =>
             {
                 // Buffered starts reconstruct an in-flight compaction when switching tasks.
@@ -670,19 +682,21 @@ impl ChatWidget {
                 };
                 self.on_context_compaction_started(id, elapsed);
             }
-            item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
-            ThreadItem::FileChange { id, changes, .. } => {
+            item @ ThreadItemPayload::CommandExecution { .. } => {
+                self.on_command_execution_started(item)
+            }
+            ThreadItemPayload::FileChange { id, changes, .. } => {
                 self.on_patch_apply_begin(id, file_update_changes_to_display(changes));
             }
-            item @ ThreadItem::McpToolCall { .. } => self.on_mcp_tool_call_started(item),
-            item @ ThreadItem::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
-            ThreadItem::WebSearch(item) => {
+            item @ ThreadItemPayload::McpToolCall { .. } => self.on_mcp_tool_call_started(item),
+            item @ ThreadItemPayload::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
+            ThreadItemPayload::WebSearch(item) => {
                 self.on_web_search_begin(item.id);
             }
-            ThreadItem::ImageGeneration(_) => {
+            ThreadItemPayload::ImageGeneration(_) => {
                 self.on_image_generation_begin();
             }
-            ThreadItem::CollabAgentToolCall {
+            ThreadItemPayload::CollabAgentToolCall {
                 id,
                 tool,
                 status,
@@ -694,7 +708,7 @@ impl ChatWidget {
                 agents_states,
                 wait_completion,
             } => self.on_collab_agent_tool_call(
-                ThreadItem::CollabAgentToolCall {
+                ThreadItemPayload::CollabAgentToolCall {
                     id,
                     tool,
                     status,
@@ -708,7 +722,7 @@ impl ChatWidget {
                 },
                 /*timestamp*/ None,
             ),
-            ThreadItem::EnteredReviewMode { review, .. } if replay_kind.is_none() => {
+            ThreadItemPayload::EnteredReviewMode { review, .. } if replay_kind.is_none() => {
                 self.enter_review_mode_with_hint(review, /*from_replay*/ false);
             }
             _ => {}
@@ -723,8 +737,8 @@ impl ChatWidget {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
         if replay_kind.is_none()
             && self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
-            && realtime::is_private_realtime_agent_item(&notification.item)
-            && !matches!(&notification.item, ThreadItem::AgentMessage { id, .. } | ThreadItem::Reasoning { id, .. }
+            && realtime::is_private_realtime_agent_item(&notification.item.payload)
+            && !matches!(&notification.item.payload, ThreadItemPayload::AgentMessage { id, .. } | ThreadItemPayload::Reasoning { id, .. }
             if matches!(
                 self.realtime_conversation.agent_items.get(&(notification.turn_id.clone(), id.clone())),
                 Some(realtime::RealtimeAgentItemOrigin::Typed)
@@ -734,31 +748,24 @@ impl ChatWidget {
         }
         // Buffered live notifications can introduce questions; historical turn replay cannot.
         if replay_kind == Some(ReplayKind::ThreadSnapshot)
-            && let ThreadItem::AgentMessage {
+            && let ThreadItemPayload::AgentMessage {
                 id,
                 questions: Some(questions),
                 ..
-            } = &notification.item
+            } = &notification.item.payload
         {
             self.add_async_questions(id, questions);
         }
         if replay_kind.is_none()
-            && let ThreadItem::Reasoning { id, .. } = &notification.item
+            && let ThreadItemPayload::Reasoning { id, .. } = &notification.item.payload
             && self.status_state.reasoning_item_id.as_ref() != Some(id)
         {
             return;
         }
-        let timestamp = history_cell::HistoryTimestamp::from_millis(notification.completed_at_ms);
-        match notification.item {
-            item @ ThreadItem::CommandExecution { .. } => {
-                self.on_command_execution_completed(CompletedItem { item, timestamp })
-            }
-            item => self.handle_thread_item(
-                item,
-                notification.turn_id,
-                replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
-                timestamp,
-            ),
-        }
+        self.handle_thread_item(
+            notification.item,
+            notification.turn_id,
+            replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+        );
     }
 }

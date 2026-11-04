@@ -35,10 +35,10 @@ impl TurnLifecycleContributor for ConversationHistoryTools {
                         .await
                         .guardian_conversation_history_max_output_tokens
                         .map_or(/*default*/ 4_000, NonZeroUsize::get);
-                    codex_core::guardian_review::conversation_history_tools(
+                    Box::pin(codex_core::guardian_review::conversation_history_tools(
                         &parent,
                         max_output_tokens,
-                    )
+                    ))
                     .await
                     .unwrap_or_default()
                 }

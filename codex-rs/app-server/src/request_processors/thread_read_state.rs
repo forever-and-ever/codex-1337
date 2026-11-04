@@ -98,7 +98,11 @@ impl From<&crate::thread_state::TurnSummary> for TerminalEvidence {
     fn from(summary: &crate::thread_state::TurnSummary) -> Self {
         if summary.last_error.is_some() {
             Self::Failed
-        } else if let Some(ThreadItem::AgentMessage { text, .. }) = &summary.last_agent_message {
+        } else if let Some(ThreadItemPayload::AgentMessage { text, .. }) = summary
+            .last_agent_message
+            .as_ref()
+            .map(|message| &message.payload)
+        {
             Self::Answer(text.clone())
         } else {
             Self::Silent

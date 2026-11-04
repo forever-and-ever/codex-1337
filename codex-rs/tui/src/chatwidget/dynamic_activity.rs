@@ -3,10 +3,10 @@
 use super::*;
 
 impl ChatWidget {
-    pub(super) fn on_dynamic_tool_item(&mut self, item: ThreadItem) {
+    pub(super) fn on_dynamic_tool_item(&mut self, item: ThreadItemPayload) {
         let started = matches!(
             &item,
-            ThreadItem::DynamicToolCall {
+            ThreadItemPayload::DynamicToolCall {
                 status: codex_app_server_protocol::DynamicToolCallStatus::InProgress,
                 ..
             }
@@ -17,18 +17,16 @@ impl ChatWidget {
                 if started {
                     interrupts.push_item_started(item);
                 } else {
-                    interrupts.push_item_completed(CompletedItem {
-                        item,
-                        timestamp: None,
-                    });
+                    interrupts
+                        .push_item_completed(codex_app_server_protocol::ThreadItem::untimed(item));
                 }
             },
             Self::handle_dynamic_tool_item_now,
         );
     }
 
-    pub(crate) fn handle_dynamic_tool_item_now(&mut self, item: ThreadItem) {
-        let ThreadItem::DynamicToolCall { id, .. } = &item else {
+    pub(crate) fn handle_dynamic_tool_item_now(&mut self, item: ThreadItemPayload) {
+        let ThreadItemPayload::DynamicToolCall { id, .. } = &item else {
             return;
         };
         let id = id.clone();

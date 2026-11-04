@@ -21,6 +21,7 @@ pub(super) use quota::QuotaReader;
 mod quota_cache;
 mod rate_limit_resets;
 mod workspace_routing;
+mod workspace_switching;
 
 pub(super) use enterprise_login::EnterpriseLoginCompletion;
 pub(super) use enterprise_login::EnterpriseLoginTarget;
@@ -216,11 +217,8 @@ impl AccountRequestProcessor {
         &self,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let changed = self.auth_manager.reload().await;
-        self.config_manager.replace_cloud_config_bundle_loader(
-            self.auth_manager.clone(),
-            self.config.chatgpt_base_url.clone(),
-            self.config.http_client_factory(),
-        );
+        self.config_manager
+            .update_managed_config_loader(self.auth_manager.clone(), &self.config);
         self.config_manager
             .sync_default_client_residency_requirement()
             .await;
@@ -370,6 +368,7 @@ impl AccountRequestProcessor {
                     .maybe_start_remote_plugin_caches_refresh(
                         &plugins_config,
                         auth,
+                        /*prefetch_recommendations*/ true,
                         Some(on_effective_plugins_changed),
                     );
             }
@@ -500,7 +499,7 @@ impl AccountRequestProcessor {
         ) {
             Ok(()) => {
                 self.auth_manager.reload().await;
-                self.config_manager.clear_cloud_config_bundle_loader();
+                self.config_manager.clear_chatgpt_config_loader();
                 Ok(())
             }
             Err(err) => Err(internal_error(format!("failed to save api key: {err}"))),
@@ -605,6 +604,15 @@ impl AccountRequestProcessor {
         let opts = self
             .login_chatgpt_common(codex_streamlined_login, login_success_page)
             .await?;
+        let (login_id, auth_url) = self.start_browser_login(opts, /*pause*/ None).await?;
+        Ok(LoginAccountResponse::Chatgpt { login_id, auth_url })
+    }
+
+    async fn start_browser_login(
+        &self,
+        opts: LoginServerOptions,
+        pause: Option<crate::turn_admission::TurnAdmissionPause>,
+    ) -> Result<(String, String), JSONRPCErrorError> {
         let server = run_login_server(opts)
             .map_err(|err| internal_error(format!("failed to start login server: {err}")))?;
         let login_id = Uuid::new_v4();
@@ -626,6 +634,8 @@ impl AccountRequestProcessor {
         let active_login = self.active_login.clone();
         let auth_url = server.auth_url.clone();
         let task = async move {
+            // Workspace credentials may change in the callback. Resume turns after caches and clients are updated.
+            let _pause = pause;
             let (success, error_msg, onboarding_entrypoint) = match tokio::time::timeout(
                 LOGIN_CHATGPT_TIMEOUT,
                 server.block_until_done_with_callback_result(),
@@ -665,10 +675,7 @@ impl AccountRequestProcessor {
         };
         tokio::spawn(AuthStorageOriginator::current().scope(task));
 
-        Ok(LoginAccountResponse::Chatgpt {
-            login_id: login_id.to_string(),
-            auth_url,
-        })
+        Ok((login_id.to_string(), auth_url))
     }
 
     async fn login_chatgpt_device_code_v2(&self, request_id: ConnectionRequestId) {
@@ -843,11 +850,8 @@ impl AccountRequestProcessor {
             )))
             .await
             .map_err(|err| internal_error(format!("failed to set external auth: {err}")))?;
-        self.config_manager.replace_cloud_config_bundle_loader(
-            self.auth_manager.clone(),
-            self.config.chatgpt_base_url.clone(),
-            self.config.http_client_factory(),
-        );
+        self.config_manager
+            .update_managed_config_loader(self.auth_manager.clone(), &self.config);
         self.config_manager
             .sync_default_client_residency_requirement()
             .await;
@@ -919,11 +923,8 @@ impl AccountRequestProcessor {
             let auth_changes = self.auth_manager.auth_change_state_receiver();
             let owner_generation = auth_changes.borrow().owner_generation;
             self.thread_manager.invalidate_mcp_runtimes().await;
-            self.config_manager.replace_cloud_config_bundle_loader(
-                self.auth_manager.clone(),
-                self.config.chatgpt_base_url.clone(),
-                self.config.http_client_factory(),
-            );
+            self.config_manager
+                .update_managed_config_loader(self.auth_manager.clone(), &self.config);
             self.config_manager
                 .sync_default_client_residency_requirement()
                 .await;
@@ -1280,6 +1281,7 @@ impl AccountRequestProcessor {
                     thread_id: usage.thread_id,
                     estimated_usage_credits_micros: usage.estimated_usage_credits_micros,
                     estimated_usage_usd_micros: usage.estimated_usage_usd_micros,
+                    native_usage_usd_micros: usage.native_usage_usd_micros,
                     groups: usage
                         .groups
                         .into_iter()
@@ -1527,11 +1529,7 @@ pub(crate) async fn logout_configured_account(
             .load_account_policy(Arc::clone(auth_manager), fallback_config)
             .await
     } else {
-        config_manager.replace_cloud_config_bundle_loader(
-            Arc::clone(auth_manager),
-            fallback_config.chatgpt_base_url.clone(),
-            fallback_config.http_client_factory(),
-        );
+        config_manager.update_managed_config_loader(Arc::clone(auth_manager), fallback_config);
         config_manager
             .load_latest_config(/*fallback_cwd*/ None)
             .await
@@ -1588,7 +1586,7 @@ pub(crate) async fn clear_account_configuration(
     config_manager: &ConfigManager,
     _config: &Config,
 ) -> Result<(), JSONRPCErrorError> {
-    config_manager.clear_cloud_config_bundle_loader();
+    config_manager.clear_chatgpt_config_loader();
     Ok(())
 }
 

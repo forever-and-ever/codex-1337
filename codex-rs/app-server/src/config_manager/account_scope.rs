@@ -2,7 +2,7 @@ use super::Arc;
 use super::AuthManager;
 use super::Config;
 use super::ConfigManager;
-use super::cloud_config_bundle_loader;
+use super::managed_config_bundle_loader;
 
 impl ConfigManager {
     /// Reload account policy without replacing another account's shared policy owner.
@@ -11,21 +11,14 @@ impl ConfigManager {
         auth: Arc<AuthManager>,
         config: &Config,
     ) -> std::io::Result<Config> {
-        let endpoint = codex_backend_client::Client::new(
-            config.chatgpt_base_url.clone(),
-            config.http_client_factory(),
-        )
-        .config_bundle_url();
-        let factory = config.http_client_factory().with_network_policy(
-            self.local_network_policy
-                .policy()
-                .restrict_to_endpoints(endpoint.parse().into_iter().collect()),
-        );
-        let loader = cloud_config_bundle_loader(
+        let loader = managed_config_bundle_loader(
             auth,
             config.chatgpt_base_url.clone(),
             self.codex_home.clone(),
-            factory,
+            config
+                .http_client_factory()
+                .with_network_policy(self.local_network_policy.policy()),
+            config.config_layer_stack.requirements_toml(),
         );
         let mut scoped = Self::new(
             self.codex_home.clone(),

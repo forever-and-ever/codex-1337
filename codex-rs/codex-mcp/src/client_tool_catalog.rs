@@ -62,6 +62,7 @@ enum CatalogSource {
     },
 }
 
+#[derive(Clone)]
 pub(crate) struct ToolCatalogSnapshot {
     pub(crate) revision: u64,
     pub(crate) tools: Arc<[ToolInfo]>,

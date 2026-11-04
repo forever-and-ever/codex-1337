@@ -1,17 +1,18 @@
 //! Path manipulation utilities
 
-use std::{
-    collections::VecDeque,
-    ffi::{OsStr, OsString},
-    fs,
-    path::{Component, Path, PathBuf},
-};
-use typed_path::{Utf8WindowsComponent, Utf8WindowsPath};
+use std::collections::VecDeque;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::fs;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
+use typed_path::Utf8WindowsComponent;
+use typed_path::Utf8WindowsPath;
 
-use crate::{
-    read::extract::make_writable_dir_all,
-    result::{ZipResult, invalid},
-};
+use crate::read::extract::make_writable_dir_all;
+use crate::result::ZipResult;
+use crate::result::invalid;
 
 /// Simplify an archive entry name into components to be resolved *under*
 /// the destination directory.
@@ -252,8 +253,10 @@ pub(crate) fn resolve_enclosed(
 
 #[cfg(test)]
 mod tests {
-    use super::{enclosed_name, simplified_components};
-    use std::path::{Path, PathBuf};
+    use super::enclosed_name;
+    use super::simplified_components;
+    use std::path::Path;
+    use std::path::PathBuf;
 
     #[test]
     fn test_simplified_components_relative_path() {

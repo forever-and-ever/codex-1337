@@ -4,6 +4,7 @@ use super::*;
 use crate::clock_format::ClockFormat;
 use chrono::Local;
 use chrono::TimeZone;
+use codex_app_server_protocol::ThreadItem;
 use pretty_assertions::assert_eq;
 
 const COMPLETED_AT: i64 = 1_700_000_000;
@@ -11,14 +12,16 @@ const COMPLETED_AT: i64 = 1_700_000_000;
 fn completed_turn(duration_ms: Option<i64>, completed_at: Option<i64>) -> AppServerTurn {
     AppServerTurn {
         completed_at,
-        items: vec![AppServerThreadItem::AgentMessage {
-            id: "answer-1".to_string(),
-            text: "The change is ready.".to_string(),
-            phase: Some(MessagePhase::FinalAnswer),
-            memory_citation: None,
-            delivery: None,
-            questions: None,
-        }],
+        items: vec![ThreadItem::untimed(
+            AppServerThreadItemPayload::AgentMessage {
+                id: "answer-1".to_string(),
+                text: "The change is ready.".to_string(),
+                phase: Some(MessagePhase::FinalAnswer),
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            },
+        )],
         ..app_server_turn(
             "turn-1",
             AppServerTurnStatus::Completed,
@@ -77,7 +80,7 @@ async fn completion_follows_plain_and_streamed_tool_answers() {
         let answer = turn.items[0].clone();
         if streamed {
             let mut command = begin_exec(&mut chat, "command-1", "echo ready");
-            if let AppServerThreadItem::CommandExecution {
+            if let AppServerThreadItemPayload::CommandExecution {
                 status,
                 aggregated_output,
                 exit_code,
@@ -91,12 +94,13 @@ async fn completion_follows_plain_and_streamed_tool_answers() {
                 *duration_ms = Some(5);
             }
             chat.handle_server_notification(
-                ServerNotification::ItemCompleted(ItemCompletedNotification {
-                    thread_id: "thread-1".to_string(),
-                    turn_id: "turn-1".to_string(),
-                    item: command,
-                    completed_at_ms: started_at_ms - 1_000,
-                }),
+                ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+                    "thread-1".to_string(),
+                    "turn-1".to_string(),
+                    command,
+                    None,
+                    started_at_ms - 1_000,
+                )),
                 /*replay_kind*/ None,
             );
             chat.handle_server_notification(

@@ -8,7 +8,7 @@ use crate::app_command::AppCommand;
 use crate::history_cell;
 use codex_app_server_client::RemoteAppServerEndpoint;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
 use crossterm::event::KeyCode;
@@ -150,20 +150,23 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     let mut tui = tui::test_support::make_test_tui().expect("test tui");
     tui.set_owned_screen(/*owned*/ true).unwrap();
     let message = |text: &str| {
-        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
-            thread_id: root.to_string(),
-            turn_id: "farm-turn".into(),
-            completed_at_ms: 0,
-            item: ThreadItem::UserMessage {
-                source_response_item_id: None,
-                id: text.into(),
-                client_id: None,
-                content: vec![codex_app_server_protocol::UserInput::Text {
-                    text: text.into(),
-                    text_elements: Vec::new(),
-                }],
-            },
-        })
+        ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification::new(
+                root.to_string(),
+                "farm-turn".into(),
+                ThreadItemPayload::UserMessage {
+                    source_response_item_id: None,
+                    id: text.into(),
+                    client_id: None,
+                    content: vec![codex_app_server_protocol::UserInput::Text {
+                        text: text.into(),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                None,
+                0,
+            ),
+        )
     };
     app.ensure_thread_channel(root)
         .store

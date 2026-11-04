@@ -3,8 +3,8 @@ use crate::history_cell::ArrivalCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryTimestamp;
 use crate::history_cell::UserHistoryCell;
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemEntry;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::step_admission::ArrivalSide;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -22,11 +22,11 @@ pub(crate) struct UserPromptClocks(HashMap<UserPromptIdentity, HistoryTimestamp>
 
 impl UserPromptClocks {
     pub(crate) fn record(&mut self, entry: &ThreadItemEntry) {
-        let ThreadItem::UserMessage {
+        let ThreadItemPayload::UserMessage {
             client_id,
             source_response_item_id,
             ..
-        } = &entry.item
+        } = &entry.item.payload
         else {
             return;
         };
@@ -34,9 +34,15 @@ impl UserPromptClocks {
             return;
         }
         let timestamp = entry
+            .item
             .completed_at_ms
             .and_then(HistoryTimestamp::from_millis)
-            .or_else(|| entry.started_at_ms.and_then(HistoryTimestamp::from_millis));
+            .or_else(|| {
+                entry
+                    .item
+                    .started_at_ms
+                    .and_then(HistoryTimestamp::from_millis)
+            });
         if let Some(timestamp) = timestamp {
             self.0.insert(
                 UserPromptIdentity {

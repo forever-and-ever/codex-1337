@@ -52,6 +52,15 @@ pub async fn run(
     config: Arc<Config>,
     parent_permission_profile: PermissionProfile,
 ) {
+    // 3. Build the locked-down config used by the consolidation agent.
+    let Some(agent_config) = agent::get_config(
+        config.as_ref(),
+        parent_permission_profile,
+        context.provider(),
+    ) else {
+        return;
+    };
+
     let phase_two_e2e_timer = context.start_timer(MEMORY_PHASE_TWO_E2E_MS);
 
     let Some(db) = context.memory_store().await else {
@@ -93,18 +102,6 @@ pub async fn run(
         job::failed(context.as_ref(), &db, &claim, "failed_prepare_workspace").await;
         return;
     }
-
-    // 3. Build the locked-down config used by the consolidation agent.
-    let Some(agent_config) = agent::get_config(
-        config.as_ref(),
-        parent_permission_profile,
-        context.provider(),
-    ) else {
-        // If we can't get the config, we can't consolidate.
-        tracing::error!("failed to get agent config");
-        job::failed(context.as_ref(), &db, &claim, "failed_sandbox_policy").await;
-        return;
-    };
 
     // 4. Load current DB-backed Phase 2 inputs.
     let raw_memories = match db
@@ -366,6 +363,7 @@ mod agent {
                 .unwrap_or_else(|| preferred_model.to_string()),
         );
         agent_config.model_reasoning_effort = Some(crate::stage_two::REASONING_EFFORT);
+        agent_config.service_tier = Some(config.memories.consolidation_service_tier.clone());
 
         Some(agent_config)
     }

@@ -18,6 +18,7 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
         auth: None,
         auth_token: None,
         auth_manager: None,
+        auth_owner: None,
         auth_generation: Arc::new(()),
         plugins_available: false,
         ready_selected_capability_roots: Vec::new(),

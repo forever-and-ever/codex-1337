@@ -1,7 +1,7 @@
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::GeneratedImageRef;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -18,11 +18,11 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
             ))
         }
         ServerNotification::ItemStarted(mut notification) => {
-            notification.item = without_thread_item_media(notification.item);
+            notification.item.payload = without_thread_item_media(notification.item.payload);
             ServerNotification::ItemStarted(notification)
         }
         ServerNotification::ItemCompleted(mut notification) => {
-            notification.item = without_thread_item_media(notification.item);
+            notification.item.payload = without_thread_item_media(notification.item.payload);
             ServerNotification::ItemCompleted(notification)
         }
         ServerNotification::RawResponseItemCompleted(mut notification) => {
@@ -158,17 +158,17 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
     }
 }
 
-fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
-    if let ThreadItem::CodeModeOwned(owned) = item {
+fn without_thread_item_media(mut item: ThreadItemPayload) -> ThreadItemPayload {
+    if let ThreadItemPayload::CodeModeOwned(owned) = item {
         let (owner, native) = owned.into_parts();
-        return ThreadItem::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+        return ThreadItemPayload::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
             owner,
             Box::new(without_thread_item_media(*native)),
         ));
     }
     match &mut item {
-        ThreadItem::CodeModeOwned(_) => unreachable!("ownership was unwrapped above"),
-        ThreadItem::UserMessage { content, .. } => {
+        ThreadItemPayload::CodeModeOwned(_) => unreachable!("ownership was unwrapped above"),
+        ThreadItemPayload::UserMessage { content, .. } => {
             content.retain(|item| match item {
                 UserInput::Image { .. } | UserInput::Audio { .. } => false,
                 UserInput::Text { .. }
@@ -178,7 +178,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
                 | UserInput::Mention { .. } => true,
             });
         }
-        ThreadItem::DynamicToolCall {
+        ThreadItemPayload::DynamicToolCall {
             content_items: Some(content_items),
             ..
         } => {
@@ -188,7 +188,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
                 DynamicToolCallOutputContentItem::InputText { .. } => true,
             });
         }
-        ThreadItem::FunctionCallOutput {
+        ThreadItemPayload::FunctionCallOutput {
             output: FunctionCallOutputBody::ContentItems(items),
             ..
         } => {
@@ -199,7 +199,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
                 | FunctionCallOutputContentItem::EncryptedContent { .. } => true,
             });
         }
-        ThreadItem::McpToolCall {
+        ThreadItemPayload::McpToolCall {
             result: Some(result),
             ..
         } => {
@@ -215,41 +215,41 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
                     .is_none()
             });
         }
-        ThreadItem::ImageGeneration(item) => {
+        ThreadItemPayload::ImageGeneration(item) => {
             item.image = GeneratedImageRef::Inline {
                 result: String::new(),
             };
         }
-        ThreadItem::HookPrompt { .. }
-        | ThreadItem::ToolOutputTokens { .. }
-        | ThreadItem::CodeMode(_)
-        | ThreadItem::AgentMessage { .. }
-        | ThreadItem::Plan { .. }
-        | ThreadItem::Reasoning { .. }
-        | ThreadItem::Thought { .. }
-        | ThreadItem::Preamble { .. }
-        | ThreadItem::StepAdmission(_)
-        | ThreadItem::ToolInput(_)
-        | ThreadItem::Arrival(_)
-        | ThreadItem::FunctionCallOutput {
+        ThreadItemPayload::HookPrompt { .. }
+        | ThreadItemPayload::ToolOutputTokens { .. }
+        | ThreadItemPayload::CodeMode(_)
+        | ThreadItemPayload::AgentMessage { .. }
+        | ThreadItemPayload::Plan { .. }
+        | ThreadItemPayload::Reasoning { .. }
+        | ThreadItemPayload::Thought { .. }
+        | ThreadItemPayload::Preamble { .. }
+        | ThreadItemPayload::StepAdmission(_)
+        | ThreadItemPayload::ToolInput(_)
+        | ThreadItemPayload::Arrival(_)
+        | ThreadItemPayload::FunctionCallOutput {
             output: FunctionCallOutputBody::Text(_),
             ..
         }
-        | ThreadItem::CommandExecution { .. }
-        | ThreadItem::FileChange { .. }
-        | ThreadItem::McpToolCall { result: None, .. }
-        | ThreadItem::DynamicToolCall {
+        | ThreadItemPayload::CommandExecution { .. }
+        | ThreadItemPayload::FileChange { .. }
+        | ThreadItemPayload::McpToolCall { result: None, .. }
+        | ThreadItemPayload::DynamicToolCall {
             content_items: None,
             ..
         }
-        | ThreadItem::CollabAgentToolCall { .. }
-        | ThreadItem::SubAgentActivity { .. }
-        | ThreadItem::WebSearch(_)
-        | ThreadItem::ImageView { .. }
-        | ThreadItem::Sleep(_)
-        | ThreadItem::EnteredReviewMode { .. }
-        | ThreadItem::ExitedReviewMode { .. }
-        | ThreadItem::ContextCompaction { .. } => {}
+        | ThreadItemPayload::CollabAgentToolCall { .. }
+        | ThreadItemPayload::SubAgentActivity { .. }
+        | ThreadItemPayload::WebSearch(_)
+        | ThreadItemPayload::ImageView { .. }
+        | ThreadItemPayload::Sleep(_)
+        | ThreadItemPayload::EnteredReviewMode { .. }
+        | ThreadItemPayload::ExitedReviewMode { .. }
+        | ThreadItemPayload::ContextCompaction { .. } => {}
     }
     item
 }

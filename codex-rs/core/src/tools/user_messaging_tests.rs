@@ -60,6 +60,7 @@ fn addressed_result(tool_name: ToolName, input: Value, success: bool) -> AnyTool
             Some(success),
         )),
         post_tool_use_payload: Some(PostToolUsePayload {
+            tool_cwd: None,
             tool_name,
             tool_use_id: "message-call".to_owned(),
             tool_input: input,

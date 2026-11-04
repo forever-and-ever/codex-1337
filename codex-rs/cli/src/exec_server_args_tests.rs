@@ -1,7 +1,8 @@
-use clap::error::ErrorKind;
-use pretty_assertions::assert_eq;
+#![cfg(test)]
 
 use super::*;
+use clap::error::ErrorKind;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn exec_server_help_documents_remote_options() {

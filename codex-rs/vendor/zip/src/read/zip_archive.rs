@@ -1,24 +1,33 @@
 //! Code related to `ZipArchive`
 
 use crate::compression::CompressionMethod;
-use crate::format::blocks::{FixedSizeBlock, ZipCentralEntryBlock};
+use crate::format::blocks::FixedSizeBlock;
+use crate::format::blocks::ZipCentralEntryBlock;
 use crate::format::find_central_directory_end;
+use crate::read::ArchiveOffset;
+use crate::read::CentralDirectoryInfo;
+use crate::read::ZipFile;
+use crate::read::ZipFileSeek;
+use crate::read::ZipReadOptions;
+use crate::read::central_header_to_zip_file_inner;
 use crate::read::config::Config;
 use crate::read::extract::RootDirFilter;
-use crate::read::readers::{ZipFileReader, ZipFileSeekReader};
-use crate::read::zipfile::{ZipFileEntry, ZipFileEntryWithDataDescriptor};
-use crate::read::{
-    ArchiveOffset, CentralDirectoryInfo, ZipFile, ZipFileSeek, ZipReadOptions,
-    central_header_to_zip_file_inner,
-};
-use crate::result::{ZipError, ZipResult};
+use crate::read::readers::ZipFileReader;
+use crate::read::readers::ZipFileSeekReader;
+use crate::read::zipfile::ZipFileEntry;
+use crate::read::zipfile::ZipFileEntryWithDataDescriptor;
+use crate::result::ZipError;
+use crate::result::ZipResult;
 use crate::types::ZipFileData;
 use crate::unstable::path_to_string;
 use core::ops::Range;
 use indexmap::IndexMap;
 use std::borrow::Cow;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 /// Immutable metadata about a `ZipArchive`.
 #[derive(Debug)]

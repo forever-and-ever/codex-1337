@@ -383,7 +383,7 @@ pub struct ConfigToml {
     pub background_terminal_max_timeout: Option<u64>,
 
     /// Seconds a thread must have no subscribers and no activity before app-server
-    /// unloads it. Defaults to 1800 (30 minutes); zero unloads immediately.
+    /// unloads it. Defaults to 60 (1 minute); zero unloads immediately.
     /// Resolved when each thread is loaded; request config overrides apply per thread.
     pub thread_unload_delay_secs: Option<u64>,
 
@@ -1000,7 +1000,17 @@ pub fn validate_reserved_model_provider_ids(
 ) -> Result<(), String> {
     let mut conflicts = model_providers
         .keys()
-        .filter(|key| RESERVED_MODEL_PROVIDER_IDS.contains(&key.as_str()))
+        .filter(|key| {
+            if key.as_str() == "openai" {
+                let provider = &model_providers[*key];
+                return provider
+                    != &ModelProviderInfo {
+                        model_catalog_url: provider.model_catalog_url.clone(),
+                        ..Default::default()
+                    };
+            }
+            RESERVED_MODEL_PROVIDER_IDS.contains(&key.as_str())
+        })
         .map(|key| format!("`{key}`"))
         .collect::<Vec<_>>();
     conflicts.sort_unstable();
@@ -1025,7 +1035,7 @@ pub fn validate_model_providers(
                 "model_providers.{key}: Amazon Bedrock is no longer supported"
             ));
         }
-        if provider.name.trim().is_empty() {
+        if key != "openai" && provider.name.trim().is_empty() {
             return Err(format!(
                 "model_providers.{key}: provider name must not be empty"
             ));

@@ -60,7 +60,7 @@ use search::Search;
 use select_mode::SelectMode;
 use selection::Selection;
 use snapshot::ViewSnapshot;
-use text::TextLayout;
+pub(crate) use text::TextLayout;
 
 pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use feed::EntryKind;
@@ -439,7 +439,7 @@ impl TranscriptView {
         })
     }
 
-    fn sync_live_layout(
+    pub(crate) fn sync_live_layout(
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,

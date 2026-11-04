@@ -13,9 +13,9 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
-fn dynamic_item(id: &str, status: DynamicToolCallStatus) -> AppServerThreadItem {
+fn dynamic_item(id: &str, status: DynamicToolCallStatus) -> AppServerThreadItemPayload {
     let completed = status != DynamicToolCallStatus::InProgress;
-    AppServerThreadItem::DynamicToolCall {
+    AppServerThreadItemPayload::DynamicToolCall {
         id: id.to_string(),
         namespace: Some("test".to_string()),
         tool: "lookup".to_string(),
@@ -136,10 +136,10 @@ async fn turn_finalization_drains_lifecycle_queue_before_interrupting_remaining_
     });
     chat.interrupts
         .push_item_started(dynamic_item("completed", DynamicToolCallStatus::InProgress));
-    chat.interrupts.push_item_completed(CompletedItem {
-        item: dynamic_item("completed", DynamicToolCallStatus::Completed),
-        timestamp: None,
-    });
+    chat.interrupts
+        .push_item_completed(codex_app_server_protocol::ThreadItem::untimed(
+            dynamic_item("completed", DynamicToolCallStatus::Completed),
+        ));
     chat.interrupts.push_item_started(dynamic_item(
         "unfinished",
         DynamicToolCallStatus::InProgress,

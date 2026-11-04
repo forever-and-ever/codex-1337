@@ -39,6 +39,8 @@ use tracing::instrument;
 use crate::tools::context::AgentMessageEncoding;
 pub use crate::tools::context::ToolCallSource;
 
+mod mcp_declarations;
+
 const EXPOSURE_DIRECT: &str = "direct";
 const EXPOSURE_DIRECT_MODEL_ONLY: &str = "direct_model_only";
 const EXPOSURE_DEFERRED: &str = "deferred";

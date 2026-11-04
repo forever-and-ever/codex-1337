@@ -11,14 +11,17 @@
 //!
 
 use core::mem;
-use std::io::{ErrorKind, Read, Write, copy, sink};
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
+use std::io::copy;
+use std::io::sink;
 
+use crate::ZIP64_BYTES_THR;
+use crate::extra_fields::UsedExtraField;
+use crate::result::ZipResult;
+use crate::result::invalid;
 use crate::unstable::LittleEndianReadExt;
-use crate::{
-    ZIP64_BYTES_THR,
-    extra_fields::UsedExtraField,
-    result::{ZipResult, invalid},
-};
 
 /// Zip64 Sizes
 /// This entry in the Local header MUST include BOTH original

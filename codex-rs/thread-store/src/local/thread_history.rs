@@ -1,5 +1,5 @@
 use codex_app_server_protocol::ThreadHistoryChangeSet;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
@@ -428,7 +428,8 @@ WHERE thread_id = ?
         .map_err(thread_history_error)?;
     }
 
-    for item in changes.changed_items {
+    for change in changes.changed_items {
+        let item = change.item;
         let created_at_ms =
             item.started_at_ms
                 .or(fallback_created_at_ms)
@@ -437,8 +438,8 @@ WHERE thread_id = ?
                         "thread history projection for {thread_id} is missing an item creation timestamp"
                     ),
                 })?;
-        let item_id = item.item.id().to_string();
-        let item_json = serde_json::to_string(&item.item).map_err(thread_history_error)?;
+        let item_id = item.id().to_string();
+        let item_json = serde_json::to_string(&item.payload).map_err(thread_history_error)?;
         // Local producers emit ItemCompleted once per item, except a step's bill, which completes
         // pending and again sealed or severed. A repeat cannot poison materialization: it keeps
         // the original creation ordinal and timestamp and replaces the snapshot.
@@ -465,7 +466,7 @@ ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
             "#,
         )
         .bind(thread_id)
-        .bind(item.turn_id.as_str())
+        .bind(change.turn_id.as_str())
         .bind(item_id.as_str())
         .bind(rollout_ordinal)
         .bind(rollout_ordinal)
@@ -480,9 +481,11 @@ ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
 
         // Keep summary item IDs on the turn row so reads do not need to scan every item in the
         // turn.
-        match item.item.native_item() {
-            ThreadItem::CodeModeOwned(_) => unreachable!("ownership ingress rejects nesting"),
-            ThreadItem::UserMessage { .. } => {
+        match item.payload.native_item() {
+            ThreadItemPayload::CodeModeOwned(_) => {
+                unreachable!("ownership ingress rejects nesting")
+            }
+            ThreadItemPayload::UserMessage { .. } => {
                 sqlx::query(
                     r#"
 UPDATE thread_turns
@@ -495,12 +498,12 @@ WHERE thread_id = ?
                 )
                 .bind(item_id.as_str())
                 .bind(thread_id)
-                .bind(item.turn_id.as_str())
+                .bind(change.turn_id.as_str())
                 .execute(&mut **transaction)
                 .await
                 .map_err(thread_history_error)?;
             }
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 phase: Some(MessagePhase::FinalAnswer),
                 ..
             } => {
@@ -516,39 +519,39 @@ WHERE thread_id = ?
                 )
                 .bind(item_id.as_str())
                 .bind(thread_id)
-                .bind(item.turn_id.as_str())
+                .bind(change.turn_id.as_str())
                 .execute(&mut **transaction)
                 .await
                 .map_err(thread_history_error)?;
             }
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 phase: Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) | None,
                 ..
             }
-            | ThreadItem::HookPrompt { .. }
-            | ThreadItem::FunctionCallOutput { .. }
-            | ThreadItem::ToolOutputTokens { .. }
-            | ThreadItem::CodeMode(_)
-            | ThreadItem::Plan { .. }
-            | ThreadItem::Reasoning { .. }
-            | ThreadItem::Thought { .. }
-            | ThreadItem::Preamble { .. }
-            | ThreadItem::StepAdmission(_)
-            | ThreadItem::ToolInput(_)
-            | ThreadItem::Arrival(_)
-            | ThreadItem::CommandExecution { .. }
-            | ThreadItem::FileChange { .. }
-            | ThreadItem::McpToolCall { .. }
-            | ThreadItem::DynamicToolCall { .. }
-            | ThreadItem::CollabAgentToolCall { .. }
-            | ThreadItem::SubAgentActivity { .. }
-            | ThreadItem::WebSearch(_)
-            | ThreadItem::ImageView { .. }
-            | ThreadItem::Sleep(_)
-            | ThreadItem::ImageGeneration(_)
-            | ThreadItem::EnteredReviewMode { .. }
-            | ThreadItem::ExitedReviewMode { .. }
-            | ThreadItem::ContextCompaction { .. } => {}
+            | ThreadItemPayload::HookPrompt { .. }
+            | ThreadItemPayload::FunctionCallOutput { .. }
+            | ThreadItemPayload::ToolOutputTokens { .. }
+            | ThreadItemPayload::CodeMode(_)
+            | ThreadItemPayload::Plan { .. }
+            | ThreadItemPayload::Reasoning { .. }
+            | ThreadItemPayload::Thought { .. }
+            | ThreadItemPayload::Preamble { .. }
+            | ThreadItemPayload::StepAdmission(_)
+            | ThreadItemPayload::ToolInput(_)
+            | ThreadItemPayload::Arrival(_)
+            | ThreadItemPayload::CommandExecution { .. }
+            | ThreadItemPayload::FileChange { .. }
+            | ThreadItemPayload::McpToolCall { .. }
+            | ThreadItemPayload::DynamicToolCall { .. }
+            | ThreadItemPayload::CollabAgentToolCall { .. }
+            | ThreadItemPayload::SubAgentActivity { .. }
+            | ThreadItemPayload::WebSearch(_)
+            | ThreadItemPayload::ImageView { .. }
+            | ThreadItemPayload::Sleep(_)
+            | ThreadItemPayload::ImageGeneration(_)
+            | ThreadItemPayload::EnteredReviewMode { .. }
+            | ThreadItemPayload::ExitedReviewMode { .. }
+            | ThreadItemPayload::ContextCompaction { .. } => {}
         }
     }
     Ok(())

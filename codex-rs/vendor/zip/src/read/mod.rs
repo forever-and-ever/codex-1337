@@ -3,37 +3,52 @@
 use crate::compression::CompressionMethod;
 use crate::cp437::FromCp437;
 use crate::datetime::DateTime;
-use crate::extra_fields::{ExtraField, ExtraFields};
-use crate::format::blocks::{CentralDirectoryEndInfo, DataAndPosition, ZipCentralEntryBlock};
-use crate::format::flags::{ZipFileFlags, ZipFlags};
+use crate::extra_fields::ExtraField;
+use crate::extra_fields::ExtraFields;
+use crate::format::blocks::CentralDirectoryEndInfo;
+use crate::format::blocks::DataAndPosition;
+use crate::format::blocks::ZipCentralEntryBlock;
+use crate::format::flags::ZipFileFlags;
+use crate::format::flags::ZipFlags;
 use crate::format::system::System;
-use crate::result::{ZipError, ZipResult, invalid};
+use crate::result::ZipError;
+use crate::result::ZipResult;
+use crate::result::invalid;
 use crate::types::ZipFileData;
 use indexmap::IndexMap;
-use std::io::{self, Read, Seek};
+use std::io::Read;
+use std::io::Seek;
+use std::io::{self};
 use std::sync::OnceLock;
 
 mod config;
-pub use config::{ArchiveOffset, Config};
+pub use config::ArchiveOffset;
+pub use config::Config;
 
 pub(crate) mod extract;
-pub use extract::{ExtractOptions, RootDirFilter, SymlinkExtractAction, root_dir_common_filter};
+pub use extract::ExtractOptions;
+pub use extract::RootDirFilter;
+pub use extract::SymlinkExtractAction;
+pub use extract::root_dir_common_filter;
 
 /// Provides high level API for reading from a stream.
 pub(crate) mod stream;
-pub use stream::{
-    read_zipfile_from_stream, read_zipfile_from_stream_with_compressed_size,
-    read_zipfile_from_stream_with_options,
-};
+pub use stream::read_zipfile_from_stream;
+pub use stream::read_zipfile_from_stream_with_compressed_size;
+pub use stream::read_zipfile_from_stream_with_options;
 
 pub(crate) mod magic_finder;
 pub(crate) mod readers;
 
 pub(crate) mod zipfile;
-pub use zipfile::{ZipFile, ZipFileEntry, ZipFileEntryWithDataDescriptor, ZipFileSeek};
+pub use zipfile::ZipFile;
+pub use zipfile::ZipFileEntry;
+pub use zipfile::ZipFileEntryWithDataDescriptor;
+pub use zipfile::ZipFileSeek;
 
 pub(crate) mod zip_archive;
-pub use zip_archive::{ZipArchive, ZipArchiveMetadata};
+pub use zip_archive::ZipArchive;
+pub use zip_archive::ZipArchiveMetadata;
 
 #[cfg(feature = "aes-crypto")]
 pub use crate::aes::AesInfo;

@@ -7,16 +7,13 @@ mod native;
 mod response;
 mod telemetry;
 
+pub(super) use native::output_instructions;
 pub(super) use telemetry::SampledScore;
 
 use super::request::PreparedRequest;
 use super::score::PendingScore;
 use connection_pool::ConnectionPool;
-use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 
 use codex_api::ApiError;
 use codex_api::Reasoning;
@@ -36,7 +33,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::TruncationPolicy;
 use codex_protocol::turn_input::CyberAccessProgram;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -90,11 +86,10 @@ pub struct LunaSamplingRequest {
     /// Trusted classifier instructions with their role and content attribution.
     pub instructions: RenderedFragment,
     /// Composed evidence messages, with roles, annotations and content order intact.
+    #[cfg(test)]
     pub input: Vec<ResponseItem>,
     /// Opaque parent compaction to reuse only for compatible model configurations.
     pub parent_compaction: Option<ResponseItem>,
-    /// Host-selected compatibility hash for the supplied parent checkpoint.
-    pub parent_compaction_hash: Option<String>,
     /// Reasoning budget explicitly selected for this request.
     pub reasoning_effort: ReasoningEffort,
     /// Owning turn that initiated this classification, not the classifier turn.
@@ -132,8 +127,8 @@ pub enum LunaSamplerError {
     /// The classification expired, lost its owning generation, or was replaced at capacity.
     #[error("Luna request was superseded by a newer classification")]
     Superseded,
-    /// The supplied parent checkpoint cannot be consumed by this Luna configuration.
-    #[error("parent compaction is incompatible with Luna")]
+    /// Native classifiers cannot consume another request's provider signatures.
+    #[error("parent compaction is incompatible with the native classifier")]
     IncompatibleCompaction,
     /// The complete classifier input exceeded the model allowance.
     #[error("Luna input exceeds the complete request budget")]
@@ -143,28 +138,14 @@ pub enum LunaSamplerError {
     QueueFull,
 }
 
-struct ActiveRequest {
-    supersede: oneshot::Sender<()>,
-    scored: Arc<AtomicBool>,
-}
-
 /// Runs bounded Luna classifications over pooled WebSockets or HTTP.
 pub struct LunaSampler {
     config: Arc<LunaSamplerConfig>,
     connections: Arc<ConnectionPool>,
-    active_requests: Mutex<VecDeque<ActiveRequest>>,
     native_catalog: tokio::sync::Mutex<Option<Arc<native::Catalog>>>,
 }
 
 impl LunaSampler {
-    pub(super) fn output_instructions(&self) -> &'static str {
-        if matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
-            super::config::CLASSIFICATION_OUTPUT_INSTRUCTIONS
-        } else {
-            super::config::NATIVE_CLASSIFICATION_OUTPUT_INSTRUCTIONS
-        }
-    }
-
     /// A checkpoint is reusable only when both models declare the same nonempty hash.
     pub(super) fn supports_parent_compaction(&self, parent_hash: Option<&str>) -> bool {
         if !matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
@@ -182,7 +163,6 @@ impl LunaSampler {
         Self {
             connections: ConnectionPool::new(Arc::clone(&config)),
             config,
-            active_requests: Mutex::new(VecDeque::with_capacity(MAX_CONCURRENT_REQUESTS)),
             native_catalog: tokio::sync::Mutex::new(None),
         }
     }
@@ -300,138 +280,6 @@ impl LunaSampler {
         }
     }
 
-    /// Sends one tool-less classification request using an available transport.
-    pub async fn sample(
-        &self,
-        mut request: LunaSamplingRequest,
-    ) -> Result<String, LunaSamplerError> {
-        if request
-            .pending_score
-            .as_ref()
-            .is_some_and(PendingScore::is_expired)
-        {
-            return Err(LunaSamplerError::Superseded);
-        }
-        let pending_score = request.pending_score.take();
-        let native = match self
-            .config
-            .provider
-            .anthropic_auth_context()
-            .map_err(|error| LunaSamplerError::Provider(error.into()))?
-        {
-            Some(auth) => {
-                let account_id = request.provider_account_id.as_deref().ok_or_else(|| {
-                    LunaSamplerError::Provider(CodexErr::InvalidRequest(
-                        "Native Guardian requires the thread's selected Anthropic account".into(),
-                    ))
-                })?;
-                Some((auth, native::model(self, account_id).await?, account_id))
-            }
-            None => None,
-        };
-        let auth_owner_generation = self.auth_owner_generation();
-        if request.parent_compaction.is_some()
-            && !self.supports_parent_compaction(request.parent_compaction_hash.as_deref())
-        {
-            return Err(LunaSamplerError::IncompatibleCompaction);
-        }
-        let evidence = std::mem::take(&mut request.input)
-            .into_iter()
-            .map(ResponseItemEnvelope::new)
-            .collect();
-        let (input, total_tokens) = Self::prepare_input(&request, /*history*/ None, evidence);
-        let input: Vec<_> = input
-            .into_iter()
-            .map(ResponseItemEnvelope::into_item)
-            .filter(|item| {
-                native.is_none() || !matches!(item, ResponseItem::AdditionalTools { .. })
-            })
-            .collect();
-        let native = match native {
-            Some((auth, model, account_id)) => {
-                let request = native::request(&model, &input)?;
-                Some((auth, model, account_id, request))
-            }
-            None => None,
-        };
-        // Admission and metrics inspect the exact native body sent below, including its schema.
-        let total_tokens = native.as_ref().map_or(total_tokens, |(_, _, _, request)| {
-            TruncationPolicy::Bytes(request.body().get().len()).token_budget()
-        });
-        let max_input_tokens = native
-            .as_ref()
-            .map_or(self.config.max_input_tokens, |(_, model, _, _)| {
-                codex_guardian_context::effective_input_token_limit(model, None)
-            });
-        let admission = if total_tokens > max_input_tokens.saturating_sub(/*rhs*/ 256) {
-            super::metrics::RequestAdmission::Rejected
-        } else {
-            super::metrics::RequestAdmission::Admitted
-        };
-        super::metrics::record_request_tokens(
-            self.config.metrics.as_deref(),
-            /*existing*/ 0,
-            total_tokens,
-            admission,
-        );
-        // Oversized classifications defer to sync with the existing failure score.
-        if matches!(admission, super::metrics::RequestAdmission::Rejected) {
-            return Err(LunaSamplerError::InputTooLarge);
-        }
-        let (supersede, superseded) = oneshot::channel();
-        let scored = Arc::new(AtomicBool::new(/*v*/ false));
-        {
-            let mut active_requests = self
-                .active_requests
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            active_requests.retain(|request| !request.supersede.is_closed());
-            if active_requests.len() == MAX_CONCURRENT_REQUESTS {
-                let oldest_scored = active_requests
-                    .iter()
-                    .position(|request| request.scored.load(Ordering::Relaxed))
-                    .unwrap_or(0);
-                if let Some(oldest) = active_requests.remove(oldest_scored) {
-                    let _ = oldest.supersede.send(());
-                }
-            }
-            active_requests.push_back(ActiveRequest {
-                supersede,
-                scored: Arc::clone(&scored),
-            });
-        }
-        // The same cancellation future moves into the detached drain after an early score.
-        let mut telemetry =
-            telemetry::SamplingTelemetry::new(self.config.metrics.clone(), pending_score.clone());
-        let superseded = Box::pin(async move {
-            tokio::select! {
-                _ = superseded => {},
-                () = async {
-                    match pending_score {
-                        Some(pending) => pending.expired().await,
-                        None => std::future::pending().await,
-                    }
-                } => {},
-            }
-        });
-        let result = if let Some((auth, _, account_id, request)) = native {
-            tokio::select! {
-                biased;
-                _ = superseded => Err(LunaSamplerError::Superseded),
-                result = native::sample(self, auth, request, account_id, scored, &mut telemetry) => result,
-            }
-        } else {
-            self.execution(&request, input, auth_owner_generation)
-                .run(
-                    execution::SamplingMode::Snapshot { superseded, scored },
-                    &mut telemetry,
-                )
-                .await
-        };
-        telemetry.record_result(&result);
-        result
-    }
-
     pub(super) fn max_input_tokens(&self) -> usize {
         self.config.max_input_tokens
     }
@@ -442,6 +290,10 @@ impl LunaSampler {
         sample: ConversationSample,
         ready: oneshot::Sender<Result<SampledScore, LunaSamplerError>>,
     ) -> Option<Vec<ResponseItemEnvelope>> {
+        if !matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
+            native::sample_snapshot(self, sample, ready).await;
+            return None;
+        }
         let ConversationSample {
             input: review_request,
             sampling,
@@ -469,12 +321,7 @@ impl LunaSampler {
             self.config.metrics.clone(),
             sampling.pending_score.clone(),
         );
-        let result = execution
-            .run(
-                execution::SamplingMode::Retained(&mut completion),
-                &mut telemetry,
-            )
-            .await;
+        let result = execution.run(&mut completion, &mut telemetry).await;
         execution
             .request
             .input

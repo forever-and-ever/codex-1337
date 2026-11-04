@@ -85,6 +85,7 @@ async fn native_classification_requires_complete_structured_output() {
         let stream = ResponseStream {
             rx_event,
             upstream_request_id: None,
+            routing_affinity: None,
             interrupt: None,
         };
         let scored = Arc::new(AtomicBool::new(/*v*/ false));

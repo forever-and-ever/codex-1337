@@ -91,6 +91,7 @@ impl LegacyInput {
             .into_iter()
             .map(|message| QueuedUserMessage {
                 user_message: message.user_message,
+                prepared_images: None,
                 action: message.action,
                 delivery: message.delivery,
                 pending_pastes: message.pending_pastes,

@@ -3,6 +3,7 @@ mod anthropic_quota;
 mod auth;
 mod bearer_auth_provider;
 mod capabilities;
+mod chatgpt_base_url;
 mod claude_catalog;
 mod combined_auth;
 mod models_endpoint;
@@ -10,6 +11,7 @@ mod models_identity;
 mod native_claude_catalog;
 pub mod openrouter;
 mod provider;
+mod runtime_auth;
 mod shared_state;
 pub mod test_support;
 mod workspace_routing;
@@ -24,6 +26,7 @@ pub use anthropic_quota::AnthropicQuota;
 pub use anthropic_quota::AnthropicQuotaError;
 pub use anthropic_quota::read_anthropic_quota;
 pub use auth::AgentIdentitySessionFallback;
+pub use auth::ProviderAuthContext;
 pub use auth::ProviderAuthScope;
 pub use auth::ResolvedProviderAuth;
 pub use auth::auth_provider_from_auth;
@@ -32,6 +35,8 @@ pub use auth::unauthenticated_auth_provider;
 pub use bearer_auth_provider::BearerAuthProvider;
 pub use bearer_auth_provider::BearerAuthProvider as CoreAuthProvider;
 pub use capabilities::ProviderCapabilities;
+pub use chatgpt_base_url::ChatgptBaseUrl;
+pub use chatgpt_base_url::DEFAULT_CHATGPT_BASE_URL;
 pub use codex_model_provider_info::CHATGPT_CODEX_BASE_URL;
 pub use codex_model_provider_info::RemoteCompactionSupport;
 pub use codex_protocol::account::ProviderAccount;
@@ -46,6 +51,13 @@ pub use provider::ProviderUnauthorizedRecovery;
 pub use provider::SharedModelProvider;
 pub use provider::create_model_provider;
 pub use provider::create_model_provider_with_anthropic_account;
+pub use provider::provider_uses_first_party_auth_path;
+pub use provider::resolve_api_provider;
+
+pub use runtime_auth::select_runtime_auth;
+pub use runtime_auth::validate_runtime_destination;
+pub use runtime_auth::validate_runtime_provider;
+pub use runtime_auth::validate_runtime_selectors;
 
 #[cfg(test)]
 #[path = "workspace_routing_tests.rs"]

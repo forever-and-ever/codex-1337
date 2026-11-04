@@ -346,12 +346,13 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             let admission = if admitted {
                 crate::code_mode_transcript::Admission::notification(
                     &codex_app_server_protocol::ServerNotification::ItemCompleted(
-                        codex_app_server_protocol::ItemCompletedNotification {
-                            thread_id: owner.thread_id.to_string(),
-                            turn_id: String::new(),
-                            item: codex_app_server_protocol::ThreadItem::CodeModeOwned(owned),
-                            completed_at_ms: 0,
-                        },
+                        codex_app_server_protocol::ItemCompletedNotification::new(
+                            owner.thread_id.to_string(),
+                            String::new(),
+                            codex_app_server_protocol::ThreadItemPayload::CodeModeOwned(owned),
+                            None,
+                            0,
+                        ),
                     ),
                     crate::code_mode_transcript::Source::Live,
                 )
@@ -367,7 +368,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 .unwrap()
                 .block
         };
-        let block = reduce(codex_app_server_protocol::ThreadItem::CodeMode(
+        let block = reduce(codex_app_server_protocol::ThreadItemPayload::CodeMode(
             codex_app_server_protocol::CodeModeItem {
                 id: "code-start".into(),
                 exec_call_id: "code".into(),
@@ -414,7 +415,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(!shown.contains("const answer"));
         for status_only in [false, true] {
             if status_only {
-                code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+                code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
                     ToolInput {
                         id: "input:status-child".into(),
                         call_id: "status-child".into(),
@@ -465,7 +466,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                     .all(|target| !matches!(target, FoldTarget::Part(_)))
             );
         }
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
             ToolInput {
                 id: "input:read-child".into(),
                 call_id: "read-child".into(),
@@ -485,7 +486,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         };
         assert!(pending.fold_position(&format).is_none());
         assert!(first.fold_position(&format).is_some());
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
             ToolInput {
                 id: "input:status-child".into(),
                 call_id: "status-child".into(),
@@ -493,7 +494,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 payload: ToolInputPayload::Json(r#"{"activity":"Reading source"}"#.into()),
             },
         ));
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
             ToolInput {
                 id: "input:write-child".into(),
                 call_id: "write-child".into(),
@@ -506,7 +507,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         ));
         // Canonical captures and semantic lifecycle cells may arrive in either order.
         // The capture must not replace the native formatter or duplicate its row.
-        let mcp_input = codex_app_server_protocol::ThreadItem::ToolInput(ToolInput {
+        let mcp_input = codex_app_server_protocol::ThreadItemPayload::ToolInput(ToolInput {
             id: "input:mcp-child".into(),
             call_id: "mcp-child".into(),
             name: ToolName::plain("mcp__depot__sem_read_outline"),
@@ -519,7 +520,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             assert!(!awaiting_native.text().contains("mcp__depot"));
             assert!(!awaiting_native.text().contains(r#""file""#));
         }
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::McpToolCall {
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::McpToolCall {
             id: "mcp-child".into(),
             server: "depot".into(),
             tool: "sem.read.outline".into(),
@@ -537,7 +538,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         if !admitted {
             code[0] = reduce(mcp_input);
         }
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
             ToolInput {
                 id: "input:agent-child".into(),
                 call_id: "agent-child".into(),
@@ -545,19 +546,21 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 payload: ToolInputPayload::Json(r#"{"message":"Inspect source"}"#.into()),
             },
         ));
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::CollabAgentToolCall {
-            id: "agent-child".into(),
-            tool: codex_app_server_protocol::CollabAgentTool::SpawnAgent,
-            status: codex_app_server_protocol::CollabAgentToolCallStatus::Completed,
-            sender_thread_id: owner.thread_id.to_string(),
-            receiver_thread_ids: vec![codex_protocol::ThreadId::from_u128(8).to_string()],
-            prompt: Some("Inspect source".into()),
-            model: None,
-            reasoning_effort: None,
-            agents_states: HashMap::default(),
-            wait_completion: None,
-        });
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+        code[0] = reduce(
+            codex_app_server_protocol::ThreadItemPayload::CollabAgentToolCall {
+                id: "agent-child".into(),
+                tool: codex_app_server_protocol::CollabAgentTool::SpawnAgent,
+                status: codex_app_server_protocol::CollabAgentToolCallStatus::Completed,
+                sender_thread_id: owner.thread_id.to_string(),
+                receiver_thread_ids: vec![codex_protocol::ThreadId::from_u128(8).to_string()],
+                prompt: Some("Inspect source".into()),
+                model: None,
+                reasoning_effort: None,
+                agents_states: HashMap::default(),
+                wait_completion: None,
+            },
+        );
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::ToolInput(
             ToolInput {
                 id: "input:command-child".into(),
                 call_id: "command-child".into(),
@@ -565,22 +568,24 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 payload: ToolInputPayload::Json(r#"{"cmd":"cat Cargo.toml"}"#.into()),
             },
         ));
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::CommandExecution {
-            sandbox_type: None,
-            model_context: None,
-            id: "child".into(),
-            plugin_id: None,
-            script_path: None,
-            command: "echo child".into(),
-            cwd: cwd.clone().into(),
-            process_id: None,
-            source: CommandExecutionSource::Agent,
-            status: codex_app_server_protocol::CommandExecutionStatus::Completed,
-            command_actions: Vec::new(),
-            aggregated_output: Some("child output".into()),
-            exit_code: Some(0),
-            duration_ms: Some(0),
-        });
+        code[0] = reduce(
+            codex_app_server_protocol::ThreadItemPayload::CommandExecution {
+                sandbox_type: None,
+                model_context: None,
+                id: "child".into(),
+                plugin_id: None,
+                script_path: None,
+                command: "echo child".into(),
+                cwd: cwd.clone().into(),
+                process_id: None,
+                source: CommandExecutionSource::Agent,
+                status: codex_app_server_protocol::CommandExecutionStatus::Completed,
+                command_actions: Vec::new(),
+                aggregated_output: Some("child output".into()),
+                exit_code: Some(0),
+                duration_ms: Some(0),
+            },
+        );
         let buffer = tests::render(&mut view, &code, 104, 26);
         let shown = tests::text(&buffer);
         // Filesystem helpers and shell reads share semantic paint through the same Fmt surface.
@@ -635,7 +640,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(!nested.text().contains("echo child"));
         assert!(nested.fold_position(&format).is_some());
         // A completed filesystem write publishes the same native edit as apply_patch.
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::FileChange {
+        code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::FileChange {
             id: "write-child".into(),
             changes: vec![codex_app_server_protocol::FileUpdateChange {
                 path: "notes.txt".into(),
@@ -652,13 +657,15 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             "{}",
             edited.text()
         );
-        code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
-            id: "code-output".into(),
-            call_id: Some("code".into()),
-            name: "exec".into(),
-            namespace: None,
-            output: FunctionCallOutputBody::Text("plain result, not code".into()),
-        });
+        code[0] = reduce(
+            codex_app_server_protocol::ThreadItemPayload::FunctionCallOutput {
+                id: "code-output".into(),
+                call_id: Some("code".into()),
+                name: "exec".into(),
+                namespace: None,
+                output: FunctionCallOutputBody::Text("plain result, not code".into()),
+            },
+        );
         tests::render(&mut view, &code, 104, 26);
         let output = FoldTarget::Invocation {
             call_id: "code".into(),

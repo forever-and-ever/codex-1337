@@ -128,6 +128,7 @@ pub(crate) use super::approvals::ApprovalAction;
 pub(crate) struct PermissionRequestPayload {
     pub tool_name: Option<ToolName>,
     pub tool_input: serde_json::Value,
+    pub tool_cwd: Option<PathUri>,
 }
 
 impl PermissionRequestPayload {
@@ -135,6 +136,7 @@ impl PermissionRequestPayload {
         tool_name: Option<ToolName>,
         command: String,
         description: Option<String>,
+        cwd: PathUri,
     ) -> Self {
         let mut tool_input = serde_json::Map::new();
         tool_input.insert("command".to_string(), serde_json::Value::String(command));
@@ -147,6 +149,7 @@ impl PermissionRequestPayload {
         Self {
             tool_name,
             tool_input: serde_json::Value::Object(tool_input),
+            tool_cwd: Some(cwd),
         }
     }
 }
