@@ -19,7 +19,7 @@ REGENERATED_BINDINGS: dict[tuple[str, str], str] = {
     (
         "152.2.0",
         "x86_64-unknown-linux-gnu",
-    ): "de9a71ee1cb4b5ab12ab5bfe382eab023087693bcf874faa72bff6fef0c2d4d5",
+    ): "63d6d85dc05dd5c5cdf7e8eb5afe1aa924d09736ef611cbc3ba838553fd4ba90",
 }
 
 

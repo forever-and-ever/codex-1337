@@ -124,21 +124,30 @@ the same `sandbox_release` transition (pointer compression, sandbox, pinned
 Chromium libc++), not the source/workspace-runtime profile:
 
 ```bash
-flock /home/main/programming/projects/codex-1337/.worktrees/upstream-0.166.0.notes/build.lock \
-  env CARGO_BUILD_JOBS=6 /home/main/.local/libexec/cpu-lanes \
-  bazel build -c opt --platforms=@llvm//platforms:linux_x86_64 \
+bazel build -c opt --platforms=@llvm//platforms:linux_x86_64 \
   //third_party/v8:rusty_v8_sandbox_release_binding_x86_64_unknown_linux_gnu
 ```
 
 Run from the checkout root; copy the reported `binding_generated_152_2_0.rs`
-output verbatim to the versioned binding path and update its resolver pin.
+output to the versioned binding path, then format it with the checkout's pinned
+Rust toolchain and the same configuration as `scripts/format.py` before hashing:
+
+```bash
+binding=third_party/v8/bindings/152.2.0/src_binding_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.rs
+rustfmt --edition 2024 --config-path codex-rs/rustfmt.toml \
+  --config imports_granularity=Item,skip_children=true "$binding"
+sha256sum "$binding"
+```
+
+Pin the formatted output's digest in the resolver. Formatting is part of
+regeneration, not a later source change: raw bindgen output has a different hash.
 The root `.bazelrc` uses `repo_env=PIP_REQUIRE_VIRTUALENV=false` because host
 pip policy otherwise leaks into rules_python's isolated wheel builds, which
 install nothing globally.
 
 SHA-256 provenance:
 - Published binding before: `3e4d5fecdbe0f98a6017e69d7ca82519a77fb032c5eb5e4cdbecdd3e2ec519d5`.
-- Regenerated binding after: `de9a71ee1cb4b5ab12ab5bfe382eab023087693bcf874faa72bff6fef0c2d4d5`.
+- Regenerated binding after: `63d6d85dc05dd5c5cdf7e8eb5afe1aa924d09736ef611cbc3ba838553fd4ba90`.
 - Published archive unchanged: `b3b490f2aa809eda7f6ac727f851fb00ce8355be72827577cfaac28c7137dbcd`
   (`librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.a.gz`).
 - Published pair manifest unchanged: `1ec730635970ab1c0e8f4764ea113ad29d69d7f8d4c2ae69f3d766434a759350`.
