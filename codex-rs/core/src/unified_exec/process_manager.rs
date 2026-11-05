@@ -85,7 +85,6 @@ use codex_protocol::protocol::TerminalInteractionEvent;
 use codex_protocol::shell_environment::is_non_inheritable_env_var;
 use codex_sandboxing::SandboxCommand;
 use codex_tools::ToolName;
-use codex_utils_head_tail_buffer::HeadTailBuffer;
 use codex_utils_output_truncation::approx_tokens_from_byte_count;
 use codex_utils_path_uri::PathUri;
 
@@ -664,10 +663,11 @@ impl UnifiedExecProcessManager {
             })?,
             None => prepared.initial_wait.deadline(start),
         };
-        let collected_output = Self::collect_output_until_deadline(
+        let collected_output = super::output_collection::collect(
             process.output_handles(),
             Some(context.session.subscribe_elicitation_pause_state()),
             deadline,
+            completion.is_none().then_some(&context.cancellation_token),
         )
         .await;
         if let Some(completion) = completion.as_mut()
@@ -1614,14 +1614,6 @@ impl UnifiedExecProcessManager {
         };
         tracing::Span::current().record("outcome", outcome);
         result
-    }
-
-    pub(super) async fn collect_output_until_deadline<const MAX_BYTES: usize>(
-        output: &OutputHandles<MAX_BYTES>,
-        pause_state: Option<watch::Receiver<bool>>,
-        deadline: Instant,
-    ) -> HeadTailBuffer<MAX_BYTES> {
-        super::output_collection::collect(output, pause_state, deadline, None).await
     }
 
     fn prune_processes_if_needed(store: &mut ProcessStore) -> Option<ProcessEntry> {

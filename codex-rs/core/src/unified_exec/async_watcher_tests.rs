@@ -8,7 +8,6 @@ use super::start_streaming_output;
 use super::utf8_boundary;
 use crate::session::tests::make_session_and_context_with_rx;
 use crate::unified_exec::UnifiedExecContext;
-use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::process::OutputBuffers;
 use crate::unified_exec::process::UnifiedExecProcess;
 use codex_protocol::items::CommandExecutionStatus;
@@ -89,10 +88,11 @@ async fn completed_output_preserves_bytes_before_subscription(
     stdout_tx.send(b"early\n".to_vec())?;
     collected.await;
 
-    let model_output = UnifiedExecProcessManager::collect_output_until_deadline(
+    let model_output = super::super::output_collection::collect(
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now(),
+        /*interjection*/ None,
     )
     .await;
     assert_eq!(model_output.to_bytes(), b"early\n");

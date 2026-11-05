@@ -171,10 +171,11 @@ async fn exec_command_with_tty(
     }
 
     let deadline = started_at + Duration::from_millis(yield_time_ms);
-    let collected_output = UnifiedExecProcessManager::collect_output_until_deadline(
+    let collected_output = super::output_collection::collect(
         process.output_handles(),
         Some(session.subscribe_elicitation_pause_state()),
         deadline,
+        /*interjection*/ None,
     )
     .await;
     let wall_time = Instant::now().saturating_duration_since(started_at);
@@ -991,10 +992,11 @@ async fn unified_exec_uses_remote_exec_server_when_configured() -> anyhow::Resul
     process.write(b"printf 'remote-unified-exec\\n'\n").await?;
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let collected = UnifiedExecProcessManager::collect_output_until_deadline(
+    let collected = super::output_collection::collect(
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now() + Duration::from_millis(2_500),
+        /*interjection*/ None,
     )
     .await
     .to_bytes_with_omission_marker();

@@ -165,6 +165,18 @@ pub(super) struct ProcessLifetimes {
     tasks: TaskTracker,
 }
 
+/// Startup rejection must still stop its backend after custody has been published.
+/// The registry's Arc deliberately prevents Drop from being the cleanup owner.
+pub(super) fn finish_startup(
+    process: &UnifiedExecProcess,
+    result: Result<(), UnifiedExecError>,
+) -> Result<(), UnifiedExecError> {
+    if result.is_err() {
+        process.terminate();
+    }
+    result
+}
+
 fn key(process: &Arc<UnifiedExecProcess>) -> usize {
     Arc::as_ptr(process) as usize
 }

@@ -306,10 +306,10 @@ impl UnifiedExecProcess {
 
         let aggregated = self.snapshot_output().await;
         let aggregated_text = String::from_utf8_lossy(&aggregated);
-        self.check_for_sandbox_denial_with_text(aggregated_text.as_ref())
-            .await?;
-
-        Ok(())
+        let result = self
+            .check_for_sandbox_denial_with_text(aggregated_text.as_ref())
+            .await;
+        super::runtime_hold::finish_startup(self, result)
     }
 
     pub(super) async fn check_for_sandbox_denial_with_text(

@@ -5,6 +5,7 @@ use crate::unified_exec::clamp_yield_time;
 use crate::unified_exec::output_collection;
 use codex_exec_server::ExecOutputStream;
 use codex_network_proxy::ManagedNetworkSandboxContext;
+use codex_utils_head_tail_buffer::HeadTailBuffer;
 use core_test_support::assert_regex_match;
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
@@ -461,10 +462,11 @@ async fn output_collection_preserves_omissions_from_drained_buffer() {
         drain_policy: OutputDrainPolicy::BoundedAfterExit,
     };
 
-    let collected = UnifiedExecProcessManager::collect_output_until_deadline(
+    let collected = output_collection::collect(
         &output,
         /*pause_state*/ None,
         Instant::now() + Duration::from_secs(1),
+        /*interjection*/ None,
     )
     .await;
 
