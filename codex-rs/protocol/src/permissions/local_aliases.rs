@@ -70,7 +70,7 @@ impl FileSystemSandboxPolicy {
         &'a self,
         context: &FileSystemSandboxPolicyContext<'a>,
     ) -> io::Result<LocalFileSystemPolicyMatcher<'a>> {
-        let mut policy = Cow::Borrowed(self);
+        let mut policy = super::aws_home::localize(self, context);
         if cfg!(target_os = "macos") {
             let policy = policy.to_mut();
             // Preserve non-path entries, including globs that constrain full-disk

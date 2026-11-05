@@ -33,6 +33,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Span;
 
+use super::ears::Ears;
 use crate::motion::MotionMode;
 use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::default_bg;
@@ -71,10 +72,12 @@ enum Act {
     /// Nothing is engaged; the classic sweep runs.
     #[default]
     Classic,
-    /// Drawing; `drawn` is when the shimmer last advanced.
+    /// Drawing; `drawn` is when the shimmer last advanced, and `ears` hear for a shimmer that
+    /// listens, once `PipeWire` lets them.
     Running {
         shimmer: Box<Shimmer>,
         drawn: Instant,
+        ears: Option<Ears>,
     },
 }
 
@@ -105,7 +108,12 @@ impl Live {
             return None;
         }
         let now = Instant::now();
-        let Act::Running { shimmer, drawn } = &mut self.act else {
+        let Act::Running {
+            shimmer,
+            drawn,
+            ears,
+        } = &mut self.act
+        else {
             return None;
         };
         let dt = now.saturating_duration_since(*drawn);
@@ -117,6 +125,9 @@ impl Live {
         };
         shimmer.set_spell(self.feed.spell());
         shimmer.set_intensity(self.feed.intensity(measured));
+        if let Some(ears) = ears {
+            shimmer.hear(&ears.drain());
+        }
         shimmer.advance(dt);
         *drawn = now;
         Some(shimmer)
@@ -147,6 +158,7 @@ pub(crate) fn engage_random() {
     let engaged = engaged();
     if let Some(recipe) = ROSTER
         .iter()
+        .filter(|recipe| offered(recipe))
         .filter(|recipe| !engaged.is_some_and(|engaged| std::ptr::eq(*recipe, engaged)))
         .choose(&mut rand::rng())
     {
@@ -156,18 +168,38 @@ pub(crate) fn engage_random() {
 
 #[expect(
     clippy::expect_used,
-    reason = "The picker checks the selected stock recipe against codex-tui's wide captions and octants; every random stock choice fits too."
+    reason = "Codex-tui engages only the stock recipes it offers, which fit its wide captions and octants."
 )]
 pub(super) fn engage(recipe: &'static Recipe) {
     let shimmer = Shimmer::new(recipe, rand::random(), GLYPHS)
         .expect("the selected stock recipe fits codex-tui");
+    let ears = recipe.listens().then(Ears::open).flatten();
     let mut live = live();
     live.act = Act::Running {
         shimmer: Box::new(shimmer),
         drawn: Instant::now(),
+        ears,
     };
     live.feed.forget();
     live.row = Row::default();
+}
+
+/// Whether codex-tui offers `recipe`: it fits the terminal, and it listens only where `PipeWire`
+/// lets it hear.
+pub(super) fn offered(recipe: &Recipe) -> bool {
+    recipe.fits(GLYPHS).is_ok() && (!recipe.listens() || Ears::can_hear())
+}
+
+/// Held for the TUI's session: dropping it stops the engaged shimmer's ears, so that no recorder
+/// outlives the TUI.
+pub(crate) struct Earplug;
+
+impl Drop for Earplug {
+    fn drop(&mut self) {
+        if let Act::Running { ears, .. } = &mut live().act {
+            *ears = None;
+        }
+    }
 }
 
 /// The recipe engaged, if any.
@@ -634,6 +666,7 @@ mod tests {
             act: Act::Running {
                 shimmer: Box::new(Shimmer::new(&ROSTER[0], 7, GLYPHS).unwrap()),
                 drawn: before,
+                ears: None,
             },
             frames: Some(frames.clone()),
             ..Live::default()

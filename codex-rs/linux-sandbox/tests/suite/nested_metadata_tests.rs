@@ -86,7 +86,12 @@ fi
 if (touch "$workspace/.codex/forbidden.txt") 2>/dev/null; then
     exit 11
 fi
-for name in .git .agents .codex .aws; do
+test -d "$workspace/.aws"
+if (touch "$workspace/.aws/forbidden.txt") 2>/dev/null; then
+    exit 14
+fi
+test ! -e "$visualization/.aws"
+for name in .git .agents .codex; do
     test -d "$visualization/$name"
     if (touch "$visualization/$name/forbidden.txt") 2>/dev/null; then
         exit 12
@@ -94,6 +99,9 @@ for name in .git .agents .codex .aws; do
 done
 printf nested-metadata-protected
 "#;
+    // HOME belongs to the sandbox executor, not the process constructing the profile.
+    let mut env = create_env_from_core_vars();
+    env.insert("HOME".to_string(), home.to_string_lossy().into_owned());
     let output = run_cmd_result_with_permission_profile_for_cwd(
         &[
             "/bin/sh",
@@ -107,7 +115,7 @@ printf nested-metadata-protected
         ],
         home.join(relative_cwd),
         permission_profile,
-        create_env_from_core_vars(),
+        env,
         LONG_TIMEOUT_MS,
         /*use_legacy_landlock*/ false,
     )

@@ -139,11 +139,19 @@ fn effective_workspace_intersection_preserves_network_metadata_and_temp() {
     );
     assert_eq!(result.network_sandbox_policy(), Restricted);
     assert!(policy.entries.contains(&special(Tmpdir, Write)));
-    for name in [".git", ".agents", ".codex", ".aws"] {
+    for name in [".git", ".agents", ".codex"] {
         let protected = project.join(name);
         assert!(!policy.can_write_local_path_with_cwd(protected.as_path(), root.as_path()));
         assert!(policy.entries.contains(&skipped(protected.into(), Read)));
     }
+    let aws = project.join(".aws");
+    assert_eq!(
+        policy.can_write_local_path_with_cwd(aws.as_path(), root.as_path()),
+        cfg!(target_os = "linux")
+    );
+    assert!(policy.entries.contains(&skipped(aws.clone().into(), Read)));
+    std::fs::create_dir(&aws).expect("existing AWS configuration");
+    assert!(!policy.can_write_local_path_with_cwd(aws.as_path(), root.as_path()));
     assert!(policy.entries.contains(&skipped(gitdir.into(), Read)));
     let strict = rooted(
         &project,

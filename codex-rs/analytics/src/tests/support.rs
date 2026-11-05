@@ -140,6 +140,7 @@ pub(super) fn sample_thread_with_metadata(
         name: None,
         theme: None,
         turns: Vec::new(),
+        theme: None,
     }
 }
 

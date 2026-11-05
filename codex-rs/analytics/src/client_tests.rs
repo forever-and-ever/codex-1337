@@ -684,6 +684,7 @@ fn sample_thread(thread_id: &str) -> Thread {
         name: None,
         theme: None,
         turns: Vec::new(),
+        theme: None,
     }
 }
 

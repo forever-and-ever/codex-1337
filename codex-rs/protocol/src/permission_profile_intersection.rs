@@ -253,12 +253,12 @@ pub fn intersect_effective_permission_profiles(
         } else {
             path.into()
         };
-        let entry =
-            if optional_metadata && !required_restriction && access == FileSystemAccessMode::Read {
-                FileSystemSandboxEntry::skip_missing_path(path, access)
-            } else {
-                FileSystemSandboxEntry::new(path, access)
-            };
+        let entry = crate::permissions::aws_home::intersect_optional_metadata(
+            path,
+            access,
+            optional_metadata,
+            required_restriction,
+        );
         if !intersection.entries.contains(&entry) {
             intersection.entries.push(entry);
         }

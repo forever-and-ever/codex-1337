@@ -538,7 +538,6 @@ fn missing_read_only_subpath_uses_empty_file_bind_data() {
             workspace.join(".git"),
             workspace.join(".agents"),
             workspace.join(".codex"),
-            workspace.join(".aws"),
         ]
     );
     assert!(
@@ -576,7 +575,6 @@ fn transient_empty_preserved_file_uses_empty_file_bind_data() {
             dot_git.clone(),
             workspace.join(".agents"),
             workspace.join(".codex"),
-            workspace.join(".aws"),
         ]
     );
     assert!(
@@ -618,12 +616,7 @@ fn missing_child_git_under_parent_repo_is_mounted_read_only() {
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
     assert_eq!(
         synthetic_mount_target_paths(&args),
-        vec![
-            workspace.join(".codex"),
-            dot_git,
-            workspace.join(".agents"),
-            workspace.join(".aws"),
-        ],
+        vec![workspace.join(".codex"), dot_git, workspace.join(".agents"),],
     );
 }
 
@@ -656,12 +649,7 @@ fn symlinked_missing_child_git_under_parent_repo_mounts_effective_path_read_only
     assert_empty_directory_mounted_read_only(&args.args, &workspace.join(".codex"));
     assert_eq!(
         synthetic_mount_target_paths(&args),
-        vec![
-            workspace.join(".codex"),
-            dot_git,
-            workspace.join(".agents"),
-            workspace.join(".aws"),
-        ],
+        vec![workspace.join(".codex"), dot_git, workspace.join(".agents"),],
     );
 }
 
@@ -812,14 +800,12 @@ fn mounts_dev_before_writable_dev_binds() {
     assert_eq!(
         synthetic_mount_target_paths(&args),
         vec![
-            PathBuf::from("/.aws"),
             PathBuf::from("/.git"),
             PathBuf::from("/.agents"),
             PathBuf::from("/.codex"),
             PathBuf::from("/dev/.git"),
             PathBuf::from("/dev/.agents"),
             PathBuf::from("/dev/.codex"),
-            PathBuf::from("/dev/.aws"),
         ]
     );
     let dev_mounts = args
@@ -1080,6 +1066,13 @@ fn split_policy_reenables_nested_writable_subpaths_after_read_only_parent() {
                 (window == ["--tmpfs", metadata_path.as_str()]).then_some(index)
             })
             .collect::<Vec<_>>();
+        if name == ".aws" {
+            assert!(
+                mount_indices.is_empty(),
+                "missing non-home AWS path must not be mounted"
+            );
+            continue;
+        }
         assert_eq!(mount_indices.len(), 1, "one mount for {metadata_path}");
         assert!(
             docs_public_rw_index < mount_indices[0],

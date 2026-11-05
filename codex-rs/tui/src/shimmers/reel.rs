@@ -19,6 +19,7 @@ use libshimmer::Palette;
 use libshimmer::Shimmer;
 use libshimmer::Spell;
 use libshimmer::TICK;
+use libshimmer::script;
 use libshimmer::stock::ROSTER;
 use libshimmer_ratatui::RowExt as _;
 
@@ -129,13 +130,16 @@ fn film(cue: &Cue, palette: Palette, width: u16) -> Value {
         Rows::Status => 1,
     };
     let area = Rect::new(0, 0, width, height);
-    let frames: Value = cue
-        .ticks
-        .iter()
-        .map(|Tick(rate, spell, caption, timer)| {
+    let frames: Value = (0_u32..)
+        .zip(&cue.ticks)
+        .map(|(n, Tick(rate, spell, caption, timer))| {
             shimmer.set_spell((*spell).into());
             shimmer.show(caption);
             shimmer.set_intensity(Intensity::new(*rate / BRISK));
+            // A shimmer that listens dances to the script's song.
+            if recipe.listens() {
+                shimmer.hear(&script::sound(TICK * n, TICK * (n + 1)));
+            }
             shimmer.advance(TICK);
             let mut buf = Buffer::empty(area);
             match &cue.rows {

@@ -24,6 +24,7 @@ use crate::protocol::NetworkAccess;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::WritableRoot;
 
+pub mod aws_home;
 mod deny_read_validator;
 mod local_aliases;
 mod target;
@@ -1075,6 +1076,9 @@ impl FileSystemSandboxPolicy {
             .find_map(|(root, _)| {
                 PROTECTED_METADATA_PATH_NAMES
                     .iter()
+                    .filter(|name| {
+                        aws_home::protected_metadata_name_in_context(name, root, context)
+                    })
                     .find_map(|metadata_name| {
                         let protected = root.join_descendant(metadata_name).ok()?;
                         path.starts_with(&protected)
@@ -1972,12 +1976,12 @@ impl FileSystemSandboxPolicy {
         self.entries
             .iter()
             .filter_map(|entry| {
-                resolve_entry_path(&entry.path, cwd_absolute.as_ref()).map(|path| {
-                    ResolvedFileSystemEntry {
+                resolve_entry_path(&entry.path, cwd_absolute.as_ref())
+                    .filter(|path| aws_home::retain_local_entry(entry, path))
+                    .map(|path| ResolvedFileSystemEntry {
                         path,
                         access: entry.access,
-                    }
-                })
+                    })
             })
             .collect()
     }
@@ -2395,7 +2399,7 @@ pub(crate) fn default_read_only_subpaths_for_writable_root(
 
     // AWS profiles can select credential helpers that the application executes.
     let top_level_aws = writable_root.join(PROTECTED_METADATA_AWS_PATH_NAME);
-    if top_level_aws.as_path().is_dir() {
+    if aws_home::protects_local_aws(top_level_aws.as_path()) {
         subpaths.push(top_level_aws);
     }
 
@@ -2529,7 +2533,10 @@ fn protected_metadata_names_for_writable_root(
     raw_writable_roots: &[&AbsolutePathBuf],
 ) -> Vec<String> {
     let mut protected_names = Vec::new();
-    for metadata_name in PROTECTED_METADATA_PATH_NAMES {
+    for metadata_name in PROTECTED_METADATA_PATH_NAMES
+        .iter()
+        .filter(|name| aws_home::protects_local_name(name, root))
+    {
         let mut metadata_paths = vec![root.join(*metadata_name)];
         metadata_paths.extend(
             raw_writable_roots
@@ -3487,22 +3494,31 @@ mod tests {
         assert!(!file_system_policy.can_write_local_path_with_cwd(&dot_git_config, cwd.path()));
         assert!(!file_system_policy.can_write_local_path_with_cwd(&dot_agents_config, cwd.path()));
         assert!(!file_system_policy.can_write_local_path_with_cwd(&dot_codex_config, cwd.path()));
-        assert!(!file_system_policy.can_write_local_path_with_cwd(&dot_aws_config, cwd.path()));
+        assert_eq!(
+            file_system_policy.can_write_local_path_with_cwd(&dot_aws_config, cwd.path()),
+            cfg!(target_os = "linux")
+        );
 
         let writable_roots = file_system_policy.get_writable_roots_with_cwd(cwd.path());
         assert_eq!(writable_roots.len(), 1);
         assert_eq!(
             writable_roots[0].protected_metadata_names,
-            vec![
-                ".git".to_string(),
-                ".agents".to_string(),
-                ".codex".to_string(),
-                ".aws".to_string(),
-            ]
+            [".git", ".agents", ".codex", ".aws"]
+                .into_iter()
+                .filter(|name| !cfg!(target_os = "linux") || *name != ".aws")
+                .map(str::to_string)
+                .collect::<Vec<_>>()
         );
         assert!(!writable_roots[0].is_path_writable(&dot_git_config));
         assert!(!writable_roots[0].is_path_writable(&dot_agents_config));
         assert!(!writable_roots[0].is_path_writable(&dot_codex_config));
+        assert_eq!(
+            writable_roots[0].is_path_writable(&dot_aws_config),
+            cfg!(target_os = "linux")
+        );
+        fs::create_dir(cwd.path().join(".aws")).expect("existing AWS configuration");
+        assert!(!file_system_policy.can_write_local_path_with_cwd(&dot_aws_config, cwd.path()));
+        let writable_roots = file_system_policy.get_writable_roots_with_cwd(cwd.path());
         assert!(!writable_roots[0].is_path_writable(&dot_aws_config));
     }
 

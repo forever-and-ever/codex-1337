@@ -207,8 +207,20 @@ fn serialize_environment_context_with_full_filesystem_profile() {
         /*network*/ None,
         /*subagents*/ None,
     );
+    let mut policy =
+        workspace_write_permission_profile_with_private_denials().file_system_sandbox_policy();
+    policy
+        .entries
+        .push(FileSystemSandboxEntry::skip_missing_path(
+            FileSystemPath::Special {
+                value: FileSystemSpecialPath::project_roots(Some(".aws".to_string())),
+            },
+            FileSystemAccessMode::Read,
+        ));
+    let profile =
+        PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted);
     context.filesystem = Some(FileSystemContext::from_permission_profile(
-        &workspace_write_permission_profile_with_private_denials(),
+        &profile,
         &[
             PathUri::from_abs_path(&repo),
             PathUri::from_abs_path(&other_repo),
@@ -219,7 +231,7 @@ fn serialize_environment_context_with_full_filesystem_profile() {
         r#"<environment_context>
   <cwd>{}</cwd>
   <shell>bash</shell>
-  <filesystem><workspace_roots><root>{repo}</root><root>{other_repo}</root></workspace_roots><permission_profile type="managed"><file_system type="restricted"><entry access="write"><special>:workspace_roots</special></entry><entry access="deny" escalatable="false"><path>{repo_private}</path></entry><entry access="deny" escalatable="false"><path>{other_repo_private}</path></entry><entry access="deny" escalatable="false"><glob>{repo_private_glob}</glob></entry><entry access="deny" escalatable="false"><glob>{other_repo_private_glob}</glob></entry></file_system></permission_profile></filesystem>
+  <filesystem><workspace_roots><root>{repo}</root><root>{other_repo}</root></workspace_roots><permission_profile type="managed"><file_system type="restricted"><entry access="write"><special>:workspace_roots</special></entry><entry access="deny" escalatable="false"><path>{repo_private}</path></entry><entry access="deny" escalatable="false"><path>{other_repo_private}</path></entry><entry access="deny" escalatable="false"><glob>{repo_private_glob}</glob></entry><entry access="deny" escalatable="false"><glob>{other_repo_private_glob}</glob></entry><entry access="read"{aws_missing}><special>:workspace_roots/.aws</special></entry></file_system></permission_profile></filesystem>
 </environment_context>"#,
         test_path_buf("/repo").display(),
         repo = repo.to_string_lossy(),
@@ -228,6 +240,11 @@ fn serialize_environment_context_with_full_filesystem_profile() {
         other_repo_private = other_repo_private.to_string_lossy(),
         repo_private_glob = repo_private_glob.to_string_lossy(),
         other_repo_private_glob = other_repo_private_glob.to_string_lossy(),
+        aws_missing = if cfg!(target_os = "linux") {
+            r#" missing_path_behavior="skip""#
+        } else {
+            ""
+        },
     );
 
     assert_eq!(context.render().expect_text(), expected);
