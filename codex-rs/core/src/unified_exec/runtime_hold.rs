@@ -177,6 +177,15 @@ pub(super) fn finish_startup(
     result
 }
 
+impl super::UnifiedExecContext {
+    pub(super) fn for_launch(&self) -> Self {
+        Self {
+            cancellation_token: self.cancellation_token.child_token(),
+            ..self.clone()
+        }
+    }
+}
+
 fn key(process: &Arc<UnifiedExecProcess>) -> usize {
     Arc::as_ptr(process) as usize
 }
@@ -186,6 +195,7 @@ impl ProcessLifetimes {
         self: &Arc<Self>,
         runtime: &RuntimeHolds,
         process_id: i32,
+        cancellation: CancellationToken,
         make: Make,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError>
     where
@@ -217,7 +227,17 @@ impl ProcessLifetimes {
             let owner = Arc::clone(self);
             self.tasks.spawn(async move {
                 // An inner panic destroys the observer, not the registry's custody.
-                let result = std::panic::AssertUnwindSafe(future).catch_unwind().await;
+                let future = std::panic::AssertUnwindSafe(future).catch_unwind();
+                tokio::pin!(future);
+                let result = tokio::select! {
+                    result = &mut future => result,
+                    () = launch.stop.cancelled() => {
+                        // Observation cancellation is not a backend stop request.
+                        // Only explicit cleanup/shutdown revokes launch admission.
+                        cancellation.cancel();
+                        future.await
+                    }
+                };
                 owner
                     .launches
                     .lock()
@@ -401,6 +421,16 @@ impl ProcessLifetimes {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.closing.cancel();
+        // An approval can be pending before a backend exists. Cancel its
+        // invocation envelope, but keep driving the supervised launch to settlement.
+        for launch in self
+            .launches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+        {
+            launch.stop.cancel();
+        }
         self.tasks.close();
     }
 
@@ -445,8 +475,12 @@ impl ProcessLifetimes {
 }
 
 impl super::UnifiedExecProcessManager {
-    pub(crate) async fn shutdown_processes(&self) {
+    pub(crate) fn begin_shutdown_processes(&self) {
         self.lifetimes.close();
+    }
+
+    pub(crate) async fn shutdown_processes(&self) {
+        self.begin_shutdown_processes();
         self.terminate_all_processes().await;
         self.lifetimes.drain().await;
     }

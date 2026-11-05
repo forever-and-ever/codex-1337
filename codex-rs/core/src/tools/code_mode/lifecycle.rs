@@ -113,7 +113,7 @@ pub(super) struct ExecutionScope {
     turn: Arc<TurnContext>,
     registry: Weak<TranscriptRegistry>,
     admission: tokio::sync::Mutex<()>,
-    shutdown: CancellationToken,
+    pub(super) shutdown: CancellationToken,
     terminal: Mutex<Option<TerminalRequest>>,
     changed: Notify,
     opened: watch::Sender<bool>,

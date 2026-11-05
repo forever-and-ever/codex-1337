@@ -362,6 +362,10 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                 .await
                 .map_err(|_| "code mode nested tool dispatcher is unavailable".to_string())?;
             let result = tokio::select! {
+                _ = self.scope.shutdown.cancelled() => {
+                    cancellation_token.cancel();
+                    Err("code mode session is shutting down".to_string())
+                }
                 response = response_rx => response
                     .map_err(|_| "code mode nested tool dispatcher stopped".to_string())?,
                 _ = cancellation_token.cancelled() => {
@@ -408,6 +412,10 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                 .await
                 .map_err(|_| "code mode notification dispatcher is unavailable".to_string())?;
             tokio::select! {
+                _ = self.scope.shutdown.cancelled() => {
+                    cancellation_token.cancel();
+                    Err("code mode session is shutting down".to_string())
+                }
                 response = response_rx => response
                     .map_err(|_| "code mode notification dispatcher stopped".to_string())?,
                 _ = cancellation_token.cancelled() => {
