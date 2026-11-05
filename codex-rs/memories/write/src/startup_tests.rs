@@ -11,14 +11,6 @@ use codex_config::types::MemoriesConfig;
 use codex_features::Feature;
 use codex_git_utils::diff_since_latest_init;
 use codex_git_utils::reset_git_repository;
-use codex_login::AuthManager;
-use codex_login::CodexAuth;
-use codex_model_provider::ModelProvider;
-use codex_model_provider::ModelProviderFuture;
-use codex_model_provider::ProviderAccountResult;
-use codex_model_provider::SharedModelProvider;
-use codex_model_provider::create_model_provider;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::ResponseItemId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ServiceTier;
@@ -26,7 +18,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelServiceTier;
-use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
@@ -56,7 +47,6 @@ use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::time::Duration;
@@ -670,7 +660,14 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
     let home = Arc::new(TempDir::new()?);
     // Keep the fixture outside Git: workspace enrichment is best effort and can
     // time out independently of the detached request metadata checked here.
-    let test = build_test_codex(&server, home).await?;
+    let accounts = memory_account_fixture(home.path()).await?;
+    let test = memory_test_codex(Arc::clone(&home), startup_test_memories_config())
+        .with_auth_manager(Arc::clone(&accounts))
+        .with_config(|config| config.model_provider.requires_openai_auth = true)
+        .build(&server)
+        .await?;
+    activate_memory_account(home.path(), "b")?;
+    accounts.reload().await;
     assert_eq!(test.config.service_tier, None);
 
     core_test_support::submit_thread_settings(
@@ -692,12 +689,14 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
 
     let context = crate::runtime::MemoryStartupContext::new(
         Arc::clone(&test.thread_manager),
-        test.thread_manager.auth_manager(),
+        test.codex.capture_provider().await?,
         test.session_configured.thread_id,
         Arc::clone(&test.codex),
         &test.config,
         config_snapshot.session_source.clone(),
     );
+    // A job already admitted as A remains A after the conversation commits C.
+    test.codex.select_account("memory-user:c").await?;
     let request_context = context
         .stage_one_request_context(
             &test.config,
@@ -727,6 +726,21 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
         )
         .await?;
     let request = wait_for_single_request(&stage_one).await;
+    assert_eq!(
+        request.header("authorization").as_deref(),
+        Some("Bearer memory-a")
+    );
+    assert_eq!(request.header("chatgpt-account-id").as_deref(), Some("a"));
+    let future = test.codex.capture_provider().await?;
+    assert_eq!(
+        future
+            .request_auth()
+            .await?
+            .unwrap()
+            .get_account_id()
+            .as_deref(),
+        Some("c")
+    );
     let metadata_header = request
         .header("x-codex-turn-metadata")
         .expect("detached memory request should include turn metadata");
@@ -780,7 +794,7 @@ async fn memories_startup_phase1_provider_default_drives_request_model() -> anyh
 
     assert_eq!(
         request.body_json()["model"].as_str(),
-        Some(MOCK_PROVIDER_PHASE_ONE_MODEL)
+        Some(PROVIDER_PHASE_ONE_MODEL)
     );
     let input: Vec<ResponseItem> = serde_json::from_value(request.body_json()["input"].clone())?;
     let message = input
@@ -802,7 +816,7 @@ async fn memories_startup_phase2_uses_provider_model_and_standard_tier() -> anyh
 
     assert_eq!(
         request.body_json()["model"].as_str(),
-        Some(MOCK_PROVIDER_PHASE_TWO_MODEL)
+        Some(PROVIDER_PHASE_TWO_MODEL)
     );
     assert_eq!(request.body_json().get("service_tier"), None);
 
@@ -852,10 +866,6 @@ async fn run_memory_phase_one_model_request_test(
     let test = memory_test_codex(Arc::clone(&home), memories)
         .build(server)
         .await?;
-    let provider = Arc::new(MockMemoryModelProvider::new(
-        test.config.model_provider.clone(),
-        Some(test.thread_manager.auth_manager()),
-    ));
     let db = test
         .codex
         .state_db()
@@ -1016,7 +1026,7 @@ async fn run_memory_phase_one_model_request_test(
     )
     .await;
 
-    let (context, config) = memory_startup_context_with_provider(&test, provider).await;
+    let (context, config) = memory_startup_context(&test).await;
     phase1::run(context, config).await;
     let request = wait_for_single_request(&response).await;
     let evidence = request.message_input_texts("user").join("");
@@ -1072,8 +1082,11 @@ async fn run_memory_phase_two_model_request_test(
         });
         model.default_service_tier = Some("ultrafast".to_string());
     };
+    let accounts = memory_account_fixture(home.path()).await?;
     let test = memory_test_codex(Arc::clone(&home), memories)
-        .with_model_info_override(MOCK_PROVIDER_PHASE_TWO_MODEL, advertise_ultrafast)
+        .with_auth_manager(Arc::clone(&accounts))
+        .with_config(|config| config.model_provider.requires_openai_auth = true)
+        .with_model_info_override(PROVIDER_PHASE_TWO_MODEL, advertise_ultrafast)
         .with_model_info_override("mock.interactive", advertise_ultrafast)
         .with_config(|config| {
             config
@@ -1084,10 +1097,6 @@ async fn run_memory_phase_two_model_request_test(
         })
         .build_with_auto_env(server)
         .await?;
-    let provider = Arc::new(MockMemoryModelProvider::new(
-        test.config.model_provider.clone(),
-        Some(test.thread_manager.auth_manager()),
-    ));
     let db = test
         .codex
         .state_db()
@@ -1138,7 +1147,10 @@ async fn run_memory_phase_two_model_request_test(
     )
     .await;
 
-    let (context, config) = memory_startup_context_with_provider(&test, provider).await;
+    activate_memory_account(home.path(), "b")?;
+    accounts.reload().await;
+    let (context, config) = memory_startup_context(&test).await;
+    test.codex.select_account("memory-user:c").await?;
     let root = config.codex_home.join(version.directory_name());
     tokio::fs::create_dir_all(&root).await?;
     seed_extension_instructions(&root).await?;
@@ -1151,6 +1163,11 @@ async fn run_memory_phase_two_model_request_test(
     let parent_permission_profile = config.permissions.effective_permission_profile();
     phase2::run(context, config, parent_permission_profile).await;
     let request = wait_for_single_request(&response).await;
+    assert_eq!(
+        request.header("authorization").as_deref(),
+        Some("Bearer memory-a")
+    );
+    assert_eq!(request.header("chatgpt-account-id").as_deref(), Some("a"));
     let turn_metadata: serde_json::Value = serde_json::from_str(
         request.body_json()["client_metadata"]["x-codex-turn-metadata"]
             .as_str()
@@ -1228,90 +1245,45 @@ async fn trigger_memories_startup(test: &TestCodex) {
     let parent_permission_profile = config.permissions.effective_permission_profile();
     start_memories_startup_task(
         Arc::clone(&test.thread_manager),
-        test.thread_manager.auth_manager(),
         test.session_configured.thread_id,
         Arc::clone(&test.codex),
         Arc::new(config),
         parent_permission_profile,
         &config_snapshot.session_source,
-    );
+    )
+    .await;
 }
 
-async fn memory_startup_context_with_provider(
+async fn memory_startup_context(
     test: &TestCodex,
-    provider: SharedModelProvider,
 ) -> (Arc<MemoryStartupContext>, Arc<codex_core::config::Config>) {
     let config_snapshot = test.codex.config_snapshot().await;
     let mut config = test.config.clone();
     config
         .features
         .enable(Feature::MemoryTool)
-        .expect("test config should allow feature update");
+        .expect("enable memories");
     let config = Arc::new(config);
-    let context = Arc::new(MemoryStartupContext::new_for_testing(
+    let captured = test
+        .codex
+        .capture_provider()
+        .await
+        .expect("capture test provider");
+    let context = Arc::new(MemoryStartupContext::new(
         Arc::clone(&test.thread_manager),
-        test.thread_manager.auth_manager(),
+        captured,
         test.session_configured.thread_id,
         Arc::clone(&test.codex),
         config.as_ref(),
         config_snapshot.session_source,
-        provider,
     ));
-
     (context, config)
 }
 
-const MOCK_PROVIDER_PHASE_ONE_MODEL: &str = "mock.phase-one";
-const MOCK_PROVIDER_PHASE_TWO_MODEL: &str = "mock.phase-two";
-
-#[derive(Debug)]
-struct MockMemoryModelProvider {
-    delegate: SharedModelProvider,
-}
-
-impl MockMemoryModelProvider {
-    fn new(info: ModelProviderInfo, auth_manager: Option<Arc<AuthManager>>) -> Self {
-        Self {
-            delegate: create_model_provider(info, auth_manager),
-        }
-    }
-}
-
-impl ModelProvider for MockMemoryModelProvider {
-    fn info(&self) -> &ModelProviderInfo {
-        self.delegate.info()
-    }
-
-    fn memory_extraction_preferred_model(&self) -> Option<&'static str> {
-        Some(MOCK_PROVIDER_PHASE_ONE_MODEL)
-    }
-
-    fn memory_consolidation_preferred_model(&self) -> Option<&'static str> {
-        Some(MOCK_PROVIDER_PHASE_TWO_MODEL)
-    }
-
-    fn auth_manager(&self) -> Option<Arc<AuthManager>> {
-        self.delegate.auth_manager()
-    }
-
-    fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
-        let delegate = Arc::clone(&self.delegate);
-        Box::pin(async move { delegate.auth().await })
-    }
-
-    fn account_state(&self) -> ProviderAccountResult {
-        self.delegate.account_state()
-    }
-
-    fn models_manager(
-        &self,
-        cache_path: PathBuf,
-        config_model_catalog: Option<ModelsResponse>,
-    ) -> codex_models_manager::manager::SharedModelsManager {
-        self.delegate
-            .models_manager(cache_path, config_model_catalog)
-    }
-}
+const PROVIDER_PHASE_ONE_MODEL: &str =
+    codex_model_provider::DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL;
+const PROVIDER_PHASE_TWO_MODEL: &str =
+    codex_model_provider::DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL;
 
 async fn seed_stage1_output(
     db: &codex_state::StateRuntime,
@@ -1638,5 +1610,63 @@ async fn memories_startup_phase2_v2_consolidates_without_a_handbook() -> anyhow:
     memories.consolidation_service_tier = "flex".to_string();
     let request = run_memory_phase_two_model_request_test(&server, home, memories).await?;
     assert_eq!(request.body_json()["service_tier"], "flex");
+    Ok(())
+}
+
+async fn memory_account_fixture(home: &Path) -> anyhow::Result<Arc<codex_login::AuthManager>> {
+    use codex_login::{AuthCredentialsStoreMode, AuthKeyringBackendKind};
+    // One user with three saved workspaces: selector, not ambient login, owns billing.
+    let id_token = codex_login::token_data::parse_chatgpt_jwt_claims(
+        "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfdXNlcl9pZCI6ICJtZW1vcnktdXNlciIsICJjaGF0Z3B0X3BsYW5fdHlwZSI6ICJwcm8ifX0.signature",
+    )?;
+    for account in ["a", "b", "c"] {
+        let auth = codex_login::AuthDotJson {
+            auth_mode: Some(codex_protocol::auth::AuthMode::Chatgpt),
+            tokens: Some(codex_login::TokenData {
+                id_token: id_token.clone(),
+                access_token: format!("memory-{account}"),
+                refresh_token: format!("refresh-{account}"),
+                account_id: Some(account.into()),
+                ..Default::default()
+            }),
+            last_refresh: Some(chrono::Utc::now()),
+            openai_api_key: None,
+            agent_identity: None,
+            personal_access_token: None,
+        };
+        codex_login::save_auth(
+            home,
+            &auth,
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::Direct,
+        )?;
+    }
+    codex_login::auth::activate_account(
+        home,
+        "memory-user:a",
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::Direct,
+    )?;
+    Ok(Arc::new(
+        codex_login::AuthManager::new(
+            home.to_path_buf(),
+            false,
+            AuthCredentialsStoreMode::File,
+            None,
+            None,
+            AuthKeyringBackendKind::Direct,
+            codex_login::test_support::transport_default_auth_route_config(),
+        )
+        .await,
+    ))
+}
+
+fn activate_memory_account(home: &Path, account: &str) -> anyhow::Result<()> {
+    codex_login::auth::activate_account(
+        home,
+        &format!("memory-user:{account}"),
+        codex_login::AuthCredentialsStoreMode::File,
+        codex_login::AuthKeyringBackendKind::Direct,
+    )?;
     Ok(())
 }

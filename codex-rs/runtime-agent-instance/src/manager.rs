@@ -14,7 +14,6 @@ use codex_http_client::NetworkPolicyDenied;
 use codex_login::AuthChangeState;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_login::RefreshTokenError;
 use http::StatusCode;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -34,6 +33,9 @@ struct CachedRuntime {
     selection: PlatformResourceSelection,
     state: RuntimeState,
 }
+
+#[path = "captured_credentials.rs"]
+mod captured_credentials;
 
 enum RuntimeState {
     Pending { registration: RuntimeRegistration },
@@ -74,51 +76,12 @@ impl RuntimeAuthManager {
     }
 
     /// Select auth and a runtime for the requested organization and project.
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "runtime initialization serializes registration and refresh for one credential source"
-    )]
     pub async fn auth_with_selection(
         &self,
         selection: &PlatformResourceSelection,
     ) -> Result<RuntimeAuth, RuntimeAuthError> {
-        // This initializer's lock can span IO. No AuthManager lock is held across registration.
-        let mut state = self.state.lock().await;
-        let (auth, http_client_factory) = self
-            .credentials
-            .auth_with_http_client_factory()
+        self.auth_with_selection_guarded(selection, |_| Ok(()))
             .await
-            .ok_or(RuntimeAuthError::Unavailable)?;
-        let mut recovery = self.credentials.unauthorized_recovery();
-        let mut result = self
-            .auth_once(&mut state, auth, http_client_factory, selection)
-            .await;
-        while matches!(
-            &result,
-            Err(RuntimeAuthError::Registration(
-                RegistrationError::Rejected {
-                    status: StatusCode::UNAUTHORIZED,
-                    ..
-                }
-            ))
-        ) && recovery.has_next()
-        {
-            recovery.next().await.map_err(|error| match error {
-                RefreshTokenError::Policy(denied) => RuntimeAuthError::Policy(denied),
-                RefreshTokenError::Permanent(_) | RefreshTokenError::Transient(_) => {
-                    RuntimeAuthError::RefreshFailed
-                }
-            })?;
-            let (auth, http_client_factory) = self
-                .credentials
-                .auth_with_http_client_factory()
-                .await
-                .ok_or(RuntimeAuthError::Unavailable)?;
-            result = self
-                .auth_once(&mut state, auth, http_client_factory, selection)
-                .await;
-        }
-        result
     }
 
     async fn auth_once(

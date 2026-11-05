@@ -22,6 +22,7 @@ use std::sync::Arc;
 pub async fn select_runtime_auth(
     manager: &RuntimeAuthManager,
     headers: &HeaderMap,
+    guard: Option<&dyn crate::ProviderCredentialGuard>,
 ) -> Result<RuntimeAuth, AuthError> {
     let selector = |name| {
         headers
@@ -39,7 +40,10 @@ pub async fn select_runtime_auth(
         project_id: selector(OPENAI_PROJECT_HEADER)?,
     };
     manager
-        .auth_with_selection(&selection)
+        .auth_with_selection_guarded(&selection, |auth| {
+            crate::models_endpoint::captured_credentials::validate(guard, Some(auth))
+                .map_err(|_| codex_runtime_agent_instance::RuntimeAuthError::Changed)
+        })
         .await
         .map_err(AuthError::from)
 }

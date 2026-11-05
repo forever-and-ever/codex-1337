@@ -295,7 +295,10 @@ impl ConnectionPool {
                     .transport
                     .get_or_try_init(|| async {
                         let client = create_client_for_route_async(
-                            self.config.http_client_factory.clone(),
+                            self.config
+                                .http_client_factory
+                                .clone()
+                                .with_sensitive_header_protection(),
                             url,
                             ClientRouteClass::Api,
                             redirect_policy,

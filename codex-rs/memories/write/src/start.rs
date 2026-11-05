@@ -9,7 +9,6 @@ use codex_core::CodexThread;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_features::Feature;
-use codex_login::AuthManager;
 use codex_protocol::MemoryVersion;
 use codex_protocol::ThreadId;
 use codex_protocol::models::PermissionProfile;
@@ -21,9 +20,8 @@ use tracing::warn;
 ///
 /// The pipeline is skipped for ephemeral sessions, disabled feature flags, and
 /// subagent sessions.
-pub fn start_memories_startup_task(
+pub async fn start_memories_startup_task(
     thread_manager: Arc<ThreadManager>,
-    auth_manager: Arc<AuthManager>,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
     config: Arc<Config>,
@@ -37,6 +35,20 @@ pub fn start_memories_startup_task(
         return;
     }
 
+    if config.model_provider.adapter == codex_model_provider_info::ModelProviderAdapter::OpenRouter
+    {
+        return;
+    }
+    // Admission captures under the conversation settings permit, not in the worker.
+    // A failed auxiliary admission cannot reject the already accepted primary turn.
+    let provider = match thread.capture_provider().await {
+        Ok(provider) => provider,
+        Err(error) => {
+            warn!(%error, "cannot capture memory-job credentials; skipping");
+            return;
+        }
+    };
+
     // Dual-write warms v2 while v1 is selected; it is no longer needed after cutover.
     let versions = if config.memories.dual_write && config.memories.version == MemoryVersion::V1 {
         vec![MemoryVersion::V1, MemoryVersion::V2]
@@ -47,11 +59,10 @@ pub fn start_memories_startup_task(
         let mut pipeline_config = config.as_ref().clone();
         pipeline_config.memories.version = version;
         let config = Arc::new(pipeline_config);
-        let auth_manager = Arc::clone(&auth_manager);
         let parent_permission_profile = parent_permission_profile.clone();
         let context = Arc::new(MemoryStartupContext::new(
             Arc::clone(&thread_manager),
-            Arc::clone(&auth_manager),
+            provider.clone(),
             thread_id,
             Arc::clone(&thread),
             config.as_ref(),
@@ -88,7 +99,7 @@ pub fn start_memories_startup_task(
             // done before the quota check.
             phase1::prune(context.as_ref(), &config).await;
 
-            if !guard::rate_limits_ok(&auth_manager, &config).await {
+            if !guard::rate_limits_ok(context.provider(), &config).await {
                 context.counter(
                     MEMORY_STARTUP,
                     /*inc*/ 1,

@@ -46,6 +46,19 @@ struct NativeBoundary {
     client: Mutex<Weak<ModelClient>>,
 }
 
+impl codex_model_provider::ForkModelProvider for NativeBoundary {
+    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
+        self.inner.anthropic_auth_context()
+    }
+
+    fn for_anthropic_account(
+        &self,
+        id: &str,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        self.inner.for_anthropic_account(id)
+    }
+}
+
 impl std::fmt::Debug for NativeBoundary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeBoundary").finish_non_exhaustive()
@@ -71,10 +84,6 @@ impl ModelProvider for NativeBoundary {
 
     fn account_state(&self) -> ProviderAccountResult {
         self.inner.account_state()
-    }
-
-    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
-        self.inner.anthropic_auth_context()
     }
 
     fn models_manager(
@@ -215,7 +224,8 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         switch_once: AtomicBool::new(true),
         client: Mutex::new(Weak::new()),
     });
-    Arc::get_mut(&mut client.state).unwrap().provider = boundary.clone();
+    Arc::get_mut(&mut client.state).unwrap().provider =
+        codex_model_provider::ProviderHandle::custom(boundary.clone());
     let warmer = Arc::new(WarmCapture::default());
     client.bind_prompt_cache_observer(Some(warmer.clone()));
     let (events_tx, events_rx) = async_channel::unbounded();
@@ -225,6 +235,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     client.commit_provider_account(ProviderAccountSelection::ClaudeSubscription {
         id: id_a.to_string(),
     });
+    let admitted_a = client.capture_provider().await?;
     let mut model = test_model_info();
     model.slug = "claude-sonnet-5-5".into();
     model
@@ -446,6 +457,49 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         events_rx.try_recv().is_err(),
         "side replay emitted a protocol event"
     );
+    // Admission is independent of the later conversation route and token rotation.
+    let mut auxiliary = test_model_client(SessionSource::Exec);
+    Arc::get_mut(&mut auxiliary.state).unwrap().provider = boundary.inner.clone();
+    let auxiliary = auxiliary.with_captured_provider(admitted_a.clone())?;
+    let auth = auxiliary.capture_anthropic_auth().await?;
+    let mut headers = http::HeaderMap::new();
+    auth.auth().add_auth_headers(&mut headers)?;
+    assert_eq!(headers[http::header::AUTHORIZATION], "Bearer rotated-a");
+    let requests_before = server.received_requests().await.unwrap().len();
+    let account_path = home
+        .path()
+        .join("anthropic/accounts")
+        .join(format!("{id_a}.json"));
+    tokio::fs::remove_file(&account_path).await?;
+    let mut config = crate::config::ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .build()
+        .await?;
+    config.model_provider = boundary.info().clone();
+    config.model_catalog = None;
+    let error = admitted_a
+        .model_info(&config, &model.slug)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<CodexErr>().unwrap().details(),
+        CodexErrorDetails::SignInRequired(_)
+    ));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        requests_before
+    );
+    boundary
+        .store
+        .upsert(
+            boundary.account_a.clone(),
+            SubscriptionGrant::bearer_only("restored-a".into())?,
+        )
+        .await?;
+    let auth = auxiliary.capture_anthropic_auth().await?;
+    let mut headers = http::HeaderMap::new();
+    auth.auth().add_auth_headers(&mut headers)?;
+    assert_eq!(headers[http::header::AUTHORIZATION], "Bearer restored-a");
     server.verify().await;
     Box::pin(native_regular_replay_profiles(
         &server,
@@ -605,11 +659,18 @@ async fn native_regular_replay_profiles(
             ))
             .await;
         let mut client = test_model_client_with_thread_id(session.thread_id, SessionSource::Exec);
-        Arc::get_mut(&mut client.state).unwrap().provider = provider.clone();
+        Arc::get_mut(&mut client.state).unwrap().provider =
+            codex_model_provider::ProviderHandle::custom(provider.clone());
         client.commit_provider_account(ProviderAccountSelection::ClaudeSubscription {
             id: boundary.account_b.clone(),
         });
-        bind_model_client_for_tests(&mut session, &mut turn, client, provider, model.clone());
+        bind_model_client_for_tests(
+            &mut session,
+            &mut turn,
+            client,
+            codex_model_provider::ProviderHandle::custom(provider),
+            model.clone(),
+        );
         session
             .record_conversation_items(&turn, model, history)
             .await;

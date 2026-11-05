@@ -1,4 +1,3 @@
-use codex_login::anthropic::AccountId;
 use codex_otel::SessionTelemetry;
 use codex_protocol::MemoryVersion;
 use codex_protocol::config_types::ReasoningSummary;
@@ -10,8 +9,6 @@ use super::memory_metric_tags;
 #[derive(Clone, Debug)]
 pub(crate) struct StageOneRequestContext {
     pub(super) version: MemoryVersion,
-    // Catalogue discovery and every parallel extraction job retain this cohort's payer.
-    pub(super) anthropic_account: Option<AccountId>,
     pub(crate) model_info: ModelInfo,
     pub(crate) session_telemetry: SessionTelemetry,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,

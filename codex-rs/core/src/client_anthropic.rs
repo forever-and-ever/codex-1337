@@ -67,6 +67,7 @@ impl ModelClient {
     pub(super) async fn capture_anthropic_auth(&self) -> Result<AnthropicRequestAuth> {
         // Capture before any await. Refresh and dispatch retain this identity even
         // when an idle/active selection changes the next request's committed route.
+        self.validate_captured_provider()?;
         let route = self.state.provider_account.load_full();
         let id = match route.as_ref().map(|route| &route.selection) {
             Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => id,

@@ -16,9 +16,9 @@ use crate::workspace::reset_memory_workspace_baseline;
 use crate::workspace::validate_consolidation_artifacts_for_version;
 use crate::workspace::write_workspace_diff;
 use codex_config::Constrained;
+use codex_core::CapturedProvider;
 use codex_core::config::Config;
 use codex_features::Feature;
-use codex_model_provider::ModelProvider;
 use codex_protocol::MemoryVersion;
 use codex_protocol::ThreadId;
 use codex_protocol::models::PermissionProfile;
@@ -307,7 +307,7 @@ mod agent {
     pub(super) fn get_config(
         config: &Config,
         parent_permission_profile: PermissionProfile,
-        provider: &dyn ModelProvider,
+        provider: &CapturedProvider,
     ) -> Option<Config> {
         let preferred_model = provider.memory_consolidation_preferred_model()?;
         let root = config

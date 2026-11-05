@@ -1,6 +1,7 @@
 use super::*;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
+use http::header::HeaderName;
 use pretty_assertions::assert_eq;
 use std::num::NonZeroU64;
 use tempfile::tempdir;

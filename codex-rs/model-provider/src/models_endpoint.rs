@@ -61,6 +61,9 @@ const MAX_MODEL_CATALOG_BYTES: usize = 1024 * 1024;
 const MODELS_ENDPOINT: &str = "/models";
 const FEDRAMP_CODEX_BASE_URL: &str = "https://gov.chatgpt.com/backend-api/codex";
 
+#[path = "catalog_credentials.rs"]
+pub(crate) mod captured_credentials;
+
 /// Provider-owned model catalogue, decoded according to the configured adapter.
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
@@ -70,6 +73,7 @@ pub(crate) struct OpenAiModelsEndpoint {
     anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     transport_builder: Arc<dyn ModelsTransportBuilder>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
+    credential_guard: Option<Arc<dyn crate::ProviderCredentialGuard>>,
 }
 
 impl OpenAiModelsEndpoint {
@@ -88,6 +92,7 @@ impl OpenAiModelsEndpoint {
         };
         Self {
             runtime_auth: None,
+            credential_guard: None,
             provider_info,
             auth_manager,
             gateway_auth_manager,
@@ -140,6 +145,7 @@ impl OpenAiModelsEndpoint {
         let provider_info = self.provider_info.clone();
         let auth_manager = self.auth_manager.clone();
         let runtime_auth = self.runtime_auth.clone();
+        let credential_guard = self.credential_guard.clone();
         // A timed-out catalog fetch must not discard a rotated refresh token before
         // it is saved. Keep credential refresh and registration owned until they finish.
         let (auth, selected_runtime_auth) = tokio::spawn(async move {
@@ -161,6 +167,7 @@ impl OpenAiModelsEndpoint {
                         crate::runtime_auth::select_runtime_auth(
                             &runtime,
                             &provider_info.build_header_map()?,
+                            credential_guard.as_deref(),
                         )
                         .await
                         .map_err(|error| map_api_error(error.into()))?,
@@ -176,6 +183,7 @@ impl OpenAiModelsEndpoint {
                     None => None,
                 },
             };
+            captured_credentials::validate(credential_guard.as_deref(), auth.as_ref())?;
             Ok::<_, CodexErr>((auth, selected_runtime_auth))
         })
         .await??;
@@ -229,7 +237,8 @@ impl OpenAiModelsEndpoint {
                 .bind_http_client_factory(http_client_factory)
                 .map_err(|error| map_api_error(error.into()))?,
             None => http_client_factory,
-        };
+        }
+        .with_sensitive_header_protection();
         let mut captured = None;
         let api_auth = if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
             let native = self
@@ -481,6 +490,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
             gateway_auth_manager: self.gateway_auth_manager.clone(),
             anthropic_auth_context: self.anthropic_auth_context.clone(),
             runtime_auth: self.runtime_auth.clone(),
+            credential_guard: self.credential_guard.clone(),
             transport_builder: Arc::clone(&self.transport_builder),
         }))
     }
@@ -700,7 +710,6 @@ mod tests {
     use codex_http_client::OutboundProxyPolicy;
     use codex_login::default_client::RESIDENCY_HEADER_NAME;
     use codex_login::default_client::ResidencyRequirement;
-    use codex_login::default_client::create_client;
     use codex_login::default_client::set_default_client_residency_requirement;
     use codex_models_manager::manager::ModelsManager;
     use codex_models_manager::manager::OpenAiModelsManager;
@@ -733,9 +742,15 @@ mod tests {
             Box::pin(async move {
                 *observed_request
                     .lock()
-                    .expect("observed request lock should not be poisoned") =
-                    Some((http_client_factory.outbound_proxy_policy(), request_url));
-                Ok(ReqwestTransport::from_http_client(create_client()))
+                    .expect("observed request lock should not be poisoned") = Some((
+                    http_client_factory.outbound_proxy_policy(),
+                    request_url.clone(),
+                ));
+                RouteAwareModelsTransportBuilder {
+                    redirect_policy: ClientRedirectPolicy::Default,
+                }
+                .build(http_client_factory, request_url)
+                .await
             })
         }
     }
@@ -819,6 +834,7 @@ mod tests {
                 gateway_auth_manager: None,
                 anthropic_auth_context: None,
                 runtime_auth: None,
+                credential_guard: None,
                 transport_builder: capture.clone(),
             });
             let provider = crate::provider::create_model_provider(
@@ -895,6 +911,7 @@ mod tests {
                 gateway_auth_manager: None,
                 anthropic_auth_context: None,
                 runtime_auth: None,
+                credential_guard: None,
                 transport_builder: capture.clone(),
             });
             let provider = crate::provider::create_model_provider(
@@ -974,11 +991,22 @@ mod tests {
     #[tokio::test]
     async fn model_request_uses_request_time_proxy_policy_and_exact_url() {
         let server = MockServer::start().await;
+        let target = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/final"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ModelsResponse { models: Vec::new() }),
+            )
+            .expect(1)
+            .mount(&target)
+            .await;
         Mock::given(method("GET"))
             .and(path("/models"))
             .and(query_param("client_version", "0.0.0"))
+            .and(header("x-config-proof", "private-configured-value"))
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(ModelsResponse { models: Vec::new() }),
+                ResponseTemplate::new(307)
+                    .insert_header("location", format!("{}/final", target.uri())),
             )
             .expect(1)
             .mount(&server)
@@ -986,11 +1014,22 @@ mod tests {
 
         let observed_request = Arc::new(Mutex::new(None));
         let endpoint = OpenAiModelsEndpoint {
-            provider_info: ModelProviderInfo::create_openai_provider(Some(server.uri())),
+            provider_info: ModelProviderInfo {
+                http_headers: Some(std::collections::HashMap::from([(
+                    "x-config-proof".into(),
+                    "private-configured-value".into(),
+                )])),
+                env_http_headers: Some(std::collections::HashMap::from([(
+                    "x-config-env".into(),
+                    "PATH".into(),
+                )])),
+                ..ModelProviderInfo::create_openai_provider(Some(server.uri()))
+            },
             auth_manager: None,
             gateway_auth_manager: None,
             anthropic_auth_context: None,
             runtime_auth: None,
+            credential_guard: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::clone(&observed_request),
             }),
@@ -1003,6 +1042,16 @@ mod tests {
             )
             .await
             .expect("models request should succeed");
+
+        let requests = target.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].headers.contains_key("x-config-proof"));
+        assert!(!requests[0].headers.contains_key("x-config-env"));
+        assert!(
+            server.received_requests().await.unwrap()[0]
+                .headers
+                .contains_key("x-config-env")
+        );
 
         assert_eq!(
             *observed_request
@@ -1039,6 +1088,7 @@ mod tests {
             gateway_auth_manager: None,
             anthropic_auth_context: None,
             runtime_auth: None,
+            credential_guard: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::new(Mutex::new(None)),
             }),

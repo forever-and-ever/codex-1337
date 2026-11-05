@@ -122,6 +122,7 @@ pub(crate) struct Session {
 
 #[derive(Clone)]
 pub(crate) struct SessionConfiguration {
+    pub(super) credentials: crate::StartCredentials,
     /// Runtime provider and its provider-specific execution policy.
     pub(super) provider: SharedModelProvider,
     pub(super) account_selection: Arc<ProviderAccountSelections>,
@@ -1971,7 +1972,8 @@ impl Session {
                     tx_event.clone(),
                     codex_responses_headers,
                     crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
-                ),
+                )
+                .with_start_credentials(&session_configuration.credentials)?,
                 executed_tool_calls: executed_tool_calls.clone(),
                 code_mode_service: crate::tools::code_mode::CodeModeService::new(
                     thread_id,

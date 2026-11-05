@@ -1,3 +1,9 @@
+#[path = "captured_source.rs"]
+mod captured_source;
+
+pub(super) use captured_source::AuthPublication;
+pub use captured_source::CapturedAuthSource;
+
 use super::Arc;
 use super::AuthConfig;
 use super::AuthCredentialsStoreMode;
@@ -166,7 +172,7 @@ impl AuthManager {
         self.ensure_personal_account_selection(auth.as_ref())?;
         let mut config = self.saved_account_config();
         config.auth_route_config = config.auth_route_config.for_personal_account()?;
-        let manager = Self::new_from_auth_config(config, /*enable_codex_api_key_env*/ false).await;
+        let manager = Self::from_auth_state(config, /*enable_codex_api_key_env*/ false, None);
         if let Some(resolver) = self.workspace_routing_resolver.get() {
             manager.set_workspace_routing_resolver(resolver.clone());
         }

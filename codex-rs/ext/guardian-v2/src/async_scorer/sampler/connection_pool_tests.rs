@@ -591,5 +591,49 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
             .redirect_policy,
         ClientRedirectPolicy::Reject,
     );
+    // This independently built HTTP client must protect configured headers too;
+    // ModelClient and catalog protection cannot cover sampler dispatch.
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
+    let source = responses::start_mock_server().await;
+    let target = responses::start_mock_server().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("location", format!("{}/v1/responses", target.uri())),
+        )
+        .expect(1)
+        .mount(&source)
+        .await;
+    let destination = responses::mount_sse_sequence(
+        &target,
+        vec![responses::sse(vec![
+            responses::ev_message_item_added("classifier", ""),
+            responses::ev_output_text_delta("low"),
+            responses::ev_completed("score"),
+        ])],
+    )
+    .await;
+    let mut config = sampler_config(format!("{}/v1", source.uri()));
+    let mut info = config.provider.info().clone();
+    info.http_headers = Some(std::collections::HashMap::from([(
+        "x-api-key".into(),
+        "guardian-configured-secret".into(),
+    )]));
+    config.provider = create_model_provider(info, config.provider.auth_manager());
+    let sampler = LunaSampler::new(config);
+    *sampler.connections.retry_after.lock().unwrap() = Some(Instant::now() + CONNECT_COOLDOWN);
+    assert_eq!(sampler.sample(sample_request("redirect")).await?, "low");
+    let requests = source.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers["x-api-key"],
+        "guardian-configured-secret"
+    );
+    let requests = destination.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].header("x-api-key").is_none());
+    assert!(requests[0].header("authorization").is_none());
     Ok(())
 }

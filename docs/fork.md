@@ -356,6 +356,14 @@ chose, as a conversation's model or a subagent's. Work Codex starts on its own
 OpenRouter: it runs on the ChatGPT login, natively on the Claude subscription
 where Codex has that path, or not at all.
 
+A memory startup job is an independently admitted operation. It captures its
+conversation's committed credential authority before any worker is queued and
+pins it through extraction (including dual-write) and consolidation. A later
+conversation account switch affects future jobs, not admitted jobs. The captured
+source may refresh its own credentials; removal or principal replacement fails
+closed, never falling back to the server's active login. Noncredential settings
+such as the live service tier remain live.
+
 ## Warpaint
 
 `[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike.

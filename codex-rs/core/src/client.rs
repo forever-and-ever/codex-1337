@@ -43,6 +43,12 @@ pub(crate) mod prompt_cache;
 
 #[path = "client_anthropic.rs"]
 mod anthropic;
+#[path = "client_provider_capture.rs"]
+mod provider_capture;
+pub use provider_capture::CapturedAuthMetadata;
+pub use provider_capture::CapturedProvider;
+pub use provider_capture::ProviderCaptureError;
+pub use provider_capture::StartCredentials;
 
 #[path = "client_openrouter.rs"]
 mod openrouter;
@@ -332,7 +338,7 @@ pub struct ModelClient {
     prompt_cache_observer: Arc<OnceLock<Arc<dyn crate::PromptCacheObserver>>>,
     // Resolved once when the session is created, like other session feature flags.
     api_key_cyber_access_programs: cyber_access_program::ApiKeyCyberAccessPrograms,
-    runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
+    execution: StartCredentials,
 }
 
 /// A turn-scoped streaming session created from a [`ModelClient`].
@@ -671,8 +677,8 @@ impl ModelClient {
             session_id_override: None,
             codex_responses_headers: None,
             event_sender: None,
-            http_client_factory,
-            runtime_auth: None,
+            http_client_factory: http_client_factory.with_sensitive_header_protection(),
+            execution: StartCredentials::Inherit,
             restored_history: false,
             anthropic_prompt_cache: Default::default(),
             request_contributors,
@@ -701,22 +707,12 @@ impl ModelClient {
         self
     }
 
-    /// Use the harness-owned runtime for this first-party provider. The owner must share this
-    /// client's credential manager. Provider-specific overrides need their own runtime owner.
     pub fn with_runtime_auth(
-        mut self,
+        self,
         manager: Arc<RuntimeAuthManager>,
         mode: RuntimeAuthMode,
     ) -> Result<Self> {
-        let info = self.state.provider.info();
-        codex_model_provider::validate_runtime_destination(info.base_url.as_deref())?;
-        codex_model_provider::validate_runtime_provider(
-            info,
-            self.auth_manager().as_ref(),
-            &manager,
-        )?;
-        self.runtime_auth = Some((manager, mode));
-        Ok(self)
+        self.activate_runtime_auth(manager, mode)
     }
 
     pub(crate) fn with_session_context(
@@ -1316,14 +1312,18 @@ impl ModelClient {
     ///
     /// This centralizes setup used by both prewarm and normal request paths so they stay in
     /// lockstep when auth/provider resolution changes.
-    async fn current_client_setup(&self, routing: ClientRouting) -> Result<CurrentClientSetup> {
+    async fn current_client_setup_unchecked(
+        &self,
+        routing: ClientRouting,
+    ) -> Result<CurrentClientSetup> {
         if self.uses_openrouter() {
             return self.openrouter_setup().await;
         }
-        if let Some((manager, mode)) = &self.runtime_auth {
+        if let Some((manager, mode)) = self.state.provider.runtime_auth() {
             let selected = codex_model_provider::select_runtime_auth(
                 manager,
                 &self.state.provider.info().build_header_map()?,
+                self.state.provider.credential_guard(),
             )
             .await
             .map_err(|error| self.state.provider.map_api_error(error.into()))?;
@@ -1352,7 +1352,10 @@ impl ModelClient {
                 runtime.actor().info(),
             )?;
             let runtime_id = Some(runtime.id().to_string());
-            let http_client_factory = selected.http_client_factory().clone();
+            let http_client_factory = selected
+                .http_client_factory()
+                .clone()
+                .with_sensitive_header_protection();
             let resolved_auth = self
                 .state
                 .provider
@@ -1404,6 +1407,7 @@ impl ModelClient {
             .auth_manager()
             .map(|manager| manager.auth_change_receiver());
         loop {
+            self.validate_captured_provider()?;
             let auth_owner_generation = self.auth_owner_generation();
             let revision = auth_changes.as_ref().map(|changes| *changes.borrow());
             let auth = provider.auth().await;
@@ -1440,6 +1444,7 @@ impl ModelClient {
                     continue;
                 }
             }
+            self.validate_captured_provider()?;
             return Ok(CurrentClientSetup {
                 auth,
                 auth_owner_generation,

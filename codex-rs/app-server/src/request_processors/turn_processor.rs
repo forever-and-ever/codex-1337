@@ -778,13 +778,13 @@ impl TurnRequestProcessor {
             if config_snapshot.is_primary_environment_configured() {
                 codex_memories_write::start_memories_startup_task(
                     Arc::clone(&self.thread_manager),
-                    Arc::clone(&self.auth_manager),
                     thread_id,
                     Arc::clone(&thread),
                     thread.config().await,
                     config_snapshot.permission_profile,
                     &config_snapshot.session_source,
-                );
+                )
+                .await;
             }
         }
 

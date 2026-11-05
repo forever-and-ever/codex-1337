@@ -103,6 +103,7 @@ pub(crate) async fn run_codex_thread_interactive(
     let mut thread_extension_init = codex_extension_api::ExtensionDataInit::default();
     thread_extension_init.insert(isolation);
     let spawn_result = Session::spawn(SessionSpawnArgs {
+        credentials: parent_session.services.model_client.start_credentials(),
         prompt_cache_observer: None,
         attached_thread: false,
         startup: Some(Arc::clone(&startup)),
