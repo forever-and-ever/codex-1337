@@ -84,11 +84,12 @@ pub(super) async fn model(
                 .map_err(LunaSamplerError::Provider)?;
             let models = provider.models_manager_without_cache(/*config_model_catalog*/ None);
             models
-                .raw_model_catalog(
+                .authoritative_catalog(
                     RefreshStrategy::OnlineIfUncached,
                     sampler.config.http_client_factory.clone(),
                 )
                 .await
+                .map_err(LunaSamplerError::Provider)?
                 .models
                 .into_iter()
                 .find(|model| {
