@@ -495,7 +495,13 @@ async fn disconnected_v2_child_lifecycle(unload_delay_secs: u64, ephemeral: bool
                 if loaded.is_empty() && child_runtime.upgrade().is_none() {
                     break;
                 }
-                tokio::task::yield_now().await;
+                // The harness transport is bounded. Real disconnected-client routing
+                // still drains broadcasts; don't pin terminal listeners on its queue
+                // while waiting for the exact runtimes those listeners must release.
+                tokio::select! {
+                    message = outgoing.recv() => assert!(message.is_some(), "outgoing channel stays open"),
+                    () = tokio::task::yield_now() => {}
+                }
             }
         })
         .await

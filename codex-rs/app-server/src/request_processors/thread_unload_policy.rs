@@ -104,7 +104,9 @@ impl UnloadingState {
                     }
                 } => { if changed.is_err() { return false; } }
             }
-            self.wake = Wake::Deadline;
+            if matches!(self.wake, Wake::Activity) {
+                self.wake = Wake::Deadline;
+            }
         }
     }
 }

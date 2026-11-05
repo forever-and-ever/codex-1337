@@ -3,6 +3,8 @@ use super::*;
 #[path = "thread_created_announcement.rs"]
 mod thread_created_announcement;
 use crate::extensions::send_thread_warning;
+use crate::thread_state::ListenerBinding;
+use crate::thread_state::ListenerInstallMode;
 use crate::thread_state::ListenerStateCandidate;
 use codex_app_server_protocol::ThreadQueueChangedNotification;
 use codex_core::ThreadEvictionOutcome;
@@ -99,6 +101,13 @@ pub(super) async fn attach_created_thread_listener(
     thread: Arc<CodexThread>,
     connection_ids: Vec<ConnectionId>,
 ) {
+    // An already-stopped creation callback only drains captured events. It must
+    // never acknowledge fresh viewers on the generation committed to shutdown.
+    let mut connection_ids = if thread.has_shutdown_status() {
+        Vec::new()
+    } else {
+        connection_ids
+    };
     let config_snapshot = thread.config_snapshot().await;
     let raw_events_enabled = if let Some(parent_thread_id) = config_snapshot.parent_thread_id {
         listener_task_context
@@ -120,6 +129,7 @@ pub(super) async fn attach_created_thread_listener(
             continue;
         }
         if connection_ids.is_empty()
+            && !thread.has_shutdown_status()
             && (thread.multi_agent_version() != Some(MultiAgentVersion::V2)
                 || config_snapshot.ephemeral)
         {
@@ -142,6 +152,13 @@ pub(super) async fn attach_created_thread_listener(
         )
         .await
         {
+            ListenerStartOutcome::Rejected
+                if !connection_ids.is_empty() && thread.has_shutdown_status() =>
+            {
+                // Explicit shutdown can win during setup. Drop the rejected
+                // attachment request and only drain that captured generation.
+                connection_ids.clear();
+            }
             ListenerStartOutcome::Started { .. } | ListenerStartOutcome::Rejected => return,
             ListenerStartOutcome::Stale => continue,
         }
@@ -332,6 +349,7 @@ async fn start_listener(
                 &listener_state,
                 &conversation.runtime_holds(),
                 connection_ids,
+                if created { ListenerInstallMode::Created } else { ListenerInstallMode::Live },
                 |attached| {
                     let listener_matches = state.listener_matches(&conversation);
                     if !created && conversation.has_shutdown_status() {
@@ -375,10 +393,16 @@ async fn start_listener(
             .await;
         let ((listener_command_rx, listener_generation), _has_subscribers_rx, attached) =
             match installed {
-                Ok(Some((Some(listener), has_subscribers_rx, attached))) => {
-                    (listener, has_subscribers_rx, attached)
-                }
-                Ok(Some((None, _, attached))) => {
+                Ok(ListenerBinding::Installed {
+                    listener: Some(listener),
+                    has_subscribers: has_subscribers_rx,
+                    attached,
+                }) => (listener, has_subscribers_rx, attached),
+                Ok(ListenerBinding::Installed {
+                    listener: None,
+                    attached,
+                    ..
+                }) => {
                     drop(state);
                     drop(pending);
                     if created {
@@ -392,7 +416,8 @@ async fn start_listener(
                     }
                     return ListenerStartOutcome::Started { attached };
                 }
-                Ok(None) => return ListenerStartOutcome::Stale,
+                Ok(ListenerBinding::Stale) => return ListenerStartOutcome::Stale,
+                Ok(ListenerBinding::Closing) => return ListenerStartOutcome::Rejected,
                 Err(()) => return ListenerStartOutcome::Rejected,
             };
         drop(pending);
