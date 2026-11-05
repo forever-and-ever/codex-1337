@@ -762,7 +762,7 @@ fn detailed_permissions_normalize_paths_and_keep_policy_changes_visible() {
     );
     // Amendments carry the same volatile paths as full instructions, plus content-derived
     // revision IDs. Preserve revision identity and the actual changed policy, not fixture salts.
-    let amendment = |directory: &str, revision: char, denied: &str| {
+    let amendment = |directory: &str, revision: char, denied: &str, agents_root: &str| {
         detailed(&[message(
             "developer",
             &format!(
@@ -770,17 +770,21 @@ fn detailed_permissions_normalize_paths_and_keep_policy_changes_visible() {
                 "0".repeat(40),
                 revision.to_string().repeat(40),
                 temp_path(directory),
-                directory = temp_path(directory),
+                directory = format!("{}{agents_root}", temp_path(directory)),
             ),
         )])
     };
     assert_eq!(
-        amendment(".tmpAbc123", 'a', "secret"),
-        amendment(".tmpDef456", 'b', "secret"),
+        amendment(".tmpAbc123", 'a', "secret", ""),
+        amendment(".tmpDef456", 'b', "secret", ""),
     );
     assert_ne!(
-        amendment(".tmpAbc123", 'a', "secret"),
-        amendment(".tmpAbc123", 'a', "public"),
+        amendment(".tmpAbc123", 'a', "secret", ""),
+        amendment(".tmpAbc123", 'a', "public", ""),
+    );
+    assert_ne!(
+        amendment(".tmpAbc123", 'a', "secret", "/agents_one"),
+        amendment(".tmpAbc123", 'a', "secret", "/agents_two"),
     );
 }
 

@@ -44,6 +44,8 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::ThreadStatusChangedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
@@ -772,6 +774,7 @@ async fn project_import_is_atomic_and_notifies_after_commit_in_order() -> Result
             ..Default::default()
         })
         .await?;
+    wait_for_completed_turn_idle(&mut server, &started.thread.id).await?;
     server.clear_message_buffer();
     let import_id = server
         .send_project_import_request(ProjectImportParams {
@@ -1079,6 +1082,7 @@ async fn assigned_forks_inherit_projects_for_persistent_and_ephemeral_children()
         })
         .await?;
 
+    wait_for_completed_turn_idle(&mut server, &started.thread.id).await?;
     server.clear_message_buffer();
     let fork_id = server
         .send_thread_fork_request(ThreadForkParams {
@@ -1112,4 +1116,24 @@ async fn assigned_forks_inherit_projects_for_persistent_and_ephemeral_children()
     assert!(ephemeral_fork.thread.ephemeral);
     assert!(ephemeral_fork.thread.path.is_none());
     Ok(())
+}
+
+async fn wait_for_completed_turn_idle(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
+    // Completion precedes idle publication; clearing a buffer cannot drain unread pipe data.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut saw_active = false;
+        loop {
+            let notification: ThreadStatusChangedNotification =
+                server.read_notification("thread/status/changed").await?;
+            if notification.thread_id != thread_id {
+                continue;
+            }
+            match notification.status {
+                ThreadStatus::Active { .. } => saw_active = true,
+                ThreadStatus::Idle if saw_active => return Ok(()),
+                _ => {}
+            }
+        }
+    })
+    .await?
 }

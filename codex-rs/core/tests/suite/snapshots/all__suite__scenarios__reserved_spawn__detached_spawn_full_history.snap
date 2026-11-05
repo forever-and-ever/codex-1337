@@ -64,7 +64,7 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
     --- agents_md/absent
     +++ agents_md/<REVISION 1>
     @@ -0,0 +1,5 @@
-    +# AGENTS.md instructions for <AGENTS_DIRECTORY>
+    +# AGENTS.md instructions for <TEMP_DIR>/<TEMP 1>
     +
     +<INSTRUCTIONS>
     +Run the destination repository checks.

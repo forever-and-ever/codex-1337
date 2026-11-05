@@ -22,11 +22,11 @@ Scenario: Second turn changes cwd to a directory with different AGENTS.md and re
 05:message/user[2]:
     [01] <instruction_diff>
         Apply this update to the previously supplied agents_md instructions; unchanged instructions remain in force.
-        --- agents_md/<BEFORE>
-        +++ agents_md/<AFTER>
+        --- agents_md/<REVISION 1>
+        +++ agents_md/<REVISION 2>
         @@ -1,10 +1,10 @@
-        -# AGENTS.md instructions for <WORKSPACE>/agents_one
-        +# AGENTS.md instructions for <WORKSPACE>/agents_two
+        -# AGENTS.md instructions for <TEMP_DIR>/<TEMP 1>/agents_one
+        +# AGENTS.md instructions for <TEMP_DIR>/<TEMP 1>/agents_two
 
          <INSTRUCTIONS>
         -# AGENTS one

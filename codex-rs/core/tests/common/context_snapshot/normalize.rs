@@ -250,14 +250,19 @@ impl Normalizer {
                 } else {
                     ("", line)
                 };
-                let body = if let Some(directory) =
-                    body.strip_prefix("# AGENTS.md instructions for ")
-                    && (directory.starts_with('/') || directory.as_bytes().get(1) == Some(&b':'))
-                {
-                    "# AGENTS.md instructions for <AGENTS_DIRECTORY>".to_string()
-                } else {
-                    self.permissions(body)
-                };
+                let body =
+                    if let Some(directory) = body.strip_prefix("# AGENTS.md instructions for ") {
+                        // Keep directory identity and stable suffixes: changing the instruction
+                        // root is meaningful even when the temporary checkout prefix is not.
+                        self.temporary_path(directory)
+                            .or_else(|| normalize_path(directory, &self.path_aliases()))
+                            .map_or_else(
+                                || body.to_string(),
+                                |directory| format!("# AGENTS.md instructions for {directory}"),
+                            )
+                    } else {
+                        self.permissions(body)
+                    };
                 format!("{prefix}{body}")
             })
             .collect::<Vec<_>>()
