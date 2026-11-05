@@ -3019,8 +3019,39 @@ async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
             "expected unified exec process to remain alive after interrupt"
         );
 
-        codex.submit(Op::CleanBackgroundTerminals).await?;
-        wait_for_process_exit(&pid).await?;
+        for marker in ["AFTER_LIVE_CLEANUP", "AFTER_EMPTY_CLEANUP"] {
+            codex.submit(Op::CleanBackgroundTerminals).await?;
+            wait_for_process_exit(&pid).await?;
+            let args = json!({"cmd": format!("printf %s {marker}"), "yield_time_ms": 1000});
+            mount_sse_sequence(
+                &server,
+                vec![
+                    sse(vec![
+                        ev_response_created(marker),
+                        ev_function_call(marker, "exec_command", &args.to_string()),
+                        ev_completed(marker),
+                    ]),
+                    sse(vec![ev_completed(&format!("{marker}-done"))]),
+                ],
+            )
+            .await;
+            codex
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: format!("execute after cleanup: {marker}"),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+            let end = wait_for_event_match(&codex, |msg| match msg {
+                EventMsg::ExecCommandEnd(event) if event.call_id == marker => Some(event.clone()),
+                _ => None,
+            })
+            .await;
+            assert_eq!(end.exit_code, 0);
+            assert!(end.aggregated_output.contains(marker));
+            wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        }
+        codex.shutdown_and_wait().await?;
+        assert!(codex.runtime_holds().acquire().is_none());
 
         Ok(())
     })

@@ -1451,7 +1451,7 @@ impl UnifiedExecProcessManager {
             return UnifiedExecProcess::from_exec_server_started(
                 started,
                 output_drain_policy,
-                |process| self.lifetimes.register(process_id, process),
+                |process| self.lifetimes.register(process_id, &process),
             )
             .await;
         }
@@ -1525,7 +1525,7 @@ impl UnifiedExecProcessManager {
         let spawned =
             spawn_result.map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
         UnifiedExecProcess::from_spawned(spawned, request.sandbox, |process| {
-            self.lifetimes.register(process_id, process)
+            self.lifetimes.register(process_id, &process)
         })
         .await
     }
@@ -1715,7 +1715,7 @@ impl UnifiedExecProcessManager {
             unregister_network_approval_for_entry(&entry).await;
             entry.process.terminate();
         }
-        self.lifetimes.shutdown().await;
+        self.lifetimes.terminate_current().await;
     }
 
     pub(crate) async fn resolve_terminal(

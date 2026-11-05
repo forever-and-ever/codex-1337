@@ -332,7 +332,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     while sess.async_hook_results.try_recv().is_ok() {}
     sess.services
         .unified_exec_manager
-        .terminate_all_processes()
+        .shutdown_processes()
         .await;
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         sess.services.local_agent_runtime.record_shutdown_failure(

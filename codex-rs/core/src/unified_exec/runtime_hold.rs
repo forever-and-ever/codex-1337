@@ -144,15 +144,20 @@ enum ObserverKind {
     End,
 }
 
+struct ProcessLaunch {
+    _hold: RuntimeHold,
+    stop: CancellationToken,
+}
+
 struct OwnedProcess {
     process: Arc<UnifiedExecProcess>,
-    hold: Arc<RuntimeHold>,
+    launch: Arc<ProcessLaunch>,
     finalization: watch::Sender<Finalization>,
 }
 
 #[derive(Default)]
 pub(super) struct ProcessLifetimes {
-    launches: Mutex<HashMap<i32, Arc<RuntimeHold>>>,
+    launches: Mutex<HashMap<i32, Arc<ProcessLaunch>>>,
     // The cancellation token is also the registration seal. Register-and-spawn
     // and close-and-snapshot retain this same short mutex; no await under it.
     processes: Mutex<HashMap<usize, OwnedProcess>>,
@@ -175,10 +180,12 @@ impl ProcessLifetimes {
         F: Future<Output = Result<ExecCommandToolOutput, UnifiedExecError>> + Send + 'static,
         Make: FnOnce() -> F,
     {
-        let hold =
-            Arc::new(runtime.acquire().ok_or_else(|| {
+        let launch = Arc::new(ProcessLaunch {
+            _hold: runtime.acquire().ok_or_else(|| {
                 UnifiedExecError::process_failed("conversation is closing".into())
-            })?);
+            })?,
+            stop: CancellationToken::new(),
+        });
         let result = {
             let _registration = self
                 .processes
@@ -192,7 +199,7 @@ impl ProcessLifetimes {
             self.launches
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(process_id, Arc::clone(&hold));
+                .insert(process_id, Arc::clone(&launch));
             let future = make();
             let (tx, rx) = oneshot::channel();
             let owner = Arc::clone(self);
@@ -217,7 +224,7 @@ impl ProcessLifetimes {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     entries
                         .values()
-                        .filter(|entry| Arc::ptr_eq(&entry.hold, &hold))
+                        .filter(|entry| Arc::ptr_eq(&entry.launch, &launch))
                         .map(|entry| {
                             if failed {
                                 entry.finalization.send_replace(Finalization::Failed);
@@ -274,8 +281,8 @@ impl ProcessLifetimes {
             .unwrap_or_else(|error| Err(UnifiedExecError::process_failed(error.to_string())))
     }
 
-    pub(super) fn register(&self, process_id: i32, process: Arc<UnifiedExecProcess>) {
-        let Some(hold) = self
+    pub(super) fn register(&self, process_id: i32, process: &Arc<UnifiedExecProcess>) {
+        let Some(launch) = self
             .launches
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -284,18 +291,23 @@ impl ProcessLifetimes {
         else {
             return;
         };
-        let mut entries = self
-            .processes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        entries.insert(
-            key(&process),
-            OwnedProcess {
-                process,
-                hold,
-                finalization: watch::channel(Finalization::Initial).0,
-            },
-        );
+        {
+            let mut entries = self
+                .processes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            entries.insert(
+                key(process),
+                OwnedProcess {
+                    process: Arc::clone(process),
+                    launch: Arc::clone(&launch),
+                    finalization: watch::channel(Finalization::Initial).0,
+                },
+            );
+        }
+        if launch.stop.is_cancelled() {
+            process.terminate();
+        }
     }
 
     pub(super) fn background(&self, process: &Arc<UnifiedExecProcess>) {
@@ -371,26 +383,59 @@ impl ProcessLifetimes {
         });
     }
 
-    pub(super) async fn shutdown(&self) {
+    pub(super) fn close(&self) {
+        let _registration = self
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.closing.cancel();
+        self.tasks.close();
+    }
+
+    /// Snapshot admitted launches under registration exclusion. A launch whose
+    /// backend is not published yet observes its stop request in register; launches
+    /// admitted after this snapshot remain executable. Only close seals admission.
+    pub(super) async fn terminate_current(&self) {
         let processes = {
             let entries = self
                 .processes
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            self.closing.cancel();
-            self.tasks.close();
+            let launches = self
+                .launches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for launch in launches
+                .values()
+                .chain(entries.values().map(|entry| &entry.launch))
+            {
+                launch.stop.cancel();
+            }
             entries
                 .values()
                 .map(|entry| Arc::clone(&entry.process))
                 .collect::<Vec<_>>()
         };
         for process in processes {
-            let _ = process.terminate_confirmed().await;
+            if let Err(error) = process.terminate_confirmed().await {
+                tracing::error!(%error, "background process termination failed; retaining custody");
+            }
         }
+    }
+
+    pub(super) async fn drain(&self) {
         self.tasks.wait().await;
         self.processes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+    }
+}
+
+impl super::UnifiedExecProcessManager {
+    pub(crate) async fn shutdown_processes(&self) {
+        self.lifetimes.close();
+        self.terminate_all_processes().await;
+        self.lifetimes.drain().await;
     }
 }
