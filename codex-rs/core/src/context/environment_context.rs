@@ -150,6 +150,9 @@ fn render_file_system_entry(rendered: &mut String, entry: &FileSystemSandboxEntr
     if entry.access == FileSystemAccessMode::Deny {
         rendered.push_str("\" escalatable=\"false");
     }
+    if codex_protocol::permissions::aws_home::is_optional_aws_entry(entry) {
+        rendered.push_str("\" missing_path_behavior=\"skip");
+    }
     rendered.push_str("\">");
     match &entry.path {
         FileSystemPath::Path { path } => {

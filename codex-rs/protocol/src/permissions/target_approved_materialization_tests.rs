@@ -164,6 +164,7 @@ fn linux_root_metadata_writes_inherit_the_root_without_reopening_other_paths() {
         roots[0].protected_metadata_names,
         PROTECTED_METADATA_PATH_NAMES
             .iter()
+            .filter(|name| !cfg!(target_os = "linux") || **name != ".aws")
             .map(std::string::ToString::to_string)
             .collect::<Vec<_>>(),
     );

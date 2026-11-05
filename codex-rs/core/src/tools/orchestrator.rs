@@ -29,6 +29,7 @@ use codex_protocol::error::SandboxErr;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::PROTECTED_METADATA_PATH_NAMES;
+use codex_protocol::permissions::aws_home::protected_metadata_name_in_context;
 use codex_protocol::permissions::file_system_root;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ReviewDecision;
@@ -241,10 +242,16 @@ impl ToolOrchestrator {
             let file_system = baseline.for_approved_command(&policy_context);
             let writable_root_metadata = file_system_root(&policy_context).is_some_and(|root| {
                 file_system.can_write_path(&root, &policy_context)
-                    && PROTECTED_METADATA_PATH_NAMES.iter().any(|name| {
-                        root.join_descendant(name)
-                            .is_ok_and(|path| file_system.can_write_path(&path, &policy_context))
-                    })
+                    && PROTECTED_METADATA_PATH_NAMES
+                        .iter()
+                        .filter(|name| {
+                            protected_metadata_name_in_context(name, &root, &policy_context)
+                        })
+                        .any(|name| {
+                            root.join_descendant(name).is_ok_and(|path| {
+                                file_system.can_write_path(&path, &policy_context)
+                            })
+                        })
             });
             let escalated_profile = (file_system != baseline
                 && file_system

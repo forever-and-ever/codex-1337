@@ -52,7 +52,9 @@ fn fold(
     let mut covered = vec![false; targets.len()];
     for entry in entries.iter() {
         if let Some(target) = target_of(entry) {
-            if entry.access != access {
+            if entry.access != access
+                || entry.missing_path_behavior != entries[first].missing_path_behavior
+            {
                 return;
             }
             covered[target] = true;
