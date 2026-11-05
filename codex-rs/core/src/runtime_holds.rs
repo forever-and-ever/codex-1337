@@ -47,12 +47,6 @@ impl WeakRuntimeHolds {
     }
 }
 
-impl RuntimeHold {
-    pub(crate) fn settlement(&self) -> tokio_util::sync::CancellationToken {
-        self.1.clone()
-    }
-}
-
 impl RuntimeHolds {
     pub fn same_runtime(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -76,7 +70,7 @@ impl Default for RuntimeHolds {
 
 /// Dropping a controller is not settlement: the actual work owner retains this guard.
 #[derive(Debug)]
-pub struct RuntimeHold(RuntimeHolds, tokio_util::sync::CancellationToken);
+pub struct RuntimeHold(RuntimeHolds);
 
 impl RuntimeHolds {
     pub fn subscribe(&self) -> watch::Receiver<RuntimeActivity> {
@@ -106,7 +100,7 @@ impl RuntimeHolds {
                 };
                 true
             })
-            .then(|| RuntimeHold(self.clone(), tokio_util::sync::CancellationToken::new()))
+            .then(|| RuntimeHold(self.clone()))
     }
 
     pub(crate) fn close(&self) {
@@ -149,6 +143,5 @@ impl Drop for RuntimeHold {
             };
             true
         });
-        self.1.cancel();
     }
 }

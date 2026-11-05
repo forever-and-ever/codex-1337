@@ -32,14 +32,6 @@ impl CodexThread {
             _ => None,
         }
     }
-
-    pub(crate) async fn capacity_idle_eligibility(&self) -> Option<IdleCloseEligibility> {
-        let revision = self.capacity_idle_revision().await?;
-        Some(IdleCloseEligibility {
-            runtime: self.runtime_holds(),
-            revision,
-        })
-    }
 }
 
 impl ThreadManager {

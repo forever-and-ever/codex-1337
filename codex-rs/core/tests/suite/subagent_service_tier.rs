@@ -367,8 +367,47 @@ async fn root_service_tier_change_updates_existing_subagent(
 async fn evicted_role_subagent_preserves_service_tier_selection(
     child_tier: Option<&str>,
 ) -> Result<()> {
+    struct FinishingPause;
+    struct FinishingBarrier {
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+    impl codex_extension_api::ThreadLifecycleContributor<Config> for FinishingBarrier {
+        fn on_thread_start<'a>(
+            &'a self,
+            input: codex_extension_api::ThreadStartInput<'a, Config>,
+        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                if matches!(input.session_source,
+                    codex_protocol::protocol::SessionSource::SubAgent(
+                        codex_protocol::protocol::SubAgentSource::ThreadSpawn { agent_path: Some(path), .. }
+                    ) if path.as_str() == "/root/replacement"
+                ) {
+                    input.thread_store.insert(FinishingPause);
+                }
+            })
+        }
+        fn on_thread_idle<'a>(
+            &'a self,
+            input: codex_extension_api::ThreadIdleInput<'a>,
+        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                if input.thread_store.get::<FinishingPause>().is_some() {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+            })
+        }
+    }
+    let finishing = std::sync::Arc::new(FinishingBarrier {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::<Config>::new();
+    extensions.thread_lifecycle_contributor(finishing.clone());
     let server = start_mock_server().await;
     let mut builder = test_codex()
+        .with_extensions(std::sync::Arc::new(extensions.build()))
         .with_model("gpt-5.6-sol")
         .with_config(|config| {
             config.service_tier = Some("priority".to_string());
@@ -397,6 +436,19 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
     let original_thread_id = created_threads.recv().await?;
     let original_thread = test.thread_manager.get_thread(original_thread_id).await?;
     wait_for_turn_complete(&original_thread).await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        original_thread
+            .runtime_holds()
+            .subscribe()
+            .wait_for(|activity| {
+                matches!(
+                    activity,
+                    codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                )
+            }),
+    )
+    .await??;
     assert_request_service_tier(&original_request, Some("priority"));
     drop(original_thread);
 
@@ -435,17 +487,21 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
         },
     )
     .await?;
-    // Capacity may reclaim an idle child immediately, never one with runtime
-    // custody (including a host viewer). Terminal publication alone is not the
-    // task's settlement boundary; release must also work immediately after it.
-    let viewer = replacement_thread
-        .runtime_holds()
-        .acquire()
-        .expect("live replacement");
-    let blocked = test
-        .thread_manager
-        .ensure_multi_agent_v2_child_loaded(original_thread_id)
-        .await;
+    // The terminal event is already visible, but this actual task is still in
+    // its idle lifecycle callback. Capacity must fail before that callback can
+    // finish, not queue behind its runtime hold.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        finishing.entered.notified(),
+    )
+    .await?;
+    let blocked = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        test.thread_manager
+            .ensure_multi_agent_v2_child_loaded(original_thread_id),
+    )
+    .await
+    .expect("capacity must return while the finishing barrier is held");
     assert!(matches!(
         blocked.unwrap_err().details(),
         codex_protocol::error::CodexErrorDetails::AgentLimitReached { .. }
@@ -456,7 +512,20 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
             .await
             .is_ok()
     );
-    drop(viewer);
+    finishing.release.notify_one();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        replacement_thread
+            .runtime_holds()
+            .subscribe()
+            .wait_for(|activity| {
+                matches!(
+                    activity,
+                    codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                )
+            }),
+    )
+    .await??;
     test.thread_manager
         .ensure_multi_agent_v2_child_loaded(original_thread_id)
         .await?;

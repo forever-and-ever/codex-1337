@@ -38,7 +38,7 @@ impl ThreadManagerState {
         thread: Arc<CodexThread>,
         membership: &AgentTreeMembership,
     ) -> CodexResult<ThreadEvictionOutcome> {
-        let Some(eligibility) = thread.capacity_idle_eligibility().await else {
+        let Some(eligibility) = thread.idle_close_eligibility(std::time::Duration::ZERO) else {
             return Ok(ThreadEvictionOutcome::Busy);
         };
         self.evict_idle_v2(thread, membership, eligibility).await

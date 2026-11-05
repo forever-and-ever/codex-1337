@@ -941,7 +941,6 @@ impl Session {
                 time_to_first_token_ms,
             })
         };
-        self.publish_terminal_settlement(&turn_state).await;
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
         let cleared_active_turn = {

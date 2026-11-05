@@ -202,6 +202,17 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
                 .await?;
             wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
             ThreadIdle::wait(&child).await;
+            // Idle lifecycle delivery still precedes actual task settlement.
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                child.runtime_holds().subscribe().wait_for(|activity| {
+                    matches!(
+                        activity,
+                        codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                    )
+                }),
+            )
+            .await??;
             if tool == "spawn_agent" {
                 assert_eq!(
                     test.thread_manager.try_evict_v2_thread(child).await?,

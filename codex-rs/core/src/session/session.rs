@@ -58,7 +58,6 @@ type McpToolApprovalMetadataMap =
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
-    pub(crate) terminal_settlement: std::sync::Mutex<Option<tokio_util::sync::CancellationToken>>,
     pub(crate) thread_id: ThreadId,
     pub(crate) provider_id: String,
     pub(crate) installation_id: String,
@@ -1990,7 +1989,6 @@ impl Session {
                 tx_event: tx_event.clone(),
                 parent_observer_event_tx: OnceLock::new(),
                 agent_status,
-                terminal_settlement: std::sync::Mutex::new(None),
                 runtime_holds: state.runtime_holds.clone(),
                 state: Mutex::new(state),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
