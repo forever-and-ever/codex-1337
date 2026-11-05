@@ -593,8 +593,10 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
     );
     // This independently built HTTP client must protect configured headers too;
     // ModelClient and catalog protection cannot cover sampler dispatch.
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, ResponseTemplate};
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
     let source = responses::start_mock_server().await;
     let target = responses::start_mock_server().await;
     Mock::given(method("POST"))

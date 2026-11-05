@@ -1,5 +1,7 @@
 //! Fork routing and eligibility are not methods of the upstream provider trait.
-use super::{ConfiguredModelProvider, ModelProvider, SharedModelProvider};
+use super::ConfiguredModelProvider;
+use super::ModelProvider;
+use super::SharedModelProvider;
 use crate::AnthropicAuthContext;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_protocol::error::CodexErr;

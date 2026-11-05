@@ -1,5 +1,6 @@
 use super::super::AccountRequestProcessor;
-use codex_login::{AuthManager, WorkspaceRoutingRequest};
+use codex_login::AuthManager;
+use codex_login::WorkspaceRoutingRequest;
 use std::sync::Arc;
 
 // The retained owner prevents address reuse from aliasing another login.

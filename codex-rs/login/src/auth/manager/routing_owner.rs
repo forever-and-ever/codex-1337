@@ -1,4 +1,5 @@
-use crate::{AuthManager, WorkspaceRoutingRequest};
+use crate::AuthManager;
+use crate::WorkspaceRoutingRequest;
 use std::io;
 
 pub(super) fn validate(owner: &AuthManager, request: &WorkspaceRoutingRequest) -> io::Result<()> {

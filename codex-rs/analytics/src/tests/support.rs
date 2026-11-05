@@ -138,7 +138,6 @@ pub(super) fn sample_thread_with_metadata(
         agent_role: None,
         git_info: None,
         name: None,
-        theme: None,
         turns: Vec::new(),
         theme: None,
     }

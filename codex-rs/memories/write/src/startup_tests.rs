@@ -1614,7 +1614,8 @@ async fn memories_startup_phase2_v2_consolidates_without_a_handbook() -> anyhow:
 }
 
 async fn memory_account_fixture(home: &Path) -> anyhow::Result<Arc<codex_login::AuthManager>> {
-    use codex_login::{AuthCredentialsStoreMode, AuthKeyringBackendKind};
+    use codex_login::AuthCredentialsStoreMode;
+    use codex_login::AuthKeyringBackendKind;
     // One user with three saved workspaces: selector, not ambient login, owns billing.
     let id_token = codex_login::token_data::parse_chatgpt_jwt_claims(
         "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfdXNlcl9pZCI6ICJtZW1vcnktdXNlciIsICJjaGF0Z3B0X3BsYW5fdHlwZSI6ICJwcm8ifX0.signature",

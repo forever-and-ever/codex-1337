@@ -430,8 +430,12 @@ async fn client_setup_rebuilds_coherent_auth_after_refresh_and_account_switches(
     let source = Arc::new(RotatingSource(std::sync::RwLock::new(Some(
         "source-a".into(),
     ))));
-    use codex_http_client::{DestinationPolicy, NetworkPolicyController, NetworkPolicyDenied};
-    use codex_login::{AuthCredentialsStoreMode, AuthKeyringBackendKind, AuthRouteConfig};
+    use codex_http_client::DestinationPolicy;
+    use codex_http_client::NetworkPolicyController;
+    use codex_http_client::NetworkPolicyDenied;
+    use codex_login::AuthCredentialsStoreMode;
+    use codex_login::AuthKeyringBackendKind;
+    use codex_login::AuthRouteConfig;
     let controller = NetworkPolicyController::default();
     let policy = controller.policy();
     let home = TempDir::new().unwrap();
