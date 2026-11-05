@@ -382,8 +382,18 @@ pub struct ConfigToml {
     /// Default: `3600000` (60 minutes).
     pub background_terminal_max_timeout: Option<u64>,
 
-    /// Seconds a thread must have no subscribers and no activity before app-server
-    /// unloads it. Defaults to 1800 (30 minutes); zero unloads immediately.
+    /// Seconds of continuous quiet without subscribers before automatic unload.
+    /// Active turns, admitted work and in-flight thread operations keep a thread loaded,
+    /// as do backend-owned unified-exec processes until exit and output/command
+    /// finalization, executing or yielded Code Mode cells, and armed alarms.
+    /// Alarm recovery failures keep the thread loaded until recovery succeeds.
+    /// The quiet interval starts again when the last subscriber or work hold releases.
+    /// Fully detached daemons, connected MCP servers, and MCP jobs or asynchronous
+    /// hooks that outlive their turn do not keep a thread loaded.
+    ///
+    /// Defaults to 1800 (30 minutes). Zero removes the quiet wait, not the work or
+    /// subscriber protections. At the subagent cap, idle children with no work hold
+    /// or subscriber may unload immediately regardless of this delay.
     /// Resolved when each thread is loaded; request config overrides apply per thread.
     pub thread_unload_delay_secs: Option<u64>,
 

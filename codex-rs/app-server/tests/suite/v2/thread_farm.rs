@@ -141,6 +141,9 @@ async fn farm_spawns_and_replays_without_steering_parent(
         std::fs::read_to_string(&config_path)?.parse()?;
     config_document["model_catalog_json"] =
         toml_edit::value(catalog_path.to_string_lossy().into_owned());
+    // The replay/fault matrix allocates six children. Their attached viewers
+    // forbid capacity eviction, which this scenario must not depend on.
+    config_document["agents"]["max_concurrent_threads_per_session"] = toml_edit::value(6);
     if mode == ThreadFarmMode::FullHistory && matches!(parent_state, ParentState::Idle) {
         config_document["wrangler"]["farm"]["reasoning_effort"] = toml_edit::value("low");
         config_document["wrangler"]["farm"]["providers"]["mock_provider"]["reasoning_effort"] =
