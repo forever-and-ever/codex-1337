@@ -1050,22 +1050,31 @@ impl RemoteControlWebsocket {
                     }
                 }
             };
+            let (event, client_id, stream_id, write_complete_tx) = match queued_server_envelope {
+                super::QueuedServerEnvelope::Message {
+                    event,
+                    client_id,
+                    stream_id,
+                    write_complete_tx,
+                } => (event, client_id, stream_id, write_complete_tx),
+                super::QueuedServerEnvelope::Flush { write_complete_tx } => {
+                    let _ = write_complete_tx.send(());
+                    continue;
+                }
+            };
             let (payloads, write_complete_tx) = {
                 let mut state = state.lock().await;
-                let seq_key = (
-                    queued_server_envelope.client_id.clone(),
-                    queued_server_envelope.stream_id.clone(),
-                );
+                let seq_key = (client_id.clone(), stream_id.clone());
                 let seq_id = *state
                     .next_seq_id_by_stream
                     .entry(seq_key.clone())
                     .or_insert(1);
 
                 let server_envelope = ServerEnvelope {
-                    event: queued_server_envelope.event,
-                    client_id: queued_server_envelope.client_id,
+                    event,
+                    client_id,
                     seq_id,
-                    stream_id: queued_server_envelope.stream_id,
+                    stream_id,
                 };
                 let server_envelopes = match split_server_envelope_for_transport(server_envelope) {
                     Ok(server_envelopes) => server_envelopes,
@@ -1090,7 +1099,7 @@ impl RemoteControlWebsocket {
                     .next_seq_id_by_stream
                     .insert(seq_key, seq_id.saturating_add(1));
 
-                (payloads, queued_server_envelope.write_complete_tx)
+                (payloads, write_complete_tx)
             };
 
             for payload in payloads {
@@ -2792,7 +2801,7 @@ mod tests {
         let second_stream = StreamId("stream-2".to_string());
         for stream_id in [&first_stream, &second_stream, &first_stream] {
             server_event_tx
-                .send(super::super::QueuedServerEnvelope {
+                .send(super::super::QueuedServerEnvelope::Message {
                     event: ServerEvent::Pong {
                         status: crate::transport::remote_control::protocol::PongStatus::Active,
                     },

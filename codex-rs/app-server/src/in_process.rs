@@ -723,9 +723,9 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                     tokio::select! {
                         reply = process_reply_rx.recv() => match reply {
                             Some(OutgoingEnvelope::ToConnection { message, write_complete_tx, .. }) => {
-                                Some(QueuedOutgoingMessage { message, write_complete_tx })
+                                Some(QueuedOutgoingMessage::Message { message, write_complete_tx })
                             }
-                            Some(OutgoingEnvelope::Broadcast { .. }) => unreachable!("replies are connection scoped"),
+                            Some(OutgoingEnvelope::Broadcast { .. } | OutgoingEnvelope::DisconnectAll { .. }) => unreachable!("replies are connection scoped"),
                             None => None,
                         },
                         // Leave ordinary replies and events queued until the pending event fits.
@@ -735,7 +735,13 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                     let Some(queued_message) = queued_message else {
                         break;
                     };
-                    let outgoing_message = queued_message.message;
+                    let (outgoing_message, write_complete_tx) = match queued_message {
+                        QueuedOutgoingMessage::Message { message, write_complete_tx } => (message, write_complete_tx),
+                        QueuedOutgoingMessage::GracefulClose { write_complete_tx } => {
+                            let _ = write_complete_tx.send(());
+                            break;
+                        }
+                    };
                     match outgoing_message {
                         OutgoingMessage::Response(response) => {
                             if let Some(response_tx) = pending_request_responses.remove(&response.id) {
@@ -797,7 +803,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                             if server_notification_requires_delivery(&notification) {
                                 pending_event = Some((
                                     InProcessServerEvent::ServerNotification(Box::new(notification)),
-                                    queued_message.write_complete_tx,
+                                    write_complete_tx,
                                 ));
                                 continue;
                             }
@@ -818,7 +824,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                             }
                         }
                     }
-                    if let Some(write_complete_tx) = queued_message.write_complete_tx {
+                    if let Some(write_complete_tx) = write_complete_tx {
                         let _ = write_complete_tx.send(());
                     }
                 }

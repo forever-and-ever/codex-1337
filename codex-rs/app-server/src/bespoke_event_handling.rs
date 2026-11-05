@@ -201,9 +201,6 @@ pub(crate) async fn apply_bespoke_event_handling(
             outgoing.abort_pending_server_requests().await;
             respond_to_pending_interrupts(&thread_state, &outgoing).await;
             let turn_failed = thread_state.lock().await.turn_summary.last_error.is_some();
-            thread_watch_manager
-                .note_turn_completed(&conversation_id.to_string(), turn_failed)
-                .await;
             handle_turn_complete(
                 conversation_id,
                 event_turn_id,
@@ -212,6 +209,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state,
             )
             .await;
+            // Idle may trigger a disconnect barrier; publish it after the terminal event.
+            thread_watch_manager
+                .note_turn_completed(&conversation_id.to_string(), turn_failed)
+                .await;
         }
         EventMsg::McpStartupUpdate(update) => {
             let (status, error, failure_reason) = match update.status {
@@ -1284,9 +1285,6 @@ pub(crate) async fn apply_bespoke_event_handling(
             outgoing.abort_pending_server_requests().await;
             respond_to_pending_interrupts(&thread_state, &outgoing).await;
 
-            thread_watch_manager
-                .note_turn_interrupted(&conversation_id.to_string())
-                .await;
             handle_turn_interrupted(
                 conversation_id,
                 event_turn_id,
@@ -1295,6 +1293,9 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state,
             )
             .await;
+            thread_watch_manager
+                .note_turn_interrupted(&conversation_id.to_string())
+                .await;
         }
         EventMsg::ThreadGoalUpdated(thread_goal_event) => {
             let notification = ThreadGoalUpdatedNotification {
@@ -2292,6 +2293,7 @@ mod tests {
             .await
             .ok_or_else(|| anyhow!("should send one message"))?;
         match envelope {
+            OutgoingEnvelope::DisconnectAll { .. } => bail!("unexpected disconnect barrier"),
             OutgoingEnvelope::Broadcast { message } => Ok(message),
             OutgoingEnvelope::ToConnection { message, .. } => Ok(message),
         }

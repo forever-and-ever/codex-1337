@@ -455,8 +455,14 @@ mod tests {
             .recv()
             .await
             .expect("request should receive overload error");
-        let overload_json =
-            serde_json::to_value(overload.message).expect("serialize overload error");
+        let QueuedOutgoingMessage::Message {
+            message: overload,
+            write_complete_tx: _,
+        } = overload
+        else {
+            panic!("expected queued message")
+        };
+        let overload_json = serde_json::to_value(overload).expect("serialize overload error");
         assert_eq!(
             overload_json,
             json!({
@@ -589,8 +595,14 @@ mod tests {
             .recv()
             .await
             .expect("writer queue should still contain original message");
-        let queued_json =
-            serde_json::to_value(queued_outgoing.message).expect("serialize queued message");
+        let QueuedOutgoingMessage::Message {
+            message: queued_outgoing,
+            write_complete_tx: _,
+        } = queued_outgoing
+        else {
+            panic!("expected queued message")
+        };
+        let queued_json = serde_json::to_value(queued_outgoing).expect("serialize queued message");
         assert_eq!(
             queued_json,
             json!({

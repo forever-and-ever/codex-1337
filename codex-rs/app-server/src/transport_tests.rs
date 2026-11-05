@@ -152,8 +152,15 @@ async fn to_connection_notifications_are_preserved_for_non_opted_out_clients() {
         .recv()
         .await
         .expect("notification should reach non-opted-out clients");
+    let QueuedOutgoingMessage::Message {
+        message,
+        write_complete_tx: _,
+    } = message
+    else {
+        panic!("expected queued message")
+    };
     assert!(matches!(
-        message.message,
+        message,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ConfigWarning(ConfigWarningNotification { summary, .. }),
             ..
@@ -224,7 +231,14 @@ async fn experimental_notifications_are_dropped_without_capability() {
             .recv()
             .await
             .expect("stable auth recovery notification should reach clients without capability");
-        let OutgoingMessage::AppServerNotification(envelope) = message.message else {
+        let QueuedOutgoingMessage::Message {
+            message,
+            write_complete_tx: _,
+        } = message
+        else {
+            panic!("expected queued message")
+        };
+        let OutgoingMessage::AppServerNotification(envelope) = message else {
             panic!("stable auth recovery notification should be delivered");
         };
         assert_eq!(envelope.notification.to_string(), method);
@@ -262,8 +276,15 @@ async fn experimental_notifications_are_preserved_with_capability() {
         .recv()
         .await
         .expect("experimental notification should reach opted-in client");
+    let QueuedOutgoingMessage::Message {
+        message,
+        write_complete_tx: _,
+    } = message
+    else {
+        panic!("expected queued message")
+    };
     assert!(matches!(
-        message.message,
+        message,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ThreadRealtimeStarted(_),
             ..
@@ -334,7 +355,14 @@ async fn command_execution_request_approval_strips_additional_permissions_withou
         .recv()
         .await
         .expect("request should be delivered to the connection");
-    let json = serde_json::to_value(message.message).expect("request should serialize");
+    let QueuedOutgoingMessage::Message {
+        message,
+        write_complete_tx: _,
+    } = message
+    else {
+        panic!("expected queued message")
+    };
+    let json = serde_json::to_value(message).expect("request should serialize");
     assert_eq!(json["params"].get("additionalPermissions"), None);
 }
 
@@ -401,7 +429,14 @@ async fn command_execution_request_approval_keeps_additional_permissions_with_ca
         .recv()
         .await
         .expect("request should be delivered to the connection");
-    let json = serde_json::to_value(message.message).expect("request should serialize");
+    let QueuedOutgoingMessage::Message {
+        message,
+        write_complete_tx: _,
+    } = message
+    else {
+        panic!("expected queued message")
+    };
+    let json = serde_json::to_value(message).expect("request should serialize");
     let allowed_path = absolute_path("/tmp/allowed").to_string_lossy().into_owned();
     assert_eq!(
         json["params"]["additionalPermissions"],
@@ -457,8 +492,15 @@ async fn broadcast_only_reaches_eligible_connections() {
                 let queued = receiver
                     .try_recv()
                     .expect("eligible client receives notification");
-                assert_eq!(serde_json::to_value(&queued.message).unwrap(), expected);
-                assert!(queued.write_complete_tx.is_none());
+                let QueuedOutgoingMessage::Message {
+                    message: queued,
+                    write_complete_tx: queued_written,
+                } = queued
+                else {
+                    panic!("expected queued message")
+                };
+                assert_eq!(serde_json::to_value(&queued).unwrap(), expected);
+                assert!(queued_written.is_none());
                 assert!(receiver.try_recv().is_err());
             }
         }
@@ -534,8 +576,15 @@ async fn broadcast_does_not_block_on_slow_connection() {
     let fast_message = fast_writer_rx
         .try_recv()
         .expect("fast connection should receive the broadcast notification");
+    let QueuedOutgoingMessage::Message {
+        message: fast_message,
+        write_complete_tx: _,
+    } = fast_message
+    else {
+        panic!("expected queued message")
+    };
     assert!(matches!(
-        fast_message.message,
+        fast_message,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ConfigWarning(ConfigWarningNotification { summary, .. }),
             ..
@@ -545,8 +594,15 @@ async fn broadcast_does_not_block_on_slow_connection() {
     let slow_message = slow_writer_rx
         .try_recv()
         .expect("slow connection should retain its original buffered message");
+    let QueuedOutgoingMessage::Message {
+        message: slow_message,
+        write_complete_tx: _,
+    } = slow_message
+    else {
+        panic!("expected queued message")
+    };
     assert!(matches!(
-        slow_message.message,
+        slow_message,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ConfigWarning(ConfigWarningNotification { summary, .. }),
             ..
@@ -605,13 +661,20 @@ async fn to_connection_stdio_waits_instead_of_disconnecting_when_writer_queue_is
         .await
         .expect("first queued message should be readable")
         .expect("first queued message should exist");
+    let QueuedOutgoingMessage::Message {
+        message: first,
+        write_complete_tx: _,
+    } = first
+    else {
+        panic!("expected queued message")
+    };
     timeout(Duration::from_millis(100), route_task)
         .await
         .expect("routing should finish after the first queued message is drained")
         .expect("routing task should succeed");
 
     assert!(matches!(
-        first.message,
+        first,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ConfigWarning(ConfigWarningNotification { summary, .. }),
             ..
@@ -620,8 +683,15 @@ async fn to_connection_stdio_waits_instead_of_disconnecting_when_writer_queue_is
     let second = writer_rx
         .try_recv()
         .expect("second notification should be delivered once the queue has room");
+    let QueuedOutgoingMessage::Message {
+        message: second,
+        write_complete_tx: _,
+    } = second
+    else {
+        panic!("expected queued message")
+    };
     assert!(matches!(
-        second.message,
+        second,
         OutgoingMessage::AppServerNotification(ServerNotificationEnvelope {
             notification: ServerNotification::ConfigWarning(ConfigWarningNotification { summary, .. }),
             ..

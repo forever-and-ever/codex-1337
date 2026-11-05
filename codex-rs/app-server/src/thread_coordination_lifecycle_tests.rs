@@ -107,6 +107,9 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
                 .await
                 .ok_or_else(|| anyhow::anyhow!("outgoing channel closed"))?;
             let message = match envelope {
+                crate::outgoing_message::OutgoingEnvelope::DisconnectAll { .. } => {
+                    anyhow::bail!("unexpected disconnect barrier")
+                }
                 crate::outgoing_message::OutgoingEnvelope::ToConnection { message, .. }
                 | crate::outgoing_message::OutgoingEnvelope::Broadcast { message } => message,
             };

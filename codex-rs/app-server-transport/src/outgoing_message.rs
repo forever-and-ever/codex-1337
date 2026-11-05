@@ -44,14 +44,20 @@ pub struct OutgoingError {
 }
 
 #[derive(Debug)]
-pub struct QueuedOutgoingMessage {
-    pub message: OutgoingMessage,
-    pub write_complete_tx: Option<oneshot::Sender<()>>,
+pub enum QueuedOutgoingMessage {
+    Message {
+        message: OutgoingMessage,
+        write_complete_tx: Option<oneshot::Sender<()>>,
+    },
+    /// Close only after all preceding messages have reached the transport writer.
+    GracefulClose {
+        write_complete_tx: oneshot::Sender<()>,
+    },
 }
 
 impl QueuedOutgoingMessage {
     pub fn new(message: OutgoingMessage) -> Self {
-        Self {
+        Self::Message {
             message,
             write_complete_tx: None,
         }
