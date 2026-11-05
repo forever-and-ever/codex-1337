@@ -9,6 +9,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Weak;
 
+#[path = "routing_owner.rs"]
+mod routing_owner;
+
 use crate::AuthManager;
 use crate::CodexAuth;
 
@@ -36,6 +39,7 @@ impl std::fmt::Debug for WorkspaceRoutingSession {
 
 /// The provider and bootstrap selected for one model session.
 pub struct WorkspaceRoutingRequest {
+    pub credentials: Arc<AuthManager>,
     pub provider_base_url: String,
     pub chatgpt_base_url: String,
     pub previously_routed: bool,
@@ -66,6 +70,7 @@ impl AuthManager {
         auth: &CodexAuth,
         request: WorkspaceRoutingRequest,
     ) -> io::Result<Option<WorkspaceRouting>> {
+        routing_owner::validate(self, &request)?;
         let Some(resolver) = self.workspace_routing_resolver.get() else {
             return Ok(None);
         };

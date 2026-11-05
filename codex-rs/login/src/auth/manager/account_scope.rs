@@ -167,6 +167,9 @@ impl AuthManager {
         let mut config = self.saved_account_config();
         config.auth_route_config = config.auth_route_config.for_personal_account()?;
         let manager = Self::new_from_auth_config(config, /*enable_codex_api_key_env*/ false).await;
+        if let Some(resolver) = self.workspace_routing_resolver.get() {
+            manager.set_workspace_routing_resolver(resolver.clone());
+        }
         {
             let mut scope = manager.write_account_scope();
             *scope = Some(id.to_owned());
