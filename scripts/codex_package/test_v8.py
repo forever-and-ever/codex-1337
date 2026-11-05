@@ -62,7 +62,7 @@ class FetchCodexV8ArtifactsTest(unittest.TestCase):
             pins = (
                 self.root / "third_party/v8/rusty_v8_152_2_0_release_manifests.sha256"
             )
-            pins.parent.mkdir(parents=True)
+            pins.parent.mkdir(parents=True, exist_ok=True)
             digest = trusted_digest or hashlib.sha256(manifest).hexdigest()
             name = trusted_name or manifest_name
             pins.write_bytes(f"{digest}  {name}".encode() + line_ending)
@@ -73,24 +73,60 @@ class FetchCodexV8ArtifactsTest(unittest.TestCase):
 
         with (
             patch.object(v8, "REPO_ROOT", self.root),
+            patch.object(v8, "REGENERATED_BINDINGS", {}),
             patch.object(v8, "download_file", side_effect=download) as download_file,
         ):
             yield spec, download_file, manifest_name
 
     def test_fetches_artifacts_after_authenticating_manifest(self) -> None:
-        with self.release("x86_64-unknown-linux-gnu") as (
-            spec,
-            download,
-            manifest_name,
-        ):
-            artifacts = v8.fetch_codex_v8_artifacts(
-                spec, version=self.version, cache_root=self.root / "cache"
-            )
-
-            self.assertEqual(artifacts.archive.read_bytes(), b"trusted V8 archive")
-            self.assertEqual(artifacts.binding.read_bytes(), b"trusted V8 binding")
-            self.assertEqual(download.call_args_list[0].args[1].name, manifest_name)
-            self.assertEqual(download.call_count, 3)
+        for regenerated in (False, True):
+            with (
+                self.subTest(regenerated=regenerated),
+                self.release("x86_64-unknown-linux-gnu") as (
+                    spec,
+                    download,
+                    manifest_name,
+                ),
+            ):
+                binding = b"trusted V8 binding"
+                if regenerated:
+                    binding = b"regenerated V8 binding"
+                    replacement = (
+                        self.root
+                        / "third_party/v8/bindings"
+                        / self.version
+                        / f"src_binding_{v8.V8_ARTIFACT_PROFILE}_{spec.target}.rs"
+                    )
+                    replacement.parent.mkdir(parents=True)
+                    replacement.write_bytes(binding)
+                    v8.REGENERATED_BINDINGS[(self.version, spec.target)] = (
+                        hashlib.sha256(binding).hexdigest()
+                    )
+                artifacts = v8.fetch_codex_v8_artifacts(
+                    spec, version=self.version, cache_root=self.root / str(regenerated)
+                )
+                self.assertEqual(artifacts.archive.read_bytes(), b"trusted V8 archive")
+                self.assertEqual(artifacts.binding.read_bytes(), binding)
+                self.assertEqual(download.call_args_list[0].args[1].name, manifest_name)
+                self.assertEqual(download.call_count, 2 if regenerated else 3)
+                if regenerated:
+                    self.assertEqual(artifacts.binding, replacement)
+                    # A bad local binding must not fall back to the unsafe release pair.
+                    for contents in (b"corrupt", None):
+                        if contents is None:
+                            replacement.unlink()
+                        else:
+                            replacement.write_bytes(contents)
+                        download.reset_mock()
+                        with self.assertRaisesRegex(
+                            RuntimeError, "Regenerated V8 binding .* failed checksum"
+                        ):
+                            v8.fetch_codex_v8_artifacts(
+                                spec,
+                                version=self.version,
+                                cache_root=self.root / str(regenerated),
+                            )
+                        download.assert_not_called()
 
     def test_authenticates_windows_manifest_with_crlf(self) -> None:
         with self.release("x86_64-pc-windows-msvc", line_ending=b"\r\n") as (

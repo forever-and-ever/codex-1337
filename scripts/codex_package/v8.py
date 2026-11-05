@@ -15,6 +15,12 @@ from .targets import REPO_ROOT, TargetSpec
 
 DOWNLOAD_TIMEOUT_SECS = 120
 V8_ARTIFACT_PROFILE = "ptrcomp_sandbox_release"
+REGENERATED_BINDINGS: dict[tuple[str, str], str] = {
+    (
+        "152.2.0",
+        "x86_64-unknown-linux-gnu",
+    ): "de9a71ee1cb4b5ab12ab5bfe382eab023087693bcf874faa72bff6fef0c2d4d5",
+}
 
 
 @dataclass(frozen=True)
@@ -95,11 +101,18 @@ def fetch_codex_v8_artifacts(
         download_file(f"{release_url}/{checksums.name}", checksums)
         verify_release_checksum_manifest(checksums, version=version)
     expected_checksums = load_checksums(checksums, {archive.name, binding.name})
-    for artifact in [archive, binding]:
+    ensure_valid_artifact(
+        archive, expected_checksums[archive_name], f"{release_url}/{archive_name}"
+    )
+    if checksum := REGENERATED_BINDINGS.get((version, target)):
+        binding = REPO_ROOT / "third_party/v8/bindings" / version / binding_name
+        if not has_checksum(binding, checksum):
+            raise RuntimeError(
+                f"Regenerated V8 binding {binding} failed checksum validation."
+            )
+    else:
         ensure_valid_artifact(
-            artifact,
-            expected_checksums[artifact.name],
-            f"{release_url}/{artifact.name}",
+            binding, expected_checksums[binding_name], f"{release_url}/{binding_name}"
         )
 
     return RustyV8ArtifactPair(archive=archive, binding=binding)

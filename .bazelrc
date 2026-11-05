@@ -1,5 +1,7 @@
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+# Host pip policy leaks into rules_python's isolated wheel builds, which install nothing globally.
+common --repo_env=PIP_REQUIRE_VIRTUALENV=false
 # Dummy xcode config so we don't need to build xcode_locator in repo rule.
 common --xcode_version_config=//:disable_xcode
 

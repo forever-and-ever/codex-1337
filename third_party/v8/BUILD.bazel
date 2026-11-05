@@ -773,6 +773,14 @@ v8_artifact_files(
 )
 
 v8_artifact_files(
+    name = "rusty_v8_sandbox_release_binding_x86_64_unknown_linux_gnu",
+    srcs = [":binding_generated_152_2_0"],
+    profile = "sandbox_release",
+    tags = ["manual"],
+    v8_cpu = "x64",
+)
+
+v8_artifact_files(
     name = "rusty_v8_sandbox_release_pair_x86_64_unknown_linux_gnu",
     srcs = [
         ":_v8_152_2_0_x86_64_unknown_linux_gnu_bazel",

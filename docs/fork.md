@@ -115,6 +115,39 @@ It uses the packaging resolver for the V8 version in `Cargo.lock`, paired bindin
 and trusted checksums. Metadata/configuration probes do not fetch artifacts.
 Keep V8 artifact policy in `scripts/codex_package/v8.py`.
 
+For V8 152.2.0 on Linux x86_64 GNU, Cargo uses the repository-owned binding
+in `third_party/v8/bindings/152.2.0/`, pinned by SHA-256 in that resolver.
+The September Codex release paired a Bazel archive with a pre-generated GN
+binding; its CppGC slots and typed-array limits disagree with the archive.
+Regenerate only the binding through upstream #57644's bindgen target under
+the same `sandbox_release` transition (pointer compression, sandbox, pinned
+Chromium libc++), not the source/workspace-runtime profile:
+
+```bash
+flock /home/main/programming/projects/codex-1337/.worktrees/upstream-0.166.0.notes/build.lock \
+  env CARGO_BUILD_JOBS=6 /home/main/.local/libexec/cpu-lanes \
+  bazel build -c opt --platforms=@llvm//platforms:linux_x86_64 \
+  //third_party/v8:rusty_v8_sandbox_release_binding_x86_64_unknown_linux_gnu
+```
+
+Run from the checkout root; copy the reported `binding_generated_152_2_0.rs`
+output verbatim to the versioned binding path and update its resolver pin.
+The root `.bazelrc` uses `repo_env=PIP_REQUIRE_VIRTUALENV=false` because host
+pip policy otherwise leaks into rules_python's isolated wheel builds, which
+install nothing globally.
+
+SHA-256 provenance:
+- Published binding before: `3e4d5fecdbe0f98a6017e69d7ca82519a77fb032c5eb5e4cdbecdd3e2ec519d5`.
+- Regenerated binding after: `de9a71ee1cb4b5ab12ab5bfe382eab023087693bcf874faa72bff6fef0c2d4d5`.
+- Published archive unchanged: `b3b490f2aa809eda7f6ac727f851fb00ce8355be72827577cfaac28c7137dbcd`
+  (`librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.a.gz`).
+- Published pair manifest unchanged: `1ec730635970ab1c0e8f4764ea113ad29d69d7f8d4c2ae69f3d766434a759350`.
+
+The archive and its published manifest still authenticate against the existing
+release pins; only the separately checked binding input changes. Missing or
+modified local bindings fail closed, never reverting to the unsafe published
+binding.
+
 Use the default dev/test profiles for focused checks and `scripts/install-local`
 for installs (`local` profile). Do not alternate ad hoc profiles. Keep `-p`/test
 filters narrow: workspace feature unification stabilizes dependencies without
