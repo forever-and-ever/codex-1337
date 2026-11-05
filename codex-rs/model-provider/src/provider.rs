@@ -290,6 +290,7 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
                     .workspace_routing(
                         auth,
                         WorkspaceRoutingRequest {
+                            credentials: Arc::clone(&auth_manager),
                             provider_base_url: provider.base_url.clone(),
                             chatgpt_base_url: routing_context.chatgpt_base_url.clone(),
                             previously_routed: *previously_routed,

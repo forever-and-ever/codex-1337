@@ -172,6 +172,23 @@ async fn workspace_routing_preserves_paths_and_excludes_other_providers() {
 #[tokio::test]
 async fn missing_routing_owner_and_wrong_workspace_fail_closed() {
     let routing_context = WorkspaceRoutingContext::new("https://chatgpt.com/backend-api".into());
+    let unowned =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let other =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let request = WorkspaceRoutingRequest {
+        credentials: other,
+        provider_base_url: "https://chatgpt.com/backend-api/codex".into(),
+        chatgpt_base_url: "https://chatgpt.com/backend-api".into(),
+        previously_routed: false,
+        session: None,
+    };
+    assert!(
+        unowned
+            .workspace_routing(&CodexAuth::create_dummy_chatgpt_auth_for_testing(), request,)
+            .await
+            .is_err()
+    );
     let auth =
         AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
     let resolver: Arc<dyn WorkspaceRoutingResolver> = Arc::new(Routing(WorkspaceRouting {

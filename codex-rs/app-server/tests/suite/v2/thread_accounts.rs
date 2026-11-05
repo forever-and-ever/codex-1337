@@ -390,6 +390,21 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             default_saved: true
         }
     );
+    for (method, params) in [
+            ("accountSession/list", json!({})),
+            ("accountSession/switch", json!({"sessionId": "removed", "accountId": "alice"})),
+        ] {
+            let request = app.send_request(method, Some(params)).await?;
+            let error = timeout(
+                DEFAULT_READ_TIMEOUT,
+                app.read_stream_until_error_message(RequestId::Integer(request)),
+            ).await??;
+            assert_eq!(error.error.code, -32600);
+            assert_eq!(
+                error.error.data,
+                Some(json!({"reason": "workspaceSwitchingUnsupported"}))
+            );
+        }
     for method in [
         "account/read",
         "account/rateLimits/read",

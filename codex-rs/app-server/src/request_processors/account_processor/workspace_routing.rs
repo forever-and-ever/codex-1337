@@ -27,11 +27,16 @@ use url::Url;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct WorkspaceRoutingKey {
+    credential_owner: CredentialOwner,
     auth_generation: u64,
     chatgpt_account_id: String,
     effective_chatgpt_base_url: String,
     required_chatgpt_base_url: Option<String>,
 }
+
+#[path = "routing_owner.rs"]
+mod routing_owner;
+use routing_owner::CredentialOwner;
 
 // Results live through same-key waiters, even if another key replaces the cache.
 // Weak entries are pruned on the next read after those requests finish.
@@ -192,7 +197,9 @@ impl WorkspaceRoutingResolver for AccountRequestProcessor {
         request: WorkspaceRoutingRequest,
     ) -> Pin<Box<dyn Future<Output = io::Result<Option<WorkspaceRouting>>> + Send + '_>> {
         Box::pin(async move {
-            self.read_account(Some(&request))
+            let scoped = routing_owner::scope(self, &request);
+            scoped
+                .read_account(Some(&request))
                 .await
                 .map(|account| account.workspace_routing)
                 .map_err(|error| match error {
@@ -423,6 +430,7 @@ impl AccountRequestProcessor {
                     .chatgpt_base_url
                     .clone();
                 let key = WorkspaceRoutingKey {
+                    credential_owner: CredentialOwner(Arc::clone(&self.auth_manager)),
                     auth_generation: auth_state.generation,
                     chatgpt_account_id: account_id.clone(),
                     effective_chatgpt_base_url: config.chatgpt_base_url.clone(),

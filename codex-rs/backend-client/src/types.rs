@@ -136,12 +136,6 @@ pub struct AccountsCheckResponse {
 #[derive(Clone, Debug, Deserialize)]
 pub struct AccountEntry {
     pub id: String,
-    pub can_access_with_session: Option<bool>,
-    pub sso_connection_name: Option<String>,
-    #[serde(default)]
-    pub is_deactivated: bool,
-    #[serde(default)]
-    pub is_fedramp_compliant_workspace: bool,
     /// Current subscription reported by the accounts endpoint, independent of token claims.
     #[serde(default)]
     pub plan_type: Option<codex_protocol::account::PlanType>,
@@ -181,17 +175,11 @@ impl Default for RawAccounts {
 #[derive(Deserialize)]
 struct ChatGptAccountEntry {
     account: ChatGptAccountInfo,
-    can_access_with_session: Option<bool>,
-    sso_connection_name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ChatGptAccountInfo {
     account_id: Option<String>,
-    #[serde(default)]
-    is_deactivated: bool,
-    #[serde(default)]
-    is_fedramp_compliant_workspace: bool,
     #[serde(default)]
     plan_type: Option<codex_protocol::account::PlanType>,
     #[serde(default)]
@@ -218,10 +206,6 @@ impl<'de> Deserialize<'de> for AccountsCheckResponse {
                     let account = entry.account;
                     Some(AccountEntry {
                         id: account.account_id?,
-                        can_access_with_session: entry.can_access_with_session,
-                        sso_connection_name: entry.sso_connection_name,
-                        is_deactivated: account.is_deactivated,
-                        is_fedramp_compliant_workspace: account.is_fedramp_compliant_workspace,
                         plan_type: account.plan_type,
                         workspace_backend_origin: None,
                         account_routing_override: None,

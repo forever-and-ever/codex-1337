@@ -1,9 +1,6 @@
 mod identity_persistence;
 
 mod workspace_routing;
-mod workspace_switching;
-pub use workspace_switching::WorkspaceLogin;
-pub use workspace_switching::WorkspaceSwitch;
 
 #[path = "account_grant.rs"]
 mod account_grant;
@@ -588,7 +585,7 @@ impl CodexAuth {
                 tokens: Some(tokens),
                 last_refresh: Some(_),
                 ..
-            }) => Ok(workspace_switching::selected_workspace_tokens(tokens)),
+            }) => Ok(tokens),
             _ => Err(std::io::Error::other("Token data is not available.")),
         }
     }
@@ -717,9 +714,7 @@ impl CodexAuth {
 
     /// Returns `None` if token-backed ChatGPT auth is unavailable.
     fn get_current_token_data(&self) -> Option<TokenData> {
-        self.get_current_auth_json()
-            .and_then(|t| t.tokens)
-            .map(workspace_switching::selected_workspace_tokens)
+        self.get_current_auth_json().and_then(|t| t.tokens)
     }
 
     fn stored_managed_chatgpt_agent_identity_record(
