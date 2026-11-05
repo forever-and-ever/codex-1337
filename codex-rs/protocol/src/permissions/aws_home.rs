@@ -72,7 +72,13 @@ pub(super) fn protects_local_aws(path: &Path) -> bool {
     }
     path.parent().is_some_and(is_local_home)
         || std::fs::symlink_metadata(path).map_or_else(
-            |error| error.kind() != std::io::ErrorKind::NotFound,
+            // Nothing exists or can be created beneath a non-directory.
+            |error| {
+                !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                )
+            },
             |_| true,
         )
 }
