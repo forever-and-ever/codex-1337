@@ -12,6 +12,10 @@ use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use thread_created_announcement::announce_created_thread;
+#[path = "thread_unload_policy.rs"]
+mod thread_unload_policy;
+use thread_unload_policy::UnloadingState;
+use thread_unload_policy::begin_idle_unload;
 
 #[cfg(test)]
 #[path = "thread_listener_shutdown_tests.rs"]
@@ -27,121 +31,6 @@ pub(super) struct ListenerTaskContext {
     pub(super) codex_home: PathBuf,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
-}
-
-struct UnloadingState {
-    delay: Duration,
-    has_subscribers_rx: watch::Receiver<bool>,
-    has_subscribers: (bool, Instant),
-    thread_status_rx: watch::Receiver<ThreadStatus>,
-    is_active: (bool, Instant),
-    runtime_operations: Option<watch::Receiver<usize>>,
-}
-
-impl UnloadingState {
-    fn new(
-        delay: Duration,
-        has_subscribers_rx: watch::Receiver<bool>,
-        thread_status_rx: watch::Receiver<ThreadStatus>,
-        runtime_operations: watch::Receiver<usize>,
-    ) -> Self {
-        let has_subscribers = (*has_subscribers_rx.borrow(), Instant::now());
-        let is_active = (
-            matches!(*thread_status_rx.borrow(), ThreadStatus::Active { .. }),
-            Instant::now(),
-        );
-        Self {
-            delay,
-            has_subscribers_rx,
-            has_subscribers,
-            thread_status_rx,
-            is_active,
-            runtime_operations: Some(runtime_operations),
-        }
-    }
-
-    fn unloading_target(&self) -> Option<Instant> {
-        if self
-            .runtime_operations
-            .as_ref()
-            .is_some_and(|operations| *operations.borrow() != 0)
-        {
-            return None;
-        }
-        match (self.has_subscribers, self.is_active) {
-            ((false, has_no_subscribers_since), (false, is_inactive_since)) => {
-                std::cmp::max(has_no_subscribers_since, is_inactive_since).checked_add(self.delay)
-            }
-            _ => None,
-        }
-    }
-
-    fn sync_receiver_values(&mut self) {
-        let has_subscribers = *self.has_subscribers_rx.borrow();
-        if self.has_subscribers.0 != has_subscribers {
-            self.has_subscribers = (has_subscribers, Instant::now());
-        }
-
-        let is_active = matches!(*self.thread_status_rx.borrow(), ThreadStatus::Active { .. });
-        if self.is_active.0 != is_active {
-            self.is_active = (is_active, Instant::now());
-        }
-    }
-
-    fn should_unload_now(&mut self) -> bool {
-        self.sync_receiver_values();
-        self.unloading_target()
-            .is_some_and(|target| target <= Instant::now())
-    }
-
-    fn note_thread_activity_observed(&mut self) {
-        if !self.is_active.0 {
-            self.is_active = (false, Instant::now());
-        }
-    }
-
-    async fn wait_for_unloading_trigger(&mut self) -> bool {
-        loop {
-            self.sync_receiver_values();
-            let unloading_target = self.unloading_target();
-            if let Some(target) = unloading_target
-                && target <= Instant::now()
-            {
-                tokio::task::yield_now().await;
-                return true;
-            }
-            let unloading_sleep = async {
-                if let Some(target) = unloading_target {
-                    tokio::time::sleep_until(target.into()).await;
-                } else {
-                    futures::future::pending::<()>().await;
-                }
-            };
-            tokio::select! {
-                _ = unloading_sleep => return true,
-                changed = self.has_subscribers_rx.changed() => {
-                    if changed.is_err() {
-                        return false;
-                    }
-                    self.sync_receiver_values();
-                },
-                changed = self.thread_status_rx.changed() => {
-                    if changed.is_err() {
-                        return false;
-                    }
-                    self.sync_receiver_values();
-                },
-                changed = async {
-                    match &mut self.runtime_operations {
-                        Some(operations) => operations.changed().await,
-                        None => futures::future::pending().await,
-                    }
-                } => {
-                    if changed.is_err() { return false; }
-                },
-            }
-        }
-    }
 }
 
 pub(super) enum ThreadShutdownResult {
@@ -351,6 +240,11 @@ async fn start_listener(
     listener_state: ListenerStateCandidate,
     startup: ListenerStartup<'_>,
 ) -> ListenerStartOutcome {
+    let _setup_hold = conversation.runtime_holds().acquire();
+    if _setup_hold.is_none() && !matches!(startup, ListenerStartup::Created { .. }) {
+        return ListenerStartOutcome::Rejected;
+    }
+    let unload_context = listener_task_context.clone();
     let (cancel_tx, mut cancel_rx) = oneshot::channel();
     let (drained_tx, drained_rx) = watch::channel(false);
     let config_snapshot = conversation.config_snapshot().await;
@@ -436,6 +330,7 @@ async fn start_listener(
             .subscribe_and_install_listener(
                 conversation_id,
                 &listener_state,
+                &conversation.runtime_holds(),
                 connection_ids,
                 |attached| {
                     let listener_matches = state.listener_matches(&conversation);
@@ -478,7 +373,7 @@ async fn start_listener(
                 },
             )
             .await;
-        let ((listener_command_rx, listener_generation), has_subscribers_rx, attached) =
+        let ((listener_command_rx, listener_generation), _has_subscribers_rx, attached) =
             match installed {
                 Ok(Some((Some(listener), has_subscribers_rx, attached))) => {
                     (listener, has_subscribers_rx, attached)
@@ -526,12 +421,12 @@ async fn start_listener(
             listener_generation,
             UnloadingState::new(
                 config.thread_unload_delay,
-                has_subscribers_rx,
-                thread_status_rx,
                 listener_task_context
                     .thread_state_manager
-                    .runtime_operations(conversation_id)
+                    .subscriber_activity(conversation_id)
                     .await,
+                conversation.runtime_holds().subscribe(),
+                thread_status_rx,
             ),
             attached,
         )
@@ -659,98 +554,29 @@ async fn start_listener(
                         None
                     }
                 } => {
-                    let Some(_idle_guard) = idle_guard else {
-                        break false;
+                    let Some(idle_guard) = idle_guard else { break false; };
+                    if !unloading_state.should_unload_now() { continue; }
+                    let outcome = begin_idle_unload(
+                        &unload_context, conversation_id, Arc::clone(&conversation),
+                        Arc::clone(&thread_state), listener_generation, config.thread_unload_delay,
+                        idle_guard,
+                    ).await;
+                    let outcome = match outcome {
+                        Ok(receiver) => receiver.await.unwrap_or(ThreadEvictionOutcome::Busy),
+                        Err(outcome) => outcome,
                     };
-                    if !unloading_state.should_unload_now() {
-                        continue;
+                    match outcome {
+                        ThreadEvictionOutcome::Evicted | ThreadEvictionOutcome::NotCurrent => return,
+                        ThreadEvictionOutcome::Contended => unloading_state.defer_contention(),
+                        ThreadEvictionOutcome::Busy => unloading_state.defer_until_activity(),
                     }
-                    // Core admission precedes TurnStarted and its derived status.
-                    // Releasing a headless lease must not evict that admitted turn.
-                    if !conversation.can_prove_turn_idle() {
-                        unloading_state.note_thread_activity_observed();
-                        continue;
-                    }
-                    {
-                        let mut pending_thread_unloads = pending_thread_unloads.lock().await;
-                        if pending_thread_unloads.contains_key(&conversation_id) {
-                            continue;
-                        }
-                        if !unloading_state.should_unload_now()
-                            || !conversation.can_prove_turn_idle()
-                        {
-                            continue;
-                        }
-                        pending_thread_unloads.insert(conversation_id, watch::channel(()).0);
-                    }
-                    if is_v2_child {
-                        let eviction = thread_manager.try_evict_v2_thread(Arc::clone(&conversation));
-                        tokio::pin!(eviction);
-                        let result = match tokio::time::timeout(
-                            Duration::from_secs(/*secs*/ 10), &mut eviction,
-                        ).await {
-                            Ok(result) => result,
-                            Err(_) => {
-                                warn!(event.name = "codex.app_server.thread_shutdown_slow", "thread {conversation_id} shutdown is taking longer than expected; continuing to wait");
-                                eviction.await
-                            }
-                        };
-                        let outcome = match result {
-                            Ok(ThreadEvictionOutcome::Busy) => {
-                                pending_thread_unloads.lock().await.remove(&conversation_id);
-                                unloading_state.note_thread_activity_observed();
-                                continue;
-                            }
-                            Ok(outcome @ (ThreadEvictionOutcome::Evicted | ThreadEvictionOutcome::NotCurrent)) => outcome,
-                            Err(err) => {
-                                warn!("failed to evict thread {conversation_id}: {err}");
-                                pending_thread_unloads.lock().await.remove(&conversation_id);
-                                unloading_state.note_thread_activity_observed();
-                                continue;
-                            }
-                        };
-                        {
-                            let mut pending = pending_thread_unloads.lock().await;
-                            if !thread_state_manager.remove_unsubscribed_listener(
-                                conversation_id, &thread_state, listener_generation,
-                            ).await {
-                                pending.remove(&conversation_id);
-                                break false;
-                            }
-                        }
-                        outgoing_for_task
-                            .cancel_requests_for_thread(conversation_id, /*error*/ None)
-                            .await;
-                        // A runtime removed by someone else may already have a replacement.
-                        if outcome == ThreadEvictionOutcome::Evicted {
-                            thread_watch_manager
-                                .remove_thread(&conversation_id.to_string())
-                                .await;
-                            outgoing_for_task
-                                .send_server_notification(ServerNotification::ThreadClosed(
-                                    ThreadClosedNotification { thread_id: conversation_id.to_string() },
-                                ))
-                                .await;
-                        }
-                        pending_thread_unloads.lock().await.remove(&conversation_id);
-                        return;
-                    }
-                    unload_thread_without_subscribers(
-                        thread_manager.clone(),
-                        outgoing_for_task.clone(),
-                        pending_thread_unloads.clone(),
-                        thread_state_manager.clone(),
-                        thread_watch_manager.clone(),
-                        conversation_id,
-                        conversation.clone(),
-                    )
-                    .await;
-                    break false;
+                    continue;
                 }
             }
         };
         // The thread owns its event sender, so waiting for channel closure retains
         // the runtime. Keep only the notification relay after ShutdownComplete.
+        drop(unload_context);
         drop(conversation);
         drop(config);
         drop(thread_manager);
@@ -758,7 +584,7 @@ async fn start_listener(
 
         if shutdown_complete {
             // The command relay no longer owns a runtime for leases to protect.
-            unloading_state.runtime_operations = None;
+            unloading_state.observe_relay();
             drained_tx.send_replace(true);
             let relay_command = |command| {
                 handle_thread_listener_command(
@@ -857,73 +683,6 @@ pub(super) async fn wait_for_thread_shutdown(thread: &Arc<CodexThread>) -> Threa
         Ok(Err(_)) => ThreadShutdownResult::SubmitFailed,
         Err(_) => ThreadShutdownResult::TimedOut,
     }
-}
-
-pub(super) async fn unload_thread_without_subscribers(
-    thread_manager: Arc<ThreadManager>,
-    outgoing: Arc<OutgoingMessageSender>,
-    pending_thread_unloads: PendingThreadUnloads,
-    thread_state_manager: ThreadStateManager,
-    thread_watch_manager: ThreadWatchManager,
-    thread_id: ThreadId,
-    thread: Arc<CodexThread>,
-) {
-    info!("thread {thread_id} has no subscribers and is idle; shutting down");
-
-    // Any pending app-server -> client requests for this thread can no longer be
-    // answered; cancel their callbacks before shutdown/unload.
-    outgoing
-        .cancel_requests_for_thread(thread_id, /*error*/ None)
-        .await;
-    thread_state_manager.remove_thread_state(thread_id).await;
-
-    tokio::spawn(async move {
-        // The deadline bounds our warning, not background cleanup. Keep polling the
-        // same future so even delayed shutdown submission can eventually finish.
-        let shutdown = thread.shutdown_and_wait();
-        tokio::pin!(shutdown);
-        let result = match tokio::time::timeout(Duration::from_secs(/*secs*/ 10), &mut shutdown)
-            .await
-        {
-            Ok(result) => result,
-            Err(_) => {
-                warn!(
-                    event.name = "codex.app_server.thread_shutdown_slow",
-                    "thread {thread_id} shutdown is taking longer than expected; continuing to wait"
-                );
-                shutdown.await
-            }
-        };
-        match result {
-            Ok(()) => {
-                // A delayed unload can finish after thread/revert replaces this runtime under
-                // the same thread ID. Only the runtime that scheduled this unload may remove it.
-                if thread_manager
-                    .remove_thread_if_matches(&thread_id, &thread)
-                    .await
-                    .is_none()
-                {
-                    info!("thread {thread_id} was replaced or removed before teardown finalized");
-                    pending_thread_unloads.lock().await.remove(&thread_id);
-                    return;
-                }
-                thread_watch_manager
-                    .remove_thread(&thread_id.to_string())
-                    .await;
-                let notification = ThreadClosedNotification {
-                    thread_id: thread_id.to_string(),
-                };
-                outgoing
-                    .send_server_notification(ServerNotification::ThreadClosed(notification))
-                    .await;
-                pending_thread_unloads.lock().await.remove(&thread_id);
-            }
-            Err(_) => {
-                pending_thread_unloads.lock().await.remove(&thread_id);
-                warn!("failed to submit Shutdown to thread {thread_id}");
-            }
-        }
-    });
 }
 
 #[allow(clippy::too_many_arguments)]

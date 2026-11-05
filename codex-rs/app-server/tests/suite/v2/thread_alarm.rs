@@ -1,3 +1,9 @@
+use codex_app_server_protocol::ThreadAlarmDisarmResponse;
+use codex_app_server_protocol::ThreadArchiveResponse;
+use codex_app_server_protocol::ThreadClosedNotification;
+use codex_app_server_protocol::ThreadLoadedListResponse;
+use codex_app_server_protocol::ThreadUnsubscribeResponse;
+use codex_app_server_protocol::ThreadUnsubscribeStatus;
 use core_test_support::mock_server;
 use std::collections::VecDeque;
 use std::path::Path;
@@ -55,7 +61,7 @@ use super::daemon_update_recovery::wait_success;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-const READY_COMMAND: &str = "printf 'warming\\n'; sleep 1; printf 'ready\\n'; sleep 30";
+const READY_COMMAND: &str = "printf 'warming\\n'; sleep 3; printf 'ready\\n'; sleep 30";
 
 struct AlarmApp {
     server: Child,
@@ -176,6 +182,7 @@ async fn alarm_app(server: &MockServer) -> Result<(AlarmApp, TempDir)> {
     let home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .with_sandbox_mode("danger-full-access")
+        .with_root_config("thread_unload_delay_secs = 1")
         .enable_feature(Feature::UnifiedExec)
         .disable_feature(Feature::ShellZshFork)
         .disable_feature(Feature::ShellSnapshot)
@@ -294,10 +301,16 @@ async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
             vec![
                 response(
                     "arm",
-                    vec![alarm_call(
-                        "clock",
-                        &json!({"after_seconds": 1, "note": "return to the work"}),
-                    )],
+                    vec![
+                        alarm_call(
+                            "clock",
+                            &json!({"after_seconds": 1, "note": "return to the work"}),
+                        ),
+                        alarm_call(
+                            "future",
+                            &json!({"after_seconds": 30, "note": "discarded by archive"}),
+                        ),
+                    ],
                 ),
                 done("armed"),
                 done("sounded"),
@@ -307,7 +320,7 @@ async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
         let (mut app, _home) = alarm_app(&server).await?;
         let thread_id = start(&mut app).await?;
         arm_turn(&mut app, &thread_id).await?;
-        assert_eq!(alarms(&mut app, 1).await?.thread_id, thread_id);
+        assert_eq!(alarms(&mut app, 2).await?.thread_id, thread_id);
         let soundings = wait_for_soundings(&mut app, &server, 1).await?;
         assert_eq!(soundings[0].note, "return to the work");
         assert_eq!(
@@ -316,7 +329,13 @@ async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
                 late_by_seconds: None
             }
         );
-        assert_eq!(soundings[0].still_armed, Vec::<String>::new());
+        let armed = alarms(&mut app, 1).await?;
+        assert_eq!(soundings[0].still_armed, vec![armed.alarms[0].id.clone()]);
+        // Archive holds alarm mutation while stopping the runtime. Binding detach
+        // must not wait reentrantly for that permit, and must discard durable rows.
+        let _: ThreadArchiveResponse = app
+            .request("thread/archive", json!({"threadId": thread_id}))
+            .await?;
         assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
         assert_eq!(model.requests().len(), 3);
         Ok(())
@@ -349,7 +368,7 @@ async fn terminal_model(server: &MockServer, scenario: TerminalScenario) {
                     let output = output.body.to_text().expect("text exec output");
                     let session_id: i32 = output.lines().find_map(|line| line.strip_prefix("Running (session ").and_then(|session| session.strip_suffix(')'))).expect("background session ID").parse().expect("numeric session ID");
                     let items = if matches!(scenario, TerminalScenario::Restart) {
-                        vec![alarm_call("watch", &json!({"session_id": session_id, "note": "watch survives as lost"})), alarm_call("clock", &json!({"after_seconds": 3, "note": "clock survives restart"}))]
+                        vec![alarm_call("watch", &json!({"session_id": session_id, "note": "watch survives as lost"})), alarm_call("clock", &json!({"after_seconds": 3, "note": "clock survives restart"})), alarm_call("future", &json!({"after_seconds": 3600, "note": "future clock pins recovered runtime"}))]
                     } else {
                         assert!(output.contains("warming"), "expected initial native output: {output}");
                         vec![alarm_call("watch", &json!({"session_id": session_id, "pattern": "^ready$", "note": "terminal is ready"}))]
@@ -394,7 +413,24 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
     db.close().await;
     arm_turn(&mut app, &thread_id).await?;
     let armed = alarms(&mut app, 1).await?;
-    let soundings = wait_for_soundings(&mut app, &server, 1).await?;
+    let unsubscribed: ThreadUnsubscribeResponse = app
+        .request("thread/unsubscribe", json!({"threadId": thread_id}))
+        .await?;
+    assert_eq!(unsubscribed.status, ThreadUnsubscribeStatus::Unsubscribed);
+    // The armed watch must survive without a subscriber past the unload delay.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let loaded: ThreadLoadedListResponse = app.request("thread/loaded/list", json!({})).await?;
+    assert!(loaded.data.contains(&thread_id));
+    let soundings = timeout(READ_TIMEOUT, async {
+        loop {
+            let captured = soundings(&server).await?;
+            if captured.len() == 1 {
+                return Ok::<_, anyhow::Error>(captured);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await??;
     assert_eq!(soundings[0].id, armed.alarms[0].id);
     assert_eq!(soundings[0].note, "terminal is ready");
     let AlarmCause::Matched { command, line, .. } = &soundings[0].cause else {
@@ -458,6 +494,9 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
         remaining.data,
         Vec::<codex_app_server_protocol::ThreadBackgroundTerminal>::new()
     );
+    // Neither the sounded watch nor its former WatchTask retains a runtime lease.
+    let closed: ThreadClosedNotification = app.read_notification("thread/closed").await?;
+    assert_eq!(closed.thread_id, thread_id);
     Ok(())
 }
 
@@ -469,14 +508,15 @@ async fn restart_delivers_overdue_clock_and_lost_terminal_without_resuming_from_
     let (mut app, home) = alarm_app(&server).await?;
     let thread_id = start(&mut app).await?;
     arm_turn(&mut app, &thread_id).await?;
-    let armed = alarms(&mut app, 2).await?;
+    let armed = alarms(&mut app, 3).await?;
     app.shutdown().await?;
     drop(app);
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let _successor = spawn_server(home.path(), &home.path().join("control/server.sock"))?;
+    let socket = home.path().join("control/server.sock");
+    let successor = spawn_server(home.path(), &socket)?;
     // Recovery runs without a frontend subscription and may precede initialization.
     // Observe delivery at the model boundary rather than waiting for UI events.
-    let soundings = timeout(READ_TIMEOUT, async {
+    let recovered = timeout(READ_TIMEOUT, async {
         loop {
             let captured = soundings(&server).await?;
             if captured.len() == 2 {
@@ -486,6 +526,33 @@ async fn restart_delivers_overdue_clock_and_lost_terminal_without_resuming_from_
         }
     })
     .await??;
+    assert_eq!(recovered.len(), 2);
+    let client = connect_daemon_client(
+        &socket,
+        InitializeCapabilities {
+            experimental_api: true,
+            ..Default::default()
+        },
+    )
+    .await?;
+    let mut app = AlarmApp {
+        server: successor,
+        socket,
+        client,
+        pending: VecDeque::new(),
+        next_request: 2,
+    };
+    // Recovery delivery loads the root without subscribing this observer. The future
+    // durable clock must keep that exact runtime loaded past its ordinary idle delay.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let loaded: ThreadLoadedListResponse = app.request("thread/loaded/list", json!({})).await?;
+    assert!(loaded.data.contains(&thread_id));
+    let future = armed
+        .alarms
+        .iter()
+        .find(|alarm| alarm.note == "future clock pins recovered runtime")
+        .context("future recovered clock")?;
+    let soundings = recovered;
     let mut recovered_ids = soundings
         .iter()
         .map(|sounding| sounding.id.as_str())
@@ -493,6 +560,7 @@ async fn restart_delivers_overdue_clock_and_lost_terminal_without_resuming_from_
     let mut armed_ids = armed
         .alarms
         .iter()
+        .filter(|alarm| alarm.id != future.id)
         .map(|alarm| alarm.id.as_str())
         .collect::<Vec<_>>();
     recovered_ids.sort_unstable();
@@ -513,5 +581,17 @@ async fn restart_delivers_overdue_clock_and_lost_terminal_without_resuming_from_
         .find(|sounding| sounding.note == "watch survives as lost")
         .context("recovered watch")?;
     assert!(matches!(&watch.cause, AlarmCause::Lost { command, .. } if command == "sleep 30"));
+    let disarmed: ThreadAlarmDisarmResponse = app
+        .request(
+            "thread/alarm/disarm",
+            json!({"threadId": thread_id, "id": future.id}),
+        )
+        .await?;
+    assert!(disarmed.alarms.is_empty());
+    let closed: ThreadClosedNotification = app.read_notification("thread/closed").await?;
+    assert_eq!(closed.thread_id, thread_id);
+    let loaded: ThreadLoadedListResponse = app.request("thread/loaded/list", json!({})).await?;
+    assert!(!loaded.data.contains(&thread_id));
+    app.shutdown().await?;
     Ok(())
 }

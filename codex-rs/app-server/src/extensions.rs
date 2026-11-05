@@ -49,6 +49,7 @@ pub(crate) struct ThreadExtensionDependencies {
     pub(crate) turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     pub(crate) coordination: Option<crate::thread_tools::CoordinationSlot>,
     pub(crate) alarms: Option<crate::alarms::Alarms>,
+    pub(crate) thread_state_manager: ThreadStateManager,
 }
 
 pub(crate) fn thread_extensions(
@@ -57,6 +58,7 @@ pub(crate) fn thread_extensions(
 ) -> Arc<ExtensionRegistry<Config>> {
     let ThreadExtensionDependencies {
         sample_responses,
+        thread_state_manager,
         event_sink,
         auth_manager,
         state_db,
@@ -74,6 +76,7 @@ pub(crate) fn thread_extensions(
         alarms,
     } = dependencies;
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
+    thread_state_manager.install_runtime_leases(&mut builder);
     if let Some(coordination) = coordination {
         crate::thread_tools::install(&mut builder, coordination);
     }

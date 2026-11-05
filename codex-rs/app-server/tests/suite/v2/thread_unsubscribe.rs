@@ -43,14 +43,78 @@ use test_case::test_case;
 use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+#[test_case("ordinary"; "ordinary")]
+#[test_case("process"; "process")]
+#[test_case("yielded_cell"; "yielded_cell")]
 #[tokio::test]
-async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<()> {
-    let server = create_mock_responses_server_repeating_assistant("Done").await;
+async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout(work: &str) -> Result<()> {
+    let server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
+    let gate = codex_home.path().join("process-release");
+    let mut process_gate = None;
+    let invocation = match work {
+        "process" => {
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(&gate)
+                    .status()?
+                    .success()
+            );
+            // The only writer is RAII-owned: failure also releases the process
+            // by EOF instead of leaving an orphan blocked on its test gate.
+            process_gate = Some(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&gate)?,
+            );
+            let command = format!(
+                "IFS= read -r < {}; printf settled",
+                shlex::try_quote(gate.to_str().expect("temporary FIFO path is UTF-8"))?
+            );
+            Some(responses::ev_function_call(
+                "background",
+                "exec_command",
+                &json!({"cmd": command, "yield_time_ms": 1}).to_string(),
+            ))
+        }
+        "yielded_cell" => Some(responses::ev_custom_tool_call(
+            "background",
+            "exec",
+            "yield_control(); await new Promise(resolve => setTimeout(resolve, 8000)); text('settled');",
+        )),
+        _ => None,
+    };
+    if let Some(invocation) = invocation {
+        responses::mount_sse_once(
+            &server,
+            responses::sse(vec![
+                responses::ev_response_created("background"),
+                invocation,
+                responses::ev_completed("background"),
+            ]),
+        )
+        .await;
+    }
+    let completion = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("done"),
+            responses::ev_assistant_message("done", "Done"),
+            responses::ev_completed("done"),
+        ]),
+    )
+    .await;
+    let config = MockResponsesConfig::new(&server.uri())
         .with_sandbox_mode("danger-full-access")
         .with_root_config("thread_unload_delay_secs = 2")
-        .write(codex_home.path())?;
+        .enable_feature(Feature::UnifiedExec);
+    let config = if work == "yielded_cell" {
+        config.enable_feature(Feature::CodeModeOnly)
+    } else {
+        config
+    };
+    config.write(codex_home.path())?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -65,6 +129,7 @@ async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<(
         .await?;
     let thread_id = thread.id;
 
+    let started = std::time::Instant::now();
     // Persist a rollout so both warm and cold resumes can find the thread.
     timeout(
         DEFAULT_READ_TIMEOUT,
@@ -79,6 +144,25 @@ async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<(
     )
     .await??;
 
+    if work == "process" {
+        let output = completion
+            .single_request()
+            .function_call_output_text("background");
+        assert!(
+            output
+                .as_ref()
+                .is_some_and(|output| output.contains("Running (session ")),
+            "expected a live backend process: {output:?}"
+        );
+    } else if work == "yielded_cell" {
+        assert!(
+            completion
+                .single_request()
+                .custom_tool_call_output("background")
+                .to_string()
+                .contains("Script running with cell ID")
+        );
+    }
     let unsubscribe: ThreadUnsubscribeResponse = mcp
         .request(|request_id| ClientRequest::ThreadUnsubscribe {
             request_id,
@@ -145,8 +229,43 @@ async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<(
         .is_err()
     );
 
+    let released = if work == "process" {
+        // No new turn and no write_stdin: natural backend exit must release custody.
+        assert!(
+            timeout(
+                std::time::Duration::from_millis(2200),
+                mcp.read_stream_until_notification_message("thread/closed")
+            )
+            .await
+            .is_err()
+        );
+        let loaded: ThreadLoadedListResponse = mcp
+            .request(|request_id| ClientRequest::ThreadLoadedList {
+                request_id,
+                params: ThreadLoadedListParams::default(),
+            })
+            .await?;
+        assert_eq!(loaded.data, vec![thread_id.clone()]);
+        let released = std::time::Instant::now();
+        drop(process_gate.take());
+        Some(released)
+    } else {
+        None
+    };
+
     let closed: ThreadClosedNotification =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("thread/closed")).await??;
+    if let Some(released) = released {
+        assert!(
+            released.elapsed() >= std::time::Duration::from_secs(2),
+            "process settlement must start a fresh full quiet interval"
+        );
+    } else if work == "yielded_cell" {
+        assert!(
+            started.elapsed() >= std::time::Duration::from_secs(10),
+            "a pure yielded cell must pin until settlement, then start the quiet interval"
+        );
+    }
     assert_eq!(
         closed,
         ThreadClosedNotification {

@@ -31,6 +31,7 @@ use std::collections::HashSet;
 use test_case::test_case;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 
 #[test_case(true; "listener attached before shutdown")]
 #[test_case(false; "listener attached after shutdown")]
@@ -45,6 +46,40 @@ async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
         .persist_thread(thread_id, PersistContext::Standard)
         .await?;
     let thread = test.codex;
+    // A watch may coalesce Held back into Quiet before its observer runs. The
+    // policy must retain the final release time instead of an observed bool edge.
+    let holds = thread.runtime_holds();
+    let mut activity = holds.subscribe();
+    timeout(
+        Duration::from_secs(10),
+        activity.wait_for(|state| {
+            matches!(
+                state,
+                codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+            )
+        }),
+    )
+    .await??;
+    let (_subscribers_tx, detached) =
+        watch::channel(crate::thread_state::SubscriberActivity::Detached {
+            since: Instant::now(),
+        });
+    let (_status_tx, status) = watch::channel(ThreadStatus::Idle);
+    let mut policy = UnloadingState::new(Duration::from_millis(250), detached, activity, status);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let transient_use = holds.acquire().expect("open runtime");
+    drop(transient_use); // No await: the observer cannot see the Held publication.
+    assert!(!policy.should_unload_now());
+    assert!(
+        timeout(
+            Duration::from_millis(5),
+            policy.wait_for_unloading_trigger()
+        )
+        .await
+        .is_err()
+    );
+    drop(policy);
+    drop(holds);
     let runtime = Arc::downgrade(&thread);
     let config = Arc::new(test.config.clone());
     let auth =
