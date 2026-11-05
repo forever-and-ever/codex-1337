@@ -18,10 +18,10 @@ mod enterprise_login;
 mod gateway_oauth;
 mod quota;
 pub(super) use quota::QuotaReader;
+pub(crate) mod account_session_unsupported;
 mod quota_cache;
 mod rate_limit_resets;
 mod workspace_routing;
-mod workspace_switching;
 
 pub(super) use enterprise_login::EnterpriseLoginCompletion;
 pub(super) use enterprise_login::EnterpriseLoginTarget;
@@ -604,14 +604,13 @@ impl AccountRequestProcessor {
         let opts = self
             .login_chatgpt_common(codex_streamlined_login, login_success_page)
             .await?;
-        let (login_id, auth_url) = self.start_browser_login(opts, /*pause*/ None).await?;
+        let (login_id, auth_url) = self.start_browser_login(opts).await?;
         Ok(LoginAccountResponse::Chatgpt { login_id, auth_url })
     }
 
     async fn start_browser_login(
         &self,
         opts: LoginServerOptions,
-        pause: Option<crate::turn_admission::TurnAdmissionPause>,
     ) -> Result<(String, String), JSONRPCErrorError> {
         let server = run_login_server(opts)
             .map_err(|err| internal_error(format!("failed to start login server: {err}")))?;
@@ -634,8 +633,6 @@ impl AccountRequestProcessor {
         let active_login = self.active_login.clone();
         let auth_url = server.auth_url.clone();
         let task = async move {
-            // Workspace credentials may change in the callback. Resume turns after caches and clients are updated.
-            let _pause = pause;
             let (success, error_msg, onboarding_entrypoint) = match tokio::time::timeout(
                 LOGIN_CHATGPT_TIMEOUT,
                 server.block_until_done_with_callback_result(),

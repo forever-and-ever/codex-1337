@@ -46,7 +46,6 @@ pub(crate) use thread_resume::ServerResume;
 pub(crate) use thread_resume::ThreadResumeTarget;
 use thread_start::FrontendStart;
 use thread_start::ThreadStartOrigin;
-mod workspace_switching;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_owned_thread_settings;
