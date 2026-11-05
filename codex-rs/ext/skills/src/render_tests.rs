@@ -529,8 +529,8 @@ fn path_aliases_retain_every_skill_under_budget_pressure() {
     assert!(body.contains("Skill bodies live on disk at the listed paths after expanding"));
     assert!(!body.contains("additional skills omitted"));
 
-    // With descriptions omitted, alias overhead is 30 tokens and each row is 8.
-    // Charging the description-bearing intro rounds overhead up to 31 and drops both rows.
+    // With descriptions omitted, alias overhead is 27 tokens and each row is 8.
+    // The compact locators must fit both rows in the exact 43-token budget.
     let root = format!("/{}", "a".repeat(250));
     let catalog = SkillCatalog {
         entries: ["one", "two"]
@@ -547,7 +547,7 @@ fn path_aliases_retain_every_skill_under_budget_pressure() {
             .collect(),
         ..SkillCatalog::default()
     };
-    let budget = SkillMetadataBudget::Tokens(46);
+    let budget = SkillMetadataBudget::Tokens(43);
     let rendered = render_available_skills(
         &catalog,
         SkillCatalogRenderPolicy::EXTENSION_COMPATIBLE
@@ -564,10 +564,10 @@ fn path_aliases_retain_every_skill_under_budget_pressure() {
             rendered.report
         ),
         (
-            46,
+            43,
             vec![
-                "- one: (file: r0/one/SKILL.md)".to_string(),
-                "- two: (file: r0/two/SKILL.md)".to_string(),
+                "- one: (r0/one/SKILL.md)".to_string(),
+                "- two: (r0/two/SKILL.md)".to_string(),
             ],
             SkillRenderReport {
                 total_count: 2,

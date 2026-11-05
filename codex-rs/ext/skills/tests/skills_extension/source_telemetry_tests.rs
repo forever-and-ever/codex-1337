@@ -57,9 +57,8 @@ async fn source_events_cover_cached_cloud_and_explicit_executor_reads() -> TestR
     let tools = harness.tools(&harness.step_store).await;
     harness.render().await?;
     let events = ReadEvents::default();
-    let subscriber = tracing_subscriber::registry().with(events.clone().with_filter(
-        tracing_subscriber::filter::filter_fn(codex_otel::OtelProvider::trace_export_filter),
-    ));
+    // Observe local attribution events; this fork does not export OTLP traces.
+    let subscriber = tracing_subscriber::registry().with(events.clone());
     // Prevent parallel tests with no subscriber from disabling this callsite globally.
     let _interest_cache_guard =
         tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
