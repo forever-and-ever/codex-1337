@@ -537,7 +537,7 @@ async fn pre_tool_use_hook_runs_only_on_the_executor_that_owns_the_command() -> 
         config.environment_hooks = toml::from_str(
             r#"
             [[PreToolUse]]
-            matcher = '^Bash$'
+            selector = { type = 'tool', namespace = '^functions$', name = '^exec_command$' }
             [[PreToolUse.hooks]]
             type = 'command'
             command = 'cat > "$CODEX_HOME/pre-tool-use-input.json"; echo denied-by-environment-hook >&2; exit 2'

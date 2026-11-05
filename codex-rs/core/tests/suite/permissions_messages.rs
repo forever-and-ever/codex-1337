@@ -42,7 +42,10 @@ fn permissions_texts(request: &ResponsesRequest) -> Vec<String> {
     request
         .message_input_texts("developer")
         .into_iter()
-        .filter(|text| text.contains("<permissions instructions>"))
+        .filter(|text| {
+            text.contains("<permissions instructions>")
+                || text.starts_with("<instruction_diff>\nApply this update to the previously supplied permissions instructions;")
+        })
         .map(|text| text.replace("\r\n", "\n"))
         .collect()
 }
@@ -62,7 +65,10 @@ fn permissions_annotations(
                 .filter(|(_, content)| {
                     content["text"]
                         .as_str()
-                        .is_some_and(|text| text.contains("<permissions instructions>"))
+                        .is_some_and(|text| {
+                            text.contains("<permissions instructions>")
+                                || text.starts_with("<instruction_diff>\nApply this update to the previously supplied permissions instructions;")
+                        })
                 })
                 .map(|(index, _)| {
                     (
@@ -273,11 +279,24 @@ async fn catalog_approval_instruction_parts_are_sent_in_initial_permissions(
         .await?;
         submit_text_turn(&test, "Continue with the fallback model.").await?;
         let next = next.single_request();
-        let fallback =
-            format!("<permissions instructions>\n{bundled_approval}\n</permissions instructions>");
         assert!(next.input().starts_with(&request.input()));
-        assert_eq!(permissions_texts(&next), vec![first, fallback]);
-        assert_eq!(permissions_annotations(&next), vec![annotation; 2]);
+        let updates = permissions_texts(&next);
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0], first);
+        assert!(updates[1].starts_with("<instruction_diff>\n"));
+        assert!(updates[1].contains("\n-Catalog permission tool\n+# request_permissions Tool\n"));
+        assert!(updates[1].contains("\n-Catalog automatic review\n"));
+        assert_eq!(
+            permissions_annotations(&next),
+            vec![
+                annotation.clone(),
+                (
+                    json!("developer"),
+                    json!("context.instruction_diff/permissions"),
+                    annotation.2
+                )
+            ],
+        );
     }
     Ok(())
 }
@@ -1036,24 +1055,28 @@ pub(super) async fn catalog_denied_reads_model_change_requests() -> Result<Vec<R
         assert!(first.ends_with(&format!(
             "\nModel A denied reads:\nThe active permission profile denies reading these paths/globs. Do not request escalation or additional permissions to read them; these denials are policy restrictions.\n- path `{denied_path}`\n- glob `{denied_glob}`\n</permissions instructions>"
         )));
-        let second = first.replace("Model A", "Model B");
-        assert_eq!(permissions_texts(&requests[1]), vec![first, second]);
+        let updates = permissions_texts(&requests[1]);
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0], first);
+        assert!(updates[1].starts_with("<instruction_diff>\n"));
+        assert!(updates[1].contains("\n-Model A denied reads:\n+Model B denied reads:\n"));
+        assert!(updates[1].contains(&format!("- path `{denied_path}`")));
+        assert!(updates[1].contains(&format!("- glob `{denied_glob}`")));
         assert_eq!(
             permissions_texts(&requests[2]),
             permissions_texts(&requests[1])
         );
-        for (request, count) in requests.iter().zip([1, 2, 2]) {
-            assert_eq!(
-                permissions_annotations(request),
-                vec![
-                    (
-                        json!("developer"),
-                        json!("permissions.instructions"),
-                        json!({"provenance": {"type": "harness", "hook": false}}),
-                    );
-                    count
-                ],
+        for (request, changed) in requests.iter().zip([false, true, true]) {
+            let annotation = (
+                json!("developer"),
+                json!("permissions.instructions"),
+                json!({"provenance": {"type": "harness", "hook": false}}),
             );
+            let mut expected = vec![annotation.clone()];
+            if changed {
+                expected.push((json!("developer"), json!("context.instruction_diff/permissions"), annotation.2));
+            }
+            assert_eq!(permissions_annotations(request), expected);
         }
         for pair in requests.windows(2) {
             assert!(pair[1].input().starts_with(&pair[0].input()));

@@ -60,8 +60,8 @@ impl ReviewerRouteQuarantine {
 
     async fn insert(&self, account_id: &str, cause: QuarantineCause) {
         let duration = match cause {
-            QuarantineCause::Ineligible => Duration::from_secs(/*secs*/ 3600),
-            QuarantineCause::Unavailable => Duration::from_secs(/*secs*/ 600),
+            QuarantineCause::Ineligible => Duration::from_hours(/*hours*/ 1),
+            QuarantineCause::Unavailable => Duration::from_mins(/*mins*/ 10),
         };
         self.accounts
             .lock()

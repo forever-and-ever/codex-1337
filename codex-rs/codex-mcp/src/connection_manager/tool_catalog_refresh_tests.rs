@@ -66,7 +66,7 @@ impl MutableCatalog {
         )
         .await?;
         let managed_client = ManagedClient {
-            connection_sharing: crate::connection_pool::ConnectionSharing::Private,
+            connection_sharing: ConnectionSharing::Private,
             shared_elicitation: None,
             _auth_change_notifications: None,
             client: Arc::clone(&client),
@@ -156,11 +156,10 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
         .prepare_call_for_tool(Arc::clone(before.config()), stale_call.tool_info())
         .await
         .expect("equivalent definition on a replacement connection");
-    equivalent
-        .call(
-            /*arguments*/ None, /*meta*/ None, /*timeout*/ None,
-        )
-        .await?;
+    Box::pin(equivalent.call(
+        /*arguments*/ None, /*meta*/ None, /*timeout*/ None,
+    ))
+    .await?;
     reconnected.client.shutdown().await;
 
     let mut search = create_test_tool("docs", "search").tool;
@@ -212,9 +211,9 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
                 .is_some()
         );
         assert_eq!(
-            call.call(
+            Box::pin(call.call(
                 /*arguments*/ None, /*meta*/ None, /*timeout*/ None
-            )
+            ))
             .await?
             .content,
             vec![serde_json::json!({"type": "text", "text": tool.tool.name})],
@@ -222,12 +221,13 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     }
     assert!(after.prepare_call("docs", "removed").is_none());
     assert!(after.prepare_call("docs", "disabled").is_none());
-    let error = stale_call
-        .call_with_preparation(/*requested_timeout*/ None, || async {
+    let error = Box::pin(
+        stale_call.call_with_preparation(/*requested_timeout*/ None, || async {
             panic!("stale call must reject before preparation")
-        })
-        .await
-        .expect_err("old definition must not reach the changed server");
+        }),
+    )
+    .await
+    .expect_err("old definition must not reach the changed server");
     assert!(error.to_string().contains("catalog changed"));
 
     // An annotation-only edit changes call authority even when the schema is identical.
@@ -301,11 +301,10 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     fixture.control.pause_call.store(true, Ordering::Release);
     let running_call = old_call.clone();
     let running = tokio::spawn(async move {
-        running_call
-            .call(
-                /*arguments*/ None, /*meta*/ None, /*timeout*/ None,
-            )
-            .await
+        Box::pin(running_call.call(
+            /*arguments*/ None, /*meta*/ None, /*timeout*/ None,
+        ))
+        .await
     });
     fixture.control.call_started.notified().await;
     *fixture.tools.write().await = vec![create_test_tool("docs", "after_call").tool];
@@ -324,12 +323,13 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     )
     .await?;
     assert!(prepared.is_none());
-    let error = old_call
-        .call_with_preparation(/*requested_timeout*/ None, || async {
+    let error = Box::pin(
+        old_call.call_with_preparation(/*requested_timeout*/ None, || async {
             panic!("pending notification must reject before preparation")
-        })
-        .await
-        .expect_err("dirty catalog must deny a new invocation");
+        }),
+    )
+    .await
+    .expect_err("dirty catalog must deny a new invocation");
     assert!(error.to_string().contains("catalog update pending"));
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 9);
     fixture.control.pause_call.store(false, Ordering::Release);
@@ -351,11 +351,13 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     let release_preparation = Arc::clone(&release);
     let calls = fixture.control.calls.load(Ordering::Acquire);
     let preparing = tokio::spawn(async move {
-        call.call_with_preparation(/*requested_timeout*/ None, || async move {
-            entered_preparation.notify_one();
-            release_preparation.notified().await;
-            Ok((None, None))
-        })
+        Box::pin(
+            call.call_with_preparation(/*requested_timeout*/ None, || async move {
+                entered_preparation.notify_one();
+                release_preparation.notified().await;
+                Ok((None, None))
+            }),
+        )
         .await
     });
     entered.notified().await;

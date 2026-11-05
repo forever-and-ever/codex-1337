@@ -6,14 +6,16 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=e03063c2cb6ece3a):
-        - namespace/functions; hash=e58195dea5c51dea
+00:additional_tools/developer (1; hash=3ff4ed438d746c14):
+        - namespace/functions; hash=1e278c28f274be06
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
-          - function/sleep
+          - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
 02:message/developer[2]:
@@ -32,15 +34,18 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
 08:message/user:
     Remember TRANSFERRED_CONTEXT_7391 and ask the host to start a worker.
 
-## Window 2 (after request 2: input diverged at item 00)
+## Window 2 (after request 2: input diverged at item 03)
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=adec8e1bf249cb8f):
-        - namespace/functions; hash=00aa6cf7871d56b9
+00:additional_tools/developer (1; hash=3ff4ed438d746c14):
+        - namespace/functions; hash=1e278c28f274be06
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
-        - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
-          - function/sleep
+          - function/request_user_input_async
+          - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
 02:message/developer[2]:

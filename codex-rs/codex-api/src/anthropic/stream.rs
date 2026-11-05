@@ -18,7 +18,7 @@ use tokio::time::Instant;
 use tokio::time::timeout;
 
 const MAX_STREAM_BYTES: usize = 64_000_000;
-const MAX_RESPONSE_DURATION: Duration = Duration::from_secs(3600);
+const MAX_RESPONSE_DURATION: Duration = Duration::from_hours(1);
 
 pub(super) fn spawn_stream(
     response: StreamResponse,

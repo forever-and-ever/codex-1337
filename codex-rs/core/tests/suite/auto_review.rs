@@ -162,6 +162,9 @@ async fn approval_review_contributor_skips_existing_guardian_model_call() -> Res
         let observe = codex_core::test_support::observe_turn_timing(&test.codex)
             .await
             .expect("active turn");
+        codex_core::test_support::wait_for_tool_blocking(&test.codex)
+            .await
+            .expect("tool blocking");
         let review_start = std::time::Instant::now();
         tokio::task::yield_now().await;
         let review_end = std::time::Instant::now();

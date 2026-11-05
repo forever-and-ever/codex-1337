@@ -6,6 +6,7 @@
 use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
+use crate::history_cell::UserMessagePresentation;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Panel;
@@ -134,7 +135,7 @@ fn step(
     admission: Admission,
 ) -> codex_app_server_protocol::ThreadItem {
     codex_app_server_protocol::ThreadItem {
-        payload: codex_app_server_protocol::ThreadItemPayload::StepAdmission(StepAdmissionItem {
+        payload: ThreadItemPayload::StepAdmission(StepAdmissionItem {
             id: format!("step:{response}"),
             response_id: response.into(),
             read_tokens: 20_000,
@@ -186,7 +187,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            presentation: Default::default(),
+            presentation: UserMessagePresentation::default(),
         }),
         message("msg-1", "I'll run the tests first."),
         Arc::new(exec),
@@ -212,7 +213,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            presentation: Default::default(),
+            presentation: UserMessagePresentation::default(),
         }),
         script_block("exec-1", Some("git status"), None),
         message("msg-4", "No step billed this reply."),
@@ -1083,7 +1084,7 @@ fn dialogue_mode_keeps_prompts_and_replies() {
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
             remote_image_urls: Vec::new(),
-            presentation: Default::default(),
+            presentation: UserMessagePresentation::default(),
         })
     };
     let notice = || -> Arc<dyn HistoryCell> {

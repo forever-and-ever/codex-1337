@@ -16,44 +16,6 @@ use super::tool_runtime_trace_event;
 use crate::ExecutionStatus;
 
 #[test]
-fn mcp_trace_excludes_human_receipt_but_preserves_fault() -> anyhow::Result<()> {
-    let event = EventMsg::McpToolCallEnd(codex_protocol::protocol::McpToolCallEndEvent {
-        call_id: "edit".into(),
-        turn_id: "turn".into(),
-        invocation: codex_protocol::protocol::McpInvocation {
-            server: "semedit".into(),
-            tool: "edit".into(),
-            arguments: None,
-        },
-        connector_id: None,
-        mcp_app_resource_uri: None,
-        mcp_app_ui: None,
-        link_id: None,
-        app_name: None,
-        action_name: None,
-        plugin_id: None,
-        read_only_hint: None,
-        duration: Duration::ZERO,
-        result: Ok(codex_protocol::mcp::CallToolResult {
-            content: vec![json!({"type":"text","text":"partial; do not retry"})],
-            structured_content: None,
-            is_error: Some(true),
-            meta: Some(json!({"codex/fileChanges":{"private":"source bytes"},"other":"kept"})),
-        }),
-    });
-    let Some(ToolRuntimeTraceEvent::Ended { payload, .. }) = tool_runtime_trace_event(&event)
-    else {
-        panic!("expected MCP trace");
-    };
-    let trace = serde_json::to_value(payload)?;
-    assert_eq!(trace["result"]["Ok"]["_meta"], json!({"other":"kept"}));
-    assert_eq!(trace["result"]["Ok"]["isError"], true);
-    assert!(!trace.to_string().contains("source bytes"));
-    assert!(serde_json::to_string(&event)?.contains("source bytes"));
-    Ok(())
-}
-
-#[test]
 fn sub_agent_activity_is_a_terminal_tool_runtime_event() -> anyhow::Result<()> {
     let agent_thread_id = ThreadId::new();
     let event = EventMsg::SubAgentActivity(SubAgentActivityEvent {

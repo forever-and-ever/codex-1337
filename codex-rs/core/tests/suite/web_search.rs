@@ -474,11 +474,12 @@ async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<(
         });
     let test = builder.build_with_auto_env(&server).await?;
     let session_store = ExtensionData::new("search-session");
+    let step_store = ExtensionData::new("search-step");
     let executor = extensions
         .tool_contributors()
         .iter()
         .flat_map(|contributor| {
-            contributor.tools(&session_store, test.codex.thread_extension_data())
+            contributor.tools_for_step(&session_store, test.codex.thread_extension_data(), &step_store)
         })
         .find(|tool| tool.tool_name() == ToolName::namespaced("web", "run"))
         .expect("Claude thread contributes web.run");

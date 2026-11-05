@@ -104,9 +104,10 @@ async fn catalog_approval_headings_follow_selected_model() -> Result<()> {
             request
                 .message_input_texts("developer")
                 .into_iter()
-                .filter(|text| text.contains("<permissions instructions>"))
+                .filter(|text| text.contains("<permissions instructions>") || text.starts_with("<instruction_diff>\nApply this update to the previously supplied permissions instructions;"))
                 .map(|text| {
                     text.lines()
+                        .map(|line| line.strip_prefix('+').unwrap_or(line))
                         .filter(|line| line.starts_with("# Model "))
                         .map(str::to_string)
                         .collect::<Vec<_>>()

@@ -39,7 +39,7 @@ impl RecoveryBackoff {
         let diagnostic = error.to_string();
         let changed = diagnostic != self.diagnostic;
         self.diagnostic = diagnostic;
-        self.delay = (self.delay * 2).min(Duration::from_secs(60));
+        self.delay = (self.delay * 2).min(Duration::from_mins(1));
         self.not_before = Instant::now() + self.delay;
         changed
     }

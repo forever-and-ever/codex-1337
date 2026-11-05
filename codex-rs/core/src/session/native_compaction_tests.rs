@@ -55,15 +55,16 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
         compaction_model_hash: None,
         reviewer_compaction_hash: None,
     };
-    let (initial_context, baseline) = crate::compact::build_compaction_replacement_history(
-        &session,
-        &step,
-        &world_state,
-        Vec::new(),
-        crate::context::CompactionContinuation::capture(source.iter().map(|item| &item.item))
-            .unwrap(),
-    )
-    .await;
+    let (initial_context, baseline) =
+        Box::pin(crate::compact::build_compaction_replacement_history(
+            &session,
+            &step,
+            &world_state,
+            Vec::new(),
+            crate::context::CompactionContinuation::capture(source.iter().map(|item| &item.item))
+                .unwrap(),
+        ))
+        .await;
     let continuation = initial_context.last().expect("captured continuation");
     let ResponseItem::Message { role, content, .. } = &continuation.item else {
         panic!("continuation message")

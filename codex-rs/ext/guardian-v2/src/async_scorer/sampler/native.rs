@@ -152,7 +152,7 @@ pub(super) async fn sample(
     request: AnthropicRequest,
     account_id: &str,
     scored: Arc<AtomicBool>,
-    telemetry: &mut super::telemetry::SamplingTelemetry,
+    telemetry: &mut SamplingTelemetry,
 ) -> Result<String, LunaSamplerError> {
     telemetry.attempts = telemetry.attempts.saturating_add(1);
     let mut captured = context

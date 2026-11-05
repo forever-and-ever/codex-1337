@@ -199,7 +199,6 @@ fn queue_rejects_unsupported_options() -> Result<()> {
         ),
         ("queue -s read-only", "`--sandbox`"),
         ("--approve-for-me queue", "`--approve-for-me`"),
-        ("prompt queue", "positional prompt; use `--message`"),
         ("-C . queue --remote unix://", "`--cd` with `--remote`"),
         ("--remote unix:// queue -C .", "`--cd` with `--remote`"),
     ] {

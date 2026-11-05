@@ -59,7 +59,7 @@ impl<T: HttpTransport> AnthropicClient<T> {
             .session
             .provider()
             .stream_idle_timeout
-            .clamp(Duration::from_secs(1), Duration::from_secs(600));
+            .clamp(Duration::from_secs(1), Duration::from_mins(10));
         let body =
             EncodedJsonBody::encode(request.body()).map_err(|e| ApiError::InvalidRequest {
                 message: format!("failed to encode Anthropic request: {e}"),

@@ -563,8 +563,8 @@ text([result, result, result], {max_tokens: 7});
     assert_eq!(
         *delegate.finished_cells.lock().expect("finished cells lock"),
         vec![
-            (cell_id("2"), codex_code_mode::CellOutcome::Completed),
-            (cell_id("3"), codex_code_mode::CellOutcome::Terminated),
+            (cell_id("g2:2"), codex_code_mode::CellOutcome::Completed),
+            (cell_id("g2:3"), codex_code_mode::CellOutcome::Terminated),
         ]
     );
     assert_eq!(
@@ -572,7 +572,7 @@ text([result, result, result], {max_tokens: 7});
             .finished_cells
             .lock()
             .expect("finished cells lock"),
-        vec![(cell_id("1"), codex_code_mode::CellOutcome::Completed)]
+        vec![(cell_id("g2:1"), codex_code_mode::CellOutcome::Completed)]
     );
 }
 

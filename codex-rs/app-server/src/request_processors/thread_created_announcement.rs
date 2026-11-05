@@ -1,6 +1,13 @@
 //! Announce resolved core-created runtimes before their event reader starts.
 
-use super::*;
+use super::ListenerTaskContext;
+use super::thread_processor::build_thread_from_loaded_snapshot;
+use super::thread_summary::thread_started_notification;
+use codex_app_server_protocol::ServerNotification;
+use codex_core::CodexThread;
+use codex_core::ThreadConfigSnapshot;
+use codex_protocol::ThreadId;
+use std::sync::Arc;
 
 struct ThreadAnnounced;
 
@@ -8,7 +15,7 @@ pub(super) async fn announce_created_thread(
     context: &ListenerTaskContext,
     thread_id: ThreadId,
     thread: &Arc<CodexThread>,
-    snapshot: &codex_core::ThreadConfigSnapshot,
+    snapshot: &ThreadConfigSnapshot,
 ) {
     if !thread
         .thread_extension_data()
@@ -20,9 +27,7 @@ pub(super) async fn announce_created_thread(
         .thread_watch_manager
         .upsert_thread(&thread_id.to_string())
         .await;
-    let mut summary = super::super::thread_processor::build_thread_from_loaded_snapshot(
-        thread_id, snapshot, thread,
-    );
+    let mut summary = build_thread_from_loaded_snapshot(thread_id, snapshot, thread);
     summary.status = context
         .thread_watch_manager
         .loaded_status_for_thread(&summary.id)
@@ -30,7 +35,7 @@ pub(super) async fn announce_created_thread(
     context
         .outgoing
         .send_server_notification(ServerNotification::ThreadStarted(
-            super::super::thread_summary::thread_started_notification(summary),
+            thread_started_notification(summary),
         ))
         .await;
 }

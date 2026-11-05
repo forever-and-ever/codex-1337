@@ -376,7 +376,7 @@ impl Shared {
             }
         }
         // Wall-clock jumps and suspend do not advance the monotonic timer.
-        let wait = wait.map(|wait| wait.min(Duration::from_secs(/*secs*/ 60)));
+        let wait = wait.map(|wait| wait.min(Duration::from_mins(/*mins*/ 1)));
         match due {
             Some((thread, replay, _)) => Next::Replay(thread, replay),
             None => Next::Wait(wait),

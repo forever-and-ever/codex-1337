@@ -35,7 +35,7 @@ use crate::oauth::generate_state;
 const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
 const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 const CALLBACK_PORT: u16 = 54545;
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 300);
+const LOGIN_TIMEOUT: Duration = Duration::from_mins(/*mins*/ 5);
 const PROFILE_RESPONSE_LIMIT: usize = 64 * 1024;
 
 #[derive(Clone)]

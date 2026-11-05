@@ -83,7 +83,7 @@ impl HookToolOutput for ExecCommandToolOutput {
             serde_json::json!({ "command": context.command }),
             Value::String(self.truncated_output_with_policy(self.model_output_policy())),
         );
-        payload.tool_cwd = self.tool_cwd.clone();
+        payload.tool_cwd.clone_from(&self.tool_cwd);
         Some(payload)
     }
 }

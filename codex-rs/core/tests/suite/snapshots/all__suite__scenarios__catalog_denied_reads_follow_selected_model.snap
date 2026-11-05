@@ -1,27 +1,31 @@
 ---
 source: core/tests/suite/scenarios.rs
-expression: "context_snapshot::format_context_snapshot(description, &entries,\n&ContextSnapshotOptions::default().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(\"Catalog denied-read wording follows the selected model, appending changed permissions once while preserving prior input, denial facts, and mandatory policy warnings.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Catalog denied-read wording follows the selected model, appending changed permissions once while preserving prior input, denial facts, and mandatory policy warnings.
 
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  model: "catalog-writable-roots-a"
+  model: "catalog-denied-reads-a"
   parallel_tool_calls: false
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
   reasoning: {"context":"all_turns","summary":"auto"}
   store: false
   stream: true
   tool_choice: "auto"
--- request 1 (request) --
-00:additional_tools/developer (2; hash=4c702e756cd52226):
-        - namespace/functions; hash=ce01915b77cef9ee
+-- request 1 (turn) --
+00:additional_tools/developer (2; hash=6e42987766c4bef9):
+        - namespace/functions; hash=39a686053a0a942f
+          - custom/python
+          - custom/bash
           - function/exec_command
           - function/write_stdin
+          - function/update_work_status
           - function/request_user_input
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=c826e5b07fd2820f
+          - function/fence
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=039136430e14a9ff
           - function/close_agent
           - function/resume_agent
           - function/send_input
@@ -33,7 +37,6 @@ Settings:
     <permissions instructions>
     Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: T...ries requires approval. Network access is restricted. [hash=99963de5837f6638]
     Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
-    Model A roots: <BOUNDED_ROOT_LIST>.
     Model A denied reads:
     The active permission profile denies reading these paths/globs. Do not request escalation or additional ... to read them; these denials are policy restrictions. [hash=46af8c20fb529219]
     - path `<CWD>/catalog-denied`
@@ -45,22 +48,26 @@ Settings:
       <shell><HOST_SHELL></shell>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><LARGE_PERMISSION_PATH_FIXTURE/></filesystem>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=2dc3c0be23d4ba8f]
     </environment_context>
 04:message/user:
     Inspect the writable workspace.
 
 ## Window 2 (after request 1)
 Settings: relative to window 1
-  model: "catalog-writable-roots-b"
--- request 2 (request) --
-00:additional_tools/developer (2; hash=4c702e756cd52226):
-        - namespace/functions; hash=ce01915b77cef9ee
+  model: "catalog-denied-reads-b"
+-- request 2 (turn) --
+00:additional_tools/developer (2; hash=6e42987766c4bef9):
+        - namespace/functions; hash=39a686053a0a942f
+          - custom/python
+          - custom/bash
           - function/exec_command
           - function/write_stdin
+          - function/update_work_status
           - function/request_user_input
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=c826e5b07fd2820f
+          - function/fence
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=039136430e14a9ff
           - function/close_agent
           - function/resume_agent
           - function/send_input
@@ -72,7 +79,6 @@ Settings: relative to window 1
     <permissions instructions>
     Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: T...ries requires approval. Network access is restricted. [hash=99963de5837f6638]
     Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
-    Model A roots: <BOUNDED_ROOT_LIST>.
     Model A denied reads:
     The active permission profile denies reading these paths/globs. Do not request escalation or additional ... to read them; these denials are policy restrictions. [hash=46af8c20fb529219]
     - path `<CWD>/catalog-denied`
@@ -84,26 +90,31 @@ Settings: relative to window 1
       <shell><HOST_SHELL></shell>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><LARGE_PERMISSION_PATH_FIXTURE/></filesystem>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=2dc3c0be23d4ba8f]
     </environment_context>
 04:message/user:
     Inspect the writable workspace.
 05:message/developer:
     <model_instructions>
-    The current model is catalog-writable-roots-b.
+    The current model is catalog-denied-reads-b.
     </model_instructions>
 06:message/developer:
-    <permissions instructions>
-    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: T...ries requires approval. Network access is restricted. [hash=99963de5837f6638]
-    Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
-    Model B roots: <BOUNDED_ROOT_LIST>.
-    Model B denied reads:
-    The active permission profile denies reading these paths/globs. Do not request escalation or additional ... to read them; these denials are policy restrictions. [hash=46af8c20fb529219]
-    - path `<CWD>/catalog-denied`
-    - glob `<CWD>/catalog-secrets/*.key`
-    </permissions instructions>
+    <instruction_diff>
+    Apply this update to the previously supplied permissions instructions; unchanged instructions remain in force.
+    --- permissions/<REVISION 1>
+    +++ permissions/<REVISION 2>
+    @@ -1,7 +1,7 @@
+     <permissions instructions>
+     Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: ...ries requires approval. Network access is restricted. [hash=b5e1d0aaf611842e]
+     Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+    -Model A denied reads:
+    +Model B denied reads:
+     The active permission profile denies reading these paths/globs. Do not request escalation or additional... to read them; these denials are policy restrictions. [hash=620df85da4caa0c7]
+     - path `<CWD>/catalog-denied`
+     - glob `<CWD>/catalog-secrets/*.key`
+    </instruction_diff>
 07:message/user:
     Continue with the selected model.
--- request 3 (request) --
+-- request 3 (turn) --
 08:message/user:
     Continue without changing permissions.

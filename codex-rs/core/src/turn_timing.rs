@@ -66,6 +66,7 @@ pub(crate) struct TurnTimingState {
     pub(crate) direct_tool_timings: DirectToolTimings,
     state: Mutex<TurnTimingStateInner>,
     profile: StdMutex<TurnProfileState>,
+    tool_blocking_started: tokio::sync::Notify,
 }
 
 #[derive(Debug, Default)]
@@ -187,6 +188,7 @@ impl TurnTimingState {
             .unwrap_or(i64::MAX)
         });
         let profile = self.profile_state().complete(completed_at_instant);
+        self.tool_blocking_started.notify_waiters();
         (Some(completed_at), duration_ms, profile)
     }
 
@@ -233,6 +235,9 @@ impl TurnTimingState {
         batch: Option<ToolBatchTiming>,
     ) -> TurnProfileTimingGuard {
         let active = self.profile_state().begin_tool_blocking(Instant::now());
+        if active {
+            self.tool_blocking_started.notify_waiters();
+        }
         TurnProfileTimingGuard {
             timing: Arc::clone(self),
             phase: TurnProfilePhase::ToolBlocking,
@@ -547,6 +552,8 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
 }
 
 mod report;
+
+mod test_support;
 
 #[cfg(test)]
 #[path = "turn_timing_tests.rs"]

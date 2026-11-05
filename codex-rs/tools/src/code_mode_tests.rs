@@ -220,15 +220,12 @@ Apply a patch"#
     };
     let metadata = codex_code_mode::enabled_tool_metadata(definition.clone());
     assert_eq!(metadata.summary, "Apply a patch");
-    assert!(
-        metadata
-            .description
-            .starts_with("Editing tools\n\nCall: await tools.editor__apply_patch(input)")
-    );
-    assert!(
-        metadata
-            .description
-            .contains("tools.editor__apply_patch(input)")
+    assert_eq!(
+        metadata.description,
+        concat!(
+            "Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.\n",
+            "Returns: no declared shape.\n\nApply a patch\n\nEditing tools"
+        )
     );
 }
 

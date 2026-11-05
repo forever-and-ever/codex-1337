@@ -20,7 +20,7 @@ use tokio::time::Instant;
 
 pub const IDLE_RESTART_PROTOCOL: &str = "codex-tui-idle-restart-v1";
 const HANDOFF_ENV: &str = "CODEX_TUI_IDLE_RESTART";
-const IDLE: Duration = Duration::from_secs(/*secs*/ 300);
+const IDLE: Duration = Duration::from_mins(/*mins*/ 5);
 static REJOINING_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
 #[derive(Debug, Serialize, Deserialize)]

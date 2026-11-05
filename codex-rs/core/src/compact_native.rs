@@ -391,13 +391,13 @@ async fn install_checkpoint(
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
     analytics_details.retained_image_count = Some(0);
-    let (initial_context, world_state_baseline) = build_compaction_replacement_history(
+    let (initial_context, world_state_baseline) = Box::pin(build_compaction_replacement_history(
         sess.as_ref(),
         replacement_step_context,
         world_state,
         Vec::new(),
         CompactionContinuation::capture(source.iter().map(|envelope| &envelope.item))?,
-    )
+    ))
     .await;
     // Anthropic requires its signed checkpoint before conversation messages, and initial
     // context can contain user-role AGENTS.md and environment fragments.
@@ -449,13 +449,13 @@ async fn install_reset(
     source: Arc<Vec<ResponseItemEnvelope>>,
 ) -> CodexResult<()> {
     let (history, summary) = reset_history(&source);
-    let (history, world_state_baseline) = build_compaction_replacement_history(
+    let (history, world_state_baseline) = Box::pin(build_compaction_replacement_history(
         sess.as_ref(),
         replacement_step_context,
         world_state,
         history,
         CompactionContinuation::capture(source.iter().map(|envelope| &envelope.item))?,
-    )
+    ))
     .await;
     sess.replace_compacted_history(
         history,

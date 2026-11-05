@@ -109,7 +109,7 @@ impl Catalog {
         };
         if let Some(snapshot) = self.snapshot.read().await.as_ref()
             && snapshot.identity == preferences.models
-            && snapshot.fetched_at.elapsed() < Duration::from_secs(300)
+            && snapshot.fetched_at.elapsed() < Duration::from_mins(5)
         {
             return snapshot.models.clone();
         }

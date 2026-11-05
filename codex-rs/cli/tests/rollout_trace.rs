@@ -1,4 +1,6 @@
 //! Exercise trace acceptance through the CLI app-server and its offline reducer.
+//!
+//! The CLI lacks the server's test-only startup flag; disable unrelated plugin discovery via config.
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -69,7 +71,7 @@ async fn accepted_output_survives_success_and_stream_failure() -> Result<()> {
         let mut app = TestAppServer::builder()
             .with_program(&codex)
             .with_plugin_startup_tasks()
-            .with_args(&["app-server"])
+            .with_args(&["-c", "features.plugins=false", "app-server"])
             .with_codex_home(home.path())
             .with_env_overrides(&[("CODEX_ROLLOUT_TRACE_ROOT", traces.path().to_str())])
             .build_initialized()
@@ -179,7 +181,7 @@ async fn accepted_output_survives_interruption_and_shutdown() -> Result<()> {
     let mut app = TestAppServer::builder()
         .with_program(&codex)
         .with_plugin_startup_tasks()
-        .with_args(&["app-server"])
+        .with_args(&["-c", "features.plugins=false", "app-server"])
         .with_codex_home(home.path())
         .with_env_overrides(&[("CODEX_ROLLOUT_TRACE_ROOT", traces.path().to_str())])
         .build_initialized()

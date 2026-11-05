@@ -16,8 +16,11 @@ async fn catalog_origins_survive_reload_and_auth_change() {
             AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
         let endpoint =
             TestAuthAwareModelsEndpoint::new(Some(auth.clone()), vec![vec![model.clone()]]);
-        let manager =
-            OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
+        let manager = OpenAiModelsManager::new(
+            home.path().join("models_cache.json"),
+            endpoint.clone(),
+            Some(auth.clone()),
+        );
         manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
         let bundled = manager
             .model_catalog_with_origins(RefreshStrategy::Offline, DEFAULT_HTTP_CLIENT_FACTORY)

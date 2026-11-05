@@ -481,26 +481,8 @@ pub(super) async fn prepare_forked_history(
         ));
         forked_rollout_items.push(RolloutItem::ResponseItem(developer_message.into()));
     }
-    if preserve_context_baselines
-        && multi_agent_version == MultiAgentVersion::V2
-        && let Some(subagent_usage_hint) = options
-            .multi_agent_v2_usage_hints
-            .as_ref()
-            .map(|hints| hints.subagent.clone())
-            .unwrap_or_else(|| {
-                resolve_usage_hints(
-                    &config.multi_agent_v2,
-                    ResolvedModelMessages::bundled().multi_agent(),
-                    !config.update_plan_enabled,
-                )
-                .subagent
-            })
-    {
-        let subagent_usage_hint_message = ContextualUserFragment::into(subagent_usage_hint);
-        forked_rollout_items.push(RolloutItem::ResponseItem(
-            subagent_usage_hint_message.into(),
-        ));
-    }
+    // The child's first effective step owns role publication and its world-state
+    // checkpoint. Fork preparation only removes the inherited parent's role.
     Ok((
         InitialHistory::Forked(forked_rollout_items),
         destination_history_mode,

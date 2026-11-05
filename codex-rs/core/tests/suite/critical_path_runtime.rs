@@ -140,7 +140,7 @@ async fn critical_path_follows_runtime_admission(
             text_elements: Vec::new(),
         }]))
         .await?;
-    let (first_id, first_start) = entries.recv().await.expect("first admitted tool");
+    let (first_id, _first_start) = entries.recv().await.expect("first admitted tool");
     let observe = codex_core::test_support::observe_turn_timing(&test.codex)
         .await
         .expect("active turn");
@@ -153,13 +153,19 @@ async fn critical_path_follows_runtime_admission(
         ]),
     )
     .await;
-    let (second_start, held_start, held_end) = if matches!(admission, Admission::Parallel) {
-        let (second_id, second_start) = entries.recv().await.expect("second overlapping tool");
+    if critical_path_timing && !matches!(admission, Admission::Unsupported) {
+        codex_core::test_support::wait_for_tool_blocking(&test.codex)
+            .await
+            .expect("tool blocking");
+    }
+    let held_start = Instant::now();
+    let held_end = if matches!(admission, Admission::Parallel) {
+        let (second_id, _second_start) = entries.recv().await.expect("second overlapping tool");
         assert_ne!(first_id, second_id);
         // Both handlers are inside their gate before either can finish.
         let held_end = Instant::now();
         gate.release.add_permits(/* n */ 2);
-        (second_start, second_start, held_end)
+        held_end
     } else {
         assert!(
             entries.try_recv().is_err(),
@@ -167,9 +173,9 @@ async fn critical_path_follows_runtime_admission(
         );
         let held_end = Instant::now();
         gate.release.add_permits(/* n */ 1);
-        let (_, second_start) = entries.recv().await.expect("second serial tool");
+        entries.recv().await.expect("second serial tool");
         gate.release.add_permits(/* n */ 1);
-        (second_start, first_start, held_end)
+        held_end
     };
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -202,7 +208,7 @@ async fn critical_path_follows_runtime_admission(
             ])
         );
         assert!(inference > Duration::ZERO);
-        assert!(tools >= second_start.duration_since(first_start));
+        assert!(tools >= held_end.duration_since(held_start));
         assert_eq!((review, unknown), (Duration::ZERO, Duration::ZERO));
         assert_eq!(
             inference + review + tools + overhead + unknown,

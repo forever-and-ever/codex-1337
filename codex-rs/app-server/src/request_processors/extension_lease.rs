@@ -203,7 +203,7 @@ impl ThreadRequestProcessor {
             pending.committed = true;
             Ok(ThreadExtensionAttachResponse { lease_id })
         };
-        tokio::time::timeout(Duration::from_secs(120), Box::pin(operation))
+        tokio::time::timeout(Duration::from_mins(2), Box::pin(operation))
             .await
             .map_err(|_| invalid_request("extension MCP server did not become ready"))?
     }

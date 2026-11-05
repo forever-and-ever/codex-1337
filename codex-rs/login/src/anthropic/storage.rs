@@ -96,7 +96,7 @@ impl AccountStore {
             options.mode(0o600);
         }
         let file = options.open(self.directory.join(format!("{id}.lock")))?;
-        tokio::time::timeout(Duration::from_secs(/*secs*/ 60), async {
+        tokio::time::timeout(Duration::from_mins(/*mins*/ 1), async {
             loop {
                 match file.try_lock() {
                     Ok(()) => return Ok(()),

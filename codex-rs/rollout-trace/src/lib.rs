@@ -11,6 +11,7 @@ mod code_cell;
 mod compaction;
 mod inference;
 mod mcp;
+mod mcp_result;
 mod model;
 mod payload;
 mod protocol_event;

@@ -7,7 +7,7 @@ use codex_mcp::McpServerRegistration;
 
 pub(crate) const CONNECTION_LEASE_SOURCE_ID: &str = "connection_lease";
 pub(super) const EXTENSION_INSTRUCTION_MARKER: &str = "[connection-scoped MCP extension]";
-const ATTACH_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const ATTACH_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(2);
 pub(super) const DETACHED_INSTRUCTIONS: &str = "The connection-scoped MCP extension is detached. Its previous developer instructions are inactive; do not call its MCP tools until a new lease is attached.";
 
 #[derive(Clone)]

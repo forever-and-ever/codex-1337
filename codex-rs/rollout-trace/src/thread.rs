@@ -272,13 +272,17 @@ impl ThreadTraceContext {
         let ThreadTraceContextState::Enabled(context) = &self.state else {
             return;
         };
+        let result = crate::mcp_result::without_human_receipts(result);
         #[derive(Serialize)]
         struct Payload<'a> {
             result: &'a Result<CallToolResult, String>,
         }
-        let Some(runtime_payload) = context
-            .write_json_payload_best_effort(RawPayloadKind::ToolRuntimeEvent, &Payload { result })
-        else {
+        let Some(runtime_payload) = context.write_json_payload_best_effort(
+            RawPayloadKind::ToolRuntimeEvent,
+            &Payload {
+                result: result.as_ref(),
+            },
+        ) else {
             return;
         };
         context.append_with_context_best_effort(

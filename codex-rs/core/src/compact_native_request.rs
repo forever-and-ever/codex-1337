@@ -27,7 +27,7 @@ use serde_json::Value;
 
 /// Includes connection and header wait as well as streaming. Summarizing a large Claude context
 /// may take minutes; cancellation still drops the attempt early.
-const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(600);
+const ATTEMPT_TIMEOUT: Duration = Duration::from_mins(10);
 /// A compaction runs far longer than a sampling request, so it retries transport failures less.
 const MAX_STREAM_RETRIES: u64 = 2;
 

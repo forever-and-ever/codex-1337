@@ -50,7 +50,7 @@ pub async fn lock_account_preferences(codex_home: &Path) -> std::io::Result<File
         .create(true)
         .truncate(false)
         .open(path)?;
-    tokio::time::timeout(Duration::from_secs(/*secs*/ 60), async {
+    tokio::time::timeout(Duration::from_mins(/*mins*/ 1), async {
         loop {
             match file.try_lock() {
                 Ok(()) => return Ok(()),
