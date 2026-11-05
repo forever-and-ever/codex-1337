@@ -96,11 +96,16 @@ pub fn take_remote_control_disabled_env() -> bool {
     disabled
 }
 
-pub(super) struct QueuedServerEnvelope {
-    pub(super) event: ServerEvent,
-    pub(super) client_id: ClientId,
-    pub(super) stream_id: StreamId,
-    pub(super) write_complete_tx: Option<oneshot::Sender<()>>,
+pub(super) enum QueuedServerEnvelope {
+    Message {
+        event: ServerEvent,
+        client_id: ClientId,
+        stream_id: StreamId,
+        write_complete_tx: Option<oneshot::Sender<()>>,
+    },
+    Flush {
+        write_complete_tx: oneshot::Sender<()>,
+    },
 }
 
 #[derive(Clone)]

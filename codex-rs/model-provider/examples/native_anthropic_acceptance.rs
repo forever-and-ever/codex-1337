@@ -162,7 +162,7 @@ impl Driver {
             "reasoning_effort":stage.effort.as_str(),
             "ttl":stage.ttl,"operation":format!("{:?}",stage.operation)}))?;
         let mut upstream_request_id = None;
-        let attempt = tokio::time::timeout(Duration::from_secs(/*secs*/ 60), async {
+        let attempt = tokio::time::timeout(Duration::from_mins(/*mins*/ 1), async {
             let mut stream = self
                 .client
                 .stream_request(request, AnthropicStreamOptions::default())
@@ -595,7 +595,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
             .await?;
         ensure!(child_warm.read > 0, "child warm cache miss");
         driver.record(json!({"status":"ttl_wait","seconds":360}))?;
-        tokio::time::sleep(Duration::from_secs(/*secs*/ 360)).await;
+        tokio::time::sleep(Duration::from_mins(/*mins*/ 6)).await;
         let retained = driver
             .send(haiku_stage("parent.after_5m", &haiku, one_hour), &parent)
             .await?;

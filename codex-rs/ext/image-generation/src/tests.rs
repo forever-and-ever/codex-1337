@@ -200,13 +200,17 @@ fn imagegen_code_mode_declaration_describes_generated_image_result() {
     let [definition] = definitions.as_slice() else {
         panic!("imagegen should produce one code-mode declaration");
     };
-    let (_, return_type) = definition
-        .description
-        .rsplit_once("): Promise<")
-        .expect("imagegen declaration should return a promise");
     assert_eq!(
-        return_type,
-        "{ image_url: string; output_hint?: string; }>; };\n```"
+        definition.output_schema,
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "image_url": { "type": "string" },
+                "output_hint": { "type": "string" }
+            },
+            "required": ["image_url"],
+            "additionalProperties": false
+        }))
     );
 }
 

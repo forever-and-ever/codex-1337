@@ -162,21 +162,22 @@ def main() -> int:
         "--workspace"
     ]
     status, found, errors = clippy(scope, owner)
+    for finding in sorted(found):
+        print(found[finding], end="")
+    if found:
+        files = {finding.path for finding in found}
+        print(
+            f"check_fork_lints: {len(found)} findings in {len(files)} fork-owned files against {owner.tag}"
+        )
+        for code, count in Counter(finding.code for finding in found).most_common():
+            print(f"{count:6} {code}")
     if status:
         print("".join(errors), end="", file=sys.stderr)
         print(f"check_fork_lints: cargo clippy exited {status}", file=sys.stderr)
         return 2
-    for finding in sorted(found):
-        print(found[finding], end="")
     if not found:
         print(f"check_fork_lints: fork-owned files are clean against {owner.tag}")
         return 0
-    files = {finding.path for finding in found}
-    print(
-        f"check_fork_lints: {len(found)} findings in {len(files)} fork-owned files against {owner.tag}"
-    )
-    for code, count in Counter(finding.code for finding in found).most_common():
-        print(f"{count:6} {code}")
     return 1
 
 

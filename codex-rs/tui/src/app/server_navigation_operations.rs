@@ -728,7 +728,7 @@ impl App {
                 picker.model_provider_override = self.harness_overrides.model_provider.clone();
                 self.drive_server_operations(server);
                 self.refresh_submission_preview();
-                let selection =
+                let selection = Box::pin(
                     crate::resume_picker::run_resume_picker_from_existing_session_with_app_server(
                         crate::uses_remote_workspace_or_environment(
                             &self.app_server_target,
@@ -743,8 +743,9 @@ impl App {
                         server.request_handle(),
                         self.primary_thread_id
                             .or(self.current_displayed_thread_id()),
-                    )
-                    .await;
+                    ),
+                )
+                .await;
                 match selection {
                     Ok(selection) => {
                         return self

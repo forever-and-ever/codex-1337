@@ -54,18 +54,16 @@ pub(super) async fn call_tool(
         if !guard.is_valid(server) {
             anyhow::bail!("extension MCP lease revoked");
         }
-        let result = current
-            .connections
-            .call_tool(
-                server,
-                tool,
-                environment_id,
-                arguments,
-                meta,
-                requested_timeout,
-                wait_for_server,
-            )
-            .await?;
+        let result = Box::pin(current.connections.call_tool(
+            server,
+            tool,
+            environment_id,
+            arguments,
+            meta,
+            requested_timeout,
+            wait_for_server,
+        ))
+        .await?;
         // Host calls use live connections, unlike model calls pinned to a binding.
         // Check after dispatch so a refresh before or during the call invalidates attribution.
         // Revisions include client identity and increase on catalog changes. Reading them
@@ -140,7 +138,7 @@ pub(super) async fn read_resource(
     let current = runtime.current.load_full();
     let guard = dispatch_guard(runtime, &current, server)?;
     let read = async {
-        let result = current.connections.read_resource(server, params).await?;
+        let result = Box::pin(current.connections.read_resource(server, params)).await?;
         if !guard.is_valid(server) {
             anyhow::bail!("extension MCP lease revoked");
         }

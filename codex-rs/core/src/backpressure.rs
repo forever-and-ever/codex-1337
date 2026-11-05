@@ -21,7 +21,7 @@ use tokio::time::Instant;
 use tracing::warn;
 
 const FIRST_DELAY: Duration = Duration::from_secs(5);
-const MAX_DELAY: Duration = Duration::from_secs(60);
+const MAX_DELAY: Duration = Duration::from_mins(1);
 /// Server advice can name an instant already past; never retry in a tight loop.
 const MIN_DELAY: Duration = Duration::from_secs(1);
 

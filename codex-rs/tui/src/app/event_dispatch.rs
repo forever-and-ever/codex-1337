@@ -514,13 +514,13 @@ impl App {
                 }
             }
             AppEvent::RecordStepAdmission { thread_id, item } => {
-                if self.chat_widget.thread_id() == Some(thread_id) {
-                    if let ThreadItemPayload::StepAdmission(admission) = item.payload.native_item() {
-                        let response_id = admission.response_id.clone();
-                        self.transcript_view.record_step_admission(item);
-                        self.seat_thought(tui, &response_id);
-                        tui.frame_requester().schedule_frame();
-                    }
+                if self.chat_widget.thread_id() == Some(thread_id)
+                    && let ThreadItemPayload::StepAdmission(admission) = item.payload.native_item()
+                {
+                    let response_id = admission.response_id.clone();
+                    self.transcript_view.record_step_admission(item);
+                    self.seat_thought(tui, &response_id);
+                    tui.frame_requester().schedule_frame();
                 }
             }
             AppEvent::TurnTipReady { thread_id, turn_id } => {

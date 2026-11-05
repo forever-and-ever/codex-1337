@@ -1,4 +1,4 @@
-//! Name claims are serialized with archive, unarchive, and fork; SQLite is the race arbiter.
+//! Name claims are serialized with archive, unarchive, and fork; `SQLite` is the race arbiter.
 use super::HashSet;
 use super::JSONRPCErrorError;
 use super::PersistContext;

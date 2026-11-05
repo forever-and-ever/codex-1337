@@ -122,6 +122,9 @@ impl RequestContext {
 
 #[derive(Debug)]
 pub(crate) enum OutgoingEnvelope {
+    DisconnectAll {
+        write_complete_tx: oneshot::Sender<()>,
+    },
     ToConnection {
         connection_id: ConnectionId,
         message: OutgoingMessage,
@@ -1449,6 +1452,9 @@ mod tests {
             let mut timestamps = Vec::new();
             for index in 0..connection_ids.len().max(1) {
                 let message = match rx.try_recv().expect("notification should be queued") {
+                    OutgoingEnvelope::DisconnectAll { .. } => {
+                        panic!("unexpected disconnect barrier")
+                    }
                     OutgoingEnvelope::Broadcast { message } => {
                         assert!(connection_ids.is_empty());
                         message
@@ -1767,3 +1773,7 @@ mod tests {
         );
     }
 }
+
+#[path = "graceful_disconnect.rs"]
+mod graceful_disconnect;
+pub(crate) use graceful_disconnect::ClientDisconnect;

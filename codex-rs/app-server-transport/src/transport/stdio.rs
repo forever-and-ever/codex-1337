@@ -135,7 +135,17 @@ pub async fn start_stdio_connection(
 
     let write_messages = async move {
         while let Some(queued_message) = writer_rx.recv().await {
-            let Some(mut json) = serialize_outgoing_message(queued_message.message) else {
+            let (message, write_complete_tx) = match queued_message {
+                QueuedOutgoingMessage::Message {
+                    message,
+                    write_complete_tx,
+                } => (message, write_complete_tx),
+                QueuedOutgoingMessage::GracefulClose { write_complete_tx } => {
+                    let _ = write_complete_tx.send(());
+                    break;
+                }
+            };
+            let Some(mut json) = serialize_outgoing_message(message) else {
                 continue;
             };
             json.push('\n');
@@ -143,7 +153,7 @@ pub async fn start_stdio_connection(
             if stdout_tx.send((json, written_tx)).await.is_err() || written_rx.await.is_err() {
                 break;
             }
-            if let Some(write_complete_tx) = queued_message.write_complete_tx {
+            if let Some(write_complete_tx) = write_complete_tx {
                 let _ = write_complete_tx.send(());
             }
         }

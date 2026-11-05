@@ -26,6 +26,7 @@ pub(super) struct Normalizer {
     temporary_directories: Vec<String>,
     prompt_cache_keys: Vec<String>,
     uuids: Vec<String>,
+    instruction_revisions: Vec<String>,
 }
 
 impl Normalizer {
@@ -59,6 +60,11 @@ impl Normalizer {
             Some("PERMISSIONS_INSTRUCTIONS") => self.permissions(&text),
             Some("ENVIRONMENT_CONTEXT") => self.environment(&text),
             _ => text,
+        };
+        let text = if text.starts_with("<instruction_diff>\n") {
+            self.instruction_diff(&text)
+        } else {
+            text
         };
         let text = self.normalize_values(&text);
         if options.rewrite_known_segments
@@ -228,6 +234,53 @@ impl Normalizer {
             .collect::<Vec<_>>();
         aliases.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
         aliases
+    }
+
+    fn instruction_diff(&mut self, text: &str) -> String {
+        static REVISION: OnceLock<Regex> = OnceLock::new();
+        let revision = REVISION.get_or_init(|| {
+            Regex::new(r"^(---|\+\+\+) ([^/]+)/([0-9a-f]{40})$")
+                .expect("instruction revision regex")
+        });
+        let normalized = text
+            .split('\n')
+            .map(|line| {
+                let (prefix, body) = if line.starts_with(['+', '-', ' ']) {
+                    line.split_at(1)
+                } else {
+                    ("", line)
+                };
+                let body = if let Some(directory) =
+                    body.strip_prefix("# AGENTS.md instructions for ")
+                    && (directory.starts_with('/') || directory.as_bytes().get(1) == Some(&b':'))
+                {
+                    "# AGENTS.md instructions for <AGENTS_DIRECTORY>".to_string()
+                } else {
+                    self.permissions(body)
+                };
+                format!("{prefix}{body}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let changed = normalized != text;
+        normalized
+            .split('\n')
+            .map(|line| {
+                if let Some(parts) = revision.captures(line)
+                    && (changed
+                        || self
+                            .instruction_revisions
+                            .iter()
+                            .any(|known| known == &parts[3]))
+                {
+                    let index = stable_index(&mut self.instruction_revisions, &parts[3]);
+                    format!("{} {}/<REVISION {index}>", &parts[1], &parts[2])
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn permissions(&mut self, text: &str) -> String {

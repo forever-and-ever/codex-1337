@@ -1400,11 +1400,11 @@ impl ModelClient {
     ) -> Result<CurrentClientSetup> {
         // Capture before resolving credentials so an account switch during setup cannot label
         // an old connection with the new owner's revision.
-        let auth_owner_generation = self.auth_owner_generation();
         let auth_changes = provider
             .auth_manager()
             .map(|manager| manager.auth_change_receiver());
         loop {
+            let auth_owner_generation = self.auth_owner_generation();
             let revision = auth_changes.as_ref().map(|changes| *changes.borrow());
             let auth = provider.auth().await;
             let (api_provider, redirect_policy) = match routing {

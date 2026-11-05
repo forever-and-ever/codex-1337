@@ -228,7 +228,7 @@ impl ClientTracker {
 
                 let server_event_tx = self.server_event_tx.clone();
                 tokio::spawn(async move {
-                    let server_envelope = QueuedServerEnvelope {
+                    let server_envelope = QueuedServerEnvelope::Message {
                         event: ServerEvent::Pong {
                             status: PongStatus::Unknown,
                         },
@@ -261,10 +261,26 @@ impl ClientTracker {
                     let Some(queued_message) = queued_message else {
                         break;
                     };
-                    let event = ServerEvent::ServerMessage {
-                        message: Box::new(queued_message.message),
+                    let (message, write_complete_tx) = match queued_message {
+                        QueuedOutgoingMessage::Message { message, write_complete_tx } => (message, write_complete_tx),
+                        QueuedOutgoingMessage::GracefulClose { write_complete_tx } => {
+                            let (flushed_tx, flushed_rx) = tokio::sync::oneshot::channel();
+                            tokio::select! {
+                                _ = disconnect_token.cancelled() => {},
+                                _ = async {
+                                    if server_event_tx.send(QueuedServerEnvelope::Flush { write_complete_tx: flushed_tx }).await.is_ok() {
+                                        let _ = flushed_rx.await;
+                                    }
+                                } => {},
+                            }
+                            let _ = write_complete_tx.send(());
+                            break;
+                        }
                     };
-                    (event, queued_message.write_complete_tx)
+                    let event = ServerEvent::ServerMessage {
+                        message: Box::new(message),
+                    };
+                    (event, write_complete_tx)
                 }
                 changed = status_rx.changed() => {
                     if changed.is_err() {
@@ -278,7 +294,7 @@ impl ClientTracker {
                 _ = disconnect_token.cancelled() => {
                     break;
                 }
-                send_result = server_event_tx.send(QueuedServerEnvelope {
+                send_result = server_event_tx.send(QueuedServerEnvelope::Message {
                     event,
                     client_id: client_id.clone(),
                     stream_id: stream_id.clone(),
@@ -562,7 +578,7 @@ mod tests {
             ClientTracker::new(server_event_tx.clone(), transport_event_tx, &shutdown_token);
 
         server_event_tx
-            .send(QueuedServerEnvelope {
+            .send(QueuedServerEnvelope::Message {
                 event: ServerEvent::Pong {
                     status: PongStatus::Unknown,
                 },

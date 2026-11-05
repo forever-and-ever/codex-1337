@@ -8,6 +8,7 @@ use clap::Parser;
 use codex_app_server_embedding::EmbeddedNetworkPolicy;
 use codex_arg0::Arg0DispatchPaths;
 use codex_cloud_config::chatgpt_config_bundle_loader_for_storage;
+use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
@@ -30,6 +31,10 @@ use crate::exec_server_telemetry;
 
 /// [EXPERIMENTAL] Run the standalone exec-server service.
 #[derive(Debug, Parser)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "clap boundary mirroring upstream's exec-server flags; clap enforces the conflicts; parsed into a typed choice at the boundary"
+)]
 pub(super) struct ExecServerCommand {
     #[command(subcommand)]
     pub(super) command: Option<ExecServerSubcommand>,
@@ -95,8 +100,8 @@ pub(super) struct ExecServerCommand {
     #[arg(long = "name", value_name = "NAME", global = true)]
     pub(super) name: Option<String>,
 
-    /// Use Agent Identity auth from CODEX_ACCESS_TOKEN for remote registration.
     #[arg(
+        help = "Use Agent Identity auth from CODEX_ACCESS_TOKEN for remote registration",
         long = "use-agent-identity-auth",
         requires = "exec_server_remote",
         global = true
@@ -122,6 +127,13 @@ pub(super) struct ExecServerCommand {
     exit_on_stdin_close: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RemoteAuth {
+    Default,
+    AgentIdentity,
+    ExecutorCredentialStdin,
+}
+
 impl ExecServerCommand {
     /// Starts the executor with the given runtime paths and configuration overrides.
     pub(super) async fn run(
@@ -130,6 +142,7 @@ impl ExecServerCommand {
         root_config_overrides: &CliConfigOverrides,
     ) -> anyhow::Result<()> {
         let strict_config = self.strict_config;
+        let remote_auth = self.remote_auth();
         let enable_cloud_config = self.should_load_cloud_config();
         let websocket_auth = self.websocket_auth.try_into_settings()?;
         if websocket_auth.config.is_some() && (self.remote.is_some() || self.command.is_some()) {
@@ -158,12 +171,16 @@ impl ExecServerCommand {
             let environment_id = self.environment_id.take().ok_or_else(|| {
                 anyhow::anyhow!("--environment-id is required when --remote is set")
             })?;
-            let config =
-                load_exec_server_config(root_config_overrides, strict_config, enable_cloud_config)
-                    .await?;
+            let config = Box::pin(load_exec_server_config(
+                root_config_overrides,
+                strict_config,
+                enable_cloud_config,
+            ))
+            .await?;
             // Configured exporters may contain account-wide credentials or client keys.
             // The scoped executor must not initialize those exporters.
-            let telemetry_config = (!self.executor_credential_stdin).then_some(&config);
+            let telemetry_config =
+                (remote_auth != RemoteAuth::ExecutorCredentialStdin).then_some(&config);
             let (_otel, telemetry) = exec_server_telemetry::init(telemetry_config);
             let mut credential_provider = None;
             let mut parent_lifetime = if self.exit_on_stdin_close {
@@ -171,23 +188,24 @@ impl ExecServerCommand {
             } else {
                 exec_server_telemetry::ParentLifetime::Independent
             };
-            let auth_provider: codex_api::SharedAuthProvider = if self.executor_credential_stdin {
-                let ExecutorCredentialPipe {
-                    provider,
-                    parent_closed,
-                } = ExecutorCredentialPipe::from_stdin(environment_id.trim().to_string());
-                provider.wait_for_initial().await?;
-                parent_lifetime =
-                    exec_server_telemetry::ParentLifetime::MonitoredStdin(parent_closed);
-                credential_provider = Some(Arc::clone(&provider));
-                provider
-            } else {
-                load_exec_server_remote_auth_provider(
-                    &config,
-                    &base_url,
-                    self.use_agent_identity_auth,
-                )
-                .await?
+            let auth_provider: codex_api::SharedAuthProvider = match remote_auth {
+                RemoteAuth::ExecutorCredentialStdin => {
+                    let ExecutorCredentialPipe {
+                        provider,
+                        parent_closed,
+                    } = ExecutorCredentialPipe::from_stdin(environment_id.trim().to_string());
+                    provider.wait_for_initial().await?;
+                    parent_lifetime =
+                        exec_server_telemetry::ParentLifetime::MonitoredStdin(parent_closed);
+                    credential_provider = Some(Arc::clone(&provider));
+                    provider
+                }
+                RemoteAuth::AgentIdentity => {
+                    load_exec_server_agent_identity_auth_provider(&config).await?
+                }
+                RemoteAuth::Default => {
+                    load_exec_server_remote_auth_provider(&config, &base_url).await?
+                }
             };
             let mut remote_config = codex_exec_server::RemoteEnvironmentConfig::new(
                 base_url,
@@ -195,7 +213,7 @@ impl ExecServerCommand {
                 auth_provider,
                 config.http_client_factory(),
             )?;
-            if self.executor_credential_stdin {
+            if remote_auth == RemoteAuth::ExecutorCredentialStdin {
                 remote_config = remote_config.with_executor_credential_auth()?;
             }
             if let Some(name) = self.name {
@@ -211,7 +229,7 @@ impl ExecServerCommand {
                     &config.codex_home,
                 ),
             );
-            let result = exec_server_telemetry::run_until_shutdown(
+            let result = Box::pin(exec_server_telemetry::run_until_shutdown(
                 async move {
                     let shutdown = async move {
                         let _ = shutdown_receiver.await;
@@ -238,16 +256,19 @@ impl ExecServerCommand {
                 },
                 parent_lifetime,
                 exec_server_telemetry::ShutdownBehavior::Graceful(shutdown_sender),
-            )
+            ))
             .await;
             if let Some(provider) = credential_provider {
                 provider.check_pipe_failure()?;
             }
             result
         } else {
-            let config_result =
-                load_exec_server_config(root_config_overrides, strict_config, enable_cloud_config)
-                    .await;
+            let config_result = Box::pin(load_exec_server_config(
+                root_config_overrides,
+                strict_config,
+                enable_cloud_config,
+            ))
+            .await;
             let config = if strict_config {
                 Some(config_result?)
             } else {
@@ -263,10 +284,10 @@ impl ExecServerCommand {
                     )
                 }),
             );
-            let http_client_factory = config
-                .as_ref()
-                .map(Config::http_client_factory)
-                .unwrap_or_else(|| HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault));
+            let http_client_factory = config.as_ref().map_or_else(
+                || HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+                Config::http_client_factory,
+            );
             let listen_url = self
                 .listen
                 .unwrap_or_else(|| codex_exec_server::DEFAULT_LISTEN_URL.to_string());
@@ -286,11 +307,17 @@ impl ExecServerCommand {
         }
     }
 
+    fn remote_auth(&self) -> RemoteAuth {
+        match (self.use_agent_identity_auth, self.executor_credential_stdin) {
+            (false, false) => RemoteAuth::Default,
+            (true, false) => RemoteAuth::AgentIdentity,
+            (false, true) => RemoteAuth::ExecutorCredentialStdin,
+            (true, true) => unreachable!("clap rejects conflicting exec-server auth flags"),
+        }
+    }
+
     pub(super) fn should_load_cloud_config(&self) -> bool {
-        self.remote.is_some()
-            && self.command.is_none()
-            && !self.executor_credential_stdin
-            && !self.use_agent_identity_auth
+        self.remote.is_some() && self.command.is_none() && self.remote_auth() == RemoteAuth::Default
     }
 }
 
@@ -304,28 +331,27 @@ pub(super) enum ExecServerSubcommand {
     },
 }
 
-async fn load_exec_server_remote_auth_provider(
-    config: &codex_core::config::Config,
-    base_url: &str,
-    use_agent_identity_auth: bool,
+async fn load_exec_server_agent_identity_auth_provider(
+    config: &Config,
 ) -> anyhow::Result<codex_api::SharedAuthProvider> {
-    if use_agent_identity_auth {
-        read_codex_access_token_from_env().ok_or_else(|| {
-            anyhow::anyhow!("CODEX_ACCESS_TOKEN is required when --use-agent-identity-auth is set")
-        })?;
-        let auth = AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false)
-            .await?
-            .auth()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Agent Identity authentication is unavailable"))?;
-        if !matches!(auth, CodexAuth::AgentIdentity(_)) {
-            anyhow::bail!(
-                "CODEX_ACCESS_TOKEN did not provide permitted Agent Identity authentication"
-            );
-        }
-        return Ok(codex_model_provider::auth_provider_from_auth(&auth));
+    read_codex_access_token_from_env().ok_or_else(|| {
+        anyhow::anyhow!("CODEX_ACCESS_TOKEN is required when --use-agent-identity-auth is set")
+    })?;
+    let auth = AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false)
+        .await?
+        .auth()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Agent Identity authentication is unavailable"))?;
+    if !matches!(auth, CodexAuth::AgentIdentity(_)) {
+        anyhow::bail!("CODEX_ACCESS_TOKEN did not provide permitted Agent Identity authentication");
     }
+    Ok(codex_model_provider::auth_provider_from_auth(&auth))
+}
 
+async fn load_exec_server_remote_auth_provider(
+    config: &Config,
+    base_url: &str,
+) -> anyhow::Result<codex_api::SharedAuthProvider> {
     let (auth_manager, auth) = load_exec_server_remote_auth(
         config,
         "remote exec-server registration requires ChatGPT authentication or API key authentication; run `codex login` or set CODEX_API_KEY",
@@ -394,7 +420,7 @@ async fn load_exec_server_config(
     root_config_overrides: &CliConfigOverrides,
     strict_config: bool,
     enable_cloud_config: bool,
-) -> anyhow::Result<codex_core::config::Config> {
+) -> anyhow::Result<Config> {
     let cli_kv_overrides = root_config_overrides
         .parse_overrides()
         .map_err(anyhow::Error::msg)?;
@@ -414,7 +440,7 @@ async fn load_exec_server_config(
             ConfigLoadOptions {
                 loader_overrides,
                 strict_config,
-                cloud_config_bundle: Default::default(),
+                cloud_config_bundle: CloudConfigBundleLoader::default(),
             },
         )
         .await?;
@@ -432,21 +458,20 @@ async fn load_exec_server_config(
 }
 
 async fn load_exec_server_remote_auth(
-    config: &codex_core::config::Config,
+    config: &Config,
     missing_auth_error: &'static str,
-) -> anyhow::Result<(Arc<AuthManager>, codex_login::CodexAuth)> {
+) -> anyhow::Result<(Arc<AuthManager>, CodexAuth)> {
     let auth_manager =
         AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true).await?;
 
-    let auth = match auth_manager.auth().await {
-        Some(auth) => auth,
-        None => {
-            auth_manager.reload().await;
-            auth_manager
-                .auth()
-                .await
-                .ok_or_else(|| anyhow::anyhow!(missing_auth_error))?
-        }
+    let auth = if let Some(auth) = auth_manager.auth().await {
+        auth
+    } else {
+        auth_manager.reload().await;
+        auth_manager
+            .auth()
+            .await
+            .ok_or_else(|| anyhow::anyhow!(missing_auth_error))?
     };
 
     Ok((auth_manager, auth))

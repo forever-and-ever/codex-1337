@@ -22,7 +22,7 @@ use std::time::UNIX_EPOCH;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
-const READ_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 60);
+const READ_TIMEOUT: Duration = Duration::from_mins(/*mins*/ 1);
 
 // Cache evidence reaches attaching clients without conflating passive warmth and active warming.
 // Other Responses providers do not inherit OpenAI's retention, and a restart invents no lease.

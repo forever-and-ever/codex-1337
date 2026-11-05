@@ -182,6 +182,7 @@ async fn failed_fork_recovers_only_its_own_turn() -> anyhow::Result<()> {
     let _parent_response = responses::mount_sse_once(&server, responses::sse(events)).await;
     let parent = test
         .cmd_with_server(&server)
+        .arg("run")
         .args(["--skip-git-repo-check", "--json", "--output-last-message"])
         .arg(&last_message)
         .arg("Produce a long turn")

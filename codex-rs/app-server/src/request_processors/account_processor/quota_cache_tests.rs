@@ -88,7 +88,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
         .read(key.clone(), QuotaFreshness::Cached, || async {
             Err(QuotaFailure {
                 message: "temporarily unavailable".into(),
-                retry_after: RetryAfter::from_delay(Duration::from_secs(/*secs*/ 300)),
+                retry_after: RetryAfter::from_delay(Duration::from_mins(/*mins*/ 5)),
             })
         })
         .await

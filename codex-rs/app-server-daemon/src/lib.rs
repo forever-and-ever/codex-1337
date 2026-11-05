@@ -1558,12 +1558,13 @@ mod tests {
             format!(
                 "app server did not become ready on {}\n\n\
                  Daemon used app-server:\n  path: {}\n\n\
-                 Readiness failure snapshot:\n  PID record ({}): missing\n  \
+                 Readiness failure snapshot:\n  PID record ({}): pid={}: process absent\n  \
                  stderr ({}): nonempty (19 bytes)\n  socket ({}): missing\n\n\
                  Managed app-server stderr ({}):\n  unexpected argument",
                 daemon.socket_path.display(),
                 daemon.managed_codex_bin.display(),
                 daemon.pid_file.display(),
+                child.id(),
                 stderr_log.display(),
                 daemon.socket_path.display(),
                 stderr_log.display(),

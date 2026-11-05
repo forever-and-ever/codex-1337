@@ -154,7 +154,7 @@ async fn send_message_to_connection(
     }
 
     let writer = connection_state.writer.clone();
-    let queued_message = QueuedOutgoingMessage {
+    let queued_message = QueuedOutgoingMessage::Message {
         message,
         write_complete_tx,
     };
@@ -207,6 +207,9 @@ pub(crate) async fn route_outgoing_envelope(
     envelope: OutgoingEnvelope,
 ) {
     match envelope {
+        OutgoingEnvelope::DisconnectAll { write_complete_tx } => {
+            graceful_disconnect::flush_connections(connections, write_complete_tx);
+        }
         OutgoingEnvelope::ToConnection {
             connection_id,
             message,
@@ -247,3 +250,6 @@ pub(crate) async fn route_outgoing_envelope(
 #[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;
+
+#[path = "transport_graceful_disconnect.rs"]
+mod graceful_disconnect;

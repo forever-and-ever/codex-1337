@@ -375,7 +375,15 @@ async fn run_websocket_outbound_loop<M, SinkError>(
                 let Some(queued_message) = queued_message else {
                     break;
                 };
-                let Some(json) = serialize_outgoing_message(queued_message.message) else {
+                let (message, write_complete_tx) = match queued_message {
+                    QueuedOutgoingMessage::Message { message, write_complete_tx } => (message, write_complete_tx),
+                    QueuedOutgoingMessage::GracefulClose { write_complete_tx } => {
+                        let _ = websocket_writer.close().await;
+                        let _ = write_complete_tx.send(());
+                        break;
+                    }
+                };
+                let Some(json) = serialize_outgoing_message(message) else {
                     continue;
                 };
                 let message = if let Some(encoder) = &mut encoder {
@@ -392,7 +400,7 @@ async fn run_websocket_outbound_loop<M, SinkError>(
                 if websocket_writer.send(message).await.is_err() {
                     break;
                 }
-                if let Some(write_complete_tx) = queued_message.write_complete_tx {
+                if let Some(write_complete_tx) = write_complete_tx {
                     let _ = write_complete_tx.send(());
                 }
             }

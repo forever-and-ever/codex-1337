@@ -120,7 +120,7 @@ impl QuotaCache {
                             ..Default::default()
                         };
                         entry.failures = 0;
-                        Duration::from_secs(/*secs*/ 60)
+                        Duration::from_mins(/*mins*/ 1)
                     }
                     Err(failure) => {
                         entry.failures = entry.failures.saturating_add(1);

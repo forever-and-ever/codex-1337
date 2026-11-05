@@ -439,7 +439,7 @@ impl ChatWidget {
             && self
                 .openrouter_ui
                 .last_refresh
-                .is_some_and(|last| last.elapsed() < Duration::from_secs(60))
+                .is_some_and(|last| last.elapsed() < Duration::from_mins(1))
         {
             return true;
         }

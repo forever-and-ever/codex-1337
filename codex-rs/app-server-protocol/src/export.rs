@@ -2439,7 +2439,10 @@ mod tests {
                                 ),
                                 "gauge?"
                             )
-                            | (Some("v2/ThreadItem.ts"), "windowId?" | "raw?")
+                            | (
+                                Some("v2/ThreadItem.ts" | "v2/ThreadItemPayload.ts"),
+                                "windowId?" | "raw?"
+                            )
                             | (Some("v2/TokenUsageBreakdown.ts"), "cost?")
                     );
                 if field_prefix.chars().rev().find(|c| !c.is_whitespace()) == Some('?')

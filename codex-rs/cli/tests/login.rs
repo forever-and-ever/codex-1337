@@ -158,7 +158,7 @@ async fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
 
     for args in [
         vec!["login", "--provider", "openai"],
-        vec!["login", "--provider", "openai", "--device-auth"],
+        vec!["login", "--device-auth"],
     ] {
         codex_command(codex_home.path())?
             .args(["-c", "forced_login_method=\"api\""])

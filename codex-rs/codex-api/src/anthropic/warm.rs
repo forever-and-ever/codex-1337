@@ -62,7 +62,7 @@ impl<T: HttpTransport> AnthropicClient<T> {
     #[tracing::instrument(name = "anthropic.warm", level = "debug", skip_all)]
     pub async fn warm(&self, request: &AnthropicWarmingRequest) -> Result<TokenUsage, ApiError> {
         let response = tokio::time::timeout(
-            Duration::from_secs(/*secs*/ 60),
+            Duration::from_mins(/*mins*/ 1),
             self.session.execute_with(
                 Method::POST,
                 "/messages",

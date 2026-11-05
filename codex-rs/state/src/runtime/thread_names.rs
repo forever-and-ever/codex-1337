@@ -109,7 +109,7 @@ WHERE archived = 0 AND id != ? AND name = ? COLLATE NOCASE
         Ok(())
     }
 
-    /// Resolve active canonical names, with trimmed input and SQLite's ASCII NOCASE matching.
+    /// Resolve active canonical names, with trimmed input and `SQLite`'s ASCII NOCASE matching.
     /// Internal sessions and every subagent source are outside the root-name namespace.
     pub async fn find_thread_name_owners(&self, name: &str) -> anyhow::Result<Vec<ThreadMetadata>> {
         anyhow::ensure!(

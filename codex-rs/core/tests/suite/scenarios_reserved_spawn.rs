@@ -526,7 +526,7 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
             .any(|item| {
                 responses::namespace_child_tool(item, "functions", "exec")
                     .and_then(|tool| tool["description"].as_str())
-                    .is_some_and(|description| description.contains("host_spawn(args:"))
+                    .is_some_and(|description| description.contains("describe_tool"))
             })
     );
     let user_messages = child_request.message_input_texts("user");
@@ -543,6 +543,13 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
     assert!(stored.items.iter().any(|item| matches!(item,
         RolloutItem::SessionMeta(meta) if meta.meta.session_id == session_id
             && meta.meta.parent_thread_id == Some(root_id)
+    )));
+    assert!(stored.items.iter().any(|item| matches!(item,
+        RolloutItem::SessionMeta(meta) if meta.meta.dynamic_tools.as_ref().is_some_and(|tools|
+            tools.iter().any(|tool| matches!(tool,
+                DynamicToolSpec::Function(tool) if tool.name == "host_spawn"
+            ))
+        )
     )));
     for input in [EARLIER_INPUT, SPAWN_INPUT] {
         let span = input_text(input);

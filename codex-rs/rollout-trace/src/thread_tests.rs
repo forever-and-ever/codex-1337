@@ -354,6 +354,79 @@ fn intercepted_exec_records_patch_without_a_terminal() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn mcp_trace_excludes_human_receipt_but_preserves_fault() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let thread_trace = ThreadTraceContext::start_root_in_root_for_test(
+        temp.path(),
+        minimal_metadata(ThreadId::new()),
+    )?;
+    let event = codex_protocol::protocol::McpToolCallEndEvent {
+        call_id: "edit".into(),
+        turn_id: "turn".into(),
+        invocation: codex_protocol::protocol::McpInvocation {
+            server: "semedit".into(),
+            tool: "edit".into(),
+            arguments: None,
+        },
+        connector_id: None,
+        mcp_app_resource_uri: None,
+        mcp_app_ui: None,
+        link_id: None,
+        app_name: None,
+        action_name: None,
+        plugin_id: None,
+        read_only_hint: None,
+        duration: std::time::Duration::ZERO,
+        result: Ok(codex_protocol::mcp::CallToolResult {
+            content: vec![serde_json::json!({"type":"text","text":"partial; do not retry"})],
+            structured_content: None,
+            is_error: Some(true),
+            meta: Some(
+                serde_json::json!({"codex/fileChanges":{"private":"source bytes"},"other":"kept"}),
+            ),
+        }),
+    };
+    thread_trace.record_mcp_tool_result("turn", "edit", &event.result);
+    let event = EventMsg::McpToolCallEnd(event);
+    assert!(crate::protocol_event::tool_runtime_trace_event(&event).is_none());
+    thread_trace.record_tool_call_event("turn", &event);
+    drop(thread_trace);
+    let bundle = single_bundle_dir(temp.path())?;
+    let events = fs::read_to_string(bundle.join("trace.jsonl"))?
+        .lines()
+        .map(serde_json::from_str::<crate::RawTraceEvent>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let completions = events
+        .into_iter()
+        .filter_map(|event| match event.payload {
+            RawTraceEventPayload::ToolCallRuntimeEnded {
+                runtime_payload, ..
+            } => Some(runtime_payload),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completions.len(),
+        1,
+        "the UI event must not duplicate backend completion"
+    );
+    let trace: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle.join(&completions[0].path))?)?;
+    assert_eq!(
+        trace["result"]["Ok"]["_meta"],
+        serde_json::json!({"other":"kept"})
+    );
+    assert_eq!(trace["result"]["Ok"]["isError"], true);
+    assert_eq!(
+        trace["result"]["Ok"]["content"],
+        serde_json::json!([{"type":"text","text":"partial; do not retry"}])
+    );
+    assert!(!trace.to_string().contains("source bytes"));
+    assert!(serde_json::to_string(&event)?.contains("source bytes"));
+    Ok(())
+}
+
 fn minimal_metadata(thread_id: ThreadId) -> ThreadStartedTraceMetadata {
     ThreadStartedTraceMetadata {
         thread_id: thread_id.to_string(),

@@ -96,6 +96,22 @@ pub fn mcp_attribution_snapshot(
         .mcp_attribution_snapshot()
 }
 
+/// Waits until the provider stream has ended and tool results are blocking the turn.
+pub async fn wait_for_tool_blocking(thread: &crate::CodexThread) -> Option<()> {
+    let timing = {
+        let active = thread.session.active_turn.lock().await;
+        Arc::clone(
+            &active
+                .as_ref()?
+                .task
+                .as_ref()?
+                .turn_context
+                .turn_timing_state,
+        )
+    };
+    timing.wait_for_tool_blocking().await.then_some(())
+}
+
 /// Retains the active turn's timing after completion without exporting telemetry.
 /// Returns `None` when there is no running task. The observer reports exclusive
 /// durations for the caller's interval in inference, automatic review, local

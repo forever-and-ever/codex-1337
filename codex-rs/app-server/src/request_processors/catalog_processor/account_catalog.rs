@@ -24,21 +24,26 @@ impl CatalogRequestProcessor {
         &self,
         params: &ModelListParams,
     ) -> Result<AccountCatalog, JSONRPCErrorError> {
-        // Policy edits take effect on every request, not just after an account transition.
-        // Use the typed provider-validation loader before catalog access can refresh credentials.
+        let overrides = ConfigOverrides {
+            model_provider: params.model_provider.clone(),
+            ..Default::default()
+        };
         let config = Arc::new(
-            self.config_manager
-                .load_for_resume(
-                    None,
-                    None,
-                    ConfigOverrides {
-                        model_provider: params.model_provider.clone(),
-                        ..Default::default()
-                    },
-                    None,
-                )
-                .await
-                .map_err(|err| config_load_error(&err))?,
+            match params.model_provider.as_ref() {
+                // The typed provider-validation loader rejects forbidden explicit routes before refresh.
+                Some(_) => {
+                    self.config_manager
+                        .load_for_resume(None, None, overrides, None)
+                        .await
+                }
+                // A global picker has no retained route: current managed policy selects its provider.
+                None => {
+                    self.config_manager
+                        .load_with_overrides(None, overrides)
+                        .await
+                }
+            }
+            .map_err(|err| config_load_error(&err))?,
         );
         let thread = match params.thread_id.as_deref() {
             Some(id) => {

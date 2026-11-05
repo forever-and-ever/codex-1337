@@ -122,7 +122,7 @@ where
     loop {
         tokio::select! {
             result = &mut run => return result,
-            _ = &mut parent_disconnected => {
+            () = &mut parent_disconnected => {
                 tracing::info!("Stopping exec-server after its parent closed stdin");
                 break;
             }

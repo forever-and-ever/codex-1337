@@ -307,7 +307,8 @@ async fn skill_catalog_deltas_survive_resume_and_rebuild_after_compaction() -> R
                 .features
                 .enable(Feature::SkillCatalogDeltas)
                 .expect("enable skill catalog deltas");
-            config.skill_max_context_tokens = NonZeroUsize::new(172);
+            // Fork root aliases make each catalog row shorter than upstream locators.
+            config.skill_max_context_tokens = NonZeroUsize::new(145);
         })
         .restart_with_auto_env(&server, &resumed)
         .await?;
@@ -428,9 +429,10 @@ async fn skill_catalog_deltas_survive_resume_and_rebuild_after_compaction() -> R
             injected
         })
         .collect::<Vec<_>>();
+    // Compaction projects current canonical catalogs with fresh request identities.
     assert_eq!(
         injections,
-        vec![1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1]
+        vec![1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1]
     );
     let exhausted = requests[16].message_input_texts("developer").join("\n");
     assert!(!exhausted.contains("- translation:"), "{exhausted}");

@@ -30,7 +30,6 @@ pub struct NetworkProxyBuilder;
 #[expect(
     clippy::needless_pass_by_value,
     clippy::unused_async,
-    clippy::unused_async_trait_impl,
     reason = "The inert builder preserves the removed upstream proxy API, including owned arguments and futures"
 )]
 impl NetworkProxyBuilder {
@@ -93,7 +92,6 @@ pub enum NetworkProxy {}
 #[expect(
     clippy::needless_pass_by_value,
     clippy::unused_async,
-    clippy::unused_async_trait_impl,
     reason = "The uninhabited stub preserves upstream proxy call signatures"
 )]
 #[allow(
@@ -223,7 +221,6 @@ pub enum NetworkProxyHandle {}
 
 #[expect(
     clippy::unused_async,
-    clippy::unused_async_trait_impl,
     reason = "The uninhabited stub preserves the upstream async shutdown signature"
 )]
 impl NetworkProxyHandle {

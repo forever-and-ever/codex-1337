@@ -75,10 +75,6 @@ struct Offline {
     calls: Arc<AtomicUsize>,
 }
 
-#[expect(
-    clippy::unused_async_trait_impl,
-    reason = "HttpTransport requires asynchronous methods; this scripted transport resolves immediately"
-)]
 impl HttpTransport for Offline {
     async fn execute(&self, _: Request) -> Result<Response, TransportError> {
         Err(TransportError::Build(

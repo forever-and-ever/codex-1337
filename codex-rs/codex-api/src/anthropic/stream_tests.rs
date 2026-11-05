@@ -197,10 +197,6 @@ impl AuthProvider for NoAuth {
 }
 
 struct UncertainTransport(Arc<AtomicUsize>);
-#[expect(
-    clippy::unused_async_trait_impl,
-    reason = "HttpTransport requires asynchronous methods; this scripted transport resolves immediately"
-)]
 impl HttpTransport for UncertainTransport {
     async fn execute(&self, _: Request) -> Result<Response, TransportError> {
         unreachable!("native inference must stream")

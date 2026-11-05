@@ -10,7 +10,7 @@
 //!
 //! Staging runs its own daemon beside production's, so a broken trial build
 //! cannot take other conversations down. Both share the Codex home:
-//! configuration, credentials, sessions and the SQLite state. Only the daemon's
+//! configuration, credentials, sessions and the `SQLite` state. Only the daemon's
 //! runtime files differ. The channel is a property of the installed bundle, not
 //! of the environment, so commands that agents run never inherit it.
 

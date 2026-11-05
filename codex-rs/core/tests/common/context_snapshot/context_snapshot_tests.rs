@@ -760,6 +760,28 @@ fn detailed_permissions_normalize_paths_and_keep_policy_changes_visible() {
         external("/policy/stable", &temp_path("named-one")),
         external("/policy/stable", &temp_path("named-two"))
     );
+    // Amendments carry the same volatile paths as full instructions, plus content-derived
+    // revision IDs. Preserve revision identity and the actual changed policy, not fixture salts.
+    let amendment = |directory: &str, revision: char, denied: &str| {
+        detailed(&[message(
+            "developer",
+            &format!(
+                "<instruction_diff>\n--- permissions/{}\n+++ permissions/{}\n - path `{}/{denied}`\n+# AGENTS.md instructions for {directory}\n</instruction_diff>",
+                "0".repeat(40),
+                revision.to_string().repeat(40),
+                temp_path(directory),
+                directory = temp_path(directory),
+            ),
+        )])
+    };
+    assert_eq!(
+        amendment(".tmpAbc123", 'a', "secret"),
+        amendment(".tmpDef456", 'b', "secret"),
+    );
+    assert_ne!(
+        amendment(".tmpAbc123", 'a', "secret"),
+        amendment(".tmpAbc123", 'a', "public"),
+    );
 }
 
 #[test]

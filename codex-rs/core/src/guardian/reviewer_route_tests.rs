@@ -210,7 +210,7 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
 
     // A transport failure is not a verdict. The fallback must preserve the review's
     // route across retries, and an exhausted deadline must not consume its warning.
-    for timeout in [Some(Duration::from_secs(60)), Some(Duration::ZERO), None] {
+    for timeout in [Some(Duration::from_mins(1)), Some(Duration::ZERO), None] {
         let (session, turn, rx) =
             Box::pin(crate::session::tests::make_session_and_context_with_rx()).await;
         let context = GuardianReviewContext::from(turn);
@@ -272,8 +272,8 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
             .local_agent_runtime
             .reviewer_route_quarantine;
         let until = *quarantine.accounts.lock().await.get(&account_id).unwrap();
-        assert!(until >= before + Duration::from_secs(/*secs*/ 3600));
-        assert!(until <= after + Duration::from_secs(/*secs*/ 3600));
+        assert!(until >= before + Duration::from_hours(/*hours*/ 1));
+        assert!(until <= after + Duration::from_hours(/*hours*/ 1));
         assert_eq!(*route.lock().await, ReviewerRoute::ParentProvider);
         assert_eq!(
             quarantine.warned.lock().await.contains(&session.thread_id),

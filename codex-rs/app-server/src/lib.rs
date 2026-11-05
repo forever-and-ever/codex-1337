@@ -28,6 +28,7 @@ use crate::config_manager::ConfigManager;
 use crate::connection_cleanup::ConnectionCleanupTasks;
 use crate::message_processor::MessageProcessor;
 use crate::message_processor::MessageProcessorArgs;
+use crate::outgoing_message::ClientDisconnect;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessageSender;
@@ -214,7 +215,7 @@ enum OutboundControlEvent {
     },
     /// Remove state for a closed/disconnected connection.
     Closed { connection_id: ConnectionId },
-    /// Disconnect all connection-oriented clients during graceful restart.
+    /// Immediately cancel connection-oriented clients on forced shutdown.
     DisconnectAll,
 }
 
@@ -830,9 +831,7 @@ pub async fn run_main_with_transport_options(
             tokio::select! {
                     biased;
                     event = outbound_control_rx.recv() => {
-                        let Some(event) = event else {
-                            break;
-                        };
+                        let Some(event) = event else { break; };
                         match event {
                             OutboundControlEvent::Opened {
                                 connection_id,
@@ -869,9 +868,7 @@ pub async fn run_main_with_transport_options(
                         }
                     }
                     envelope = outgoing_rx.recv() => {
-                    let Some(envelope) = envelope else {
-                        break;
-                    };
+                    let Some(envelope) = envelope else { break; };
                     route_outgoing_envelope(&mut outbound_connections, envelope).await;
                 }
             }
@@ -968,7 +965,7 @@ pub async fn run_main_with_transport_options(
                 let _ = tokio_util::task::AbortOnDropHandle::new(task).await;
             });
             let mut snapshot_finished = !managed_daemon;
-            let mut clients_disconnected = false;
+            let mut client_disconnect = ClientDisconnect::default();
             let mut shutdown_state = ShutdownState::default();
             let mut shutdown_signal_future = Box::pin(shutdown_signal());
             let exit_reason = loop {
@@ -985,25 +982,20 @@ pub async fn run_main_with_transport_options(
                     if let Some(task) = &recovery_task {
                         task.abort();
                     }
-                    let finished = snapshot_finished || shutdown_state.forced();
-                    if finished {
+                    if shutdown_state.forced() {
                         transport_shutdown_token.cancel();
-                    }
-                    if managed_daemon && shutdown_state.forced() {
+                        let _ = outbound_control_tx.try_send(OutboundControlEvent::DisconnectAll);
                         break "forced_shutdown_requested";
                     }
-                    if !clients_disconnected {
-                        let _ = outbound_control_tx
-                            .send(OutboundControlEvent::DisconnectAll)
-                            .await;
-                        clients_disconnected = true;
-                    }
-                    if finished {
+                    client_disconnect.begin(&initialize_notification_sender);
+                    if snapshot_finished && client_disconnect.closed() {
+                        transport_shutdown_token.cancel();
                         break "shutdown_requested";
                     }
                 }
 
                 tokio::select! {
+                    () = client_disconnect.flushed() => {}
                     _ = &mut snapshot, if matches!(shutdown_state, ShutdownState::Draining { .. } | ShutdownState::Forced) && *active_admissions_rx.borrow() == 0 && !snapshot_finished => {
                         snapshot_finished = true;
                     }
@@ -1294,7 +1286,7 @@ pub async fn run_main_with_transport_options(
                 shutdown_forced = shutdown_state.forced(),
                 "processor task exited"
             );
-            if managed_daemon && shutdown_state.forced() {
+            if shutdown_state.forced() {
                 AppServerExit::Forced
             } else {
                 AppServerExit::Graceful
@@ -1305,6 +1297,7 @@ pub async fn run_main_with_transport_options(
     drop(transport_event_tx);
 
     if matches!(processor_handle.await, Ok(AppServerExit::Forced)) {
+        outbound_handle.abort();
         return Ok(AppServerExit::Forced);
     }
     let _ = outbound_handle.await;

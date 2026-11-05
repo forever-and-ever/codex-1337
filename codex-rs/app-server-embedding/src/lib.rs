@@ -83,9 +83,9 @@ pub struct InProcessClientStartArgs {
     pub embedded_network_policy: EmbeddedNetworkPolicy,
     /// Feedback sink used by app-server/core telemetry and logs.
     pub feedback: CodexFeedback,
-    /// SQLite tracing layer used to flush recently emitted logs before feedback upload.
+    /// `SQLite` tracing layer used to flush recently emitted logs before feedback upload.
     pub log_db: Option<LogDbLayer>,
-    /// Process-wide SQLite state handle shared with the embedded app-server.
+    /// Process-wide `SQLite` state handle shared with the embedded app-server.
     pub state_db: Option<StateDbHandle>,
     /// Environment manager used by core execution and filesystem operations.
     pub environment_manager: Arc<EnvironmentManager>,

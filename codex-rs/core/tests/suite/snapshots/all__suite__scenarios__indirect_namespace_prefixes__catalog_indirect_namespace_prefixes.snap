@@ -1,8 +1,8 @@
 ---
 source: core/tests/suite/scenarios_indirect_namespace_prefixes.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Function prefixes annotate direct and indirect tools; namespace prefixes annotate embedded namespace docs, loaded namespaces, and flat indirect entries. A model switch clears both without changing dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(\"Function and namespace prefixes follow the selected model in declarations and describe_tool contracts; model switches clear them without changing dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: Function prefixes annotate direct and indirect tools; namespace prefixes annotate embedded namespace docs, loaded namespaces, and flat indirect entries. A model switch clears both without changing dispatch.
+Scenario: Function and namespace prefixes follow the selected model in declarations and describe_tool contracts; model switches clear them without changing dispatch.
 
 ## Window 1
 Settings:
@@ -15,10 +15,16 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=1261f9f79ad97cee):
-    - custom/exec: Exec guidance.  Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided Ja...; hash=db96605f80dbbdd7
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=6692d8f6c55be489
+  tools (9; hash=3c2de397dccb17b2):
+    - custom/exec: Exec guidance.  Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fen...; hash=ed431b25e298d6d2
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
+    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
+    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+    - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
+    - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
+      - function/wait_agent
+    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
@@ -35,22 +41,21 @@ Settings:
     Find echo, call it, and list the agents.
 -- request 2 (turn) --
 06:custom_tool_call/exec:
-    const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+    const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
-    const agents = await tools.collaboration__list_agents({});
+    const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 07:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nImage guidance.\\n\\nView a local image file from the filesystem w...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=4bd42f2e71ce15d7]
+     | {"descriptions":["Functions context.\\n\\nCall: await tools.view_image(args).\\nParameters: object\\n  detai...n\\nReports."],"echo":"ECHOING: ping","agent":"/root"} [hash=3edb2e8737d39148]
 
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (4; hash=d878b195101dccae):
-    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=881b443f5068d3fb
+  tools (9; hash=17adfc3c6cf995fe):
+    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=8450aed3ca11d79e
 -- request 3 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
@@ -65,16 +70,15 @@ Settings: relative to window 1
 05:message/user:
     Find echo, call it, and list the agents.
 06:custom_tool_call/exec:
-    const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+    const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
-    const agents = await tools.collaboration__list_agents({});
+    const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 07:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nImage guidance.\\n\\nView a local image file from the filesystem w...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=4bd42f2e71ce15d7]
+     | {"descriptions":["Functions context.\\n\\nCall: await tools.view_image(args).\\nParameters: object\\n  detai...n\\nReports."],"echo":"ECHOING: ping","agent":"/root"} [hash=3edb2e8737d39148]
 08:message/assistant:
     Done.
 09:message/developer:
@@ -83,13 +87,12 @@ Settings: relative to window 1
     Find echo again, call it, and list the agents.
 -- request 4 (turn) --
 11:custom_tool_call/exec:
-    const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+    const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
-    const agents = await tools.collaboration__list_agents({});
+    const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 12:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["View a local image file from the filesystem when visual inspection is needed. Use this...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=6f5fd573af132df1]
+     | {"descriptions":["Call: await tools.view_image(args).\\nParameters: object\\n  detail (optional): string. ...n\\nReports."],"echo":"ECHOING: ping","agent":"/root"} [hash=cfc8c1df3c62940a]
