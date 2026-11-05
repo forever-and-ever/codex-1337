@@ -2969,6 +2969,103 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
             .state,
         codex_state::AgentMailState::Admitted
     );
+    // Registration wins against explicit shutdown: persistence is paused after
+    // the registrar publishes its task under SessionState. Closing cannot drain
+    // past it, even when the caller requesting admission has been cancelled.
+    let mut settling = deferred.clone();
+    let settling_id = ResponseItemId::new("amsg_mail");
+    settling.id = None;
+    settling.content = "admission settles through shutdown".into();
+    reopened
+        .thread_queue()
+        .accept_agent_mail(
+            &settling_id,
+            resumed_session.thread_id,
+            sender,
+            resumed_session.thread_id,
+            "shutdown settlement",
+            &digest,
+            &serde_json::to_string(&settling).unwrap(),
+        )
+        .await
+        .unwrap();
+    settling.id = Some(settling_id.clone());
+    let persistence = super::thread_settings::acquire_persistence_lock(&resumed_session).await;
+    let owner = Arc::clone(&resumed_session);
+    let owner_turn = Arc::clone(&resumed_turn_context);
+    let owned_mail = settling.clone().into();
+    let caller = tokio::spawn(async move {
+        owner
+            .record_accepted_agent_mail(&owner_turn, owner_turn.model_info(), &owned_mail)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while resumed_session.pending_agent_mail_admissions() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    resumed_session.begin_explicit_close().await;
+    let mut drain = Box::pin(resumed_session.drain_agent_mail_admissions());
+    assert!(futures::poll!(drain.as_mut()).is_pending());
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    assert!(futures::poll!(drain.as_mut()).is_pending());
+    drop(persistence);
+    tokio::time::timeout(Duration::from_secs(5), drain)
+        .await
+        .unwrap();
+    assert_eq!(resumed_session.pending_agent_mail_admissions(), 0);
+    assert_eq!(
+        reopened
+            .thread_queue()
+            .agent_mail(resumed_session.thread_id, &settling_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Admitted,
+    );
+    // Close wins against a later registrar: it cannot publish into the already
+    // drained tracker, and the authoritative inbox remains pending for reload.
+    let late_id = ResponseItemId::new("amsg_mail");
+    settling.id = None;
+    reopened
+        .thread_queue()
+        .accept_agent_mail(
+            &late_id,
+            resumed_session.thread_id,
+            sender,
+            resumed_session.thread_id,
+            "after shutdown seal",
+            &digest,
+            &serde_json::to_string(&settling).unwrap(),
+        )
+        .await
+        .unwrap();
+    settling.id = Some(late_id.clone());
+    assert!(
+        resumed_session
+            .record_accepted_agent_mail(
+                &resumed_turn_context,
+                resumed_turn_context.model_info(),
+                &settling.into(),
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(resumed_session.pending_agent_mail_admissions(), 0);
+    assert!(matches!(
+        reopened
+            .thread_queue()
+            .agent_mail(resumed_session.thread_id, &late_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Pending(_),
+    ));
 }
 
 #[test_case::test_case(false, None, false, 5; "plain items")]
@@ -7013,6 +7110,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         tx_event,
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
+        runtime_holds: state.runtime_holds.clone(),
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         initial_account_binding: tokio::sync::OnceCell::new(),
@@ -9069,6 +9167,7 @@ where
         tx_event,
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
+        runtime_holds: state.runtime_holds.clone(),
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         initial_account_binding: tokio::sync::OnceCell::new(),

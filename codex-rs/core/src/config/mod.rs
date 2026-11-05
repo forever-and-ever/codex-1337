@@ -4160,7 +4160,7 @@ impl Config {
             .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
             .max(MIN_EMPTY_YIELD_TIME_MS);
         let thread_unload_delay =
-            Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(/*default*/ 60));
+            Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(crate::runtime_holds::DEFAULT_THREAD_UNLOAD_DELAY_SECS));
         if std::time::Instant::now()
             .checked_add(thread_unload_delay)
             .is_none()

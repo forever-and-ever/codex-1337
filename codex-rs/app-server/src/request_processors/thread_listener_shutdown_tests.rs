@@ -11,6 +11,9 @@ use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
 use crate::thread_sample::SampleResponseRegistry;
 use crate::thread_state::ConnectionCapabilities;
+use crate::thread_state::ListenerBinding;
+use crate::thread_state::ListenerInstallMode;
+use crate::thread_state::ListenerStateCandidate;
 use crate::thread_state::resolve_server_request_on_thread_listener;
 use anyhow::Context;
 use anyhow::Result;
@@ -22,6 +25,8 @@ use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::ThreadUnsubscribeStatus;
 use codex_arg0::Arg0DispatchPaths;
+use codex_core::ThreadEvictionOutcome;
+use codex_core::ThreadRegistration;
 use codex_goal_extension::GoalService;
 use codex_login::AuthManager;
 use codex_thread_store::PersistContext;
@@ -31,6 +36,7 @@ use std::collections::HashSet;
 use test_case::test_case;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 
 #[test_case(true; "listener attached before shutdown")]
 #[test_case(false; "listener attached after shutdown")]
@@ -45,6 +51,66 @@ async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
         .persist_thread(thread_id, PersistContext::Standard)
         .await?;
     let thread = test.codex;
+    // A watch may coalesce Held back into Quiet before its observer runs. The
+    // policy must retain the final release time instead of an observed bool edge.
+    let holds = thread.runtime_holds();
+    let mut activity = holds.subscribe();
+    timeout(
+        Duration::from_secs(10),
+        activity.wait_for(|state| {
+            matches!(
+                state,
+                codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+            )
+        }),
+    )
+    .await??;
+    let (_subscribers_tx, detached) =
+        watch::channel(crate::thread_state::SubscriberActivity::Detached {
+            since: Instant::now(),
+        });
+    let (status_tx, status) = watch::channel(ThreadStatus::Idle);
+    let mut policy = UnloadingState::new(Duration::from_millis(250), detached, activity, status);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let transient_use = holds.acquire().expect("open runtime");
+    drop(transient_use); // No await: the observer cannot see the Held publication.
+    assert!(!policy.should_unload_now());
+    assert!(
+        timeout(
+            Duration::from_millis(5),
+            policy.wait_for_unloading_trigger()
+        )
+        .await
+        .is_err()
+    );
+    // Status-only wakeups must not erase a contention floor; a second
+    // Contended result establishes a fresh floor without rewriting quiet-since.
+    timeout(Duration::from_secs(5), policy.wait_for_unloading_trigger()).await?;
+    let quiet = holds.activity();
+    policy.defer_contention();
+    status_tx.send_replace(ThreadStatus::NotLoaded);
+    assert!(
+        timeout(
+            Duration::from_millis(200),
+            policy.wait_for_unloading_trigger()
+        )
+        .await
+        .is_err()
+    );
+    policy.defer_contention();
+    status_tx.send_replace(ThreadStatus::Idle);
+    assert!(
+        timeout(
+            Duration::from_millis(900),
+            policy.wait_for_unloading_trigger()
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(holds.activity(), quiet);
+    timeout(Duration::from_secs(5), policy.wait_for_unloading_trigger()).await?;
+    drop(policy);
+    drop(holds);
     let runtime = Arc::downgrade(&thread);
     let config = Arc::new(test.config.clone());
     let auth =
@@ -117,11 +183,114 @@ async fn listener_shutdown_releases_runtime_and_preserves_other_subscribers(
             .await;
     }
     if attach_before_shutdown {
+        // Pause after identity validation. Core capacity wins before the host
+        // transaction can acquire viewer custody: installation must not run.
+        let other = test_codex().build_with_auto_env(&server).await?;
+        let other_id = other.session_configured.thread_id;
+        let other_thread = Arc::clone(&other.codex);
+        let mut quiet = other_thread.runtime_holds().subscribe();
+        timeout(
+            Duration::from_secs(10),
+            quiet.wait_for(|state| {
+                matches!(
+                    state,
+                    codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                )
+            }),
+        )
+        .await??;
+        let candidate = thread_state_manager.created_listener_state(other_id).await;
+        let state_manager = thread_state_manager.clone();
+        let manager = Arc::clone(&other.thread_manager);
+        let (validated_tx, validated_rx) = oneshot::channel();
+        let (install_tx, install_rx) = oneshot::channel();
+        let installer = tokio::spawn(async move {
+            assert!(matches!(
+                manager.thread_registration(other_id, &other_thread).await,
+                ThreadRegistration::Current
+            ));
+            validated_tx.send(()).expect("identity observer");
+            install_rx.await.expect("install barrier");
+            state_manager
+                .subscribe_and_install_listener(
+                    other_id,
+                    &candidate,
+                    &other_thread.runtime_holds(),
+                    &[connection_id],
+                    ListenerInstallMode::Live,
+                    |_| -> Result<(), ()> {
+                        panic!("Closing runtime installed an attached listener")
+                    },
+                )
+                .await
+        });
+        validated_rx.await?;
+        let eligibility = other
+            .codex
+            .idle_close_eligibility(Duration::ZERO)
+            .expect("idle child before capacity seal");
+        assert_eq!(
+            other
+                .thread_manager
+                .try_idle_close(Arc::clone(&other.codex), eligibility)
+                .await?,
+            ThreadEvictionOutcome::Evicted
+        );
+        install_tx.send(()).expect("installation still waiting");
+        assert!(matches!(
+            installer.await?.expect("installation closure never ran"),
+            ListenerBinding::Closing
+        ));
+        assert!(
+            thread_state_manager
+                .subscribed_connection_ids(other_id)
+                .await
+                .is_empty()
+        );
+        assert!(matches!(
+            thread_state_manager.created_listener_state(other_id).await,
+            ListenerStateCandidate::Unpublished(_)
+        ));
+    }
+    // Converse ordering: install viewer custody before the same saved eligibility
+    // can seal. A manually acquired core hold is not a host-subscription witness.
+    let eligibility = thread
+        .idle_close_eligibility(Duration::ZERO)
+        .expect("idle runtime");
+    let candidate = thread_state_manager.created_listener_state(thread_id).await;
+    let installed = thread_state_manager
+        .subscribe_and_install_listener(
+            thread_id,
+            &candidate,
+            &thread.runtime_holds(),
+            &connection_ids,
+            ListenerInstallMode::Live,
+            |_| Ok::<_, ()>(()),
+        )
+        .await
+        .expect("viewer installation");
+    assert!(matches!(
+        installed,
+        ListenerBinding::Installed { attached: true, .. }
+    ));
+    assert!(thread.idle_close_eligibility(Duration::ZERO).is_none());
+    assert_eq!(
+        test.thread_manager
+            .try_idle_close(Arc::clone(&thread), eligibility)
+            .await?,
+        ThreadEvictionOutcome::Busy
+    );
+    if attach_before_shutdown {
         processor
             .try_attach_thread_listener(thread_id, Arc::clone(&thread), connection_ids.clone())
             .await;
     }
     thread.shutdown_and_wait().await?;
+    assert!(
+        !thread_state_manager
+            .try_add_connection_to_thread(thread_id, connection_id)
+            .await
+    );
     let shutdown_result = tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
         let resume = processor
             .thread_resume(

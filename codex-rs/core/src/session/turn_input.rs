@@ -23,7 +23,6 @@ use super::turn_context::TurnContext;
 use crate::WithTurnExtensionData;
 use crate::context::ContextualUserFragment;
 use crate::context::GuardianSenderMessages;
-use crate::state::ActiveTurn;
 use crate::state::AdditionalContextFormat;
 use crate::state::TurnState;
 use crate::tasks::RegularTask;
@@ -251,6 +250,10 @@ pub(super) async fn handle(
                 .acquire()
                 .await
                 .unwrap_or_else(|_| unreachable!("extension admission semaphore is never closed"));
+            let _runtime_hold = session
+                .runtime_holds
+                .acquire()
+                .ok_or(CodexErr::ThreadNotFound(session.thread_id))?;
             start_or_steer(session, request, submission_id).await
         }
         TurnInputMode::StartIfIdle => {
@@ -562,7 +565,12 @@ async fn start_if_idle(
                 reason: NotSubmittedReason::Superseded,
             });
         }
-        let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
+        let Some(reservation) = session.reserve_runtime_turn() else {
+            return Ok(TurnInputSubmission::NotSubmitted {
+                reason: NotSubmittedReason::ServerDraining,
+            });
+        };
+        let active_turn = active_turn.insert(reservation);
         Arc::clone(&active_turn.turn_state)
     };
     drop(_extension_admission);
@@ -750,7 +758,7 @@ impl Session {
         if !self.mailbox_turn_has_capacity().await {
             return None;
         }
-        let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
+        let active_turn = active_turn.insert(self.reserve_runtime_turn()?);
         let previous_options = if has_trigger_turn {
             Default::default()
         } else {

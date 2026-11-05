@@ -1,3 +1,8 @@
+use codex_core::runtime_holds::RuntimeActivity;
+use codex_core::runtime_holds::RuntimeHold;
+use codex_core::runtime_holds::RuntimeHolds;
+use codex_core::runtime_holds::WeakRuntimeHolds;
+
 mod delivery;
 mod tools;
 mod wire;
@@ -27,7 +32,6 @@ use tokio::task::JoinHandle;
 
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingMessageSender;
-use crate::thread_state::ThreadRuntimeLease;
 use crate::thread_tools::CoordinationSlot;
 
 pub(crate) use tools::install;
@@ -42,7 +46,6 @@ enum Arm {
     Watch {
         session_id: i32,
         watch: TerminalWatch,
-        lease: ThreadRuntimeLease,
         deadline: Option<i64>,
     },
 }
@@ -73,7 +76,9 @@ impl Drop for RunningAlarmWorker {
         for task in &self.tasks {
             task.abort();
         }
-        self.alarms.0.registry().watches.clear();
+        let mut registry = self.alarms.0.registry();
+        registry.watches.clear();
+        registry.bindings.clear();
     }
 }
 
@@ -81,11 +86,93 @@ impl Drop for RunningAlarmWorker {
 struct Registry {
     alarms: BTreeMap<i64, ThreadAlarm>,
     watches: HashMap<i64, WatchTask>,
+    bindings: HashMap<ThreadId, RuntimeBinding>,
+}
+
+// Archive already holds mutation while shutdown invokes extension stop. Move
+// bindings into this guard so stop cannot wait reentrantly; restore surviving
+// runtimes if archival fails before their teardown.
+pub(crate) struct AlarmArchiveGuard<'a> {
+    alarms: &'a Alarms,
+    _mutation: tokio::sync::SemaphorePermit<'a>,
+    bindings: Vec<(ThreadId, RuntimeBinding)>,
+}
+
+impl Drop for AlarmArchiveGuard<'_> {
+    fn drop(&mut self) {
+        let mut registry = self.alarms.0.registry();
+        for (thread, binding) in self.bindings.drain(..) {
+            if binding
+                .runtime
+                .upgrade()
+                .is_some_and(|runtime| !matches!(runtime.activity(), RuntimeActivity::Closing))
+            {
+                registry.bindings.entry(thread).or_insert(binding);
+                registry.refresh(thread, true);
+            }
+        }
+    }
+}
+
+struct RuntimeBinding {
+    runtime: WeakRuntimeHolds,
+    phase: BindingPhase,
+}
+
+enum BindingPhase {
+    Recovering(RuntimeHold),
+    Armed(RuntimeHold),
+    Clear,
+}
+
+impl RuntimeBinding {
+    fn refresh(&mut self, armed: bool, recovered: bool) {
+        if matches!(self.phase, BindingPhase::Recovering(_)) && !recovered {
+            return;
+        }
+        self.phase = match (
+            std::mem::replace(&mut self.phase, BindingPhase::Clear),
+            armed,
+        ) {
+            (BindingPhase::Recovering(hold) | BindingPhase::Armed(hold), true) => {
+                BindingPhase::Armed(hold)
+            }
+            (BindingPhase::Clear, true) => self
+                .runtime
+                .upgrade()
+                .and_then(|runtime| runtime.acquire())
+                .map_or(BindingPhase::Clear, BindingPhase::Armed),
+            (_, false) => BindingPhase::Clear,
+        };
+    }
+}
+
+impl Registry {
+    fn refresh(&mut self, thread: ThreadId, recovered: bool) {
+        let armed = self.alarms.values().any(|alarm| {
+            alarm.thread_id == thread && matches!(alarm.state, ThreadAlarmState::Armed(_))
+        });
+        if let Some(binding) = self.bindings.get_mut(&thread) {
+            binding.refresh(armed, recovered);
+        }
+    }
+
+    fn recovered(&mut self) {
+        let threads = self
+            .bindings
+            .iter()
+            .filter_map(|(thread, binding)| {
+                matches!(binding.phase, BindingPhase::Recovering(_)).then_some(*thread)
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            self.refresh(thread, true);
+        }
+    }
 }
 
 struct WatchTask {
     task: JoinHandle<()>,
-    _lease: ThreadRuntimeLease,
 }
 
 impl Drop for WatchTask {
@@ -106,6 +193,7 @@ struct Shared {
     mutation: tokio::sync::Semaphore,
     initialized: OnceCell<()>,
     changed: Notify,
+    bindings_changed: Notify,
     sounded: mpsc::UnboundedSender<(i64, AlarmCause)>,
     publications: mpsc::UnboundedSender<Publication>,
 }
@@ -152,6 +240,7 @@ impl Alarms {
             mutation: tokio::sync::Semaphore::new(1),
             initialized: OnceCell::new(),
             changed: Notify::new(),
+            bindings_changed: Notify::new(),
             sounded,
             publications,
         }));
@@ -193,6 +282,9 @@ impl Alarms {
     }
 
     async fn initialize(&self) -> Result<(), String> {
+        if self.0.initialized.get().is_some() {
+            return Ok(());
+        }
         self.0
             .initialized
             .get_or_try_init(|| async {
@@ -245,10 +337,13 @@ impl Alarms {
                 for (id, cause) in ready {
                     self.sound_locked(id, cause).await?;
                 }
-                Ok(())
+                Ok::<(), String>(())
             })
             .await
-            .copied()
+            .copied()?;
+        let _mutation = self.0.mutate().await;
+        self.0.registry().recovered();
+        Ok(())
     }
 
     fn store(&self) -> Result<&Store, String> {
@@ -267,13 +362,80 @@ impl Alarms {
         })
     }
 
-    fn attach_hold(&self, thread: ThreadId, data: &codex_extension_api::ExtensionData) {
+    async fn attach_hold(
+        &self,
+        thread: ThreadId,
+        data: &codex_extension_api::ExtensionData,
+    ) -> Result<(), String> {
+        let runtime = data
+            .get::<RuntimeHolds>()
+            .ok_or_else(|| "alarm runtime lifetime authority is unavailable".to_string())?;
+        let _mutation = self.0.mutate().await;
+        let mut registry = self.0.registry();
+        let current = registry.bindings.get(&thread).is_some_and(|binding| {
+            binding
+                .runtime
+                .upgrade()
+                .is_some_and(|bound| bound.same_runtime(&runtime))
+        });
+        if !current {
+            let hold = runtime
+                .acquire()
+                .ok_or_else(|| "alarm runtime is closing".to_string())?;
+            registry.bindings.insert(
+                thread,
+                RuntimeBinding {
+                    runtime: runtime.downgrade(),
+                    phase: BindingPhase::Recovering(hold),
+                },
+            );
+            registry.refresh(thread, self.0.initialized.get().is_some());
+        }
+        drop(registry);
         let weak = Arc::downgrade(&self.0);
         data.insert(codex_core::idle_hold::IdleHold::new(move || {
             weak.upgrade()
                 .is_some_and(|shared| Alarms(shared).held(thread))
         }));
         data.insert(self.clone());
+        Ok(())
+    }
+
+    async fn detach_hold(&self, thread: ThreadId, data: &codex_extension_api::ExtensionData) {
+        let Some(runtime) = data.get::<RuntimeHolds>() else {
+            return;
+        };
+        loop {
+            let changed = self.0.bindings_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if !self
+                .0
+                .registry()
+                .bindings
+                .get(&thread)
+                .is_some_and(|binding| {
+                    binding
+                        .runtime
+                        .upgrade()
+                        .is_some_and(|bound| bound.same_runtime(&runtime))
+                })
+            {
+                return;
+            }
+            tokio::select! {
+                _mutation = self.0.mutate() => {
+                    let mut registry = self.0.registry();
+                    if registry.bindings.get(&thread).is_some_and(|binding| {
+                        binding.runtime.upgrade().is_some_and(|bound| bound.same_runtime(&runtime))
+                    }) {
+                        registry.bindings.remove(&thread);
+                    }
+                    return;
+                }
+                () = &mut changed => {}
+            }
+        }
     }
 
     fn summaries(&self, thread: ThreadId) -> Vec<AlarmSummary> {
@@ -337,11 +499,14 @@ impl Alarms {
             .await
             .map_err(|err| err.to_string())?;
         let id = alarm.id;
-        self.0.registry().alarms.insert(id, alarm.clone());
+        {
+            let mut registry = self.0.registry();
+            registry.alarms.insert(id, alarm.clone());
+            registry.refresh(thread, true);
+        }
         if let Arm::Watch {
             session_id,
             watch,
-            lease,
             deadline,
         } = arm
         {
@@ -350,13 +515,7 @@ impl Alarms {
                 let cause = delivery::watch(watch, session_id, deadline).await;
                 let _ = sounded.send((id, cause));
             });
-            self.0.registry().watches.insert(
-                id,
-                WatchTask {
-                    task,
-                    _lease: lease,
-                },
-            );
+            self.0.registry().watches.insert(id, WatchTask { task });
         }
         self.publish(thread, None);
         Ok(alarm)
@@ -397,14 +556,35 @@ impl Alarms {
             let mut registry = self.0.registry();
             registry.alarms.remove(&id);
             registry.watches.remove(&id);
+            registry.refresh(thread, true);
         }
         self.publish(thread, None);
         Ok(self.summaries(thread))
     }
 
-    pub(crate) async fn archive_guard(&self) -> Result<tokio::sync::SemaphorePermit<'_>, String> {
+    pub(crate) async fn archive_guard(
+        &self,
+        threads: &[ThreadId],
+    ) -> Result<AlarmArchiveGuard<'_>, String> {
         self.initialize().await?;
-        Ok(self.0.mutate().await)
+        let mutation = self.0.mutate().await;
+        let mut registry = self.0.registry();
+        let bindings = threads
+            .iter()
+            .filter_map(|thread| {
+                registry
+                    .bindings
+                    .remove(thread)
+                    .map(|binding| (*thread, binding))
+            })
+            .collect();
+        drop(registry);
+        self.0.bindings_changed.notify_waiters();
+        Ok(AlarmArchiveGuard {
+            alarms: self,
+            _mutation: mutation,
+            bindings,
+        })
     }
 
     pub(crate) async fn discard_locked(&self, thread: ThreadId) -> Result<(), String> {
@@ -427,6 +607,7 @@ impl Alarms {
             registry.alarms.remove(&id);
             registry.watches.remove(&id);
         }
+        registry.refresh(thread, true);
         drop(registry);
         self.publish(thread, None);
         Ok(())
@@ -474,6 +655,7 @@ impl Alarms {
         } else {
             registry.alarms.remove(&id);
         }
+        registry.refresh(alarm.thread_id, self.0.initialized.get().is_some());
         drop(registry);
         self.publish(alarm.thread_id, None);
         Ok(())

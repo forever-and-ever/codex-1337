@@ -1,5 +1,8 @@
+pub use idle_close::IdleCloseEligibility;
+
 mod agent_mail;
 mod fork_snapshot;
+mod idle_close;
 pub(crate) use fork_snapshot::fork_history_from_snapshot;
 mod managed;
 mod prompt_cache;

@@ -41,6 +41,7 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         let mut registry = alarms.0.registry();
         registry.alarms.remove(&alarm.id);
         registry.watches.remove(&alarm.id);
+        registry.refresh(alarm.thread_id, true);
         drop(registry);
         alarms.publish(alarm.thread_id, None);
         return Ok(Delivery::Done);
@@ -68,6 +69,7 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
     let mut registry = alarms.0.registry();
     registry.alarms.remove(&alarm.id);
     registry.watches.remove(&alarm.id);
+    registry.refresh(alarm.thread_id, true);
     drop(registry);
     alarms.publish(alarm.thread_id, None);
     Ok(Delivery::Done)
@@ -85,7 +87,7 @@ pub(super) async fn watch(
     loop {
         let delay = deadline.map(|at| {
             Duration::from_millis(at.saturating_sub(super::now()).max(0).unsigned_abs())
-                .min(Duration::from_secs(60))
+                .min(Duration::from_mins(1))
         });
         tokio::select! {
             biased;
@@ -185,13 +187,13 @@ fn next(alarms: &Alarms, retries: &HashMap<i64, Retry>) -> Next {
             ThreadAlarmState::Armed(AlarmTrigger::Watch { .. }) => {}
         }
     }
-    Next::Wait(wait.map(|delay| delay.min(Duration::from_secs(60))))
+    Next::Wait(wait.map(|delay| delay.min(Duration::from_mins(1))))
 }
 
 pub(super) async fn run(alarms: Alarms, mut sounds: mpsc::UnboundedReceiver<(i64, AlarmCause)>) {
     while let Err(error) = alarms.initialize().await {
         tracing::warn!(%error, "alarm recovery will retry");
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_mins(1)).await;
     }
     let mut retries = HashMap::<i64, Retry>::new();
     let mut pending_sound = None;
@@ -243,7 +245,7 @@ pub(super) async fn run(alarms: Alarms, mut sounds: mpsc::UnboundedReceiver<(i64
                 retries.insert(
                     id,
                     Retry {
-                        at: Instant::now() + Duration::from_secs(60),
+                        at: Instant::now() + Duration::from_mins(1),
                         pending,
                     },
                 );

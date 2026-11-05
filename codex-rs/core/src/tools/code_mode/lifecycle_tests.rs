@@ -16,8 +16,14 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
             "text('done')".into(),
             service.shutdown_token.clone(),
         )
-        .await;
+        .await
+        .unwrap();
     let scope = start.scope();
+    let execution_hold = scope.execution_hold();
+    assert!(matches!(
+        session.runtime_holds.activity(),
+        crate::runtime_holds::RuntimeActivity::Held { .. }
+    ));
     let opened_owner = scope.owner();
     assert_eq!(opened_owner.cell_id, None);
 
@@ -27,6 +33,15 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
     let cell = CellId::new("generation-1:cell-1".into());
     start.allocated(&cell).await;
     scope.terminal_admitted().await;
+    assert!(matches!(
+        session.runtime_holds.activity(),
+        crate::runtime_holds::RuntimeActivity::Held { .. }
+    ));
+    drop(execution_hold);
+    assert!(matches!(
+        session.runtime_holds.activity(),
+        crate::runtime_holds::RuntimeActivity::Quiet { .. }
+    ));
     let owner = scope.owner();
     let actual = std::iter::from_fn(|| events.try_recv().ok())
         .map(|event| {
@@ -238,6 +253,7 @@ async fn failed_allocation_closes_without_fabricating_a_runtime_cell() {
             service.shutdown_token.clone(),
         )
         .await
+        .unwrap()
         .failed()
         .await;
     let actual = std::iter::from_fn(|| events.try_recv().ok())
@@ -293,7 +309,8 @@ async fn service_teardown_cancels_blocked_transcript_admission() {
             "await new Promise(() => {})".into(),
             service.shutdown_token.clone(),
         )
-        .await;
+        .await
+        .unwrap();
     let scope = starting.scope();
     let wait = service
         .begin_process_wait("abandoned-exec", scope.owner(), Arc::clone(&scope.turn))

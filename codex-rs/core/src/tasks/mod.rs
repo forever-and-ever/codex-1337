@@ -352,7 +352,13 @@ impl Session {
             .await
             .unwrap_or_else(|_| unreachable!("account work semaphore is never closed"));
         let Some(mut active) = input.lock(self).await else {
-            return Ok(());
+            return if self.runtime_holds.is_closing() {
+                Err(codex_protocol::error::CodexErr::ThreadNotFound(
+                    self.thread_id,
+                ))
+            } else {
+                Ok(())
+            };
         };
         let turn = active.as_mut().expect("task admission owns an active turn");
         debug_assert!(turn.task.is_none());
@@ -398,7 +404,9 @@ impl Session {
             codex.turn.token_usage.total_tokens = field::Empty,
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
+        let execution_hold = Arc::clone(&turn.runtime_hold);
         let task_future = async move {
+            let _execution_hold = execution_hold;
             let ctx_for_finish = Arc::clone(&ctx);
             let task_result = task_for_run
                 .run(

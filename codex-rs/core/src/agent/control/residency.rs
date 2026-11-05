@@ -4,14 +4,12 @@ use super::LocalAgentControl;
 use super::LocalAgentRuntime;
 use super::runtime::AgentTreeMembership;
 use crate::agent::AgentStatus;
-use crate::agent::registry::EvictedEnvironments;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
-use codex_protocol::error::CodexErrKind;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::MultiAgentVersion;
@@ -26,6 +24,8 @@ use tracing::warn;
 pub enum ThreadEvictionOutcome {
     /// Work or another teardown owns the runtime; retry later.
     Busy,
+    /// Another lock owner prevented a nonblocking eligibility decision.
+    Contended,
     /// This operation stopped and removed the runtime.
     Evicted,
     /// The runtime was removed or replaced; leave its replacement alone.
@@ -38,78 +38,10 @@ impl ThreadManagerState {
         thread: Arc<CodexThread>,
         membership: &AgentTreeMembership,
     ) -> CodexResult<ThreadEvictionOutcome> {
-        let Ok(residency_guard) = Arc::clone(&thread.residency_gate).try_write_owned() else {
+        let Some(eligibility) = thread.idle_close_eligibility(std::time::Duration::ZERO) else {
             return Ok(ThreadEvictionOutcome::Busy);
         };
-        let thread_id = thread.session.thread_id;
-        if !self
-            .get_thread(thread_id)
-            .await
-            .is_ok_and(|registered| Arc::ptr_eq(&registered, &thread))
-        {
-            return Ok(ThreadEvictionOutcome::NotCurrent);
-        }
-        if !is_resident_candidate(&thread) || !is_unloadable(&thread).await {
-            return Ok(ThreadEvictionOutcome::Busy);
-        }
-        let manager = Arc::clone(self);
-        let teardown = membership
-            .clone()
-            .into_teardown_guard("resident_eviction", Some(thread_id));
-        // Once shutdown is submitted, cancellation cannot release delivery or capacity early.
-        tokio::spawn(async move {
-            let _residency_guard = residency_guard;
-            thread.ensure_rollout_materialized().await;
-            if let Err(err) = thread.shutdown_and_wait().await {
-                teardown.record_shutdown_failure("stop_resident", CodexErrKind::from(&err).into());
-                teardown.complete();
-                return Err(err);
-            }
-            // Dispatch has stopped and the residency guard excludes senders. A tree
-            // shutdown deliberately discards its mailbox instead of retaining it.
-            let mail = thread
-                .session
-                .input_queue
-                .drain_mailbox()
-                .await
-                .into_iter()
-                .map(|mail| mail.communication)
-                // Accepted mail keeps its durable owner; replay restores it after reload.
-                .filter(|mail| !crate::session::agent_mail::is_accepted_agent_mail(mail))
-                .collect();
-            let runtime = &thread.session.services.local_agent_runtime;
-            let _ = runtime.mailboxes.enqueue(thread_id, /*id*/ None, mail);
-            // Preserve configured bindings across eviction without retaining turn-only attachments.
-            // Raw bindings keep the original pending owner configuration alive.
-            let environments = EvictedEnvironments {
-                selections: thread.environment_selections().await,
-                bindings: thread
-                    .session
-                    .services
-                    .turn_environments
-                    .configured_snapshot_now(),
-            };
-            let mut threads = manager.threads.write().await;
-            if threads
-                .get(&thread_id)
-                .is_some_and(|registered| !Arc::ptr_eq(registered, &thread))
-            {
-                teardown.complete();
-                return Ok(ThreadEvictionOutcome::NotCurrent);
-            }
-            runtime
-                .registry
-                .save_evicted_environments(thread_id, environments);
-            let removed = threads.remove(&thread_id).is_some();
-            runtime.residency.remove(thread_id);
-            teardown.complete();
-            Ok(if removed {
-                ThreadEvictionOutcome::Evicted
-            } else {
-                ThreadEvictionOutcome::NotCurrent
-            })
-        })
-        .await?
+        self.evict_idle_v2(thread, membership, eligibility).await
     }
 }
 
@@ -267,7 +199,7 @@ impl V2Residency {
                 Ok(ThreadEvictionOutcome::Evicted | ThreadEvictionOutcome::NotCurrent) => {
                     return true;
                 }
-                Ok(ThreadEvictionOutcome::Busy) => {}
+                Ok(ThreadEvictionOutcome::Busy | ThreadEvictionOutcome::Contended) => {}
                 Err(err) => warn!("v2 resident eviction failed: {err}"),
             }
         }
@@ -282,7 +214,7 @@ impl V2Residency {
         touch_resident(&mut state.residents, thread_id);
     }
 
-    fn remove(&self, thread_id: ThreadId) {
+    pub(super) fn remove(&self, thread_id: ThreadId) {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -320,19 +252,6 @@ fn is_resident_candidate(thread: &CodexThread) -> bool {
 
 pub(super) fn is_v2_resident_session_source(session_source: &SessionSource) -> bool {
     matches!(session_source, SessionSource::SubAgent(_))
-}
-
-async fn is_unloadable(thread: &CodexThread) -> bool {
-    matches!(
-        thread.agent_status().await,
-        AgentStatus::PendingInit
-            | AgentStatus::Completed(_)
-            | AgentStatus::Errored(_)
-            | AgentStatus::Interrupted
-    ) && thread.session.active_turn.lock().await.is_none()
-        && !thread.session.has_outstanding_durable_sleep()
-        && !thread.session.input_queue.has_held_mailbox_items().await
-        && !thread.session.input_queue.has_pending_mailbox_items().await
 }
 
 #[cfg(test)]

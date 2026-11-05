@@ -1,3 +1,5 @@
+use codex_extension_api::ThreadStopInput;
+
 use std::fmt::Write as _;
 
 use std::sync::Arc;
@@ -72,11 +74,13 @@ impl ThreadLifecycleContributor<Config> for AlarmTools {
                 Access::Unavailable
             });
             if available {
+                if let Ok(id) = ThreadId::from_string(input.thread_store.level_id())
+                    && let Err(error) = self.0.attach_hold(id, input.thread_store).await
+                {
+                    tracing::error!(%error, "cannot bind alarm runtime");
+                }
                 if let Err(error) = self.0.initialize().await {
                     tracing::error!(%error, "alarm registry unavailable during thread start");
-                }
-                if let Ok(id) = ThreadId::from_string(input.thread_store.level_id()) {
-                    self.0.attach_hold(id, input.thread_store);
                 }
             }
         })
@@ -87,8 +91,16 @@ impl ThreadLifecycleContributor<Config> for AlarmTools {
                 input.thread_store.get::<Access>().as_deref(),
                 Some(Access::Available)
             ) && let Ok(id) = ThreadId::from_string(input.thread_store.level_id())
+                && let Err(error) = self.0.attach_hold(id, input.thread_store).await
             {
-                self.0.attach_hold(id, input.thread_store);
+                tracing::error!(%error, "cannot bind resumed alarm runtime");
+            }
+        })
+    }
+    fn on_thread_stop<'a>(&'a self, input: ThreadStopInput<'a>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            if let Ok(id) = ThreadId::from_string(input.thread_store.level_id()) {
+                self.0.detach_hold(id, input.thread_store).await;
             }
         })
     }
@@ -181,7 +193,7 @@ impl AlarmTool {
             .get()
             .and_then(std::sync::Weak::upgrade)
             .ok_or_else(|| "alarm host is unavailable".to_string())?;
-        let (thread, lease) = Box::pin(service.load(&self.caller.to_string()))
+        let (thread, _lease) = Box::pin(service.load(&self.caller.to_string()))
             .await
             .map_err(|err| err.message)?;
         let config = thread.config_snapshot().await;
@@ -194,7 +206,8 @@ impl AlarmTool {
             );
         }
         self.alarms
-            .attach_hold(self.caller, thread.thread_extension_data());
+            .attach_hold(self.caller, thread.thread_extension_data())
+            .await?;
         match self.function.name.as_str() {
             "list" => {
                 let _: Empty = serde_json::from_str(args).map_err(|err| err.to_string())?;
@@ -235,7 +248,6 @@ impl AlarmTool {
                             super::Arm::Watch {
                                 session_id,
                                 watch,
-                                lease,
                                 deadline,
                             },
                             stale,

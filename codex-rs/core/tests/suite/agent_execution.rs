@@ -578,6 +578,22 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools(
     })
     .await;
 
+    // Terminal publication precedes task destruction; this fixture needs a
+    // genuinely reclaimable child, not a production capacity wait.
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        first_thread
+            .runtime_holds()
+            .subscribe()
+            .wait_for(|activity| {
+                matches!(
+                    activity,
+                    codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                )
+            }),
+    )
+    .await??;
+
     let evicted_thread = Arc::downgrade(&first_thread);
     drop(first_thread);
 
@@ -625,6 +641,20 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        replacement_thread
+            .runtime_holds()
+            .subscribe()
+            .wait_for(|activity| {
+                matches!(
+                    activity,
+                    codex_core::runtime_holds::RuntimeActivity::Quiet { .. }
+                )
+            }),
+    )
+    .await??;
+
     assert!(
         test.thread_manager
             .get_thread(first_thread_id)

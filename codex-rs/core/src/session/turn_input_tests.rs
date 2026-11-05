@@ -925,6 +925,14 @@ async fn mailbox_wake_revalidates_reservation_and_captures_current_settings(
         .reserve_pending_work_turn()
         .await
         .expect("ordinary mail reserves family-capacity work");
+    let held_revision = match session.runtime_holds.activity() {
+        crate::runtime_holds::RuntimeActivity::Held { revision, .. } => revision,
+        activity => panic!("reservation must own runtime custody: {activity:?}"),
+    };
+    assert!(matches!(
+        session.seal_idle_runtime(held_revision),
+        crate::runtime_holds::IdleSeal::Busy
+    ));
     // Model discovery can yield while settings change or an interrupt replaces
     // this reservation. Capture the current configuration without taking mail.
     let selected_mode = if mode == ModeKind::Plan {
@@ -971,6 +979,28 @@ async fn mailbox_wake_revalidates_reservation_and_captures_current_settings(
     );
     session.clear_reserved_idle_turn(&replacement).await;
     assert!(session.active_turn.lock().await.is_none());
+    assert_eq!(
+        session.input_queue.drain_mailbox_input_items().await.0,
+        vec![TurnInput::InterAgentCommunication(
+            communication.clone().into()
+        )]
+    );
+    let revision = match session.runtime_holds.activity() {
+        crate::runtime_holds::RuntimeActivity::Quiet { revision, .. } => revision,
+        activity => panic!("cleared reservation must be quiet: {activity:?}"),
+    };
+    assert!(revision > held_revision);
+    // Close wins: neither a new reservation nor a captured old-runtime start
+    // can acquire custody. Mail stays in its queue for the replacement runtime.
+    assert!(matches!(
+        session.seal_idle_runtime(revision),
+        crate::runtime_holds::IdleSeal::Sealed
+    ));
+    session
+        .input_queue
+        .enqueue_mailbox_communication(communication.clone().into(), Default::default())
+        .await;
+    assert!(session.reserve_pending_work_turn().await.is_none());
     assert_eq!(
         session.input_queue.drain_mailbox_input_items().await.0,
         vec![TurnInput::InterAgentCommunication(communication.into())]

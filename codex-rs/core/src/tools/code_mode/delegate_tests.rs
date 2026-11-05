@@ -50,7 +50,8 @@ async fn execution_scope(
             "text('original')".into(),
             service.shutdown_token.clone(),
         )
-        .await;
+        .await
+        .unwrap();
     let scope = starting.scope();
     starting.allocated(cell).await;
     scope
@@ -172,6 +173,9 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     let _untraced = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let delegate = CodeModeCellDelegate {
+        custody: std::sync::Mutex::new(super::super::lifecycle::CellCustody::Executing {
+            _hold: Arc::new(session.runtime_holds.acquire().unwrap()),
+        }),
         fence: Default::default(),
         scope: execution_scope(&session, &turn, &cell_id).await,
         broker: Arc::clone(&broker),
@@ -249,6 +253,9 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
         /*executed_tool_calls*/ Default::default(),
     ));
     let delegate = CodeModeCellDelegate {
+        custody: std::sync::Mutex::new(super::super::lifecycle::CellCustody::Executing {
+            _hold: Arc::new(session.runtime_holds.acquire().unwrap()),
+        }),
         fence: Default::default(),
         scope: execution_scope(&session, &turn, &CellId::new("queued-cell".to_string())).await,
         broker: Arc::clone(&broker),

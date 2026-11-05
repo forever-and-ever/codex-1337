@@ -353,7 +353,7 @@ async fn output_collection_stays_bounded_across_repeated_drains() {
         let chunks: [&[u8]; 4] = [b"01234567", b"89ABCDEF", b"ghijklmnopq", b"rs"];
         let output_buffer = Arc::new(tokio::sync::Mutex::new(OutputBuffers::<10>::default()));
         let output_notify = Arc::new(Notify::new());
-        let output_closed = Arc::new(AtomicBool::new(false));
+        let output_closed = Arc::new(super::super::runtime_hold::OutputTermination::default());
         let output_closed_notify = Arc::new(Notify::new());
         let cancellation_token = CancellationToken::new();
         let interjection = CancellationToken::new();
@@ -445,7 +445,8 @@ async fn output_collection_preserves_omissions_from_drained_buffer() {
     expected.push_chunk(b"overflow");
     let output_buffer = Arc::new(tokio::sync::Mutex::new(buffered_output));
     let output_notify = Arc::new(Notify::new());
-    let output_closed = Arc::new(AtomicBool::new(true));
+    let output_closed = Arc::new(super::super::runtime_hold::OutputTermination::default());
+    output_closed.store(true, Ordering::Release);
     let output_closed_notify = Arc::new(Notify::new());
     let cancellation_token = CancellationToken::new();
     cancellation_token.cancel();

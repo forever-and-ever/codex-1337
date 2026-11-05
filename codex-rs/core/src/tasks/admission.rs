@@ -35,9 +35,14 @@ impl TaskAdmission {
         session: &'a Session,
     ) -> Option<MutexGuard<'a, Option<ActiveTurn>>> {
         let mut active = session.active_turn.lock().await;
+        if session.runtime_holds.is_closing() {
+            return None;
+        }
         match self {
             Self::Unreserved(_) => {
-                active.get_or_insert_with(ActiveTurn::default);
+                if active.is_none() {
+                    *active = Some(session.reserve_runtime_turn()?);
+                }
             }
             Self::Reserved { .. } => {
                 if active

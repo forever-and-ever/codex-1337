@@ -1,3 +1,5 @@
+mod idle_close;
+
 use crate::TurnInputRequest;
 use crate::TurnInputSubmission;
 use crate::TurnStartOptions;

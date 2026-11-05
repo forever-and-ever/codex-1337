@@ -174,6 +174,9 @@ impl ThreadStartOrigin for HeadlessStart {
             .get_thread(thread_id)
             .await
             .map_err(|err| internal_error(format!("new thread disappeared: {err}")))?;
+        if !lease.bind(&runtime) {
+            return Err(internal_error("new thread is closing"));
+        }
         let state = context.thread_state_manager.thread_state(thread_id).await;
         ensure_listener_task_running(context.clone(), thread_id, runtime, state).await?;
         Ok(lease)

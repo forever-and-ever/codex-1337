@@ -541,6 +541,7 @@ enabled = false
                 thread_extensions(
                     &good_config,
                     ThreadExtensionDependencies {
+                        thread_state_manager: crate::thread_state::ThreadStateManager::new(),
                         sample_responses: Arc::new(
                             crate::thread_sample::SampleResponseRegistry::default(),
                         ),

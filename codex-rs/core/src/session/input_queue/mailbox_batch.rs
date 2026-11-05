@@ -208,3 +208,16 @@ impl MailboxBatch {
         }
     }
 }
+
+impl InputQueue {
+    pub(crate) fn can_prove_mailbox_empty(&self) -> Option<bool> {
+        self.mailbox_pending_mails.try_lock().ok().map(|pending| {
+            pending.ready.is_empty()
+                && !matches!(pending.batch, MailboxBatch::Holding { .. })
+                && self
+                    .controller
+                    .as_ref()
+                    .is_none_or(|(_, _, updates)| !*updates.borrow())
+        })
+    }
+}

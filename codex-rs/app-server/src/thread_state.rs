@@ -26,7 +26,6 @@ use codex_rollout::state_db::StateDbHandle;
 use codex_utils_path_uri::LegacyAppPathString;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::Weak;
@@ -41,6 +40,13 @@ type PendingInterruptQueue = Vec<ConnectionRequestId>;
 // The unload that inserts an entry owns its removal. Dropping the sender wakes deferred
 // listener attachment only after that unload finishes cleanup.
 pub(crate) type PendingThreadUnloads = Arc<Mutex<HashMap<ThreadId, watch::Sender<()>>>>;
+
+#[path = "thread_runtime_leases.rs"]
+mod runtime_leases;
+pub(crate) use runtime_leases::ListenerBinding;
+pub(crate) use runtime_leases::ListenerInstallMode;
+pub(crate) use runtime_leases::SubscriberActivity;
+pub(crate) use runtime_leases::ThreadRuntimeLease;
 
 pub(crate) struct PendingThreadResumeRequest {
     pub(crate) request_id: ConnectionRequestId,
@@ -350,22 +356,13 @@ struct ThreadEntry {
     state: Arc<Mutex<ThreadState>>,
     connection_ids: HashSet<ConnectionId>,
     has_connections_watcher: watch::Sender<bool>,
-    runtime_operations: watch::Sender<usize>,
+    subscriber_activity: watch::Sender<SubscriberActivity>,
+    runtime_leases: runtime_leases::RuntimeLeases,
 }
 
 impl Default for ThreadEntry {
     fn default() -> Self {
         Self::new(Arc::new(Mutex::new(ThreadState::default())))
-    }
-}
-
-/// Pins a runtime against idle eviction for one server-owned operation. This
-/// grants neither a client subscription nor authority to answer approvals.
-pub(crate) struct ThreadRuntimeLease(watch::Sender<usize>);
-
-impl Drop for ThreadRuntimeLease {
-    fn drop(&mut self) {
-        self.0.send_modify(|count| *count -= 1);
     }
 }
 
@@ -375,11 +372,13 @@ impl ThreadEntry {
             state,
             connection_ids: HashSet::new(),
             has_connections_watcher: watch::channel(false).0,
-            runtime_operations: watch::channel(0).0,
+            subscriber_activity: watch::channel(SubscriberActivity::detached()).0,
+            runtime_leases: runtime_leases::RuntimeLeases::default(),
         }
     }
 
-    fn update_has_connections(&self) {
+    fn update_has_connections(&mut self) {
+        self.update_subscriber_activity();
         let _ = self.has_connections_watcher.send_if_modified(|current| {
             let prev = *current;
             *current = !self.connection_ids.is_empty();
@@ -425,26 +424,6 @@ impl ListenerStateCandidate {
 }
 
 impl ThreadStateManager {
-    pub(crate) async fn lease_runtime(&self, thread_id: ThreadId) -> ThreadRuntimeLease {
-        let mut state = self.state.lock().await;
-        let operations = &state
-            .threads
-            .entry(thread_id)
-            .or_default()
-            .runtime_operations;
-        operations.send_modify(|count| *count += 1);
-        ThreadRuntimeLease(operations.clone())
-    }
-
-    pub(crate) async fn runtime_operations(&self, thread_id: ThreadId) -> watch::Receiver<usize> {
-        let mut state = self.state.lock().await;
-        state
-            .threads
-            .entry(thread_id)
-            .or_default()
-            .runtime_operations
-            .subscribe()
-    }
     /// Coordinates goal edits with cold/path-based resume for just this thread.
     pub(crate) async fn lock_goal_resume(
         &self,
@@ -693,50 +672,6 @@ impl ThreadStateManager {
             .is_some_and(|thread_entry| !thread_entry.connection_ids.is_empty())
     }
 
-    /// Publishes a new state only when listener installation succeeds, or reuses a current state.
-    /// The caller must hold the candidate's state lock.
-    pub(crate) async fn subscribe_and_install_listener<T, E>(
-        &self,
-        thread_id: ThreadId,
-        candidate: &ListenerStateCandidate,
-        connection_ids: &[ConnectionId],
-        install: impl FnOnce(bool) -> Result<T, E>,
-    ) -> Result<Option<(T, watch::Receiver<bool>, bool)>, E> {
-        let mut state = self.state.lock().await;
-        let ThreadStateManagerInner {
-            live_connections,
-            threads,
-            thread_ids_by_connection,
-        } = &mut *state;
-        let slot = threads.entry(thread_id);
-        match (&slot, candidate) {
-            (Entry::Occupied(entry), _) if Arc::ptr_eq(&entry.get().state, candidate.state()) => {}
-            (Entry::Vacant(_), ListenerStateCandidate::Unpublished(_)) => {}
-            _ => return Ok(None),
-        }
-        let attached = connection_ids
-            .iter()
-            .any(|connection_id| live_connections.contains_key(connection_id));
-        let installed = install(attached)?;
-        let entry = slot.or_insert_with(|| ThreadEntry::new(Arc::clone(candidate.state())));
-        for &connection_id in connection_ids {
-            if live_connections.contains_key(&connection_id) {
-                thread_ids_by_connection
-                    .entry(connection_id)
-                    .or_default()
-                    .insert(thread_id);
-                entry.connection_ids.insert(connection_id);
-                self.subscription_lifetimes.insert(connection_id, thread_id);
-            }
-        }
-        entry.update_has_connections();
-        Ok(Some((
-            installed,
-            entry.has_connections_watcher.subscribe(),
-            attached,
-        )))
-    }
-
     pub(crate) async fn try_add_connection_to_thread(
         &self,
         thread_id: ThreadId,
@@ -744,6 +679,15 @@ impl ThreadStateManager {
     ) -> bool {
         let mut state = self.state.lock().await;
         if !state.live_connections.contains_key(&connection_id) {
+            return false;
+        }
+        if !state
+            .threads
+            .entry(thread_id)
+            .or_default()
+            .runtime_leases
+            .viewers(true)
+        {
             return false;
         }
         state

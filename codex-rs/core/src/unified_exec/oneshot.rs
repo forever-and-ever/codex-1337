@@ -19,6 +19,7 @@ use super::trace_id;
 use crate::tools::context::ExecCommandToolOutput;
 
 pub(super) struct Completion<'a> {
+    pub process_ready: &'a tokio::sync::Notify,
     pub timeout: Duration,
     pub timed_out: bool,
     pub process: &'a OnceLock<Arc<UnifiedExecProcess>>,
@@ -51,6 +52,9 @@ impl UnifiedExecProcessManager {
             context.tool_name.clone(),
         );
         let _cancel_on_drop = context.cancellation_token.clone().drop_guard();
+        let lifetimes = Arc::clone(&context.session.services.unified_exec_manager.lifetimes);
+        let runtime = context.session.runtime_holds.clone();
+        let process_id = request.process_id;
         let task = async move {
             let manager = &context.session.services.unified_exec_manager;
             let process_id = request.process_id;
@@ -65,7 +69,9 @@ impl UnifiedExecProcessManager {
             }
 
             let process = OnceLock::new();
+            let process_ready = tokio::sync::Notify::new();
             let mut completion = Completion {
+                process_ready: &process_ready,
                 timeout,
                 timed_out: false,
                 process: &process,
@@ -73,27 +79,30 @@ impl UnifiedExecProcessManager {
             let result = {
                 let mut execution =
                     Box::pin(manager.exec_command_inner(request, &context, Some(&mut completion)));
+                let cancellation = async {
+                    context.cancellation_token.cancelled().await;
+                    loop {
+                        let ready = process_ready.notified();
+                        if let Some(process) = process.get() {
+                            if let Err(error) = process.terminate_confirmed().await {
+                                process.fail_and_terminate(error.to_string());
+                            }
+                            process.cancellation_token().cancel();
+                            return;
+                        }
+                        ready.await;
+                    }
+                };
+                tokio::pin!(cancellation);
                 tokio::select! {
                     biased;
-                    _ = context.cancellation_token.cancelled() => {
-                        if let Some(process) = process.get() {
-                            if !process.has_exited()
-                                && let Err(err) = process.terminate_confirmed().await
-                            {
-                                process.fail_and_terminate(err.to_string());
-                            }
-                            // An exited remote shell can still have open output pipes.
-                            process.cancellation_token().cancel();
-                            let _ = execution.await;
-                        } else {
-                            drop(execution);
-                            manager.release_process_id(process_id).await;
-                        }
+                    () = &mut cancellation => {
+                        let _ = execution.await;
                         return (
                             Err(UnifiedExecError::process_failed("command cancelled".into())),
                             "cancelled",
                         );
-                    }
+                    },
                     result = &mut execution => result,
                 }
             };
@@ -113,14 +122,12 @@ impl UnifiedExecProcessManager {
             });
             (result, outcome)
         };
-        let (result, outcome) = match tokio::spawn(task.in_current_span()).await {
-            Ok(result) => result,
-            Err(err) => (
-                Err(UnifiedExecError::process_failed(err.to_string())),
-                "failed",
-            ),
-        };
-        tracing::Span::current().record("outcome", outcome);
-        result
+        lifetimes
+            .execute(&runtime, process_id, move || async move {
+                let (result, outcome) = task.in_current_span().await;
+                tracing::Span::current().record("outcome", outcome);
+                result
+            })
+            .await
     }
 }

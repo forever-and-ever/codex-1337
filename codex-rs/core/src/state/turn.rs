@@ -33,6 +33,7 @@ pub(crate) struct ActiveTurn {
     /// Reservations that have not started still accept inputs.
     pub(crate) finishing: Option<CancellationToken>,
     pub(crate) turn_state: Arc<Mutex<TurnState>>,
+    pub(crate) runtime_hold: Arc<crate::runtime_holds::RuntimeHold>,
 }
 
 /// Whether mailbox deliveries should still be folded into the current turn.
@@ -55,12 +56,18 @@ pub(crate) enum MailboxDeliveryPhase {
     NextTurn,
 }
 
+#[cfg(test)]
 impl Default for ActiveTurn {
     fn default() -> Self {
         Self {
             task: None,
             finishing: None,
             turn_state: Arc::new(Mutex::new(TurnState::default())),
+            runtime_hold: Arc::new(
+                crate::runtime_holds::RuntimeHolds::default()
+                    .acquire()
+                    .expect("new test runtime"),
+            ),
         }
     }
 }

@@ -23,6 +23,8 @@
 //! - `process_state.rs`: shared exit/failure state for local and remote processes.
 //! - `process_manager.rs`: orchestration (approvals, sandboxing, reuse) and request handling.
 
+mod runtime_hold;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Weak;
@@ -85,6 +87,7 @@ fn trace_id(id: &str) -> Option<&str> {
     (!id.is_empty() && id.len() <= MAX_TRACE_ID_BYTES).then_some(id)
 }
 
+#[derive(Clone)]
 pub(crate) struct UnifiedExecContext {
     pub session: Arc<Session>,
     pub step_context: Arc<StepContext>,
@@ -158,6 +161,7 @@ pub(crate) struct ProcessStore {
 }
 
 pub(crate) struct UnifiedExecProcessManager {
+    lifetimes: Arc<runtime_hold::ProcessLifetimes>,
     process_store: Mutex<ProcessStore>,
     max_write_stdin_yield_time_ms: u64,
 }
@@ -165,6 +169,7 @@ pub(crate) struct UnifiedExecProcessManager {
 impl UnifiedExecProcessManager {
     pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
         Self {
+            lifetimes: Arc::default(),
             process_store: Mutex::new(ProcessStore::default()),
             max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
                 .max(MIN_EMPTY_YIELD_TIME_MS),

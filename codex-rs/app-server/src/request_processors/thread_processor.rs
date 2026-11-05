@@ -1893,7 +1893,11 @@ impl ThreadRequestProcessor {
             return Ok((ThreadArchiveResponse {}, Vec::new()));
         }
 
-        let _alarm_guard = self.alarms.archive_guard().await.map_err(internal_error)?;
+        let _alarm_guard = self
+            .alarms
+            .archive_guard(&subtree_thread_ids)
+            .await
+            .map_err(internal_error)?;
         archive_thread_ids[1..].reverse();
         // Collaboration may resume an archived descendant without unarchiving it.
         self.prepare_thread_for_archive(thread_id).await?;
@@ -4726,22 +4730,28 @@ impl ThreadRequestProcessor {
                     && matches!(loaded_status, ThreadStatus::Idle)
                     && !is_running
                 {
-                    // A loaded idle thread is only a cache entry. Shut it down
-                    // before removing it so cold resume cannot duplicate a
-                    // thread that timed out during shutdown.
-                    match wait_for_thread_shutdown(&existing_thread).await {
-                        ThreadShutdownResult::Complete => {
-                            self.thread_manager.remove_thread(&existing_thread_id).await;
-                            self.finalize_thread_teardown(existing_thread_id).await;
-                            // Shutdown can flush newer rollout items, so reload the
-                            // stored thread before starting the replacement session.
-                            return Ok(RunningThreadResumeResult::NotRunning(None));
-                        }
-                        ThreadShutdownResult::SubmitFailed => {
-                            warn!("failed to submit Shutdown to thread {existing_thread_id}");
-                        }
-                        ThreadShutdownResult::TimedOut => {
-                            warn!("thread {existing_thread_id} shutdown timed out");
+                    // Reconfiguration may replace an idle cache entry, never live
+                    // background work. Seal admission rather than racing a status check.
+                    if let Some(eligibility) =
+                        existing_thread.idle_close_eligibility(Duration::ZERO)
+                    {
+                        match self
+                            .thread_manager
+                            .try_idle_close(Arc::clone(&existing_thread), eligibility)
+                            .await
+                        {
+                            Ok(codex_core::ThreadEvictionOutcome::Evicted) => {
+                                self.finalize_thread_teardown(existing_thread_id).await;
+                                return Ok(RunningThreadResumeResult::NotRunning(None));
+                            }
+                            Ok(
+                                codex_core::ThreadEvictionOutcome::Busy
+                                | codex_core::ThreadEvictionOutcome::Contended
+                                | codex_core::ThreadEvictionOutcome::NotCurrent,
+                            ) => {}
+                            Err(error) => {
+                                warn!("failed to replace idle thread {existing_thread_id}: {error}")
+                            }
                         }
                     }
                 }

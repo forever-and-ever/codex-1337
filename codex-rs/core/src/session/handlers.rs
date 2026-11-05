@@ -311,7 +311,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     let startup_prewarm = {
         let mut state = sess.state.lock().await;
         // Stop admission and take the current warmup together so resume cannot replace it.
-        state.shutting_down = true;
+        state.runtime_holds.close();
         state.take_session_startup_prewarm()
     };
     sess.drain_agent_mail_admissions().await;
@@ -332,7 +332,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     while sess.async_hook_results.try_recv().is_ok() {}
     sess.services
         .unified_exec_manager
-        .terminate_all_processes()
+        .shutdown_processes()
         .await;
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         sess.services.local_agent_runtime.record_shutdown_failure(

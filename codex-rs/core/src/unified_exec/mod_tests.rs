@@ -110,23 +110,21 @@ async fn exec_command_with_tty(
     let command = vec!["bash".to_string(), "-lc".to_string(), cmd.to_string()];
     let request = test_exec_request(turn, command.clone(), cwd.clone(), shell_env());
 
-    let process = Arc::new(
-        manager
-            .open_session_with_prepared_exec_env(
-                process_id,
-                &request,
-                /*tool_ctx*/ None,
-                codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
-                /*network_policy_decider*/ None,
-                tty,
-                turn.initial_environments
-                    .primary()
-                    .expect("turn environment")
-                    .environment
-                    .as_ref(),
-            )
-            .await?,
-    );
+    let process = manager
+        .open_session_with_prepared_exec_env(
+            process_id,
+            &request,
+            /*tool_ctx*/ None,
+            codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
+            /*network_policy_decider*/ None,
+            tty,
+            turn.initial_environments
+                .primary()
+                .expect("turn environment")
+                .environment
+                .as_ref(),
+        )
+        .await?;
     let context = UnifiedExecContext::new(
         Arc::clone(session),
         crate::session::step_context::StepContext::for_test(Arc::clone(turn)),
@@ -298,21 +296,20 @@ async fn blocking_terminate_unified_process(
     allow_terminate: Arc<Notify>,
 ) -> anyhow::Result<Arc<UnifiedExecProcess>> {
     let (wake_tx, _wake_rx) = watch::channel(0);
-    Ok(Arc::new(
-        UnifiedExecProcess::from_exec_server_started(
-            StartedExecProcess {
-                process: Arc::new(BlockingTerminateExecProcess {
-                    process_id: process_id.to_string().into(),
-                    terminate_started,
-                    allow_terminate,
-                    wake_tx,
-                }),
-                sandbox_type: Some(codex_sandboxing::SandboxType::None),
-            },
-            OutputDrainPolicy::WaitForOutputClosure,
-        )
-        .await?,
-    ))
+    Ok(UnifiedExecProcess::from_exec_server_started(
+        StartedExecProcess {
+            process: Arc::new(BlockingTerminateExecProcess {
+                process_id: process_id.to_string().into(),
+                terminate_started,
+                allow_terminate,
+                wake_tx,
+            }),
+            sandbox_type: Some(codex_sandboxing::SandboxType::None),
+        },
+        OutputDrainPolicy::WaitForOutputClosure,
+        |_| {},
+    )
+    .await?)
 }
 
 async fn write_stdin(
@@ -849,7 +846,7 @@ async fn terminating_during_stdin_poll_returns_exited_response(
         .await;
         let mut store = manager.process_store.lock().await;
         let entry = store.processes.get_mut(&process_id).unwrap();
-        entry.process = Arc::new(replacement);
+        entry.process = replacement;
         entry.call_id = "replacement".into();
     } else {
         manager.release_process_id(process_id).await;
@@ -1151,7 +1148,7 @@ async fn stdin_approval_preserves_the_reviewed_terminal() -> anyhow::Result<()> 
                     )
                     .await;
                     let mut store = manager.process_store.lock().await;
-                    store.processes.get_mut(&process_id).unwrap().process = Arc::new(replacement);
+                    store.processes.get_mut(&process_id).unwrap().process = replacement;
                 }
                 session.notify_approval("write", decision).await;
                 return anyhow::Ok(());

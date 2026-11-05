@@ -202,10 +202,24 @@ impl ThreadCoordinationService {
         // A live newly-created thread need not have a materialized rollout.
         // Recheck only after acquiring the lease and draining pending unloads;
         // shutdown runtimes still require authoritative cold restoration below.
-        if let Ok(thread) = self.threads.thread_manager.get_thread(id).await
-            && thread.agent_status().await != AgentStatus::Shutdown
-        {
-            return Ok((thread, lease));
+        if let Ok(thread) = self.threads.thread_manager.get_thread(id).await {
+            if thread.agent_status().await != AgentStatus::Shutdown && lease.bind(&thread) {
+                return Ok((thread, lease));
+            }
+            tokio::time::timeout_at(deadline, thread.wait_for_idle_close())
+                .await
+                .map_err(|_| invalid_request("destination runtime is still closing"))?;
+            if let Ok(current) = self.threads.thread_manager.get_thread(id).await
+                && current.agent_status().await != AgentStatus::Shutdown
+            {
+                if !Arc::ptr_eq(&current, &thread) && lease.bind(&current) {
+                    return Ok((current, lease));
+                }
+                return Err(invalid_request("destination runtime is still closing"));
+            }
+            // Explicit shutdown can leave its stopped generation registered.
+            // Restore that destination through the existing cold-resume path;
+            // never return its closed Arc or reopen its admission.
         }
         self.read(thread_id).await?;
         Box::pin(self.threads.thread_resume(
@@ -224,8 +238,14 @@ impl ThreadCoordinationService {
             .thread_manager
             .get_thread(id)
             .await
-            .map(|thread| (thread, lease))
             .map_err(|err| internal_error(format!("failed to load thread: {err}")))
+            .and_then(|thread| {
+                if lease.bind(&thread) {
+                    Ok((thread, lease))
+                } else {
+                    Err(invalid_request("destination runtime is closing"))
+                }
+            })
     }
 
     pub(crate) async fn send(

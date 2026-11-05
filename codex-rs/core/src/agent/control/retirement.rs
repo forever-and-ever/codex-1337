@@ -1,6 +1,5 @@
 //! Retirement changes family membership, never conversation history.
 use super::LocalAgentControl;
-use crate::state::ActiveTurn;
 use codex_agent_graph_store::AgentGraphStore;
 use codex_agent_graph_store::ThreadSpawnEdgeStatus;
 use codex_protocol::AgentPath;
@@ -151,10 +150,10 @@ impl LocalAgentControl {
             self.runtime.registry.release_spawned_thread(*id);
             self.forget_v2_residency(*id);
         }
-        // Reserve idle slots until Shutdown consumes them. Background task admission must not
-        // start work between releasing these locks and processing the shutdown submission.
-        for guard in &mut admission {
-            **guard = Some(ActiveTurn::default());
+        // Seal admission before releasing the idle-turn guards. No background registrar
+        // can publish new work while the shutdown submission is being processed.
+        for thread in &threads {
+            thread.session.begin_explicit_close().await;
         }
         drop(admission);
         for id in &ids {
