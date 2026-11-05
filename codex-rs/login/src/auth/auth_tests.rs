@@ -1568,6 +1568,7 @@ async fn replacing_external_auth_clears_permanent_failure() {
         .await
         .expect("replacement external auth should refresh");
     assert_eq!(manager.auth_cached(), Some(auth));
+    AuthManager::exercise_source_replacement_fence().await;
 }
 
 #[tokio::test]

@@ -9,6 +9,10 @@ use crate::RefreshTokenError;
 use std::io;
 use std::sync::Arc;
 
+#[cfg(test)]
+#[path = "captured_source_tests.rs"]
+mod tests;
+
 enum Source {
     External {
         provider: Arc<dyn ExternalAuth>,
@@ -58,6 +62,14 @@ impl ExternalAuth for Source {
             Self::Static(_) => RefreshTokenError::Transient(error),
         }
     }
+}
+
+fn same_opaque_kind(previous: Option<&CodexAuth>, current: Option<&CodexAuth>) -> bool {
+    previous.zip(current).is_some_and(|(previous, current)| {
+        !previous.is_chatgpt_auth()
+            && !current.is_chatgpt_auth()
+            && previous.api_auth_mode() == current.api_auth_mode()
+    })
 }
 
 fn validate_principal(initial: &CodexAuth, current: &CodexAuth) -> io::Result<()> {
@@ -213,14 +225,10 @@ impl AuthManager {
         previous: Option<&CodexAuth>,
         current: Option<&CodexAuth>,
     ) -> bool {
-        previous.zip(current).is_some_and(|(previous, current)| {
-            !previous.is_chatgpt_auth()
-                && !current.is_chatgpt_auth()
-                && previous.api_auth_mode() == current.api_auth_mode()
-                // Publication holds the cache lock. Never wait behind a source
-                // replacement; a concurrent replacement must revoke.
-                && self.external_auth.try_read().is_ok_and(|source| source.is_some())
-        })
+        same_opaque_kind(previous, current)
+            // Publication holds the cache lock. Never wait behind a source
+            // replacement; a concurrent replacement must revoke.
+            && self.external_auth.try_read().is_ok_and(|source| source.is_some())
     }
 
     pub(in crate::auth::manager) fn replace_external_auth_owner(
@@ -231,30 +239,33 @@ impl AuthManager {
         let mut slot = self.external_auth.write().map_err(|_| {
             RefreshTokenError::Transient(io::Error::other("external auth lock is poisoned"))
         })?;
-        let changed = slot
+        if slot
             .as_ref()
-            .is_none_or(|previous| !Arc::ptr_eq(previous, &source));
+            .is_some_and(|previous| Arc::ptr_eq(previous, &source))
+        {
+            return Ok(());
+        }
+        // Match clear_external_auth's source-before-cache order. Cache publication
+        // only tries the source lock, so it cannot invert this order. Publish the
+        // source transition and freshness fence while holding both locks.
+        let cache = self.inner.write().map_err(|_| {
+            RefreshTokenError::Transient(io::Error::other("credential cache lock is poisoned"))
+        })?;
+        let opaque_replacement = same_opaque_kind(cache.auth.as_ref(), Some(auth));
         *slot = Some(source);
-        drop(slot);
-        if changed {
-            let cache = self.inner.write().map_err(|_| {
-                RefreshTokenError::Transient(io::Error::other("credential cache lock is poisoned"))
-            })?;
-            // Known ChatGPT identity changes and refreshes belong to the canonical
-            // cache publication below. Only opaque source replacement needs an
-            // explicit ownership event: its new bearer may equal the old one.
-            if !self.external_source_owns_rotation(cache.auth.as_ref(), Some(auth)) {
-                return Ok(());
-            }
+        if opaque_replacement {
             self.auth_publication.invalidate(&self.auth_route_config);
-            self.auth_change_state_tx.send_modify(|state| {
-                state.generation += 1;
+        }
+        self.auth_change_state_tx.send_modify(|state| {
+            // Read freshness does not imply a new principal, login, or runtime actor.
+            state.generation += 1;
+            if opaque_replacement {
                 state.owner_generation += 1;
                 state.source_generation += 1;
                 state.login_generation += 1;
-            });
-            self.auth_change_tx.send_modify(|revision| *revision += 1);
-        }
+            }
+        });
+        self.auth_change_tx.send_modify(|revision| *revision += 1);
         Ok(())
     }
 
