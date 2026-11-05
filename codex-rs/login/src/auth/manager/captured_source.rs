@@ -226,6 +226,7 @@ impl AuthManager {
     pub(in crate::auth::manager) fn replace_external_auth_owner(
         &self,
         source: Arc<dyn ExternalAuth>,
+        auth: &CodexAuth,
     ) -> Result<(), RefreshTokenError> {
         let mut slot = self.external_auth.write().map_err(|_| {
             RefreshTokenError::Transient(io::Error::other("external auth lock is poisoned"))
@@ -236,9 +237,15 @@ impl AuthManager {
         *slot = Some(source);
         drop(slot);
         if changed {
-            let _cache = self.inner.write().map_err(|_| {
+            let cache = self.inner.write().map_err(|_| {
                 RefreshTokenError::Transient(io::Error::other("credential cache lock is poisoned"))
             })?;
+            // Known ChatGPT identity changes and refreshes belong to the canonical
+            // cache publication below. Only opaque source replacement needs an
+            // explicit ownership event: its new bearer may equal the old one.
+            if !self.external_source_owns_rotation(cache.auth.as_ref(), Some(auth)) {
+                return Ok(());
+            }
             self.auth_publication.invalidate(&self.auth_route_config);
             self.auth_change_state_tx.send_modify(|state| {
                 state.generation += 1;
@@ -336,11 +343,15 @@ impl AuthManager {
         enable_codex_api_key_env: bool,
         auth: Option<CodexAuth>,
     ) -> Self {
-        use super::super::{
-            AuthChangeState, AuthConfig, CachedAuth, agent_identity_authapi_base_url,
-        };
-        use std::sync::{Mutex, OnceLock, RwLock};
-        use tokio::sync::{Semaphore, watch};
+        use super::super::AuthChangeState;
+        use super::super::AuthConfig;
+        use super::super::CachedAuth;
+        use super::super::agent_identity_authapi_base_url;
+        use std::sync::Mutex;
+        use std::sync::OnceLock;
+        use std::sync::RwLock;
+        use tokio::sync::Semaphore;
+        use tokio::sync::watch;
         let AuthConfig {
             codex_home,
             auth_credentials_store_mode,

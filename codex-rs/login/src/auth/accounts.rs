@@ -180,6 +180,10 @@ pub(super) struct AccountStorage {
 }
 
 impl AuthStorageBackend for AccountStorage {
+    fn is_ephemeral(&self) -> bool {
+        self.backend.is_ephemeral()
+    }
+
     fn home(&self) -> &Path {
         self.backend.home()
     }

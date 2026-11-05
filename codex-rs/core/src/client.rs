@@ -1964,9 +1964,7 @@ impl ModelClientSession {
         // Resolving an external auth provider can change ownership during client setup.
         let owner_changed = self.websocket_session.auth_owner_generation != auth_owner_generation
             || self.client.auth_owner_generation() != auth_owner_generation;
-        if owner_changed {
-            self.turn_state = Arc::new(OnceLock::new());
-        }
+        self.reset_credential_bound_turn_state(owner_changed, runtime_id.as_deref());
 
         if needs_new || owner_changed {
             self.websocket_session.reset(if owner_changed {

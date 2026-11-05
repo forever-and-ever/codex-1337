@@ -18,6 +18,20 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelInfo;
 use std::sync::Arc;
 
+impl super::ModelClientSession {
+    pub(super) fn reset_credential_bound_turn_state(
+        &mut self,
+        owner_changed: bool,
+        runtime_id: Option<&str>,
+    ) {
+        // Opaque source rotation may preserve policy ownership while replacing
+        // the runtime actor. Sticky turn state cannot cross that runtime binding.
+        if owner_changed || self.websocket_session.runtime_id.as_deref() != runtime_id {
+            self.turn_state = Arc::new(std::sync::OnceLock::new());
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderCaptureError {
     #[error("select a provider account before starting auxiliary work")]

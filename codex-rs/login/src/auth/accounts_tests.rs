@@ -2,6 +2,7 @@ use super::*;
 use crate::auth::AuthManager;
 use crate::auth::CodexAuth;
 use crate::auth::storage::FileAuthStorage;
+use crate::auth::storage::create_auth_storage;
 use base64::Engine;
 use codex_protocol::auth::AuthMode;
 use pretty_assertions::assert_eq;
@@ -48,6 +49,7 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
         backend: backend.clone(),
         id: identity(&alice).unwrap(),
     };
+    assert!(!scoped.is_ephemeral());
     assert_eq!(scoped.load()?, Some(alice.clone()));
     assert_eq!(backend.load()?, Some(bob.clone()));
 
@@ -76,6 +78,15 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
     assert!(scoped.save(&relogged).is_err());
     assert_eq!(scoped.load()?, None);
     assert_eq!(backend.load()?, Some(account("bob", /*revision*/ 0)));
+    let ephemeral = AccountStorage {
+        backend: create_auth_storage(
+            home.path().to_owned(),
+            AuthCredentialsStoreMode::Ephemeral,
+            AuthKeyringBackendKind::default(),
+        ),
+        id: identity(&alice).unwrap(),
+    };
+    assert!(ephemeral.is_ephemeral());
     Ok(())
 }
 

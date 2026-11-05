@@ -2934,7 +2934,7 @@ impl AuthManager {
         external_auth: Arc<dyn ExternalAuth>,
     ) -> Result<(), RefreshTokenError> {
         let auth = self.resolve_external_auth(external_auth.as_ref()).await?;
-        self.replace_external_auth_owner(external_auth)?;
+        self.replace_external_auth_owner(external_auth, &auth)?;
         if let Ok(mut guard) = self.inner.write() {
             guard.permanent_refresh_failure = None;
         }
