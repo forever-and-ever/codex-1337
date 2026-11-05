@@ -245,8 +245,12 @@ impl CodeModeService {
         .await;
     }
 
-    pub(crate) async fn shutdown(&self) -> Result<(), String> {
+    pub(crate) fn begin_shutdown(&self) {
         self.shutdown_token.cancel();
+    }
+
+    pub(crate) async fn shutdown(&self) -> Result<(), String> {
+        self.begin_shutdown();
         // Join any initialization already in progress without initializing an unused service.
         let result = match self
             .session

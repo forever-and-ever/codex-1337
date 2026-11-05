@@ -2,6 +2,7 @@ pub(crate) mod farm_allocation;
 pub(crate) mod preserved_tools;
 mod provider_capture;
 mod response_thought;
+mod runtime_shutdown;
 pub(crate) mod startup;
 
 use crate::PromptCacheKey;

@@ -314,6 +314,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
         state.runtime_holds.close();
         state.take_session_startup_prewarm()
     };
+    super::runtime_shutdown::begin(sess);
     sess.drain_agent_mail_admissions().await;
     sess.agent_mail.publications.close();
     if let Some(startup_prewarm) = startup_prewarm {
@@ -330,21 +331,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.hooks().shutdown().await;
     sess.async_hook_results.close();
     while sess.async_hook_results.try_recv().is_ok() {}
-    sess.services
-        .unified_exec_manager
-        .shutdown_processes()
-        .await;
-    if let Err(err) = sess.services.code_mode_service.shutdown().await {
-        sess.services.local_agent_runtime.record_shutdown_failure(
-            AgentTreeShutdownFailure::operation_failed(
-                "session_shutdown",
-                "code_mode",
-                Some(sess.thread_id),
-                "code_mode_error",
-            ),
-        );
-        warn!("failed to shutdown code mode session: {err}");
-    }
+    super::runtime_shutdown::drain(sess).await;
     sess.stop_mcp_prewarm_worker().await;
     {
         let _refresh = sess.mcp_refresh.acquire().await;

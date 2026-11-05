@@ -513,13 +513,14 @@ impl UnifiedExecProcessManager {
         request: ExecCommandRequest,
         context: &UnifiedExecContext,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
-        let owned_context = context.clone();
+        let owned_context = context.for_launch();
         let process_id = request.process_id;
         let result = self
             .lifetimes
             .execute(
                 &context.session.runtime_holds,
                 process_id,
+                owned_context.cancellation_token.clone(),
                 move || async move {
                     owned_context
                         .session

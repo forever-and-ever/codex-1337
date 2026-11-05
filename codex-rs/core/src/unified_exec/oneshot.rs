@@ -55,6 +55,7 @@ impl UnifiedExecProcessManager {
         let lifetimes = Arc::clone(&context.session.services.unified_exec_manager.lifetimes);
         let runtime = context.session.runtime_holds.clone();
         let process_id = request.process_id;
+        let cancellation = context.cancellation_token.clone();
         let task = async move {
             let manager = &context.session.services.unified_exec_manager;
             let process_id = request.process_id;
@@ -123,7 +124,7 @@ impl UnifiedExecProcessManager {
             (result, outcome)
         };
         lifetimes
-            .execute(&runtime, process_id, move || async move {
+            .execute(&runtime, process_id, cancellation, move || async move {
                 let (result, outcome) = task.in_current_span().await;
                 tracing::Span::current().record("outcome", outcome);
                 result

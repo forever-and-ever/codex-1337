@@ -46,6 +46,7 @@ enum PendingReviewChange {
     UserInstruction,
     VerifiedAnswer,
     Compaction,
+    Shutdown { interrupt: bool },
 }
 
 #[test_case(PendingReviewChange::UserInstruction, GuardianContextMode::ThreadOwned, GuardianAssessmentStatus::Denied; "new user instruction")]
@@ -54,6 +55,8 @@ enum PendingReviewChange {
 #[test_case(PendingReviewChange::VerifiedAnswer, GuardianContextMode::Legacy, GuardianAssessmentStatus::Denied; "migration verified answer")]
 #[test_case(PendingReviewChange::Compaction, GuardianContextMode::Legacy, GuardianAssessmentStatus::Aborted; "compaction promotes policy")]
 #[test_case(PendingReviewChange::Compaction, GuardianContextMode::ThreadOwned, GuardianAssessmentStatus::Approved; "ordinary compaction preserves review")]
+#[test_case(PendingReviewChange::Shutdown { interrupt: false }, GuardianContextMode::ThreadOwned, GuardianAssessmentStatus::Aborted; "shutdown pending review without interrupt")]
+#[test_case(PendingReviewChange::Shutdown { interrupt: true }, GuardianContextMode::ThreadOwned, GuardianAssessmentStatus::Aborted; "shutdown pending review with interrupt")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_revalidates_owning_session_before_allow(
     change: PendingReviewChange,
@@ -124,7 +127,7 @@ async fn guardian_revalidates_owning_session_before_allow(
         vec![StreamingSseChunk {
             gate: None,
             body: match change {
-                PendingReviewChange::Compaction => responses::sse(vec![
+                PendingReviewChange::Compaction | PendingReviewChange::Shutdown { .. } => responses::sse(vec![
                     json!({"type": "response.output_item.done", "item": {
                         "type": "compaction", "id": "compacted", "encrypted_content": "known producer"
                     }}),
@@ -160,15 +163,22 @@ async fn guardian_revalidates_owning_session_before_allow(
             config
                 .set_legacy_sandbox_policy(SandboxPolicy::new_workspace_write_policy())
                 .expect("set sandbox policy");
-            for feature in [
-                Feature::CodeMode,
-                Feature::CodeModeInterrupt,
-                Feature::DefaultModeRequestUserInput,
-            ] {
+            for feature in [Feature::CodeMode, Feature::DefaultModeRequestUserInput] {
                 config
                     .features
                     .enable(feature)
                     .expect("enable test feature");
+            }
+            if matches!(change, PendingReviewChange::Shutdown { interrupt: false }) {
+                config
+                    .features
+                    .disable(Feature::CodeModeInterrupt)
+                    .expect("disable user-interruption policy");
+            } else {
+                config
+                    .features
+                    .enable(Feature::CodeModeInterrupt)
+                    .expect("enable user-interruption policy");
             }
         })
         .with_code_mode_host_program(codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")?)
@@ -253,7 +263,10 @@ async fn guardian_revalidates_owning_session_before_allow(
         test.submit_text_turn("Do not run the command.").await?;
     }
     let mut completed_status = None;
-    if matches!(change, PendingReviewChange::Compaction) {
+    if matches!(
+        change,
+        PendingReviewChange::Compaction | PendingReviewChange::Shutdown { .. }
+    ) {
         test.codex.submit(Op::Compact).await?;
         loop {
             match test.codex.next_event().await?.msg.native_event() {
@@ -267,6 +280,21 @@ async fn guardian_revalidates_owning_session_before_allow(
                 _ => {}
             }
         }
+    }
+
+    if matches!(change, PendingReviewChange::Shutdown { .. }) {
+        assert!(
+            completed_status.is_none(),
+            "the yielded approval must still be pending"
+        );
+        // No parent task remains to own interruption. Explicit shutdown must cancel
+        // the yielded cell's approval without waiting for this reviewer gate.
+        tokio::time::timeout(Duration::from_secs(10), test.codex.shutdown_and_wait())
+            .await
+            .context("shutdown waited for the held Guardian review")??;
+        let _ = review_completion_tx.send(());
+        streaming_server.shutdown().await;
+        return Ok(());
     }
 
     review_completion_tx
