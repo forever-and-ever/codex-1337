@@ -30,12 +30,15 @@ async fn redirects_honor_sensitive_header_protection_without_changing_default_be
         OutboundProxyPolicy::RespectSystemProxy,
     ] {
         for protect_sensitive_headers in [false, true] {
-            let (target, target_server) = spawn_response_server(vec![
-                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".into(),
-            ]);
-            let (source, source_server) = spawn_response_server(vec![
+            let source_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let source = source_listener.local_addr().unwrap();
+            let (target, target_server) = spawn_response_server(vec![format!(
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{source}/returned\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )]);
+            let (source, source_server) = serve_responses(source_listener, vec![
             "HTTP/1.1 307 Temporary Redirect\r\nLocation: /same\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
             format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{target}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".into(),
         ]);
             let url = format!("http://{source}/start");
             let factory = HttpClientFactory::new(policy);
@@ -57,8 +60,14 @@ async fn redirects_honor_sensitive_header_protection_without_changing_default_be
                 .unwrap();
             assert_eq!(response.text().await.unwrap(), "ok");
             let source_requests = source_server.join().unwrap();
-            assert_eq!(source_requests.len(), 2);
-            for request in source_requests {
+            assert_eq!(source_requests.len(), 3);
+            assert!(!source_requests[2].contains("private-token"));
+            assert_eq!(
+                source_requests[2].contains("private-proof"),
+                !protect_sensitive_headers
+            );
+            assert!(source_requests[2].contains("x-public: retained\r\n"));
+            for request in &source_requests[..2] {
                 assert!(request.contains("authorization: Bearer private-token\r\n"));
                 assert!(request.contains("x-custom-proof: private-proof\r\n"));
             }
@@ -1069,6 +1078,13 @@ pub(super) fn spawn_response_server(
     responses: Vec<String>,
 ) -> (std::net::SocketAddr, std::thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("response listener should bind");
+    serve_responses(listener, responses)
+}
+
+fn serve_responses(
+    listener: TcpListener,
+    responses: Vec<String>,
+) -> (std::net::SocketAddr, std::thread::JoinHandle<Vec<String>>) {
     let address = listener
         .local_addr()
         .expect("response listener should have an address");

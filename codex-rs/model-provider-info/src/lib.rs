@@ -19,7 +19,6 @@ use codex_protocol::error::EnvVarError;
 use codex_protocol::error::Result as CodexResult;
 use codex_utils_redacted_string::RedactedString;
 use http::HeaderMap;
-use http::header::HeaderName;
 use http::header::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -31,6 +30,7 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 mod capabilities;
+mod configured_headers;
 mod gateway_oauth;
 mod oauth_session;
 mod search_route;
@@ -327,34 +327,8 @@ impl ModelProviderInfo {
         }
     }
 
-    /// Resolve configured request headers before choosing credentials or a runtime.
     pub fn build_header_map(&self) -> CodexResult<HeaderMap> {
-        let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
-            + self.env_http_headers.as_ref().map_or(0, HashMap::len);
-        let mut headers = HeaderMap::with_capacity(capacity);
-        if let Some(extra) = &self.http_headers {
-            for (k, v) in extra {
-                if let (Ok(name), Ok(value)) =
-                    (HeaderName::try_from(k), HeaderValue::try_from(v.as_str()))
-                {
-                    headers.insert(name, value);
-                }
-            }
-        }
-
-        if let Some(env_headers) = &self.env_http_headers {
-            for (header, env_var) in env_headers {
-                if let Ok(val) = std::env::var(env_var)
-                    && !val.trim().is_empty()
-                    && let (Ok(name), Ok(value)) =
-                        (HeaderName::try_from(header), HeaderValue::try_from(val))
-                {
-                    headers.insert(name, value);
-                }
-            }
-        }
-
-        Ok(headers)
+        Ok(crate::configured_headers::resolve(self))
     }
 
     /// Builds an API provider with managed residency taking precedence over configured headers.

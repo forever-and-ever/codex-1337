@@ -671,7 +671,7 @@ impl ModelClient {
             session_id_override: None,
             codex_responses_headers: None,
             event_sender: None,
-            http_client_factory,
+            http_client_factory: http_client_factory.with_sensitive_header_protection(),
             runtime_auth: None,
             restored_history: false,
             anthropic_prompt_cache: Default::default(),
@@ -1352,7 +1352,10 @@ impl ModelClient {
                 runtime.actor().info(),
             )?;
             let runtime_id = Some(runtime.id().to_string());
-            let http_client_factory = selected.http_client_factory().clone();
+            let http_client_factory = selected
+                .http_client_factory()
+                .clone()
+                .with_sensitive_header_protection();
             let resolved_auth = self
                 .state
                 .provider
