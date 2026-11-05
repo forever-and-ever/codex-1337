@@ -90,7 +90,7 @@ pub(super) async fn remote_process(
     write_status: WriteStatus,
     terminate_error: Option<String>,
     sandbox_type: impl Into<Option<codex_sandboxing::SandboxType>>,
-) -> UnifiedExecProcess {
+) -> Arc<UnifiedExecProcess> {
     let (wake_tx, _wake_rx) = watch::channel(0);
     let started = StartedExecProcess {
         process: Arc::new(MockExecProcess {
@@ -105,9 +105,13 @@ pub(super) async fn remote_process(
         sandbox_type: sandbox_type.into(),
     };
 
-    UnifiedExecProcess::from_exec_server_started(started, OutputDrainPolicy::WaitForOutputClosure)
-        .await
-        .expect("remote process should start")
+    UnifiedExecProcess::from_exec_server_started(
+        started,
+        OutputDrainPolicy::WaitForOutputClosure,
+        |_| {},
+    )
+    .await
+    .expect("remote process should start")
 }
 
 #[tokio::test]

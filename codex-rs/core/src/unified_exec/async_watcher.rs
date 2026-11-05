@@ -54,7 +54,10 @@ struct Buffer<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES> {
 }
 
 /// Spawn a background task that emits ExecCommandOutputDelta events on UTF‑8 boundaries.
-pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &UnifiedExecContext) {
+pub(crate) fn start_streaming_output(
+    process: &Arc<UnifiedExecProcess>,
+    context: &UnifiedExecContext,
+) {
     let mut receiver = process.output_receiver();
     let output_drained = process.output_drained_notify();
     let exit_token = process.cancellation_token();
@@ -71,85 +74,91 @@ pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &Uni
         call_id: context.call_id.clone(),
     };
 
-    tokio::spawn(async move {
-        use tokio::sync::broadcast::error::RecvError;
+    output_drained.start();
+    context
+        .session
+        .services
+        .unified_exec_manager
+        .lifetimes
+        .spawn_streamer(Arc::clone(process), async move {
+            use tokio::sync::broadcast::error::RecvError;
 
-        let mut output: Buffer = Buffer {
-            pending: Vec::new(),
-            emitter,
-        };
+            let mut output: Buffer = Buffer {
+                pending: Vec::new(),
+                emitter,
+            };
 
-        let mut grace_sleep: Option<Pin<Box<Sleep>>> = None;
-        let output_closed_notified = output_closed_notify.notified();
-        tokio::pin!(output_closed_notified);
-        let mut output_complete = false;
+            let mut grace_sleep: Option<Pin<Box<Sleep>>> = None;
+            let output_closed_notified = output_closed_notify.notified();
+            tokio::pin!(output_closed_notified);
+            let mut output_complete = false;
 
-        loop {
-            // Register before checking the atomic so a close between the check
-            // and the select cannot miss the notification.
-            output_closed_notified.as_mut().enable();
-            if grace_sleep.is_some() && output_closed.load(Ordering::Acquire) {
-                output_complete = true;
-                break;
-            }
-
-            tokio::select! {
-                _ = exit_token.cancelled(), if grace_sleep.is_none() => {
-                    let deadline = Instant::now() + TRAILING_OUTPUT_GRACE;
-                    grace_sleep.replace(Box::pin(tokio::time::sleep_until(deadline)));
-                }
-
-                _ = async {
-                    if let Some(sleep) = grace_sleep.as_mut() {
-                        sleep.as_mut().await;
-                    }
-                }, if grace_sleep.is_some() => {
+            loop {
+                // Register before checking the atomic so a close between the check
+                // and the select cannot miss the notification.
+                output_closed_notified.as_mut().enable();
+                if grace_sleep.is_some() && output_closed.load(Ordering::Acquire) {
+                    output_complete = true;
                     break;
                 }
 
-                _ = &mut output_closed_notified, if grace_sleep.is_some() => {
-                    output_closed_notified.set(output_closed_notify.notified());
-                }
+                tokio::select! {
+                    _ = exit_token.cancelled(), if grace_sleep.is_none() => {
+                        let deadline = Instant::now() + TRAILING_OUTPUT_GRACE;
+                        grace_sleep.replace(Box::pin(tokio::time::sleep_until(deadline)));
+                    }
 
-                received = receiver.recv() => {
-                    let chunk = match received {
-                        Ok(chunk) => chunk,
-                        Err(RecvError::Lagged(_)) => {
-                            continue;
-                        },
-                        Err(RecvError::Closed) => {
-                            output_complete = true;
-                            break;
+                    _ = async {
+                        if let Some(sleep) = grace_sleep.as_mut() {
+                            sleep.as_mut().await;
                         }
+                    }, if grace_sleep.is_some() => {
+                        break;
+                    }
+
+                    _ = &mut output_closed_notified, if grace_sleep.is_some() => {
+                        output_closed_notified.set(output_closed_notify.notified());
+                    }
+
+                    received = receiver.recv() => {
+                        let chunk = match received {
+                            Ok(chunk) => chunk,
+                            Err(RecvError::Lagged(_)) => {
+                                continue;
+                            },
+                            Err(RecvError::Closed) => {
+                                output_complete = true;
+                                break;
+                            }
+                        };
+
+                        output.push(chunk).await;
+                    }
+                }
+            }
+
+            output_complete |= output_closed.load(Ordering::Acquire);
+            if output_complete {
+                // Output producers publish all chunks before setting output_closed
+                // with Release ordering, so the Acquire above makes this a final
+                // safe drain.
+                loop {
+                    let chunk = match receiver.try_recv() {
+                        Ok(chunk) => chunk,
+                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                        Err(
+                            tokio::sync::broadcast::error::TryRecvError::Empty
+                            | tokio::sync::broadcast::error::TryRecvError::Closed,
+                        ) => break,
                     };
 
                     output.push(chunk).await;
                 }
             }
-        }
 
-        output_complete |= output_closed.load(Ordering::Acquire);
-        if output_complete {
-            // Output producers publish all chunks before setting output_closed
-            // with Release ordering, so the Acquire above makes this a final
-            // safe drain.
-            loop {
-                let chunk = match receiver.try_recv() {
-                    Ok(chunk) => chunk,
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
-                    Err(
-                        tokio::sync::broadcast::error::TryRecvError::Empty
-                        | tokio::sync::broadcast::error::TryRecvError::Closed,
-                    ) => break,
-                };
-
-                output.push(chunk).await;
-            }
-        }
-
-        output.finish().await;
-        output_drained.notify_one();
-    });
+            output.finish().await;
+            output_drained.notify_one();
+        });
 }
 
 /// Spawn a background watcher that waits for the PTY to exit and then emits a
@@ -176,7 +185,9 @@ pub(crate) fn spawn_exit_watcher(
     let output_drained = process.output_drained_notify();
     let interaction_lock = process.interaction_lock();
 
-    tokio::spawn(async move {
+    let lifetimes = Arc::clone(&context.session.services.unified_exec_manager.lifetimes);
+    let owner = Arc::clone(&lifetimes);
+    lifetimes.spawn_finalizer(Arc::clone(&process), async move {
         exit_token.cancelled().await;
         output_drained.notified().await;
         // Deferred network denial deliberately remains observable for a short
@@ -239,6 +250,7 @@ pub(crate) fn spawn_exit_watcher(
             )
             .await;
         }
+        owner.finalized(&process);
     });
 }
 

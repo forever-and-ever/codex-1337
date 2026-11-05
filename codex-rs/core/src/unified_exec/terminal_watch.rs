@@ -303,7 +303,7 @@ impl TerminalWatch {
             Ok(Signal::Closed { at }) => {
                 self.process.cancellation_token().cancelled().await;
                 let exited_at = timestamp().max(at);
-                if self.runtime_closed().await {
+                if self.runtime_closed() {
                     return (exited_at, TerminalWatchEvent::Lost);
                 }
                 let output = self.process.output_handles().output_buffer.lock().await;
@@ -331,9 +331,9 @@ impl TerminalWatch {
         }
     }
 
-    async fn runtime_closed(&self) -> bool {
+    fn runtime_closed(&self) -> bool {
         match self.runtime.upgrade() {
-            Some(runtime) => runtime.terminal_runtime_closed().await,
+            Some(runtime) => runtime.terminal_runtime_closed(),
             None => true,
         }
     }

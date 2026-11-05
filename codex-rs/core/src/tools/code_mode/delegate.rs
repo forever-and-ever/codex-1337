@@ -42,6 +42,7 @@ pub(super) struct CodeModeDispatchBroker {
 
 /// Retains the step advertised to one execution, including callbacks after it yields.
 pub(super) struct CodeModeCellDelegate {
+    pub(super) custody: std::sync::Mutex<super::lifecycle::CellCustody>,
     pub(super) broker: Arc<CodeModeDispatchBroker>,
     pub(super) step_context: Arc<StepContext>,
     pub(super) scope: Arc<super::lifecycle::ExecutionScope>,
@@ -421,6 +422,11 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
         self.scope
             .finish(codex_protocol::code_mode::CodeModeStatus::Interrupted);
         self.broker.close_cell(cell_id);
+        *self
+            .custody
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            super::lifecycle::CellCustody::Settled;
     }
 
     fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode::CellOutcome) {
@@ -437,6 +443,11 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
         };
         self.scope.allocate(cell_id);
         self.scope.finish(status);
+        *self
+            .custody
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            super::lifecycle::CellCustody::Settled;
     }
 }
 

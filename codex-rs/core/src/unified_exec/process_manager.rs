@@ -514,8 +514,22 @@ impl UnifiedExecProcessManager {
         request: ExecCommandRequest,
         context: &UnifiedExecContext,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
+        let owned_context = context.clone();
+        let process_id = request.process_id;
         let result = self
-            .exec_command_inner(request, context, /*completion*/ None)
+            .lifetimes
+            .execute(
+                &context.session.runtime_holds,
+                process_id,
+                move || async move {
+                    owned_context
+                        .session
+                        .services
+                        .unified_exec_manager
+                        .exec_command_inner(request, &owned_context, /*completion*/ None)
+                        .await
+                },
+            )
             .await;
         let outcome = match &result {
             Ok(output) if output.process_id.is_some() => "yielded",
@@ -550,9 +564,9 @@ impl UnifiedExecProcessManager {
             metrics_sidecar,
             permissions,
         } = attempt;
-        let process = Arc::new(process);
         if let Some(completion) = completion.as_ref() {
             let _ = completion.process.set(Arc::clone(&process));
+            completion.process_ready.notify_one();
         }
         let network_denial_monitor = deferred_network_approval.as_ref().map(|deferred| {
             terminate_process_on_network_denial(
@@ -1198,7 +1212,7 @@ impl UnifiedExecProcessManager {
             // for another poll; closed, empty output cannot grow again.
             if retention == OutputRetention::UntilCollected
                 && output.drain_policy == OutputDrainPolicy::WaitForOutputClosure
-                && !entry.process.termination_requested.load(Ordering::Acquire)
+                && !entry.process.termination_requested()
                 && (!output.output_closed.load(Ordering::Acquire)
                     || output
                         .output_buffer
@@ -1307,6 +1321,7 @@ impl UnifiedExecProcessManager {
             store.processes.insert(process_id, entry);
             pruned_entry
         };
+        self.lifetimes.background(&process);
         spawn_exit_watcher(
             Arc::clone(&process),
             context,
@@ -1350,7 +1365,7 @@ impl UnifiedExecProcessManager {
         windows_sandbox_proxy_settings_mode: codex_sandboxing::WindowsSandboxProxySettingsMode,
         tty: bool,
         environment: &codex_exec_server::Environment,
-    ) -> Result<UnifiedExecProcess, ToolError> {
+    ) -> Result<Arc<UnifiedExecProcess>, ToolError> {
         let mut request = if environment.is_remote() || shell_snapshot.is_some() {
             attempt.env_for_exec_server(command, options).await
         } else {
@@ -1400,7 +1415,7 @@ impl UnifiedExecProcessManager {
         network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
         tty: bool,
         environment: &codex_exec_server::Environment,
-    ) -> Result<UnifiedExecProcess, UnifiedExecError> {
+    ) -> Result<Arc<UnifiedExecProcess>, UnifiedExecError> {
         if environment.is_remote() || request.exec_server_shell_snapshot.is_some() {
             let backend = environment.get_exec_backend();
             let params = exec_server_params_for_request(
@@ -1433,8 +1448,12 @@ impl UnifiedExecProcessManager {
             } else {
                 OutputDrainPolicy::BoundedAfterExit
             };
-            return UnifiedExecProcess::from_exec_server_started(started, output_drain_policy)
-                .await;
+            return UnifiedExecProcess::from_exec_server_started(
+                started,
+                output_drain_policy,
+                |process| self.lifetimes.register(process_id, process),
+            )
+            .await;
         }
 
         // TODO(anp): Keep PathUri through the local PTY/process launch boundary.
@@ -1505,7 +1524,10 @@ impl UnifiedExecProcessManager {
         .await;
         let spawned =
             spawn_result.map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
-        UnifiedExecProcess::from_spawned(spawned, request.sandbox).await
+        UnifiedExecProcess::from_spawned(spawned, request.sandbox, |process| {
+            self.lifetimes.register(process_id, process)
+        })
+        .await
     }
 
     #[tracing::instrument(
@@ -1693,6 +1715,7 @@ impl UnifiedExecProcessManager {
             unregister_network_approval_for_entry(&entry).await;
             entry.process.terminate();
         }
+        self.lifetimes.shutdown().await;
     }
 
     pub(crate) async fn resolve_terminal(

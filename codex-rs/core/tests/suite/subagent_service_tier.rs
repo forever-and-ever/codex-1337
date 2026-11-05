@@ -435,6 +435,28 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
         },
     )
     .await?;
+    // Capacity may reclaim an idle child immediately, never one with runtime
+    // custody (including a host viewer). Terminal publication alone is not the
+    // task's settlement boundary; release must also work immediately after it.
+    let viewer = replacement_thread
+        .runtime_holds()
+        .acquire()
+        .expect("live replacement");
+    let blocked = test
+        .thread_manager
+        .ensure_multi_agent_v2_child_loaded(original_thread_id)
+        .await;
+    assert!(matches!(
+        blocked.unwrap_err().details(),
+        codex_protocol::error::CodexErrorDetails::AgentLimitReached { .. }
+    ));
+    assert!(
+        test.thread_manager
+            .get_thread(replacement_thread_id)
+            .await
+            .is_ok()
+    );
+    drop(viewer);
     test.thread_manager
         .ensure_multi_agent_v2_child_loaded(original_thread_id)
         .await?;

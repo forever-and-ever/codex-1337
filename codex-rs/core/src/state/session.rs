@@ -99,8 +99,8 @@ pub(crate) struct SessionState {
     pub(crate) async_compaction: crate::session::async_compaction::AsyncCompactionState,
     /// Original request effort for the current model while configuration updates remain active.
     pub(crate) reasoning_effort_pin: ReasoningEffortPin,
-    /// Set under the state lock before shutdown takes the last warmup handle.
-    pub(crate) shutting_down: bool,
+    /// Shared close authority; registrar check-and-insert retains this state lock.
+    pub(crate) runtime_holds: crate::runtime_holds::RuntimeHolds,
     /// Background model warmup scheduled at startup or while resuming an idle thread.
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     /// Retained after completion so later turns do not repeat speculative captures.
@@ -150,7 +150,7 @@ impl SessionState {
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
             async_compaction: crate::session::async_compaction::AsyncCompactionState::default(),
             reasoning_effort_pin: ReasoningEffortPin::Unset,
-            shutting_down: false,
+            runtime_holds: crate::runtime_holds::RuntimeHolds::default(),
             startup_prewarm: None,
             shell_snapshot_prewarm: None,
             preamble_window: None,

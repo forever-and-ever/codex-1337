@@ -209,7 +209,7 @@ impl Session {
     pub(crate) async fn schedule_startup_prewarm(self: &Arc<Self>, input: PrewarmInput) {
         let websocket_connect_timeout = self.provider().await.websocket_connect_timeout();
         let mut state = self.state.lock().await;
-        if state.shutting_down {
+        if state.runtime_holds.is_closing() {
             return;
         }
         // Publish the warmup before another turn can be admitted. No network work

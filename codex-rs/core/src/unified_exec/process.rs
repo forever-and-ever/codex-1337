@@ -60,7 +60,7 @@ impl<const MAX_BYTES: usize> OutputBuffers<MAX_BYTES> {
 pub(crate) struct OutputHandles<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_MAX_BYTES> {
     pub(crate) output_buffer: Arc<Mutex<OutputBuffers<MAX_BYTES>>>,
     pub(crate) output_notify: Arc<Notify>,
-    pub(crate) output_closed: Arc<AtomicBool>,
+    pub(crate) output_closed: Arc<super::runtime_hold::OutputTermination>,
     pub(crate) output_closed_notify: Arc<Notify>,
     pub(crate) cancellation_token: CancellationToken,
     pub(super) terminal_watches: Arc<super::terminal_watch::TerminalWatches>,
@@ -70,7 +70,7 @@ pub(crate) struct OutputHandles<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_MAX
 }
 
 struct OutputTaskGuard {
-    output_closed: Arc<AtomicBool>,
+    output_closed: Arc<super::runtime_hold::OutputTermination>,
     output_closed_notify: Arc<Notify>,
     terminal_watches: Arc<super::terminal_watch::TerminalWatches>,
 }
@@ -78,7 +78,7 @@ struct OutputTaskGuard {
 impl Drop for OutputTaskGuard {
     fn drop(&mut self) {
         self.terminal_watches.close();
-        self.output_closed.store(true, Ordering::Release);
+        self.output_closed.interrupt();
         self.output_closed_notify.notify_waiters();
     }
 }
@@ -104,7 +104,7 @@ pub(crate) struct UnifiedExecProcess {
     process_handle: ProcessHandle,
     output_tx: broadcast::Sender<Vec<u8>>,
     output: OutputHandles,
-    output_drained: Arc<Notify>,
+    output_drained: Arc<super::runtime_hold::OutputDrain>,
     interaction_lock: Arc<Mutex<()>>,
     state_tx: watch::Sender<ProcessState>,
     state_rx: watch::Receiver<ProcessState>,
@@ -112,9 +112,9 @@ pub(crate) struct UnifiedExecProcess {
     sandbox_type: Option<SandboxType>,
     timed_out: AtomicBool,
     /// Explicit termination overrides retention of remote output after exit.
-    pub(super) termination_requested: AtomicBool,
+    termination: Arc<termination::Termination>,
     // The shell may still need to replay this file after process startup returns.
-    pub(crate) _shell_snapshot: Option<Arc<ShellSnapshotFile>>,
+    pub(crate) _shell_snapshot: std::sync::Mutex<Option<Arc<ShellSnapshotFile>>>,
 }
 
 impl std::fmt::Debug for UnifiedExecProcess {
@@ -137,13 +137,13 @@ impl UnifiedExecProcess {
             terminal_watches: Arc::default(),
             output_buffer: Arc::new(Mutex::new(OutputBuffers::default())),
             output_notify: Arc::new(Notify::new()),
-            output_closed: Arc::new(AtomicBool::new(false)),
+            output_closed: Arc::default(),
             output_closed_notify: Arc::new(Notify::new()),
             cancellation_token: CancellationToken::new(),
             drain_policy,
             collection_finished: CancellationToken::new(),
         };
-        let output_drained = Arc::new(Notify::new());
+        let output_drained = Arc::default();
         let (output_tx, _) = broadcast::channel(64);
         let (state_tx, state_rx) = watch::channel(ProcessState::default());
 
@@ -158,8 +158,8 @@ impl UnifiedExecProcess {
             output_task: None,
             sandbox_type,
             timed_out: AtomicBool::new(false),
-            termination_requested: AtomicBool::new(false),
-            _shell_snapshot: None,
+            termination: Arc::default(),
+            _shell_snapshot: std::sync::Mutex::new(None),
         }
     }
 
@@ -200,12 +200,20 @@ impl UnifiedExecProcess {
         self.output.cancellation_token.clone()
     }
 
-    pub(super) fn output_drained_notify(&self) -> Arc<Notify> {
+    pub(super) fn output_drained_notify(&self) -> Arc<super::runtime_hold::OutputDrain> {
         Arc::clone(&self.output_drained)
     }
 
     pub(super) fn interaction_lock(&self) -> Arc<Mutex<()>> {
         Arc::clone(&self.interaction_lock)
+    }
+
+    pub(super) fn state_updates(&self) -> watch::Receiver<super::process_state::ProcessState> {
+        self.state_rx.clone()
+    }
+
+    pub(super) fn termination_requested(&self) -> bool {
+        self.termination.requested()
     }
 
     pub(super) fn has_exited(&self) -> bool {
@@ -214,6 +222,10 @@ impl UnifiedExecProcess {
             ProcessHandle::Local(process_handle) => state.has_exited || process_handle.has_exited(),
             ProcessHandle::ExecServer(_) => state.has_exited,
         }
+    }
+
+    pub(super) fn backend_has_exited(&self) -> bool {
+        termination::backend_has_exited(self)
     }
 
     pub(super) fn exit_code(&self) -> Option<i32> {
@@ -238,7 +250,6 @@ impl UnifiedExecProcess {
     }
 
     fn finish_termination(&self) {
-        self.termination_requested.store(true, Ordering::Release);
         self.output.cancellation_token.cancel();
         if let Some(output_task) = &self.output_task {
             output_task.abort();
@@ -246,31 +257,11 @@ impl UnifiedExecProcess {
     }
 
     pub(super) fn terminate(&self) {
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => process_handle.terminate(),
-            ProcessHandle::ExecServer(process_handle) => {
-                let process_handle = Arc::clone(process_handle);
-                tokio::spawn(async move {
-                    let _ = process_handle.terminate().await;
-                });
-            }
-        }
-        self.finish_termination();
+        termination::terminate(self);
     }
 
     pub(super) async fn terminate_confirmed(&self) -> Result<(), UnifiedExecError> {
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => process_handle.terminate(),
-            ProcessHandle::ExecServer(process_handle) => {
-                process_handle
-                    .terminate()
-                    .await
-                    .map_err(|err| UnifiedExecError::process_failed(err.to_string()))?;
-            }
-        }
-        self.signal_exit(self.exit_code());
-        self.finish_termination();
-        Ok(())
+        termination::confirmed(self).await
     }
 
     pub(super) async fn interrupt(&self) -> Result<(), UnifiedExecError> {
@@ -360,7 +351,8 @@ impl UnifiedExecProcess {
     pub(super) async fn from_spawned(
         spawned: SpawnedPty,
         sandbox_type: SandboxType,
-    ) -> Result<Self, UnifiedExecError> {
+        on_started: impl FnOnce(Arc<Self>),
+    ) -> Result<Arc<Self>, UnifiedExecError> {
         let SpawnedPty {
             session: process_handle,
             stdout_rx,
@@ -379,6 +371,8 @@ impl UnifiedExecProcess {
             managed.output_tx.clone(),
         ));
 
+        let managed = Arc::new(managed);
+        on_started(Arc::clone(&managed));
         match exit_rx.try_recv() {
             Ok(exit_code) => {
                 managed.signal_exit(Some(exit_code));
@@ -416,7 +410,8 @@ impl UnifiedExecProcess {
     pub(super) async fn from_exec_server_started(
         started: StartedExecProcess,
         output_drain_policy: OutputDrainPolicy,
-    ) -> Result<Self, UnifiedExecError> {
+        on_started: impl FnOnce(Arc<Self>),
+    ) -> Result<Arc<Self>, UnifiedExecError> {
         let process_handle = ProcessHandle::ExecServer(Arc::clone(&started.process));
         // Older peers do not report this field. In that case, skip local
         // classification rather than attributing a violation to a guessed backend.
@@ -430,8 +425,11 @@ impl UnifiedExecProcess {
             managed.output_tx.clone(),
             managed.state_tx.clone(),
             managed.interaction_lock(),
+            Arc::clone(&managed.termination),
         ));
 
+        let managed = Arc::new(managed);
+        on_started(Arc::clone(&managed));
         let mut state_rx = managed.state_rx.clone();
         if tokio::time::timeout(EARLY_EXIT_GRACE_PERIOD, async {
             loop {
@@ -460,6 +458,7 @@ impl UnifiedExecProcess {
         output_tx: broadcast::Sender<Vec<u8>>,
         state_tx: watch::Sender<ProcessState>,
         interaction_lock: Arc<Mutex<()>>,
+        termination: Arc<termination::Termination>,
     ) -> JoinHandle<()> {
         let OutputHandles {
             terminal_watches,
@@ -509,7 +508,7 @@ impl UnifiedExecProcess {
                         let _ = state_tx.send_replace(
                             state.failed("exec-server process event stream closed".to_string()),
                         );
-                        output_closed.store(true, Ordering::Release);
+                        output_closed.fail();
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();
                         break;
@@ -547,7 +546,7 @@ impl UnifiedExecProcess {
                         Err(err) => {
                             let state = state_tx.borrow().clone();
                             let _ = state_tx.send_replace(state.failed(err.to_string()));
-                            output_closed.store(true, Ordering::Release);
+                            output_closed.fail();
                             output_closed_notify.notify_waiters();
                             cancellation_token.cancel();
                             break;
@@ -578,7 +577,7 @@ impl UnifiedExecProcess {
                     if let Some(message) = failure {
                         let state = state_tx.borrow().clone();
                         let _ = state_tx.send_replace(state.failed(message));
-                        output_closed.store(true, Ordering::Release);
+                        output_closed.fail();
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();
                         break;
@@ -596,7 +595,11 @@ impl UnifiedExecProcess {
                         cancellation_token.cancel();
                     }
                     if closed || final_drain {
-                        output_closed.store(true, Ordering::Release);
+                        if closed {
+                            output_closed.store(true, Ordering::Release);
+                        } else {
+                            output_closed.interrupt();
+                        }
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();
                         break;
@@ -652,7 +655,7 @@ impl UnifiedExecProcess {
                     ExecProcessEvent::Failed(message) => {
                         let state = state_tx.borrow().clone();
                         let _ = state_tx.send_replace(state.failed(message));
-                        output_closed.store(true, Ordering::Release);
+                        output_closed.fail();
                         output_closed_notify.notify_waiters();
                         cancellation_token.cancel();
                         break;
@@ -660,9 +663,7 @@ impl UnifiedExecProcess {
                 }
             }
             if final_drain {
-                tokio::spawn(async move {
-                    let _ = process.terminate().await;
-                });
+                termination::request_backend(&termination, &ProcessHandle::ExecServer(process));
             }
             cancellation_token.cancel();
         })
@@ -711,6 +712,7 @@ impl UnifiedExecProcess {
                     stderr_open = false;
                 }
             }
+            output_closed.store(true, Ordering::Release);
         })
     }
 
@@ -726,3 +728,6 @@ impl Drop for UnifiedExecProcess {
         self.terminate();
     }
 }
+
+#[path = "process_termination.rs"]
+mod termination;

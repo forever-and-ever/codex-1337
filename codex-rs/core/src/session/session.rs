@@ -58,6 +58,7 @@ type McpToolApprovalMetadataMap =
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
+    pub(crate) terminal_settlement: std::sync::Mutex<Option<tokio_util::sync::CancellationToken>>,
     pub(crate) thread_id: ThreadId,
     pub(crate) provider_id: String,
     pub(crate) installation_id: String,
@@ -67,6 +68,7 @@ pub(crate) struct Session {
     pub(crate) parent_observer_event_tx: OnceLock<Sender<Event>>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
     pub(super) state: Mutex<SessionState>,
+    pub(crate) runtime_holds: crate::runtime_holds::RuntimeHolds,
     /// Orders accepted settings commits and their persisted events with compaction checkpoints.
     /// Keep this separate from `state` so storage I/O does not block runtime state access.
     pub(super) thread_settings_persistence: Semaphore,
@@ -1825,6 +1827,7 @@ impl Session {
                 extension_metrics::from_session_telemetry(session_telemetry.clone());
             let workspace_routing =
                 thread_extension_data.get_or_init(|| config.workspace_routing_context());
+            thread_extension_data.insert(state.runtime_holds.clone());
             for contributor in extensions.thread_lifecycle_contributors() {
                 contributor
                     .on_thread_start(codex_extension_api::ThreadStartInput {
@@ -1987,6 +1990,8 @@ impl Session {
                 tx_event: tx_event.clone(),
                 parent_observer_event_tx: OnceLock::new(),
                 agent_status,
+                terminal_settlement: std::sync::Mutex::new(None),
+                runtime_holds: state.runtime_holds.clone(),
                 state: Mutex::new(state),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
                 initial_account_binding: tokio::sync::OnceCell::new(),

@@ -146,8 +146,11 @@ impl CodeModeService {
                 script,
                 self.shutdown_token.clone(),
             )
-            .await;
+            .await?;
         let delegate = Arc::new(CodeModeCellDelegate {
+            custody: std::sync::Mutex::new(lifecycle::CellCustody::Executing {
+                _hold: starting.scope().execution_hold(),
+            }),
             broker: Arc::clone(&self.dispatch_broker),
             step_context,
             scope: starting.scope(),

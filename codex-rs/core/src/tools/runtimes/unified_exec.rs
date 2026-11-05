@@ -102,7 +102,7 @@ pub struct UnifiedExecRuntime<'a> {
 }
 
 pub(crate) struct UnifiedExecAttempt {
-    pub(crate) process: UnifiedExecProcess,
+    pub(crate) process: std::sync::Arc<UnifiedExecProcess>,
     pub(crate) metrics_sidecar: Option<PluginMetricsSidecar>,
     pub(crate) permissions: TerminalPermissions,
 }
@@ -651,8 +651,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest<'_>, UnifiedExecAttempt> for UnifiedExec
                 prepared.turn_environment.environment.as_ref(),
             )
             .await;
-        let mut process = with_launch_failure_events(process, prepared, ctx).await?;
-        process._shell_snapshot = shell_snapshot;
+        let process = with_launch_failure_events(process, prepared, ctx).await?;
+        *process
+            ._shell_snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = shell_snapshot;
         Ok(UnifiedExecAttempt {
             process,
             metrics_sidecar,

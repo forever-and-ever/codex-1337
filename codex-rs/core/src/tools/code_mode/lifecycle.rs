@@ -98,7 +98,16 @@ impl Drop for NotificationLease {
     }
 }
 
+/// Executable custody ends at the runtime callback, not capture/result disposal.
+pub(super) enum CellCustody {
+    Executing {
+        _hold: Arc<crate::runtime_holds::RuntimeHold>,
+    },
+    Settled,
+}
+
 pub(super) struct ExecutionScope {
+    runtime_hold: Weak<crate::runtime_holds::RuntimeHold>,
     owner: Mutex<CodeModeOwner>,
     session: Weak<Session>,
     turn: Arc<TurnContext>,
@@ -187,7 +196,15 @@ impl TranscriptRegistry {
         exec_call_id: String,
         script: String,
         shutdown: CancellationToken,
-    ) -> ExecutionStart {
+    ) -> Result<ExecutionStart, String> {
+        let runtime_hold = Arc::new(
+            session
+                .upgrade()
+                .ok_or("conversation stopped")?
+                .runtime_holds
+                .acquire()
+                .ok_or("conversation is closing")?,
+        );
         let draining_shutdown = shutdown.clone();
         let () = self.cleanup_started.get_or_init(|| {
             let registry = Arc::downgrade(self);
@@ -231,6 +248,7 @@ impl TranscriptRegistry {
             |session| session.thread_id,
         );
         let scope = Arc::new(ExecutionScope {
+            runtime_hold: Arc::downgrade(&runtime_hold),
             owner: Mutex::new(CodeModeOwner {
                 thread_id,
                 exec_call_id: exec_call_id.clone(),
@@ -265,6 +283,7 @@ impl TranscriptRegistry {
         let starting = ExecutionStart(Some(Arc::clone(&scope)));
         let draining = Arc::clone(&scope);
         self.tasks.spawn(async move {
+            let _runtime_hold = runtime_hold;
             let admission = async {
                 draining
                     .record(
@@ -333,7 +352,7 @@ impl TranscriptRegistry {
             draining.admitted.send_replace(true);
         });
         let _ = scope.opened.subscribe().wait_for(|opened| *opened).await;
-        starting
+        Ok(starting)
     }
 
     fn alias(
@@ -485,6 +504,12 @@ impl TranscriptRegistry {
 }
 
 impl ExecutionScope {
+    pub(super) fn execution_hold(&self) -> Arc<crate::runtime_holds::RuntimeHold> {
+        self.runtime_hold
+            .upgrade()
+            .unwrap_or_else(|| unreachable!("executable allocation precedes terminal admission"))
+    }
+
     pub(super) fn owner(&self) -> CodeModeOwner {
         self.owner
             .lock()

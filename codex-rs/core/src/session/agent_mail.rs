@@ -504,18 +504,23 @@ impl Session {
         let mail = communication.clone();
         let task = {
             let state = self.state.lock().await;
-            if state.shutting_down {
+            if state.runtime_holds.is_closing() {
                 return Err(CodexErr::InvalidRequest(
                     "recipient is shutting down; accepted mail retained for recovery".into(),
                 ));
             }
-            // Registration and the shutdown flag share state exclusion. Teardown
+            let runtime_hold = state
+                .runtime_holds
+                .acquire()
+                .unwrap_or_else(|| unreachable!("state exclusion keeps admission open"));
+            // Registration and the close phase share state exclusion. Teardown
             // cannot miss a detached operation registered after its drain snapshot.
             self.agent_mail
                 .admissions
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .spawn(async move {
+                    let _runtime_hold = runtime_hold;
                     session
                         .agent_mail
                         .received

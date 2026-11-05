@@ -1292,13 +1292,30 @@ async fn cancelled_v2_send_finishes_reload_registration() {
         )])
         .await
         .unwrap();
-    // The existing fixture has no task runner to finish its initial turn.
-    thread.session.mark_interrupted();
+    // Stop the fixture's initial admission before testing automatic eviction;
+    // dropping its task controller alone does not prove execution settlement.
+    thread
+        .session
+        .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
+        .await;
     *thread.session.active_turn.lock().await = None;
-    assert_eq!(
-        harness.manager.try_evict_v2_thread(thread).await.unwrap(),
-        ThreadEvictionOutcome::Evicted,
-    );
+    // Intercept the seal on this single-thread runtime, before its independent
+    // cleanup owner can run. Cancelling this observer cannot reopen admission or
+    // release residency while teardown still owns the old generation.
+    let mut eviction = Box::pin(harness.manager.try_evict_v2_thread(Arc::clone(&thread)));
+    poll_fn(|cx| {
+        assert!(eviction.as_mut().poll(cx).is_pending());
+        assert!(thread.runtime_holds().is_closing());
+        assert!(thread.runtime_holds().acquire().is_none());
+        assert!(thread.residency_gate.try_read().is_err());
+        Poll::Ready(())
+    })
+    .await;
+    drop(eviction);
+    timeout(Duration::from_secs(5), thread.wait_for_idle_close())
+        .await
+        .expect("sealed cleanup survives observer cancellation");
+    assert!(harness.manager.get_thread(child_id).await.is_err());
     assert!(
         control
             .runtime
@@ -1608,7 +1625,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
                 .try_evict_v2_thread(Arc::clone(&reloaded_child))
                 .await
                 .expect("attempt eviction before input submission"),
-            crate::ThreadEvictionOutcome::Busy,
+            crate::ThreadEvictionOutcome::Contended,
         );
     }
     let reloaded_instructions = reloaded_child.session.inherited_instructions().await;

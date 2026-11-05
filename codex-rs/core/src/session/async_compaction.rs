@@ -98,7 +98,7 @@ pub(super) async fn maybe_start(
         };
         // Stop blocks new launches; already-running compaction remains session-owned.
         if turn_cancellation.is_cancelled()
-            || state.shutting_down
+            || state.runtime_holds.is_closing()
             || state
                 .async_compaction
                 .runtime
