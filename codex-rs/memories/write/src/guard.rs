@@ -1,24 +1,28 @@
 use codex_backend_client::Client as BackendClient;
+use codex_core::CapturedProvider;
 use codex_core::config::Config;
-use codex_login::AuthManager;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use tracing::info;
 use tracing::warn;
 
-pub(crate) async fn rate_limits_ok(auth_manager: &AuthManager, config: &Config) -> bool {
+pub(crate) async fn rate_limits_ok(provider: &CapturedProvider, config: &Config) -> bool {
     if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
         // No native quota endpoint is implemented; unrelated ChatGPT quota is not evidence.
         return true;
     }
-    rate_limits_check(auth_manager, config)
-        .await
-        .unwrap_or(true)
+    rate_limits_check(provider, config).await.unwrap_or(true)
 }
 
-async fn rate_limits_check(auth_manager: &AuthManager, config: &Config) -> Option<bool> {
-    let auth = auth_manager.auth().await?;
+async fn rate_limits_check(provider: &CapturedProvider, config: &Config) -> Option<bool> {
+    let auth = match provider.request_auth().await {
+        Ok(auth) => auth?,
+        Err(error) => {
+            warn!(%error, "memory-job credentials are unavailable");
+            return Some(false);
+        }
+    };
     if !auth.uses_codex_backend() {
         return None;
     }

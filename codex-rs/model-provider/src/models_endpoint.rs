@@ -61,6 +61,9 @@ const MAX_MODEL_CATALOG_BYTES: usize = 1024 * 1024;
 const MODELS_ENDPOINT: &str = "/models";
 const FEDRAMP_CODEX_BASE_URL: &str = "https://gov.chatgpt.com/backend-api/codex";
 
+#[path = "catalog_credentials.rs"]
+pub(crate) mod captured_credentials;
+
 /// Provider-owned model catalogue, decoded according to the configured adapter.
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
@@ -70,6 +73,7 @@ pub(crate) struct OpenAiModelsEndpoint {
     anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     transport_builder: Arc<dyn ModelsTransportBuilder>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
+    credential_guard: Option<Arc<dyn crate::ProviderCredentialGuard>>,
 }
 
 impl OpenAiModelsEndpoint {
@@ -88,6 +92,7 @@ impl OpenAiModelsEndpoint {
         };
         Self {
             runtime_auth: None,
+            credential_guard: None,
             provider_info,
             auth_manager,
             gateway_auth_manager,
@@ -140,6 +145,7 @@ impl OpenAiModelsEndpoint {
         let provider_info = self.provider_info.clone();
         let auth_manager = self.auth_manager.clone();
         let runtime_auth = self.runtime_auth.clone();
+        let credential_guard = self.credential_guard.clone();
         // A timed-out catalog fetch must not discard a rotated refresh token before
         // it is saved. Keep credential refresh and registration owned until they finish.
         let (auth, selected_runtime_auth) = tokio::spawn(async move {
@@ -161,6 +167,7 @@ impl OpenAiModelsEndpoint {
                         crate::runtime_auth::select_runtime_auth(
                             &runtime,
                             &provider_info.build_header_map()?,
+                            credential_guard.as_deref(),
                         )
                         .await
                         .map_err(|error| map_api_error(error.into()))?,
@@ -176,6 +183,7 @@ impl OpenAiModelsEndpoint {
                     None => None,
                 },
             };
+            captured_credentials::validate(credential_guard.as_deref(), auth.as_ref())?;
             Ok::<_, CodexErr>((auth, selected_runtime_auth))
         })
         .await??;
@@ -482,6 +490,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
             gateway_auth_manager: self.gateway_auth_manager.clone(),
             anthropic_auth_context: self.anthropic_auth_context.clone(),
             runtime_auth: self.runtime_auth.clone(),
+            credential_guard: self.credential_guard.clone(),
             transport_builder: Arc::clone(&self.transport_builder),
         }))
     }
@@ -825,6 +834,7 @@ mod tests {
                 gateway_auth_manager: None,
                 anthropic_auth_context: None,
                 runtime_auth: None,
+                credential_guard: None,
                 transport_builder: capture.clone(),
             });
             let provider = crate::provider::create_model_provider(
@@ -901,6 +911,7 @@ mod tests {
                 gateway_auth_manager: None,
                 anthropic_auth_context: None,
                 runtime_auth: None,
+                credential_guard: None,
                 transport_builder: capture.clone(),
             });
             let provider = crate::provider::create_model_provider(
@@ -1018,6 +1029,7 @@ mod tests {
             gateway_auth_manager: None,
             anthropic_auth_context: None,
             runtime_auth: None,
+            credential_guard: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::clone(&observed_request),
             }),
@@ -1076,6 +1088,7 @@ mod tests {
             gateway_auth_manager: None,
             anthropic_auth_context: None,
             runtime_auth: None,
+            credential_guard: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::new(Mutex::new(None)),
             }),

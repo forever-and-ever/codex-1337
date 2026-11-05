@@ -1,5 +1,6 @@
 pub(crate) mod farm_allocation;
 pub(crate) mod preserved_tools;
+mod provider_capture;
 mod response_thought;
 pub(crate) mod startup;
 
@@ -505,6 +506,7 @@ impl From<CompactedHistoryMetadata> for CompactedHistoryInstallation<'_> {
 }
 
 pub(crate) struct SessionSpawnArgs {
+    pub(crate) credentials: crate::StartCredentials,
     pub(crate) prompt_cache_observer: Option<Arc<dyn crate::PromptCacheObserver>>,
     pub(crate) attached_thread: bool,
     pub(crate) startup: Option<Arc<startup::SessionStartup>>,
@@ -627,6 +629,7 @@ impl Session {
             .ensure_config_server_applied()?;
         args.config.validate_windows_mxc_requirement()?;
         let SessionSpawnArgs {
+            credentials,
             prompt_cache_observer,
             attached_thread,
             startup,
@@ -968,6 +971,7 @@ impl Session {
         }
         let storage_originator = AuthStorageOriginator::from_client_name(&originator);
         let session_configuration = SessionConfiguration {
+            credentials,
             turn_extension_init,
             account_selection: Arc::clone(&agent_control.runtime().account_selection),
             provider: codex_model_provider::create_model_provider_with_anthropic_account(

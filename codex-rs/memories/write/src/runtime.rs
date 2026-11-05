@@ -1,10 +1,12 @@
 use crate::metrics::MEMORY_STORAGE_BYTES;
 use crate::workspace::memory_storage_bytes;
+use codex_core::CapturedProvider;
 use codex_core::CodexThread;
 use codex_core::ModelClient;
 use codex_core::NewThread;
 use codex_core::Prompt;
 use codex_core::ResponseEvent;
+use codex_core::StartCredentials;
 use codex_core::StartIfIdleSubmission;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadManager;
@@ -15,17 +17,10 @@ use codex_core::content_items_to_text;
 use codex_core::detached_memory_responses_metadata;
 use codex_core::resolve_installation_id;
 use codex_features::Feature;
-use codex_login::AuthManager;
-use codex_login::CodexAuth;
-use codex_login::anthropic::AccountId;
 use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_login::default_client::originator;
-use codex_model_provider::ModelProvider;
-use codex_model_provider::SharedModelProvider;
-use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderAdapter;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::MemoryVersion;
@@ -58,8 +53,7 @@ pub(crate) struct MemoryStartupContext {
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
     thread_manager: Arc<ThreadManager>,
-    auth_manager: Arc<AuthManager>,
-    provider: SharedModelProvider,
+    provider: CapturedProvider,
     session_telemetry: SessionTelemetry,
 }
 
@@ -79,7 +73,7 @@ fn memory_metric_tags<'a>(
 }
 
 fn build_session_telemetry(
-    auth_manager: &AuthManager,
+    provider: &CapturedProvider,
     thread_id: ThreadId,
     config: &Config,
     source: SessionSource,
@@ -89,15 +83,15 @@ fn build_session_telemetry(
     let is_native_anthropic =
         config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription;
     let auth = (!is_native_anthropic)
-        .then(|| auth_manager.auth_cached())
+        .then(|| provider.auth_metadata())
         .flatten();
     let auth = auth.as_ref();
-    let auth_mode = auth.map(CodexAuth::auth_mode).map(TelemetryAuthMode::from);
-    let account_id = auth.and_then(CodexAuth::get_account_id);
-    let account_email = auth.and_then(CodexAuth::get_account_email);
+    let auth_mode = auth.map(|auth| TelemetryAuthMode::from(auth.mode));
+    let account_id = auth.and_then(|auth| auth.account_id.clone());
+    let account_email = auth.and_then(|auth| auth.account_email.clone());
     let auth_env_telemetry = collect_auth_env_telemetry(
         &config.model_provider,
-        !is_native_anthropic && auth_manager.codex_api_key_env_enabled(),
+        !is_native_anthropic && provider.codex_api_key_env_enabled(),
     );
     SessionTelemetry::new(
         thread_id,
@@ -117,73 +111,25 @@ fn build_session_telemetry(
 impl MemoryStartupContext {
     pub(crate) fn new(
         thread_manager: Arc<ThreadManager>,
-        auth_manager: Arc<AuthManager>,
+        provider: CapturedProvider,
         thread_id: ThreadId,
         thread: Arc<CodexThread>,
         config: &Config,
         source: SessionSource,
     ) -> Self {
-        let provider = create_model_provider(
-            config.model_provider.clone(),
-            Some(Arc::clone(&auth_manager)),
-        );
-        Self::new_with_provider(
-            thread_manager,
-            auth_manager,
-            thread_id,
-            thread,
-            config,
-            source,
-            provider,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_for_testing(
-        thread_manager: Arc<ThreadManager>,
-        auth_manager: Arc<AuthManager>,
-        thread_id: ThreadId,
-        thread: Arc<CodexThread>,
-        config: &Config,
-        source: SessionSource,
-        provider: SharedModelProvider,
-    ) -> Self {
-        Self::new_with_provider(
-            thread_manager,
-            auth_manager,
-            thread_id,
-            thread,
-            config,
-            source,
-            provider,
-        )
-    }
-
-    fn new_with_provider(
-        thread_manager: Arc<ThreadManager>,
-        auth_manager: Arc<AuthManager>,
-        thread_id: ThreadId,
-        thread: Arc<CodexThread>,
-        config: &Config,
-        source: SessionSource,
-        provider: SharedModelProvider,
-    ) -> Self {
-        let model = config.model.as_deref().unwrap_or("unknown");
         let session_telemetry = build_session_telemetry(
-            &auth_manager,
+            &provider,
             thread_id,
             config,
             source,
-            model,
+            config.model.as_deref().unwrap_or("unknown"),
             originator().value,
         );
-
         Self {
             version: config.memories.version,
             thread_id,
             thread,
             thread_manager,
-            auth_manager,
             provider,
             session_telemetry,
         }
@@ -238,8 +184,8 @@ impl MemoryStartupContext {
         }
     }
 
-    pub(crate) fn provider(&self) -> &dyn ModelProvider {
-        self.provider.as_ref()
+    pub(crate) fn provider(&self) -> &CapturedProvider {
+        &self.provider
     }
 
     pub(crate) fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]) {
@@ -264,56 +210,17 @@ impl MemoryStartupContext {
         model_name: &str,
         reasoning_effort: ReasoningEffort,
     ) -> anyhow::Result<StageOneRequestContext> {
-        let anthropic_account =
-            if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
-                Some(
-                    self.thread
-                        .committed_provider_account_id()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Select an Anthropic account before memory extraction")
-                        })?
-                        .parse::<AccountId>()?,
-                )
-            } else {
-                None
-            };
-        let models_manager = if let Some(account) = &anthropic_account {
-            let provider = self.provider.for_anthropic_account(&account.to_string())?;
-            let manager =
-                provider.models_manager(config.models_cache_path(), config.model_catalog.clone());
-            let catalog = manager
-                .raw_model_catalog(
-                    RefreshStrategy::OnlineIfUncached,
-                    config.http_client_factory(),
-                )
-                .await;
-            if !catalog
-                .models
-                .iter()
-                .any(|model| model.slug == model_name && model.anthropic.is_some())
-            {
-                anyhow::bail!(
-                    "Cannot load authoritative Anthropic memory-extraction metadata for this account"
-                );
-            }
-            manager
-        } else {
-            self.thread_manager.get_models_manager()
-        };
         let config_snapshot = self.thread.config_snapshot().await;
-        let model_info = models_manager
-            .get_model_info(model_name, &config.to_models_manager_config())
-            .await;
+        let model_info = self.provider.model_info(config, model_name).await?;
         let reasoning_summary = config
             .model_reasoning_summary
             .unwrap_or(model_info.default_reasoning_summary);
 
         Ok(StageOneRequestContext {
             version: self.version,
-            anthropic_account,
             model_info,
             session_telemetry: build_session_telemetry(
-                &self.auth_manager,
+                &self.provider,
                 self.thread_id,
                 config,
                 config_snapshot.session_source,
@@ -338,7 +245,7 @@ impl MemoryStartupContext {
         let session_id = SessionId::from(self.thread_id);
         let session_id_string = session_id.to_string();
         let model_client = ModelClient::new(
-            Some(Arc::clone(&self.auth_manager)),
+            None,
             AgentIdentityAuthPolicy::JwtOnly,
             self.thread_id,
             config.model_provider.clone(),
@@ -357,11 +264,8 @@ impl MemoryStartupContext {
             config.workspace_routing_context(),
             Vec::new(),
         )
-        .with_anthropic_prompt_cache(config.anthropic_prompt_cache.clone());
-        let model_client = match &context.anthropic_account {
-            Some(account) => model_client.with_anthropic_account(account.clone())?,
-            None => model_client,
-        };
+        .with_anthropic_prompt_cache(config.anthropic_prompt_cache.clone())
+        .with_captured_provider(self.provider.clone())?;
 
         let mut client_session = model_client.new_session();
         let window_id = format!("{}:0", self.thread_id);
@@ -418,27 +322,16 @@ impl MemoryStartupContext {
 
     pub(crate) async fn spawn_consolidation_agent(
         &self,
-        mut config: Config,
+        config: Config,
         prompt: Vec<UserInput>,
         workspace_lock: Arc<crate::MemoryWorkspaceLock>,
     ) -> anyhow::Result<SpawnedConsolidationAgent> {
-        if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
-            let account = self
-                .thread
-                .committed_provider_account_id()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Select an Anthropic account before memory consolidation")
-                })?
-                .parse::<AccountId>()?;
-            // Consolidation is an independent family, not a visible child. StartThreadOptions
-            // has no explicit native binding; change only its owned configuration snapshot.
-            config.wrangler.default_claude_account = Some(account.to_string());
-        }
         let NewThread {
             thread_id, thread, ..
         } = self
             .thread_manager
             .start_thread(StartThreadOptions {
+                credentials: StartCredentials::Captured(self.provider.clone()),
                 session_source: Some(SessionSource::Internal(
                     InternalSessionSource::MemoryConsolidation,
                 )),

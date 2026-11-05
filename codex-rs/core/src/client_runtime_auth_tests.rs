@@ -23,7 +23,7 @@ async fn selected_runtime_transport_stays_revoked(mode: RuntimeAuthMode) {
             "runtime_agent_instance_id": "runtime-a", "agent_host_id": "host-a",
             "actor": {"kind": "platform", "user_id": "user-a", "organization_id": "org-a", "project_id": null},
         })))
-        .expect(1)
+        .expect(2)
         .mount(&server)
         .await;
     Mock::given(path("/v1/responses"))
@@ -56,6 +56,17 @@ async fn selected_runtime_transport_stays_revoked(mode: RuntimeAuthMode) {
         .await,
     );
     assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+    let runtime_source = Arc::new(ChangingPrincipalSource(std::sync::RwLock::new(
+        CodexAuth::from_api_key("key-a"),
+    )));
+    manager
+        .set_external_auth(runtime_source.clone())
+        .await
+        .unwrap();
+    assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+    let parent_permit = policy
+        .acquire(&format!("{}/v1/responses", server.uri()).parse().unwrap())
+        .unwrap();
     let runtime = Arc::new(RuntimeAuthManager::new(
         manager.clone(),
         AgentHostAuthorization::InstallationId {
@@ -72,9 +83,21 @@ async fn selected_runtime_transport_stays_revoked(mode: RuntimeAuthMode) {
     client.http_client_factory = factory;
     Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
         ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri()))),
-        Some(manager),
+        Some(Arc::clone(&manager)),
     );
-    let client = client.with_runtime_auth(runtime, mode).unwrap();
+    let client = client
+        .with_runtime_auth(Arc::clone(&runtime), mode)
+        .unwrap();
+    let captured = client.capture_provider().await.unwrap();
+    assert!(server.received_requests().await.unwrap().is_empty());
+    parent_permit.check().unwrap();
+    let mut auxiliary = test_model_client(SessionSource::Exec);
+    Arc::get_mut(&mut auxiliary.state).unwrap().provider =
+        create_model_provider(client.state.provider.info().clone(), None);
+    let auxiliary = auxiliary.with_captured_provider(captured).unwrap();
+    let selected = auxiliary.state.provider.runtime_auth().unwrap();
+    assert!(Arc::ptr_eq(&selected.0, &runtime));
+    assert!(selected.0.uses_credentials(&manager));
     let setup = client
         .current_client_setup(ClientRouting::Workspace)
         .await
@@ -85,9 +108,17 @@ async fn selected_runtime_transport_stays_revoked(mode: RuntimeAuthMode) {
         .build_request(http::Method::POST, "/responses");
     let request = setup.api_auth.apply_auth(request).await.unwrap();
     transport.execute(request.clone()).await.unwrap();
+    *runtime_source.0.write().unwrap() = CodexAuth::from_api_key("rotated-key-a");
+    let rotated = auxiliary
+        .current_client_setup(ClientRouting::Workspace)
+        .await
+        .unwrap();
+    assert_eq!(rotated.auth.unwrap().get_token().unwrap(), "rotated-key-a");
+    parent_permit.check().unwrap();
 
     // A new policy may allow the destination, but cannot authorize the old account's request.
     policy.invalidate();
+    assert_eq!(parent_permit.check(), Err(NetworkPolicyDenied::Revoked));
     assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
     assert!(matches!(
         transport.execute(request).await,
@@ -126,6 +157,102 @@ async fn selected_runtime_transport_stays_revoked(mode: RuntimeAuthMode) {
             NetworkPolicyDenied::Revoked
         )))
     ));
+    // Replacing this runtime's credential principal revokes captured work without
+    // authorizing a second registration or an anonymous/provider fallback.
+    codex_login::login_with_api_key(
+        home.path(),
+        "key-b",
+        AuthCredentialsStoreMode::Ephemeral,
+        AuthKeyringBackendKind::Direct,
+    )
+    .unwrap();
+    manager.clear_external_auth();
+    manager.reload().await;
+    assert!(
+        auxiliary
+            .current_client_setup(ClientRouting::Workspace)
+            .await
+            .is_err()
+    );
+
+    // Catalog auth resolves again after capture. A new principal must not reach
+    // either discovery or this retained runtime's registration endpoint.
+    struct ChangingPrincipalSource(std::sync::RwLock<CodexAuth>);
+    impl codex_login::ExternalAuth for ChangingPrincipalSource {
+        fn resolve(&self) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            let auth = self.0.read().unwrap().clone();
+            Box::pin(async move { Ok(auth) })
+        }
+        fn refresh(
+            &self,
+            _: codex_login::ExternalAuthRefreshContext,
+        ) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            self.resolve()
+        }
+    }
+    use base64::Engine as _;
+    let chatgpt = |user: &str, workspace: &str| {
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(json!({"https://api.openai.com/auth": {"chatgpt_user_id": user}}).to_string());
+        CodexAuth::from_external_chatgpt_tokens(
+            &format!("header.{payload}.signature"),
+            workspace,
+            None,
+        )
+        .unwrap()
+    };
+    for runtime_enabled in [false, true] {
+        let initial = if runtime_enabled {
+            CodexAuth::from_api_key("catalog-a")
+        } else {
+            chatgpt("user-a", "workspace-a")
+        };
+        let source = Arc::new(ChangingPrincipalSource(std::sync::RwLock::new(
+            initial.clone(),
+        )));
+        let manager = AuthManager::from_auth_for_testing(initial);
+        manager.set_external_auth(source.clone()).await.unwrap();
+        let mut info =
+            ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+        info.model_catalog_url = Some(format!("{}/captured-models", server.uri()).into());
+        let mut client = test_model_client(SessionSource::Exec);
+        Arc::get_mut(&mut client.state).unwrap().provider =
+            create_model_provider(info.clone(), Some(Arc::clone(&manager)));
+        if runtime_enabled {
+            let runtime = Arc::new(RuntimeAuthManager::new(
+                manager,
+                AgentHostAuthorization::InstallationId {
+                    installation_id: uuid::Uuid::nil(),
+                },
+                RuntimeRegistrationMetadata {
+                    harness: None,
+                    harness_version: None,
+                    role: RuntimeRole::OrchestratorAndExecutor,
+                },
+                format!("{}/register", server.uri()).parse().unwrap(),
+            ));
+            client = client.with_runtime_auth(runtime, mode).unwrap();
+        }
+        let captured = client.capture_provider().await.unwrap();
+        let mut config = crate::config::test_config().await;
+        config.model_provider = info;
+        config.model_catalog = None;
+        let models = captured.models_manager(&config).unwrap();
+        models.set_api_key_model_discovery_enabled(true);
+        *source.0.write().unwrap() = chatgpt("user-b", "workspace-b");
+        let _ = models
+            .authoritative_catalog(
+                codex_models_manager::manager::RefreshStrategy::OnlineIfUncached,
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+            )
+            .await;
+        assert!(captured.model_info(&config, "gpt-5.5").await.is_err());
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            3,
+            "invalid catalog credentials must be rejected before discovery or registration"
+        );
+    }
     server.verify().await;
 }
 

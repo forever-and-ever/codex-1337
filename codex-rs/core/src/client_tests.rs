@@ -295,6 +295,8 @@ struct SetupRefreshProvider {
     setup_calls: AtomicUsize,
 }
 
+impl codex_model_provider::ForkModelProvider for SetupRefreshProvider {}
+
 impl ModelProvider for SetupRefreshProvider {
     fn info(&self) -> &ModelProviderInfo {
         self.inner.info()
@@ -381,7 +383,8 @@ async fn client_setup_accepts_command_credential_refresh() {
         });
         let manager = provider.auth_manager().unwrap();
         let mut client = test_model_client(SessionSource::Exec);
-        Arc::get_mut(&mut client.state).unwrap().provider = provider;
+        Arc::get_mut(&mut client.state).unwrap().provider =
+            codex_model_provider::ProviderHandle::custom(provider);
 
         let setup = client.current_client_setup(routing).await.unwrap();
         let mut headers = http::HeaderMap::new();
@@ -407,6 +410,118 @@ async fn client_setup_accepts_command_credential_refresh() {
 
 #[tokio::test]
 async fn client_setup_rebuilds_coherent_auth_after_refresh_and_account_switches() {
+    struct RotatingSource(std::sync::RwLock<Option<String>>);
+    impl codex_login::ExternalAuth for RotatingSource {
+        fn resolve(&self) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            let token = self.0.read().unwrap().clone();
+            Box::pin(async move {
+                token
+                    .map(|token| CodexAuth::from_api_key(&token))
+                    .ok_or_else(|| std::io::Error::other("captured source unavailable"))
+            })
+        }
+        fn refresh(
+            &self,
+            _: codex_login::ExternalAuthRefreshContext,
+        ) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            self.resolve()
+        }
+    }
+    let source = Arc::new(RotatingSource(std::sync::RwLock::new(Some(
+        "source-a".into(),
+    ))));
+    use codex_http_client::{DestinationPolicy, NetworkPolicyController, NetworkPolicyDenied};
+    use codex_login::{AuthCredentialsStoreMode, AuthKeyringBackendKind, AuthRouteConfig};
+    let controller = NetworkPolicyController::default();
+    let policy = controller.policy();
+    let home = TempDir::new().unwrap();
+    codex_login::login_with_api_key(
+        home.path(),
+        "static-a",
+        AuthCredentialsStoreMode::Ephemeral,
+        AuthKeyringBackendKind::Direct,
+    )
+    .unwrap();
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+        .with_network_policy(policy.clone());
+    let manager = Arc::new(
+        AuthManager::new(
+            home.path().to_path_buf(),
+            false,
+            AuthCredentialsStoreMode::Ephemeral,
+            None,
+            None,
+            AuthKeyringBackendKind::Direct,
+            AuthRouteConfig::from_http_client_factory(factory),
+        )
+        .await,
+    );
+    assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+    let url = "https://example.com/v1/responses".parse().unwrap();
+    let static_permit = policy.acquire(&url).unwrap();
+    let mut client = test_model_client(SessionSource::Exec);
+    Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
+        test_model_provider().info().clone(),
+        Some(Arc::clone(&manager)),
+    );
+    let static_capture = client.capture_provider().await.unwrap();
+    static_permit.check().unwrap();
+    manager.set_external_auth(source.clone()).await.unwrap();
+    assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+    let parent_permit = policy.acquire(&url).unwrap();
+    let external_capture = client.capture_provider().await.unwrap();
+    parent_permit.check().unwrap();
+    let captured_policy = external_capture
+        .auth_manager()
+        .unwrap()
+        .http_client_factory()
+        .network_policy()
+        .clone();
+    let captured_permit = captured_policy.acquire(&url).unwrap();
+    *source.0.write().unwrap() = Some("rotated-a".into());
+    assert_eq!(
+        external_capture
+            .request_auth()
+            .await
+            .unwrap()
+            .unwrap()
+            .get_token()
+            .unwrap(),
+        "rotated-a"
+    );
+    parent_permit.check().unwrap();
+    captured_permit.check().unwrap();
+    // Borrowing the policy never removes its actual revocation fence.
+    policy.invalidate();
+    assert_eq!(parent_permit.check(), Err(NetworkPolicyDenied::Revoked));
+    assert_eq!(captured_permit.check(), Err(NetworkPolicyDenied::Revoked));
+    assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+    assert!(matches!(
+        captured_policy.acquire(&url),
+        Err(NetworkPolicyDenied::Revoked)
+    ));
+    manager
+        .set_external_auth(Arc::new(RotatingSource(std::sync::RwLock::new(Some(
+            "replacement-b".into(),
+        )))))
+        .await
+        .unwrap();
+    for (captured, expected) in [
+        (static_capture, "static-a"),
+        (external_capture.clone(), "rotated-a"),
+    ] {
+        let mut auxiliary = test_model_client(SessionSource::Exec);
+        Arc::get_mut(&mut auxiliary.state).unwrap().provider =
+            create_model_provider(client.state.provider.info().clone(), None);
+        let auxiliary = auxiliary.with_captured_provider(captured).unwrap();
+        let setup = auxiliary
+            .current_client_setup(super::ClientRouting::ConfiguredProvider)
+            .await
+            .unwrap();
+        assert_eq!(setup.auth.unwrap().get_token().unwrap(), expected);
+    }
+    *source.0.write().unwrap() = None;
+    assert!(external_capture.request_auth().await.is_err());
     for (user, workspace, expected_owner_generation) in [
         ("user-a", "workspace-a", 0),
         ("user-b", "workspace-a", 1),
@@ -441,7 +556,8 @@ async fn client_setup_rebuilds_coherent_auth_after_refresh_and_account_switches(
             setup_calls: AtomicUsize::new(/*v*/ 0),
         });
         let mut client = test_model_client(SessionSource::Exec);
-        Arc::get_mut(&mut client.state).unwrap().provider = provider.clone();
+        Arc::get_mut(&mut client.state).unwrap().provider =
+            codex_model_provider::ProviderHandle::custom(provider.clone());
         let setup = client
             .current_client_setup(super::ClientRouting::ConfiguredProvider)
             .await
@@ -1782,6 +1898,8 @@ struct TestRecoveryProvider {
     attempts: Arc<AtomicUsize>,
 }
 
+impl codex_model_provider::ForkModelProvider for TestRecoveryProvider {}
+
 impl ModelProvider for TestRecoveryProvider {
     fn info(&self) -> &ModelProviderInfo {
         self.inner.info()
@@ -1834,11 +1952,12 @@ impl ModelProvider for TestRecoveryProvider {
 async fn provider_owned_auth_recovery_is_bounded_and_preserves_unauthorized_failures() {
     for should_fail in [false, true] {
         let attempts = Arc::new(AtomicUsize::new(0));
-        let provider: SharedModelProvider = Arc::new(TestRecoveryProvider {
-            inner: test_model_provider(),
-            should_fail,
-            attempts: Arc::clone(&attempts),
-        });
+        let provider: SharedModelProvider =
+            codex_model_provider::ProviderHandle::custom(Arc::new(TestRecoveryProvider {
+                inner: test_model_provider(),
+                should_fail,
+                attempts: Arc::clone(&attempts),
+            }));
         assert!(provider.auth_manager().is_none());
 
         let unauthorized = || TransportError::Http {

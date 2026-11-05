@@ -102,6 +102,7 @@ pub use workspace_routing::WorkspaceRoutingResolver;
 pub use workspace_routing::WorkspaceRoutingSession;
 
 mod account_scope;
+pub use account_scope::CapturedAuthSource;
 pub use account_scope::PreparedAccount;
 
 /// Authentication mechanism used by the current user.
@@ -2094,6 +2095,7 @@ pub struct AuthManager {
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
     workload_identity_selected: bool,
     auth_route_config: AuthRouteConfig,
+    auth_publication: account_scope::AuthPublication,
 }
 
 /// Configuration view required to construct a shared [`AuthManager`].
@@ -2170,7 +2172,8 @@ fn default_agent_identity_authapi_base_url() -> Option<String> {
 impl AuthManager {
     /// Returns the application policy associated with this account owner.
     pub fn application_network_policy(&self) -> codex_http_client::NetworkPolicy {
-        self.auth_route_config.application_network_policy().clone()
+        self.auth_publication
+            .application_policy(&self.auth_route_config)
     }
 
     /// Creates content clients bound to the account currently owned by this manager.
@@ -2178,7 +2181,10 @@ impl AuthManager {
         self.auth_route_config
             .http_client_factory()
             .clone()
-            .with_network_policy(self.application_network_policy().for_current_account())
+            .with_network_policy(
+                self.auth_publication
+                    .content_policy(&self.auth_route_config),
+            )
     }
     /// Create a new manager loading the initial auth using the provided
     /// preferred auth method. Errors loading auth are swallowed; `auth()` will
@@ -2215,44 +2221,7 @@ impl AuthManager {
             .await
             .ok()
             .flatten();
-        let AuthConfig {
-            codex_home,
-            auth_credentials_store_mode,
-            keyring_backend_kind,
-            forced_login_method,
-            chatgpt_base_url,
-            forced_chatgpt_workspace_id,
-            managed_auth_policy,
-            auth_route_config,
-        } = auth_config;
-        let agent_identity_authapi_base_url =
-            agent_identity_authapi_base_url(chatgpt_base_url.as_deref()).ok();
-        let (auth_change_tx, _auth_change_rx) = watch::channel(0);
-        Self {
-            codex_home,
-            account_scope: RwLock::new(None),
-            inner: RwLock::new(CachedAuth {
-                auth: managed_auth,
-                permanent_refresh_failure: None,
-            }),
-            auth_change_tx,
-            auth_change_state_tx: watch::channel(AuthChangeState::default()).0,
-            workspace_routing_resolver: OnceLock::new(),
-            enable_codex_api_key_env,
-            auth_credentials_store_mode,
-            keyring_backend_kind,
-            forced_login_method,
-            forced_chatgpt_workspace_id: RwLock::new(forced_chatgpt_workspace_id),
-            managed_auth_policy,
-            chatgpt_base_url,
-            agent_identity_authapi_base_url,
-            refresh_lock: Arc::new(Semaphore::new(/*permits*/ 1)),
-            agent_identity_lock: Semaphore::new(/*permits*/ 1),
-            agent_identity_bootstrap_cooldown: Mutex::default(),
-            external_auth: RwLock::new(None),
-            workload_identity_selected: false,
-            auth_route_config,
-        }
+        Self::from_auth_state(auth_config, enable_codex_api_key_env, managed_auth)
     }
 
     /// Create an AuthManager with a specific CodexAuth, for testing only.
@@ -2288,6 +2257,7 @@ impl AuthManager {
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
             workload_identity_selected: false,
+            auth_publication: account_scope::AuthPublication::Owner,
             auth_route_config: crate::test_support::transport_default_auth_route_config(),
         })
     }
@@ -2319,6 +2289,7 @@ impl AuthManager {
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
             workload_identity_selected: false,
+            auth_publication: account_scope::AuthPublication::Owner,
             auth_route_config: crate::test_support::transport_default_auth_route_config(),
         })
     }
@@ -2358,6 +2329,7 @@ impl AuthManager {
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
             workload_identity_selected: false,
+            auth_publication: account_scope::AuthPublication::Owner,
             auth_route_config: crate::test_support::transport_default_auth_route_config(),
         })
     }
@@ -2396,6 +2368,7 @@ impl AuthManager {
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(Some(Arc::new(BearerTokenRefresher::new(config, env)))),
             workload_identity_selected: false,
+            auth_publication: account_scope::AuthPublication::Owner,
             // External bearer auth refreshes by running the provider's command and never makes
             // auth-owned HTTP requests, so this route is intentionally inert.
             auth_route_config: AuthRouteConfig::from_http_client_factory(HttpClientFactory::new(
@@ -2906,14 +2879,17 @@ impl AuthManager {
         let previous = guard.auth.as_ref();
         let changed = !AuthManager::auths_equal(previous, new_auth.as_ref());
         let auth_changed_for_refresh = !Self::auths_equal_for_refresh(previous, new_auth.as_ref());
-        let owner_changed = auth_changed_for_refresh && !same_owner(previous, new_auth.as_ref());
+        let source_rotation = self.external_source_owns_rotation(previous, new_auth.as_ref());
+        let owner_changed = auth_changed_for_refresh
+            && !source_rotation
+            && !same_owner(previous, new_auth.as_ref());
         let source_changed =
             auth_changed_for_refresh && !super::source::same_source(previous, new_auth.as_ref());
-        let login_changed = auth_changed_for_refresh && !same_login(previous, new_auth.as_ref());
+        let login_changed = auth_changed_for_refresh
+            && !source_rotation
+            && !same_login(previous, new_auth.as_ref());
         if owner_changed {
-            self.auth_route_config
-                .application_network_policy()
-                .invalidate();
+            self.auth_publication.invalidate(&self.auth_route_config);
         }
         if auth_changed_for_refresh {
             guard.permanent_refresh_failure = None;
@@ -2958,11 +2934,7 @@ impl AuthManager {
         external_auth: Arc<dyn ExternalAuth>,
     ) -> Result<(), RefreshTokenError> {
         let auth = self.resolve_external_auth(external_auth.as_ref()).await?;
-        let mut external_auth_slot = self.external_auth.write().map_err(|_| {
-            RefreshTokenError::Transient(std::io::Error::other("external auth lock is poisoned"))
-        })?;
-        *external_auth_slot = Some(external_auth);
-        drop(external_auth_slot);
+        self.replace_external_auth_owner(external_auth)?;
         if let Ok(mut guard) = self.inner.write() {
             guard.permanent_refresh_failure = None;
         }

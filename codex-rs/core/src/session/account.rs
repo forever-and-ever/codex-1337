@@ -29,6 +29,9 @@ impl Session {
     }
 
     fn pending_account_selection(&self) -> Option<Arc<ProviderAccountSelection>> {
+        if self.services.model_client.has_captured_provider() {
+            return None;
+        }
         self.services
             .local_agent_runtime
             .account_selection
@@ -129,6 +132,7 @@ impl Session {
         &self,
         selection: ProviderAccountSelection,
     ) -> std::io::Result<()> {
+        self.services.model_client.require_mutable_provider()?;
         let has_parent = self
             .state
             .lock()

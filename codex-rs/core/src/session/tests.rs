@@ -4597,6 +4597,7 @@ async fn set_rate_limits_retains_previous_credits() {
         },
     };
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
@@ -4721,6 +4722,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         },
     };
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
@@ -5347,6 +5349,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
     };
 
     SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
@@ -6811,6 +6814,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     };
     let default_environments = vec![local(config.cwd.clone())];
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         environments: default_environments.clone(),
@@ -7147,6 +7151,7 @@ async fn make_session_with_config_and_rx(
     };
     let default_environments = vec![local(config.cwd.clone())];
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         environments: default_environments.clone(),
@@ -7285,6 +7290,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
     };
     let default_environments = vec![local(config.cwd.clone())];
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         environments: default_environments.clone(),
@@ -8868,6 +8874,7 @@ where
     };
     let default_environments = vec![local(config.cwd.clone())];
     let session_configuration = SessionConfiguration {
+        credentials: crate::StartCredentials::Inherit,
         account_selection: Arc::default(),
         turn_extension_init: Default::default(),
         environments: default_environments.clone(),

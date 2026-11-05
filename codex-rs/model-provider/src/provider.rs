@@ -150,17 +150,13 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     }
 
     /// Returns the preferred model used for memory extraction.
-    ///
-    /// None: this provider runs no memory work.
-    fn memory_extraction_preferred_model(&self) -> Option<&'static str> {
-        Some(DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL)
+    fn memory_extraction_preferred_model(&self) -> &'static str {
+        DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
     }
 
     /// Returns the preferred model used for memory consolidation.
-    ///
-    /// None: this provider runs no memory work.
-    fn memory_consolidation_preferred_model(&self) -> Option<&'static str> {
-        Some(DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL)
+    fn memory_consolidation_preferred_model(&self) -> &'static str {
+        DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL
     }
 
     /// Returns whether requests made through this provider should include attestation.
@@ -175,22 +171,6 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// to think through whether Codex should have a unified provider-specific auth
     /// manager throughout the codebase; that is a larger refactor than this change.
     fn auth_manager(&self) -> Option<Arc<AuthManager>>;
-
-    /// Native subscription authentication, never resolved through OpenAI credentials.
-    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
-        Ok(None)
-    }
-
-    /// Returns an immutable native discovery scope sharing this provider's credential manager.
-    /// Other provider authentication and request routing remain unchanged.
-    fn for_anthropic_account(
-        &self,
-        _account_id: &str,
-    ) -> codex_protocol::error::Result<SharedModelProvider> {
-        Err(CodexErr::InvalidRequest(
-            "Provider does not support Anthropic account-scoped discovery".into(),
-        ))
-    }
 
     /// Runtime authentication selected for this provider's inference destination.
     fn runtime_auth(&self) -> Option<&(Arc<RuntimeAuthManager>, RuntimeAuthMode)> {
@@ -423,7 +403,14 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
 pub type ModelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Shared runtime model provider handle.
-pub type SharedModelProvider = Arc<dyn ModelProvider>;
+#[path = "provider_handle.rs"]
+mod provider_handle;
+
+pub use provider_handle::ForkModelProvider;
+pub use provider_handle::ProviderCredentialGuard;
+pub use provider_handle::ProviderHandle;
+
+pub type SharedModelProvider = Arc<ProviderHandle>;
 
 /// Resolve credential-dependent defaults without changing configured endpoints.
 pub fn resolve_api_provider(
@@ -458,7 +445,7 @@ pub(crate) fn create_model_provider_with_runtime(
     auth_manager: Option<Arc<AuthManager>>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
 ) -> SharedModelProvider {
-    Arc::new(ConfiguredModelProvider::new(
+    ProviderHandle::configured(ConfiguredModelProvider::new(
         provider_info,
         auth_manager,
         None,
@@ -471,7 +458,7 @@ pub fn create_model_provider_with_anthropic_account(
     auth_manager: Option<Arc<AuthManager>>,
     default_account: Option<String>,
 ) -> SharedModelProvider {
-    Arc::new(ConfiguredModelProvider::new(
+    ProviderHandle::configured(ConfiguredModelProvider::new(
         provider_info,
         auth_manager,
         default_account,
@@ -489,6 +476,7 @@ struct ConfiguredModelProvider {
     anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
     catalog_runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
+    credential_guard: Option<Arc<dyn provider_handle::ProviderCredentialGuard>>,
 }
 
 enum ModelsCacheConfig {
@@ -554,6 +542,7 @@ impl ConfiguredModelProvider {
             anthropic_auth_context,
             runtime_auth: inference_runtime_auth,
             catalog_runtime_auth,
+            credential_guard: None,
         }
     }
 
@@ -565,9 +554,13 @@ impl ConfiguredModelProvider {
             crate::validate_runtime_destination(self.info.base_url.as_deref())?;
             crate::validate_runtime_provider(&self.info, self.auth_manager.as_ref(), runtime)?;
             let headers = self.info.build_header_map()?;
-            let selected = crate::runtime_auth::select_runtime_auth(runtime, &headers)
-                .await
-                .map_err(|error| self.map_api_error(error.into()))?;
+            let selected = crate::runtime_auth::select_runtime_auth(
+                runtime,
+                &headers,
+                self.credential_guard.as_deref(),
+            )
+            .await
+            .map_err(|error| self.map_api_error(error.into()))?;
             crate::validate_runtime_selectors(&headers, selected.runtime().actor().info())?;
             ResolvedProviderAuth {
                 auth: selected.clone().into_auth_provider(*mode),
@@ -576,6 +569,10 @@ impl ConfiguredModelProvider {
             }
         } else {
             let auth = self.auth().await;
+            crate::models_endpoint::captured_credentials::validate(
+                self.credential_guard.as_deref(),
+                auth.as_ref(),
+            )?;
             match scope {
                 Some(scope) if provider_uses_first_party_auth_path(&self.info) => {
                     resolve_provider_auth_for_scope(
@@ -625,7 +622,8 @@ impl ConfiguredModelProvider {
                 self.gateway_auth_manager.clone(),
                 self.anthropic_auth_context.clone(),
             )
-            .with_runtime_auth(self.catalog_runtime_auth.clone()),
+            .with_runtime_auth(self.catalog_runtime_auth.clone())
+            .with_credential_guard(self.credential_guard.clone()),
         );
         let auth_manager = self.auth_manager.clone();
         let manager = match cache {
@@ -675,39 +673,8 @@ impl ModelProvider for ConfiguredModelProvider {
         }
     }
 
-    fn memory_extraction_preferred_model(&self) -> Option<&'static str> {
-        match self.info.adapter {
-            codex_model_provider_info::ModelProviderAdapter::OpenRouter => None,
-            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                Some("claude-haiku-5-5")
-            }
-            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
-                Some(DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL)
-            }
-        }
-    }
-
-    fn memory_consolidation_preferred_model(&self) -> Option<&'static str> {
-        match self.info.adapter {
-            codex_model_provider_info::ModelProviderAdapter::OpenRouter => None,
-            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                Some("claude-sonnet-5-5")
-            }
-            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
-                Some(DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL)
-            }
-        }
-    }
-
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
-    }
-
-    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
-        self.anthropic_auth_context
-            .clone()
-            .transpose()
-            .map_err(std::io::Error::other)
     }
 
     fn gateway_auth_manager(&self) -> std::io::Result<Option<Arc<GatewayAuthManager>>> {
@@ -715,20 +682,6 @@ impl ModelProvider for ConfiguredModelProvider {
             .clone()
             .transpose()
             .map_err(std::io::Error::other)
-    }
-
-    fn for_anthropic_account(
-        &self,
-        account_id: &str,
-    ) -> codex_protocol::error::Result<SharedModelProvider> {
-        let context = self.anthropic_auth_context()?.ok_or_else(|| {
-            CodexErr::InvalidRequest(
-                "Provider does not support Anthropic account-scoped discovery".into(),
-            )
-        })?;
-        let mut provider = self.clone();
-        provider.anthropic_auth_context = Some(Ok(Arc::new(context.for_account(account_id)?)));
-        Ok(Arc::new(provider))
     }
 
     fn supports_attestation(&self) -> bool {
@@ -1355,6 +1308,6 @@ pub(crate) mod test_support {
         let mut provider =
             ConfiguredModelProvider::new(info, Some(credentials), None, Some(runtime.clone()));
         provider.runtime_auth = Some(runtime);
-        Arc::new(provider)
+        ProviderHandle::configured(provider)
     }
 }

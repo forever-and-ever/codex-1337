@@ -16,6 +16,8 @@ use crate::CodexAppsToolsCache;
 
 #[path = "thread_accounts.rs"]
 pub(crate) mod accounts;
+#[path = "thread_credentials.rs"]
+mod credentials;
 use crate::CodexThreadSettingsOverrides;
 use crate::agent::AgentStatus;
 use crate::agent::LocalAgentControl;
@@ -279,6 +281,7 @@ pub enum PromptCacheKey {
 
 pub struct StartThreadOptions {
     pub config: Config,
+    pub credentials: crate::StartCredentials,
     /// Request-body cache key policy for this thread and its children. Hosts must reapply it on cold resume.
     pub prompt_cache_key: PromptCacheKey,
     /// Host-owned provider for this root thread's additional instructions.
@@ -327,6 +330,7 @@ impl StartThreadOptions {
     pub fn new(config: Config) -> Self {
         Self {
             config,
+            credentials: crate::StartCredentials::Inherit,
             prompt_cache_key: PromptCacheKey::default(),
             thread_instructions_provider: None,
             allow_provider_model_fallback: false,
@@ -2411,6 +2415,7 @@ impl ThreadManagerState {
         };
         let StartThreadOptions {
             mut config,
+            credentials,
             prompt_cache_key,
             allow_provider_model_fallback,
             initial_history,
@@ -2556,14 +2561,16 @@ impl ThreadManagerState {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
-        let scoped_auth = Box::pin(self.account_for_spawn(
-            &config,
-            &initial_history,
-            parent_thread_id,
-            &auth_manager,
-            &agent_control,
-        ))
-        .await?;
+        let scoped_auth = credentials
+            .account_for_spawn(
+                self,
+                &config,
+                &initial_history,
+                parent_thread_id,
+                &auth_manager,
+                &agent_control,
+            )
+            .await?;
         let (auth_manager, models_manager, plugins_manager) = if let Some(auth) = scoped_auth {
             config.application_network_policy = auth.application_network_policy();
             if auth.auth_cached().is_none() {
@@ -2708,7 +2715,11 @@ impl ThreadManagerState {
         } else {
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile
         };
+        let models_manager = credentials
+            .models_manager(&config)?
+            .unwrap_or(models_manager);
         let spawn_result = Session::spawn(SessionSpawnArgs {
+            credentials,
             prompt_cache_observer: self.prompt_cache_observer.get().cloned(),
             attached_thread,
             startup,
