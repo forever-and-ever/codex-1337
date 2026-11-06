@@ -1,4 +1,5 @@
 use super::*;
+use codex_extension_api::TurnStartAdmission;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -58,6 +59,7 @@ fn pending_upgrade_keeps_admission_open_until_requests_and_turns_are_idle() {
     let mut active = admission.subscribe_active();
     let (running_tx, mut running) = watch::channel(/*init*/ 0);
     let request = admission.admit().expect("starting a turn");
+    let turn = admission.admit_turn_start().expect("Core admits the start");
     let mut shutdown = ShutdownState::default();
     for _ in 0..2 {
         shutdown.on_signal(
@@ -76,8 +78,8 @@ fn pending_upgrade_keeps_admission_open_until_requests_and_turns_are_idle() {
             ShutdownAction::Noop
         );
     }
-    // Admission and running-turn publication overlap, not a transient idle gap.
-    running_tx.send_replace(/*value*/ 1);
+    // The request ends before the running count observes its turn; Core's
+    // permit for the started turn spans that gap.
     drop(request);
     assert_eq!(
         shutdown.update(
@@ -88,7 +90,9 @@ fn pending_upgrade_keeps_admission_open_until_requests_and_turns_are_idle() {
         ),
         ShutdownAction::Noop
     );
+    running_tx.send_replace(/*value*/ 1);
     let resumed = admission.admit().expect("resumes still admitted");
+    drop(turn);
     running_tx.send_replace(/*value*/ 0);
     assert_eq!(
         shutdown.update(

@@ -23,7 +23,28 @@ impl Session {
             finishing: None,
             turn_state: Arc::new(Mutex::new(TurnState::default())),
             runtime_hold: Arc::new(self.runtime_holds.acquire()?),
+            admission: None,
         })
+    }
+
+    /// Keeps an admitted start's host permit until its turn ends, so a host drain
+    /// still counts the turn before observing its first event.
+    pub(crate) async fn retain_turn_admission(
+        &self,
+        turn_id: &str,
+        admission: Option<Box<dyn Send + Sync>>,
+    ) {
+        let Some(admission) = admission else {
+            return;
+        };
+        if let Some(turn) = self.active_turn.lock().await.as_mut()
+            && turn
+                .task
+                .as_ref()
+                .is_some_and(|task| task.turn_context.sub_id == turn_id)
+        {
+            turn.admission = Some(admission);
+        }
     }
 
     pub(crate) fn seal_idle_runtime(&self, revision: u64) -> crate::runtime_holds::IdleSeal {

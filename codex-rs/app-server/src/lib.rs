@@ -994,7 +994,7 @@ pub async fn run_main_with_transport_options(
 
                 tokio::select! {
                     () = client_disconnect.flushed() => {}
-                    _ = &mut snapshot, if matches!(shutdown_state, ShutdownState::Draining { .. } | ShutdownState::Forced) && *active_admissions_rx.borrow() == 0 && !snapshot_finished => {
+                    _ = &mut snapshot, if matches!(shutdown_state, ShutdownState::Draining { .. } | ShutdownState::Forced) && active_admissions_rx.borrow().requests == 0 && !snapshot_finished => {
                         snapshot_finished = true;
                     }
                     shutdown_signal_result = &mut shutdown_signal_future, if graceful_signal_restart_enabled && !shutdown_state.forced() => {

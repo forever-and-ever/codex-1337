@@ -204,7 +204,7 @@ impl<C: Sync> ExtensionRegistry<C> {
 
     /// Acquires the host's turn-start permit, or an empty permit for ungated hosts.
     /// A missing permit rejects the start before Core consumes pending input.
-    pub fn admit_turn_start(&self) -> Option<Box<dyn Send>> {
+    pub fn admit_turn_start(&self) -> Option<Box<dyn Send + Sync>> {
         match &self.turn_start_admission {
             Some(admission) => admission.admit_turn_start(),
             None => Some(Box::new(())),

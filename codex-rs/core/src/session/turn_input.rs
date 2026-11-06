@@ -433,7 +433,7 @@ async fn start_or_steer(
                         .session_source,
                     SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
                 );
-            let _admission = if is_delegated_input {
+            let admission = if is_delegated_input {
                 None
             } else {
                 let Some(admission) = session.services.extensions.admit_turn_start() else {
@@ -472,6 +472,9 @@ async fn start_or_steer(
             session
                 .spawn_task(Arc::clone(&turn_context), task_input, RegularTask::new())
                 .await?;
+            session
+                .retain_turn_admission(&submission_id, admission)
+                .await;
             Ok(TurnInputSubmission::Started {
                 turn_id: submission_id,
                 root_turn_id: turn_context.root_turn_id(),
@@ -522,10 +525,10 @@ async fn start_if_idle(
         });
     }
 
-    let _admission = session.services.extensions.admit_turn_start();
+    let admission = session.services.extensions.admit_turn_start();
     // A one-shot review delegate completes its already-running parent's work.
     // Its explicit input carries parent lineage; automatic starts do not qualify.
-    if _admission.is_none()
+    if admission.is_none()
         && !(kind == TurnStartKind::User
             && start.parent_turn_id.is_some()
             && matches!(
@@ -664,6 +667,9 @@ async fn start_if_idle(
     session
         .start_task(Arc::clone(&turn_context), task_input, RegularTask::new())
         .await?;
+    session
+        .retain_turn_admission(&submission_id, admission)
+        .await;
     Ok(TurnInputSubmission::Started {
         turn_id: submission_id,
         root_turn_id: turn_context.root_turn_id(),

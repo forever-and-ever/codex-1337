@@ -209,7 +209,7 @@ async fn turn_extension_data_is_captured_for_automatic_turns() -> anyhow::Result
 struct TestAdmission(AtomicBool);
 
 impl TurnStartAdmission for TestAdmission {
-    fn admit_turn_start(&self) -> Option<Box<dyn Send>> {
+    fn admit_turn_start(&self) -> Option<Box<dyn Send + Sync>> {
         if self.0.load(Ordering::SeqCst) {
             None
         } else {

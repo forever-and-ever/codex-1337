@@ -1,5 +1,6 @@
 //! Explicit shutdown drains immediately; installation waits for idle without denying service.
 
+use crate::turn_admission::Admissions;
 use crate::turn_admission::TurnAdmission;
 use std::io;
 use tokio::sync::watch;
@@ -100,7 +101,7 @@ impl ShutdownState {
     pub(crate) fn update(
         &mut self,
         running_turns: &mut watch::Receiver<usize>,
-        active_admissions: &mut watch::Receiver<usize>,
+        active_admissions: &mut watch::Receiver<Admissions>,
         connection_count: usize,
         turn_admission: &TurnAdmission,
     ) -> ShutdownAction {
@@ -113,8 +114,8 @@ impl ShutdownState {
         #[cfg(not(unix))]
         let _ = turn_admission;
 
-        // A start publishes a running turn before releasing its permit. Read in
-        // this order, after closing admission, to observe that transition safely.
+        // Read admissions first: once admission closes they only fall, and Core
+        // releases an admitted turn's permit only as that turn ends.
         let active_admissions = *active_admissions.borrow_and_update();
         let running_turn_count = *running_turns.borrow_and_update();
         match self {
@@ -130,7 +131,7 @@ impl ShutdownState {
             Self::Draining {
                 last_logged_running_turn_count,
             } => {
-                if running_turn_count == 0 && active_admissions == 0 {
+                if running_turn_count == 0 && active_admissions.is_empty() {
                     info!(
                         "shutdown signal restart: no assistant turns running; stopping acceptor and disconnecting {connection_count} connection(s)"
                     );
@@ -138,7 +139,8 @@ impl ShutdownState {
                 }
                 if *last_logged_running_turn_count != Some(running_turn_count) {
                     info!(
-                        "shutdown signal restart: waiting for {running_turn_count} running assistant turn(s) and {active_admissions} admitted request(s) to finish"
+                        "shutdown signal restart: waiting for {running_turn_count} running assistant turn(s), {} admitted turn(s) and {} admitted request(s) to finish",
+                        active_admissions.turns, active_admissions.requests
                     );
                     *last_logged_running_turn_count = Some(running_turn_count);
                 }

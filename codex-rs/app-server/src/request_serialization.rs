@@ -537,10 +537,10 @@ mod tests {
         );
 
         admission.begin_drain();
-        assert_eq!(*active.borrow(), 1);
+        assert_eq!(active.borrow().requests, 1);
         live_gate.close().await;
         queues.discard_closed().await;
-        assert_eq!(*active.borrow(), 0);
+        assert_eq!(active.borrow().requests, 0);
 
         let gate_for_shutdown = Arc::clone(&live_gate);
         let shutdown_task = tokio::spawn(async move {

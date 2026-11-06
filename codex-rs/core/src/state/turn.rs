@@ -34,6 +34,8 @@ pub(crate) struct ActiveTurn {
     pub(crate) finishing: Option<CancellationToken>,
     pub(crate) turn_state: Arc<Mutex<TurnState>>,
     pub(crate) runtime_hold: Arc<crate::runtime_holds::RuntimeHold>,
+    /// The host's permit for an admitted start, held until this turn ends.
+    pub(crate) admission: Option<Box<dyn Send + Sync>>,
 }
 
 /// Whether mailbox deliveries should still be folded into the current turn.
@@ -68,6 +70,7 @@ impl Default for ActiveTurn {
                     .acquire()
                     .expect("new test runtime"),
             ),
+            admission: None,
         }
     }
 }

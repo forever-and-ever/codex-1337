@@ -1,3 +1,4 @@
+use super::Admissions;
 use super::TurnAdmission;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use codex_extension_api::TurnStartAdmission;
@@ -12,7 +13,13 @@ fn drain_rejects_new_work_without_waiting_for_admitted_work() {
         .admit_turn_start()
         .expect("automatic start admitted");
     admission.begin_drain();
-    assert_eq!(*active.borrow(), 2);
+    assert_eq!(
+        *active.borrow(),
+        Admissions {
+            requests: 1,
+            turns: 1
+        }
+    );
     assert!(admission.admit_turn_start().is_none());
 
     let error = admission.admit().err().expect("new request rejected");
@@ -22,7 +29,13 @@ fn drain_rejects_new_work_without_waiting_for_admitted_work() {
         Some(serde_json::json!({ "reason": "serverShuttingDown" }))
     );
     drop(in_flight);
-    assert_eq!(*active.borrow(), 1);
+    assert_eq!(
+        *active.borrow(),
+        Admissions {
+            requests: 0,
+            turns: 1
+        }
+    );
     drop(automatic);
-    assert_eq!(*active.borrow(), 0);
+    assert_eq!(*active.borrow(), Admissions::default());
 }
