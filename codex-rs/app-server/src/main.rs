@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 #[cfg(all(
     target_os = "linux",
-    target_env = "musl",
+    any(target_env = "gnu", target_env = "musl"),
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 #[global_allocator]

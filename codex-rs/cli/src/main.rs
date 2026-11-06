@@ -51,7 +51,7 @@ use supports_color::Stream;
 
 #[cfg(all(
     target_os = "linux",
-    target_env = "musl",
+    any(target_env = "gnu", target_env = "musl"),
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 #[global_allocator]
@@ -76,6 +76,7 @@ mod exec_server_credential;
 mod exec_server_telemetry;
 mod marketplace_cmd;
 mod mcp_cmd;
+mod reclaim;
 // TELOS(provider-login): provider selection and dispatch belong to the fork.
 mod login_command;
 mod mcp_login;
@@ -975,6 +976,7 @@ fn stage_str(stage: Stage) -> &'static str {
 pub fn main() -> anyhow::Result<()> {
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+        reclaim::purge_freed_heap_in_background();
         // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
         Box::pin(cli_main(arg0_paths, remote_control_disabled)).await?;
         Ok(())
