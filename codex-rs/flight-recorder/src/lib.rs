@@ -1,8 +1,8 @@
 //! Per-process flight recorder: a byte-bounded, tiered in-memory ring of tracing events.
 //!
 //! Routine diagnostics never reach disk. They leave the process only through an explicit query
-//! (the app-server's `debug/flightRecorder/read`), an on-demand `SIGUSR1` dump, or the panic
-//! hook. Each [`Tier`] has its own byte budget, so DEBUG/TRACE chatter can never evict INFO and
+//! (the app-server's `debug/flightRecorder/read`), an on-demand `SIGUSR1` dump, the
+//! app-server's dump as a forced shutdown begins, or the panic hook. Each [`Tier`] has its own byte budget, so DEBUG/TRACE chatter can never evict INFO and
 //! INFO can never evict WARN/ERROR.
 //!
 //! The ring lock is held only to append, evict or copy records. Nothing under it emits tracing

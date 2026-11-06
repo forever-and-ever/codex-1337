@@ -644,7 +644,7 @@ pub async fn run_main_with_transport_options(
             .boxed(),
     };
 
-    // Diagnostics stay in memory; they reach disk only on SIGUSR1 or a panic.
+    // Diagnostics stay in memory; they reach disk only on SIGUSR1, a forced shutdown or a panic.
     let _ = tracing_subscriber::registry()
         .with(stderr_fmt)
         .with(recorder.layer())
@@ -658,7 +658,7 @@ pub async fn run_main_with_transport_options(
     #[cfg(unix)]
     if let Err(err) = codex_flight_recorder::spawn_signal_dump(
         recorder,
-        recorder_dumps,
+        recorder_dumps.clone(),
         codex_flight_recorder::Process::AppServer,
     ) {
         warn!(%err, "failed to install the flight recorder's SIGUSR1 dump");
@@ -1006,6 +1006,9 @@ pub async fn run_main_with_transport_options(
                                 continue;
                             }
                         };
+                        if matches!(signal, crate::shutdown::ShutdownSignal::Forceable) {
+                            recorder.dump_before_shutdown(&recorder_dumps, codex_flight_recorder::Process::AppServer);
+                        }
                         let running_turn_count = *running_turn_count_rx.borrow();
                         shutdown_state.on_signal(signal, connections.len(), running_turn_count, &processor.turn_admission);
                     }

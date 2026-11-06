@@ -47,6 +47,7 @@ impl Process {
 #[derive(Clone, Copy)]
 enum Cause {
     Signal,
+    Terminate,
     Panic,
 }
 
@@ -54,6 +55,7 @@ impl Cause {
     fn as_str(self) -> &'static str {
         match self {
             Self::Signal => "signal",
+            Self::Terminate => "terminate",
             Self::Panic => "panic",
         }
     }
@@ -67,15 +69,32 @@ impl FlightRecorder {
     /// Writes the whole ring to a new file under `dir`, then prunes this process kind's
     /// older on-demand dumps.
     pub fn dump(&self, dir: &Path, process: Process) -> io::Result<PathBuf> {
+        self.dump_for(dir, process, Cause::Signal)
+    }
+
+    /// Writes the ring as a forced shutdown begins, before a drain that a wedged turn can
+    /// stall until the supervisor kills the process, and logs the outcome.
+    pub fn dump_before_shutdown(&self, dir: &Path, process: Process) {
+        match self.dump_for(dir, process, Cause::Terminate) {
+            Ok(path) => {
+                tracing::info!(path = %path.display(), "flight recorder dumped before shutdown");
+            }
+            Err(err) => {
+                tracing::warn!("flight recorder shutdown dump failed: {err}");
+            }
+        }
+    }
+
+    fn dump_for(&self, dir: &Path, process: Process, cause: Cause) -> io::Result<PathBuf> {
         let records = self.excerpt(&RecordFilter::default()).records;
         fs::create_dir_all(dir)?;
-        let path = dir.join(dump_name(process, Cause::Signal));
+        let path = dir.join(dump_name(process, cause));
         let mut out = BufWriter::new(File::create_new(&path)?);
         for record in &records {
             render_record(record, &mut out)?;
         }
         out.flush()?;
-        prune(dir, process, Cause::Signal)?;
+        prune(dir, process, cause)?;
         Ok(path)
     }
 }

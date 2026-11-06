@@ -53,7 +53,7 @@ just test
 
 Codex is written in Rust, so it honors the `RUST_LOG` environment variable to configure its logging behavior.
 
-Each process keeps recent diagnostics in a bounded in-memory flight recorder and writes nothing by default. `codex logs` reads the shared app server's recorder (`--thread`, `--level`, `--since`, `--follow`); SIGUSR1 or a panic dumps a process's recorder under `$CODEX_HOME/log/flight-recorder/`. Set `log_dir` explicitly to enable a plaintext TUI log for a run:
+Each process keeps recent diagnostics in a bounded in-memory flight recorder and writes nothing by default. `codex logs` reads the shared app server's recorder (`--thread`, `--level`, `--since`, `--follow`); SIGUSR1, a panic, or the start of a forced app-server shutdown dumps a process's recorder under `$CODEX_HOME/log/flight-recorder/`. Set `log_dir` explicitly to enable a plaintext TUI log for a run:
 
 ```bash
 codex -c log_dir=./.codex-log
