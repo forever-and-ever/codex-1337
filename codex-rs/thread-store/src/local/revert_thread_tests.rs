@@ -280,6 +280,14 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     // The older binary's plain file replaces the framed one.
     std::fs::remove_file(first_replacement_path.with_extension("jsonl.zst"))
         .expect("remove framed rollout");
+    // The older binary's replacement is a new file, so no projection of it exists yet.
+    super::super::thread_history::delete_thread(
+        &store,
+        codex_rollout::rollout_id_from_path(first_replacement_path.as_path())
+            .expect("replacement rollout id"),
+    )
+    .await
+    .expect("drop replacement projection");
 
     store
         .revert_thread(RevertThreadParams {

@@ -36,6 +36,18 @@ pub(super) async fn materialize_to_sqlite(
     if store.state_db.is_none() {
         return Ok(());
     }
+    // TELOS(history-pruning): passes over one rollout never interleave, so a build from offset 0
+    // is never observed half done in this process.
+    let _projection = store.projection_warden.lock(thread_id).await;
+    materialize_to_sqlite_locked(store, thread_id, rollout_path).await
+}
+
+/// [`materialize_to_sqlite`] for a caller already holding the rollout's projection lock.
+pub(super) async fn materialize_to_sqlite_locked(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    rollout_path: &Path,
+) -> ThreadStoreResult<()> {
     let result = materialize_to_sqlite_with_state_db(store, thread_id, rollout_path).await;
     record_projection_outcome(&result);
     result
@@ -77,7 +89,12 @@ async fn materialize_to_sqlite_with_state_db(
         initial_ordinal,
         subagent_history_start_ordinal,
     )
-    .await
+    .await?;
+    // The pass read through the end of the rollout, so a build from offset 0 is complete.
+    if projection_state.is_none_or(|state| state.rebuilding) {
+        super::history_pruning::finish_rebuild(store, thread_id).await?;
+    }
+    Ok(())
 }
 
 /// Read and project the complete durable prefix in one blocking task.

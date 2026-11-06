@@ -568,6 +568,8 @@ pub fn thread_store_from_config(
                         })
                     }),
             );
+            // TELOS(history-pruning): unused thread history projections are evicted in the background.
+            store.spawn_history_pruning();
             if has_state_db && background_migration_enabled {
                 let startup_store = Arc::clone(&store);
                 tokio::spawn(async move {

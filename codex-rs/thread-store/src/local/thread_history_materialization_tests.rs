@@ -577,6 +577,47 @@ WHERE thread_id = ?
         params.position = page.next_cursor.map(ListItemsPosition::Cursor);
     }
     assert_eq!(params.position, None);
+
+    // Eviction drops the unloaded thread's projection. Concurrent reads then rebuild it once
+    // through catch-up, and neither sees it empty or half built.
+    let whole_turn = ListItemsParams {
+        page_size: 100,
+        ..params
+    };
+    let before = reopened
+        .list_items(whole_turn.clone())
+        .await
+        .expect("read projected turn");
+    assert_eq!(
+        super::super::history_pruning::evict_unused(&reopened, i64::MAX)
+            .await
+            .expect("evict"),
+        1
+    );
+    let remaining = sqlx::query_scalar::<_, i64>(
+        "SELECT (SELECT COUNT(*) FROM thread_items WHERE thread_id = ?1) \
+         + (SELECT COUNT(*) FROM thread_history_projection_state WHERE thread_id = ?1)",
+    )
+    .bind(thread_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("count projection rows");
+    assert_eq!(remaining, 0);
+    let (first, second) = tokio::join!(
+        reopened.list_items(whole_turn.clone()),
+        reopened.list_items(whole_turn),
+    );
+    for page in [first, second] {
+        assert_eq!(page.expect("read rebuilt turn").items, before.items);
+    }
+    let rebuilding = sqlx::query_scalar::<_, bool>(
+        "SELECT rebuilding FROM thread_history_projection_state WHERE thread_id = ?",
+    )
+    .bind(thread_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("read rebuilt projection state");
+    assert!(!rebuilding);
 }
 
 #[tokio::test]

@@ -51,12 +51,17 @@ impl LocalThreadStore {
         &self,
         requested_thread_id: ThreadId,
     ) -> ThreadStoreResult<RolloutLineage> {
-        self.resolve_rollout_lineage_with_mode(
-            requested_thread_id,
-            LineageResolutionMode::HistoryPage,
-            /*initial_path*/ None,
-        )
-        .await
+        let lineage = self
+            .resolve_rollout_lineage_with_mode(
+                requested_thread_id,
+                LineageResolutionMode::HistoryPage,
+                /*initial_path*/ None,
+            )
+            .await?;
+        // TELOS(history-pruning): an evicted or half-rebuilt segment is rebuilt before any page
+        // reads it.
+        super::history_pruning::ensure_projected(self, &lineage).await?;
+        Ok(lineage)
     }
 
     pub(super) async fn resolve_rollout_lineage_for_reference(

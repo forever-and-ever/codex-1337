@@ -167,6 +167,15 @@ pub(super) async fn resume_thread(
             writer_lock,
         )
         .await?;
+    // TELOS(history-pruning): opening a thread is a use of its projection.
+    if matches!(history_mode, ThreadHistoryMode::Paginated)
+        && let Err(err) = super::history_pruning::touch(store, rollout_id).await
+    {
+        warn!(
+            "failed to record thread history use for {}: {err}",
+            params.thread_id
+        );
+    }
     Ok(history)
 }
 

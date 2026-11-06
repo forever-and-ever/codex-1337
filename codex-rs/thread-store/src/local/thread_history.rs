@@ -50,6 +50,10 @@ pub(super) enum RolloutProjectionStep {
 pub(super) struct RolloutProjectionState {
     pub next_byte_offset: u64,
     pub next_ordinal: u64,
+    /// A build from offset 0 has not reached the end of the rollout yet; see `history_pruning`.
+    pub rebuilding: bool,
+    /// When the projection was last read, opened or written, in Unix milliseconds; 0 if unknown.
+    pub accessed_at_ms: i64,
 }
 
 pub(super) async fn projection_state(
@@ -68,9 +72,9 @@ pub(super) async fn projection_state(
     }
 
     let pool = store.thread_history_db().await?;
-    let state = sqlx::query_as::<_, (i64, i64)>(
+    let state = sqlx::query_as::<_, (i64, i64, bool, i64)>(
         r#"
-SELECT next_rollout_byte_offset, next_rollout_ordinal
+SELECT next_rollout_byte_offset, next_rollout_ordinal, rebuilding, accessed_at_ms
 FROM thread_history_projection_state
 WHERE thread_id = ?
         "#,
@@ -80,8 +84,9 @@ WHERE thread_id = ?
     .await
     .map_err(thread_history_error)?;
     state
-        .map(|(next_byte_offset, next_ordinal)| {
-            Ok(RolloutProjectionState {
+        .map(
+            |(next_byte_offset, next_ordinal, rebuilding, accessed_at_ms)| {
+                Ok(RolloutProjectionState {
                 next_byte_offset: u64::try_from(next_byte_offset).map_err(|_| {
                     ThreadStoreError::Internal {
                         message: format!(
@@ -96,8 +101,11 @@ WHERE thread_id = ?
                         ),
                     }
                 })?,
+                rebuilding,
+                accessed_at_ms,
             })
-        })
+            },
+        )
         .transpose()
 }
 
@@ -223,20 +231,28 @@ ON CONFLICT(thread_id, item_id) DO NOTHING
 INSERT INTO thread_history_projection_state (
     thread_id,
     next_rollout_byte_offset,
-    next_rollout_ordinal
-) VALUES (?, ?, ?)
+    next_rollout_ordinal,
+    accessed_at_ms,
+    rebuilding
+) VALUES (?, ?, ?, ?, 1)
 ON CONFLICT(thread_id) DO UPDATE SET
     next_rollout_byte_offset = excluded.next_rollout_byte_offset,
-    next_rollout_ordinal = excluded.next_rollout_ordinal
+    next_rollout_ordinal = excluded.next_rollout_ordinal,
+    accessed_at_ms = MAX(accessed_at_ms, excluded.accessed_at_ms)
         "#,
     )
     .bind(thread_id.as_str())
     .bind(sqlite_integer(next_offset, "rollout byte offset")?)
     .bind(next_ordinal)
+    // TELOS(history-pruning): a projected write is a use; a new row stays rebuilding until its
+    // pass reaches the end of the rollout.
+    .bind(super::history_pruning::now_ms())
     .execute(&mut *transaction)
     .await
     .map_err(thread_history_error)?;
-    transaction.commit().await.map_err(thread_history_error)
+    transaction.commit().await.map_err(thread_history_error)?;
+    store.projection_warden.record_write();
+    Ok(())
 }
 
 pub(super) async fn delete_thread(

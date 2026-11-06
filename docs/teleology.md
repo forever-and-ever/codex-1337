@@ -518,6 +518,28 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: upstream's compression worker (`mod worker` and `mod metrics` in `compression.rs`) and its materialization paths. Any upstream reader or test that opens the logical `.jsonl` path directly fails on a framed rollout. Route it through `existing_rollout_path`, `open_rollout_seekable_reader` or `read_rollout_text`; tests use `codex_rollout::test_support`.
 - Evidence: maintainer decision 2026-11-06. Production held 5,123 plain rollouts (38.4 GB) and 1,169 single-frame ones (6.0 GB). A deterministic sample of 102 plain rollouts (461 MiB) converts to 81 MiB (5.7×) in 1.2 s. Flushing after every line, the worst case for a live writer, gives 83 MiB (5.55×). `zstd -dc` reproduces the converted files byte for byte.
 
+### history-pruning
+
+- Telos: the SQLite history projection holds only what is in use, because it can always be rebuilt from rollouts.
+- Holds:
+  - Eviction: a projection unused for 14 days is evicted. Use is `accessed_at_ms`, which projected writes set and which reads and resumes advance at most hourly; rows from before the column fall back to `threads.updated_at`. Evicting deletes the projected rows and the projection state row in one transaction, and never touches a session file. It never runs while the thread is loaded in this process or holds its cross-process writer lock.
+  - Reads: every paginated read first rebuilds an absent projection, or finishes one marked `rebuilding`, under the per-rollout lock that every catch-up pass takes. So a rebuild in progress is never read as empty or truncated.
+  - Reclamation: new projection databases use `auto_vacuum=INCREMENTAL`, and evicted pages are reclaimed in bounded `incremental_vacuum` chunks. An older database is converted once by a full VACUUM. The conversion runs only after an eviction pass, with freed pages at least half the file, live data at most 6 GiB and no projection write for 5 minutes, re-checked just before it starts. A failed conversion retries at most daily. No other database is ever vacuumed.
+- Owners: `codex-rs/thread-store/src/local/history_pruning.rs` (`ProjectionWarden`, `ensure_projected`, `evict`, `reclaim`, `convert_to_incremental`), `codex-rs/state/thread_history_migrations/0009_thread_history_lifecycle.sql`. Seams in upstream files:
+  - `state/src/sqlite.rs`: `auto_vacuum`;
+  - `thread-store/src/local/mod.rs`: the module and the `projection_warden` field;
+  - `thread_history.rs`: the use stamp and the `rebuilding` mark in the upsert;
+  - `thread_history_materialization.rs`: the per-rollout lock and `finish_rebuild`;
+  - `rollout_lineage.rs`: `ensure_projected`;
+  - `live_writer.rs`: `touch`;
+  - `core/src/thread_manager.rs`: `spawn_history_pruning`.
+- Tripwire: `paginated_live_append_materializes_turn_items_and_state` (`codex-rs/thread-store/src/local/thread_history_materialization_tests.rs`) evicts, then checks that two concurrent page reads equal the page from before eviction and that `rebuilding` clears.
+- Pressure:
+  - A new upstream reader that queries the projection tables without going through `resolve_rollout_lineage_for_history_page` would read an evicted projection as empty.
+  - A new projected table that `evict` does not delete would leave orphans.
+  - Upstream catch-up changes that write outside `materialize_to_sqlite` would bypass the per-rollout lock.
+- Evidence: maintainer decision 2026-11-06.
+
 ## Build economy
 
 ### one-dependency-graph
@@ -859,7 +881,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/pager_overlay.rs`: attention-gated-painting
 - `codex-rs/tui/src/pager_overlay/transcript.rs`: attention-gated-painting
 
-- `codex-rs/state/src/sqlite.rs`: authoritative-queue-integrity
+- `codex-rs/state/src/sqlite.rs`: authoritative-queue-integrity, history-pruning
 - `codex-rs/login/src/auth/storage.rs`: credential-backend-authority
 - `codex-rs/login/src/auth/storage_telemetry.rs`: credential-backend-authority
 - `codex-rs/login/src/auth/manager.rs`: pinned-accounts
@@ -911,7 +933,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/thread-store/src/in_memory.rs`: warpaint
 - `codex-rs/thread-store/src/local/daybreak_metadata_tests.rs`: warpaint
 - `codex-rs/thread-store/src/local/helpers.rs`: warpaint
-- `codex-rs/thread-store/src/local/mod.rs`: warpaint
+- `codex-rs/thread-store/src/local/mod.rs`: warpaint, history-pruning
 - `codex-rs/thread-store/src/local/read_thread.rs`: warpaint
 - `codex-rs/thread-store/src/local/update_thread_metadata.rs`: warpaint
 - `codex-rs/thread-store/src/types.rs`: warpaint
@@ -1223,9 +1245,11 @@ Fork-owned files, absent upstream:
 - `codex-rs/rollout/src/lib.rs`: framed-rollouts
 - `codex-rs/rollout/src/writer_lock.rs`: framed-rollouts
 - `codex-rs/thread-store/src/local/history_revision.rs`: framed-rollouts
-- `codex-rs/thread-store/src/local/rollout_lineage.rs`: framed-rollouts
-- `codex-rs/thread-store/src/local/live_writer.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/rollout_lineage.rs`: framed-rollouts, history-pruning
+- `codex-rs/thread-store/src/local/live_writer.rs`: framed-rollouts, history-pruning
 - `codex-rs/thread-store/src/local/rollout_migration/publish.rs`: framed-rollouts
-- `codex-rs/core/src/thread_manager.rs`: framed-rollouts
+- `codex-rs/core/src/thread_manager.rs`: framed-rollouts, history-pruning
 - `codex-rs/app-server/src/request_processors/rollout.rs`: framed-rollouts
 - `codex-rs/tui/src/resume_picker_transcript_preview.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/thread_history.rs`: history-pruning
+- `codex-rs/thread-store/src/local/thread_history_materialization.rs`: history-pruning

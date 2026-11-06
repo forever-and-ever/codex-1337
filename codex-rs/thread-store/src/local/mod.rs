@@ -5,6 +5,7 @@ mod context_role;
 mod create_thread;
 mod delete_thread;
 mod helpers;
+mod history_pruning;
 mod history_revision;
 mod list_threads;
 mod live_writer;
@@ -152,6 +153,7 @@ pub struct LocalThreadStore {
     pending_thread_metadata: pending_thread_metadata::PendingThreadMetadataRegistry,
     live_writer_locks: Arc<LiveWriterLocks>,
     writer_lock_coordinator: Arc<WriterLockCoordinator>,
+    projection_warden: Arc<history_pruning::ProjectionWarden>,
     state_db: Option<StateDbHandle>,
     thread_history_db: Arc<OnceCell<sqlx::SqlitePool>>,
     thread_name_claims: Arc<OnceCell<()>>,
@@ -281,6 +283,7 @@ impl LocalThreadStore {
                 pending_thread_metadata::PendingThreadMetadataRegistry::default(),
             live_writer_locks: Arc::new(LiveWriterLocks::default()),
             writer_lock_coordinator,
+            projection_warden: Arc::default(),
             state_db,
             thread_history_db: Arc::new(OnceCell::new()),
             thread_name_claims: Arc::new(OnceCell::new()),
