@@ -121,7 +121,7 @@ impl Session {
         let context = Box::pin(self.new_inject_items_context()).await;
         // Earlier Code Mode messages may need the persistence lock before this can return.
         let user_input_order = self.reserve_user_input_order().await;
-        let _guard = thread_settings::acquire_persistence_lock(self).await;
+        let settings = thread_settings::acquire_persistence_lock(self).await;
         let mut item = ContextualUserFragment::into(update);
         Self::stamp_response_item_for_history(&mut item, &context.sub_id);
         Self::assign_missing_response_item_id(&mut item);
@@ -144,7 +144,7 @@ impl Session {
                 .map_err(std::io::Error::other)?;
         }
         // A failed append or checkpoint must not change live authorization or its revision.
-        self.try_ensure_rollout_materialized(PersistContext::ThreadPreparation)
+        self.try_ensure_rollout_materialized_under(&settings, PersistContext::ThreadPreparation)
             .await?;
         self.state.lock().await.history.record_annotated_items(
             std::slice::from_mut(&mut item),

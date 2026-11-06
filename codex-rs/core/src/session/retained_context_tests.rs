@@ -7,7 +7,10 @@ use pretty_assertions::assert_eq;
 use test_case::test_case;
 
 use super::thread_settings;
+use crate::agent::control::ProviderAccountSelection;
+use crate::context::UserGoalUpdate;
 use crate::session::tests::make_session_and_context;
+use crate::session::tests::open_thread_persistence;
 
 fn delivered_message() -> RetainedUserMessage {
     RetainedUserMessage {
@@ -115,4 +118,32 @@ async fn confirmed_delivery_reserves_order_and_persists_before_a_fast_user_reply
         })
         .expect("confirmed delivery order");
     assert!(assistant_order < codex_history::RetainedContextOrder::Local(reply_order));
+}
+
+// Goal updates hold the nonreentrant persistence permit while materializing, and the first
+// materialization of an account-bound session binds that account under the same permit. A
+// cold-resumed provider-account thread reaches its binding first through `/goal resume`.
+#[tokio::test]
+async fn goal_update_binds_a_pending_account_under_its_own_permit() {
+    let (mut session, _) = make_session_and_context().await;
+    open_thread_persistence(&mut session).await;
+    session.services.model_client =
+        session
+            .services
+            .model_client
+            .clone()
+            .with_provider_account(Some(Arc::new(
+                ProviderAccountSelection::ClaudeSubscription {
+                    id: "claude-account".to_owned(),
+                },
+            )));
+
+    tokio::time::timeout(
+        Duration::from_secs(/*secs*/ 5),
+        session.record_user_goal_update(UserGoalUpdate::Clear),
+    )
+    .await
+    .expect("goal update must not wait for its own permit")
+    .expect("record goal update");
+    assert!(session.initial_account_binding.initialized());
 }

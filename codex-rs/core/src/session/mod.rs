@@ -1562,24 +1562,7 @@ impl Session {
         context: PersistContext,
     ) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
-            if self.services.auth_manager.is_account_scoped()
-                || self.services.model_client.provider_account_id().is_some()
-            {
-                // Ownership must be durable when the rollout first materializes, not when a
-                // blank composer opens. Serialize the snapshot with explicit account changes.
-                self.initial_account_binding
-                    .get_or_try_init(|| async {
-                        let _settings = thread_settings::acquire_persistence_lock(self).await;
-                        live_thread
-                            .append_items(&[RolloutItem::EventMsg(
-                                thread_settings::applied_event(self).await,
-                            )])
-                            .await
-                            .map_err(std::io::Error::other)?;
-                        live_thread.flush().await.map_err(std::io::Error::other)
-                    })
-                    .await?;
-            }
+            self.bind_initial_account(live_thread).await?;
             live_thread
                 .persist(context)
                 .await

@@ -144,7 +144,8 @@ pub(super) fn prepare_update(
 }
 
 /// Acquires the shared permit before capturing or changing persistent settings.
-/// Nonreentrant: callers holding this permit must not materialize a rollout or reacquire it.
+/// Nonreentrant: holders never reacquire it and materialize only through
+/// `Session::try_ensure_rollout_materialized_under`.
 pub(crate) async fn acquire_persistence_lock(session: &Session) -> SemaphorePermit<'_> {
     session
         .thread_settings_persistence

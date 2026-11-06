@@ -3,8 +3,70 @@ use crate::agent::control::ProviderAccountSelection;
 use codex_login::anthropic::AccountId;
 use codex_login::anthropic::AccountStore;
 use std::sync::atomic::Ordering;
+use tokio::sync::SemaphorePermit;
 
 impl Session {
+    /// Makes the selected account durable when the rollout first materializes, not when a
+    /// blank composer opens. Acquires the persistence permit only while that binding is pending.
+    pub(super) async fn bind_initial_account(
+        &self,
+        live_thread: &LiveThread,
+    ) -> std::io::Result<()> {
+        if self.initial_account_binding.initialized() || !self.binds_account() {
+            return Ok(());
+        }
+        let settings = thread_settings::acquire_persistence_lock(self).await;
+        self.bind_initial_account_under(&settings, live_thread)
+            .await
+    }
+
+    /// `try_ensure_rollout_materialized` for a caller already holding the nonreentrant
+    /// persistence permit.
+    pub(super) async fn try_ensure_rollout_materialized_under(
+        &self,
+        settings: &SemaphorePermit<'_>,
+        context: PersistContext,
+    ) -> std::io::Result<()> {
+        if let Some(live_thread) = self.live_thread() {
+            self.bind_initial_account_under(settings, live_thread)
+                .await?;
+            live_thread
+                .persist(context)
+                .await
+                .map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    }
+
+    /// Every binder holds the permit, which serializes the snapshot with explicit account
+    /// changes and leaves no initializer pending on a permit its caller holds.
+    async fn bind_initial_account_under(
+        &self,
+        _settings: &SemaphorePermit<'_>,
+        live_thread: &LiveThread,
+    ) -> std::io::Result<()> {
+        if !self.binds_account() {
+            return Ok(());
+        }
+        self.initial_account_binding
+            .get_or_try_init(|| async {
+                live_thread
+                    .append_items(&[RolloutItem::EventMsg(
+                        thread_settings::applied_event(self).await,
+                    )])
+                    .await
+                    .map_err(std::io::Error::other)?;
+                live_thread.flush().await.map_err(std::io::Error::other)
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn binds_account(&self) -> bool {
+        self.services.auth_manager.is_account_scoped()
+            || self.services.model_client.provider_account_id().is_some()
+    }
+
     pub(crate) fn committed_provider_account_id(&self) -> Option<String> {
         self.services.model_client.provider_account_id()
     }
