@@ -13,11 +13,13 @@
 //! - A trailer is a skippable frame after each closed frame recording where the frame starts, the
 //!   logical offset of its first byte, its logical length and the previous trailer.
 //! - The open frame has no last block yet. The next writer seals it: it keeps the complete lines,
-//!   truncates the torn suffix, and ends the frame with an empty last block and the checksum.
+//!   copies the torn suffix to a durable `<file>.torn-<unix ms>` sidecar before truncating it, and
+//!   ends the frame with an empty last block and the checksum. Sealing never destroys bytes.
 //!
 //! The whole file is a valid zstd stream. Every byte offset stored elsewhere (thread history,
 //! fork prefixes) is logical: it addresses the decoded JSONL, as plain rollouts store directly.
 
+mod quarantine;
 mod reader;
 mod survey;
 mod writer;

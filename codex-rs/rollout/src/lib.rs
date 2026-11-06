@@ -109,13 +109,15 @@ pub use seekable_reader::read_rollout_prefix;
 pub use seekable_reader::read_rollout_text;
 pub use seekable_reader::rollout_logical_len;
 
-/// Writes every line of `input` into the empty, readable and writable `output` as a framed
-/// rollout with every frame closed. Returns the decoded length.
+/// Writes every line of `input` into the empty, readable and writable `output`, open at `path`,
+/// as a framed rollout with every frame closed, and fails unless the result decodes to exactly
+/// those lines. Returns the decoded length. Blocking.
 pub fn encode_framed_rollout(
     input: impl std::io::BufRead,
+    path: &std::path::Path,
     output: std::fs::File,
 ) -> std::io::Result<u64> {
-    framed::reencode(input, output)
+    framed::reencode(input, path, output)
 }
 pub use seekable_reader::rollout_contains_prefix;
 

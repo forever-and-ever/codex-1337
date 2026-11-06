@@ -13,6 +13,8 @@ use rand::rngs::StdRng;
 use super::FramedReader;
 use super::FramedWriter;
 use super::HINT_LEN;
+use super::HINT_TRAILER_FIELD;
+use super::quarantine::StructureScan;
 use super::read_exact_at;
 use super::to_index;
 use super::write_all_at;
@@ -55,6 +57,19 @@ fn random_line(rng: &mut StdRng) -> Vec<u8> {
     line
 }
 
+/// The bytes sealing moved into the directory's one quarantine sidecar, if any.
+fn quarantined(directory: &Path) -> Vec<u8> {
+    let sidecars: Vec<_> = std::fs::read_dir(directory)
+        .expect("list")
+        .map(|entry| entry.expect("entry").path())
+        .filter(|path| path.to_string_lossy().contains(".torn-"))
+        .collect();
+    assert!(sidecars.len() <= 1, "one seal makes at most one sidecar");
+    sidecars.first().map_or_else(Vec::new, |sidecar| {
+        std::fs::read(sidecar).expect("read sidecar")
+    })
+}
+
 fn read_all(path: &Path) -> Vec<u8> {
     let mut content = Vec::new();
     FramedReader::open(File::open(path).expect("open"))
@@ -65,13 +80,13 @@ fn read_all(path: &Path) -> Vec<u8> {
 }
 
 #[test]
-fn sealing_after_any_crash_keeps_exactly_the_acknowledged_lines() {
+fn sealing_after_any_crash_keeps_the_acknowledged_lines_and_quarantines_the_rest() {
     let mut rng = StdRng::seed_from_u64(0x5EA1);
     for _ in 0..64 {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("rollout.jsonl.zst");
         // Frames close only where the test says, so it knows which bytes each step wrote.
-        let mut writer = FramedWriter::open(open_for_append(&path))
+        let mut writer = FramedWriter::open(&path, open_for_append(&path))
             .expect("create")
             .with_frame_logical_bytes(u64::MAX);
         let mut acknowledged = Vec::new();
@@ -108,8 +123,41 @@ fn sealing_after_any_crash_keeps_exactly_the_acknowledged_lines() {
             break;
         }
         drop(writer);
+        // Some cases also corrupt a closed frame's trailer: sealing keeps the frames up to that
+        // one and quarantines the corrupted trailer and everything after it as corruption.
+        let spans = FramedReader::open(File::open(&path).expect("open"))
+            .expect("survey")
+            .spans;
+        let corrupted = (!spans.is_empty() && rng.random_bool(0.25)).then(|| {
+            let span = spans[rng.random_range(0..spans.len())];
+            let file = open_for_append(&path);
+            let mut previous = [0; 1];
+            read_exact_at(&file, &mut previous, span.end + 32).expect("read trailer");
+            write_all_at(&file, &[previous[0] ^ 0x40], span.end + 32).expect("corrupt trailer");
+            span
+        });
+        let crashed = std::fs::read(&path).expect("read crashed rollout");
 
-        let mut writer = FramedWriter::open(open_for_append(&path)).expect("seal");
+        let mut writer = FramedWriter::open(&path, open_for_append(&path)).expect("seal");
+        let dropped = quarantined(dir.path());
+        let cut = crashed.len() - dropped.len();
+        assert_eq!(
+            &crashed[cut..],
+            &dropped[..],
+            "the sidecar holds exactly the cut bytes"
+        );
+        let sealed = std::fs::read(&path).expect("read sealed rollout");
+        // Before the cut, sealing rewrites only the hint's trailer field.
+        let field = to_index(HINT_TRAILER_FIELD).expect("index");
+        let hint_field = field..field + 8;
+        assert_eq!(&sealed[..hint_field.start], &crashed[..hint_field.start]);
+        assert_eq!(&sealed[hint_field.end..cut], &crashed[hint_field.end..cut]);
+        let mut scan = StructureScan::default();
+        scan.feed(&dropped);
+        assert_eq!(scan.found(), corrupted.is_some());
+        if let Some(span) = corrupted {
+            acknowledged.truncate(to_index(span.logical_end()).expect("index"));
+        }
         assert_eq!(writer.logical_len(), acknowledged.len() as u64);
         for _ in 0..rng.random_range(0..4) {
             let line = random_line(&mut rng);
@@ -122,7 +170,7 @@ fn sealing_after_any_crash_keeps_exactly_the_acknowledged_lines() {
         assert_eq!(read_all(&path), acknowledged);
 
         // Sealed, the whole file is one standard zstd stream with valid checksums.
-        drop(FramedWriter::open(open_for_append(&path)).expect("reseal"));
+        drop(FramedWriter::open(&path, open_for_append(&path)).expect("reseal"));
         let decoded = zstd::stream::decode_all(File::open(&path).expect("open")).expect("decode");
         assert_eq!(decoded, acknowledged);
     }
@@ -133,7 +181,7 @@ fn seeks_cross_closed_frames_and_the_open_frame() {
     let mut rng = StdRng::seed_from_u64(0x5EE4);
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("rollout.jsonl.zst");
-    let mut writer = FramedWriter::open(open_for_append(&path))
+    let mut writer = FramedWriter::open(&path, open_for_append(&path))
         .expect("create")
         .with_frame_logical_bytes(8 << 10);
     let mut expected = Vec::new();
@@ -178,7 +226,7 @@ fn readers_see_a_prefix_of_lines_while_a_writer_appends() {
     let expected = lines.concat();
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("rollout.jsonl.zst");
-    let mut writer = FramedWriter::open(open_for_append(&path))
+    let mut writer = FramedWriter::open(&path, open_for_append(&path))
         .expect("create")
         .with_frame_logical_bytes(16 << 10);
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

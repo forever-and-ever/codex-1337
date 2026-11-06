@@ -1,15 +1,36 @@
 //! Appends lines to a framed rollout, closing frames by size or idleness and sealing on open.
+//!
+//! # Lock model
+//!
+//! A framed rollout's length changes only through its one open [`FramedWriter`], and a writer
+//! exists only under its thread's cross-process writer lock:
+//!
+//! 1. The opener acquires the lock: a live or temporary `RolloutRecorder` holds its
+//!    `WriterLockGuard` for the life of its writer task, `append_rollout_item_to_path` for the
+//!    one append, and conversion and migration for the whole rewrite.
+//! 2. [`FramedWriter::open`] seals whatever a previous writer left open, quarantining the cut
+//!    bytes, and every append and frame close then extends the file at `end`.
+//! 3. The writer closes its frame and is dropped before the lock is released. No writer releases
+//!    the lock while it stays open, so no other writer can change the file under it.
+//!
+//! A length other than `end` before a write is therefore a broken lock discipline or a foreign
+//! process. The writer refuses to write and logs at ERROR rather than re-sealing, which could cut
+//! another writer's frame in flight.
 
 use std::fs::File;
 use std::io;
 use std::io::BufRead;
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
+
+use sha2::Digest;
+use sha2::Sha256;
 
 use zstd::zstd_safe::CCtx;
 use zstd::zstd_safe::CParameter;
 use zstd::zstd_safe::InBuffer;
 use zstd::zstd_safe::OutBuffer;
-use zstd::zstd_safe::ResetDirective;
 use zstd::zstd_safe::zstd_sys::ZSTD_EndDirective;
 
 use super::COMPRESSION_LEVEL;
@@ -19,6 +40,8 @@ use super::HINT_TRAILER_FIELD;
 use super::IDLE_FRAME_CLOSE;
 use super::TRAILER_LEN;
 use super::WINDOW_LOG;
+use super::quarantine::quarantine;
+use super::reader::FramedReader;
 use super::survey::Remainder;
 use super::survey::Span;
 use super::survey::encode_hint;
@@ -32,6 +55,7 @@ use super::zstd_error;
 const EMPTY_LAST_BLOCK: [u8; 3] = [1, 0, 0];
 
 pub(crate) struct FramedWriter {
+    path: PathBuf,
     file: File,
     encoder: CCtx<'static>,
     /// Where the next compressed byte goes.
@@ -51,10 +75,10 @@ struct OpenFrame {
 }
 
 impl FramedWriter {
-    /// Takes `file` (readable and writable, not in append mode) for appending: an empty file
-    /// receives the hint, and a framed one has its open frame sealed. The caller holds the
-    /// rollout's writer lock.
-    pub(crate) fn open(file: File) -> io::Result<Self> {
+    /// Takes `file`, open at `path` for reading and writing but not appending: an empty file
+    /// receives the hint, and a framed one has its open frame sealed. Blocking; the caller holds
+    /// the rollout's writer lock.
+    pub(crate) fn open(path: &Path, file: File) -> io::Result<Self> {
         let mut encoder = CCtx::create();
         for parameter in [
             CParameter::CompressionLevel(COMPRESSION_LEVEL),
@@ -64,6 +88,7 @@ impl FramedWriter {
             encoder.set_parameter(parameter).map_err(zstd_error)?;
         }
         let mut writer = Self {
+            path: path.to_path_buf(),
             file,
             encoder,
             end: HINT_LEN as u64,
@@ -87,11 +112,18 @@ impl FramedWriter {
         self
     }
 
-    /// Ends whatever a previous writer left open, keeping exactly its complete lines.
+    /// Ends whatever a previous writer left open, keeping exactly its complete lines. The bytes
+    /// past the kept layout are quarantined before the file is cut.
     fn seal(&mut self) -> io::Result<()> {
         let survey = survey(&self.file)?;
         self.last_trailer = survey.last_trailer;
         self.logical_end = survey.closed_logical_end();
+        let cut = match &survey.remainder {
+            Remainder::Closed => survey.valid_end,
+            Remainder::Untrailed { span, .. } => span.end,
+            Remainder::Open { cut, .. } => *cut,
+        };
+        quarantine(&self.path, &self.file, cut)?;
         let unsealed = match survey.remainder {
             Remainder::Closed => None,
             Remainder::Untrailed { span, .. } => Some(span),
@@ -138,9 +170,7 @@ impl FramedWriter {
     /// Appends one newline-terminated line. `flush` ends the current block so the line survives a
     /// crash; bulk re-encoding leaves it off for density.
     pub(crate) fn append(&mut self, line: &[u8], flush: bool) -> io::Result<()> {
-        if self.file.metadata()?.len() != self.end {
-            self.resync()?;
-        }
+        self.ensure_unchanged()?;
         let open = *self.open.get_or_insert(OpenFrame {
             start: self.end,
             logical_start: self.logical_end,
@@ -163,14 +193,23 @@ impl FramedWriter {
         Ok(())
     }
 
-    /// Another writer sealed this file and appended (an unloaded thread's metadata update), so
-    /// this writer's frame is no longer open: start over from the file's current layout.
-    fn resync(&mut self) -> io::Result<()> {
-        self.encoder
-            .reset(ResetDirective::SessionOnly)
-            .map_err(zstd_error)?;
-        self.open = None;
-        self.seal()
+    /// Fails closed when the file's length is not where this writer left it; see the lock model.
+    fn ensure_unchanged(&self) -> io::Result<()> {
+        let len = self.file.metadata()?.len();
+        if len == self.end {
+            return Ok(());
+        }
+        tracing::error!(
+            rollout = %self.path.display(),
+            expected = self.end,
+            found = len,
+            "framed rollout changed under its writer; refusing to write"
+        );
+        Err(io::Error::other(format!(
+            "{} changed under its writer: expected {} bytes, found {len}",
+            self.path.display(),
+            self.end
+        )))
     }
 
     /// Ends the open frame, if any, and records it in a trailer and the hint.
@@ -178,6 +217,7 @@ impl FramedWriter {
         let Some(open) = self.open else {
             return Ok(());
         };
+        self.ensure_unchanged()?;
         self.compress(&[], ZSTD_EndDirective::ZSTD_e_end)?;
         self.open = None;
         self.write_trailer(Span {
@@ -246,11 +286,19 @@ impl FramedWriter {
     }
 }
 
-/// Writes every line of `input` into the empty `output` as a framed rollout with every frame
-/// closed, terminating an unterminated final line as the plain writer would. Returns the decoded
-/// length.
-pub(crate) fn reencode(mut input: impl BufRead, output: File) -> io::Result<u64> {
-    let mut writer = FramedWriter::open(output)?;
+/// Writes every line of `input` into the empty `output`, open at `path`, as a framed rollout with
+/// every frame closed, terminating an unterminated final line as the plain writer would. The
+/// output is synced and then decoded in full; unless it reproduces exactly the bytes fed to the
+/// encoder, this fails. Returns the decoded length. Blocking.
+pub(crate) fn reencode(mut input: impl BufRead, path: &Path, output: File) -> io::Result<u64> {
+    if output.metadata()?.len() != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not empty", path.display()),
+        ));
+    }
+    let mut writer = FramedWriter::open(path, output)?;
+    let mut fed = Sha256::new();
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -260,9 +308,22 @@ pub(crate) fn reencode(mut input: impl BufRead, output: File) -> io::Result<u64>
         if line.last() != Some(&b'\n') {
             line.push(b'\n');
         }
+        fed.update(&line);
         writer.append(&line, /*flush*/ false)?;
     }
     writer.close_frame()?;
     writer.file.sync_all()?;
+    let mut reader = FramedReader::open(writer.file.try_clone()?)?;
+    let mut decoded = Sha256::new();
+    let decoded_len = io::copy(&mut reader, &mut decoded)?;
+    if decoded_len != writer.logical_end || decoded.finalize() != fed.finalize() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} does not decode to the bytes encoded into it",
+                path.display()
+            ),
+        ));
+    }
     Ok(writer.logical_end)
 }

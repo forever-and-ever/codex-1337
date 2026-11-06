@@ -74,7 +74,7 @@ pub(crate) fn is_compressed_rollout_path(path: &Path) -> bool {
 /// [`resolve_rollout_for_append_blocking`].
 pub(crate) async fn resolve_rollout_for_append(
     path: &Path,
-    writer_lock: Option<std::sync::Arc<crate::WriterLockGuard>>,
+    writer_lock: std::sync::Arc<crate::WriterLockGuard>,
 ) -> io::Result<PathBuf> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -126,16 +126,20 @@ pub(crate) fn convert_rollout_blocking(source: &Path) -> io::Result<PathBuf> {
     } else {
         Box::new(&input)
     };
-    let logical_len =
-        crate::framed::reencode(io::BufReader::new(decoded), temp.as_file().try_clone()?)?;
-    let written = crate::framed::FramedReader::open(temp.as_file().try_clone()?)?;
-    if written.logical_len() != logical_len {
-        return Err(io::Error::other("re-encoded rollout lost bytes"));
-    }
+    // Fails unless the synced temp file decodes to exactly the bytes read from the source.
+    crate::framed::reencode(
+        io::BufReader::new(decoded),
+        temp.path(),
+        temp.as_file().try_clone()?,
+    )?;
     access_metadata::copy(&input, temp.as_file())?;
     temp.as_file().sync_all()?;
     temp.persist(destination.as_path())
         .map_err(|err| err.error)?;
+    #[cfg(unix)]
+    if let Some(directory) = destination.parent() {
+        File::open(directory)?.sync_all()?;
+    }
     if source != destination {
         // The framed file is complete before the plain one goes; a crash between leaves both,
         // and readers and writers keep preferring the plain one until the next conversion.

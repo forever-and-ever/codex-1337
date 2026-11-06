@@ -9,6 +9,9 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::time::Instant;
 
 use tokio::io::AsyncWriteExt;
@@ -20,7 +23,9 @@ use crate::ordinal::ordinal_state_for_rollout;
 
 pub(crate) enum RolloutSink {
     Plain(tokio::fs::File),
-    Framed(Box<FramedWriter>),
+    /// Compression and positional writes run on the blocking pool, which the writer moves to for
+    /// each operation; the mutex is never contended.
+    Framed(Arc<Mutex<FramedWriter>>),
 }
 
 impl RolloutSink {
@@ -53,14 +58,14 @@ impl RolloutSink {
                 .create(create)
                 .truncate(false)
                 .open(path)?;
-            let writer = FramedWriter::open(file)?;
+            let writer = FramedWriter::open(path, file)?;
             let ordinal_state = if read_ordinals {
                 let mut reader = FramedReader::open(writer.file().try_clone()?)?;
                 Some(ordinal_state_for_rollout(&mut reader, path)?)
             } else {
                 None
             };
-            return Ok((Self::Framed(Box::new(writer)), ordinal_state));
+            return Ok((Self::Framed(Arc::new(Mutex::new(writer))), ordinal_state));
         }
         let mut file = OpenOptions::new()
             .read(true)
@@ -78,13 +83,18 @@ impl RolloutSink {
 
     /// Appends one newline-terminated line. A framed append is durable against a process crash
     /// when this returns.
-    pub(crate) async fn append_line(&mut self, line: &[u8]) -> io::Result<()> {
+    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<()> {
         match self {
             Self::Plain(file) => {
-                file.write_all(line).await?;
+                file.write_all(&line).await?;
                 file.flush().await
             }
-            Self::Framed(writer) => writer.append(line, /*flush*/ true),
+            Self::Framed(writer) => {
+                off_runtime(writer, move |writer| {
+                    writer.append(&line, /*flush*/ true)
+                })
+                .await
+            }
         }
     }
 
@@ -99,17 +109,34 @@ impl RolloutSink {
     pub(crate) fn idle_deadline(&self) -> Option<Instant> {
         match self {
             Self::Plain(_) => None,
-            Self::Framed(writer) => writer.idle_deadline(),
+            Self::Framed(writer) => lock(writer).ok()?.idle_deadline(),
         }
     }
 
     /// Ends the open frame so the next writer need not seal it.
-    pub(crate) fn close_frame(&mut self) -> io::Result<()> {
+    pub(crate) async fn close_frame(&mut self) -> io::Result<()> {
         match self {
             Self::Plain(_) => Ok(()),
-            Self::Framed(writer) => writer.close_frame(),
+            Self::Framed(writer) => off_runtime(writer, FramedWriter::close_frame).await,
         }
     }
+}
+
+/// Runs one framed-writer operation on the blocking pool.
+async fn off_runtime(
+    writer: &Arc<Mutex<FramedWriter>>,
+    operation: impl FnOnce(&mut FramedWriter) -> io::Result<()> + Send + 'static,
+) -> io::Result<()> {
+    let writer = Arc::clone(writer);
+    tokio::task::spawn_blocking(move || operation(&mut *lock(&writer)?))
+        .await
+        .map_err(io::Error::other)?
+}
+
+fn lock(writer: &Mutex<FramedWriter>) -> io::Result<MutexGuard<'_, FramedWriter>> {
+    writer
+        .lock()
+        .map_err(|_| io::Error::other("a framed rollout writer panicked"))
 }
 
 /// A plain rollout torn mid-line gets a newline, so the next record starts on its own line.

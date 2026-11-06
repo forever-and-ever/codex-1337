@@ -142,14 +142,14 @@ enum RolloutCmd {
 /// Observable state for the background rollout writer task.
 struct RolloutWriterTask {
     // The task, not just its caller, owns the lock until queued file writes finish.
-    _writer_lock: Option<Arc<crate::WriterLockGuard>>,
+    _writer_lock: Arc<crate::WriterLockGuard>,
     handle: Mutex<Option<JoinHandle<()>>>,
     terminal_failure: Mutex<Option<Arc<IoError>>>,
 }
 
 impl RolloutWriterTask {
     /// Create task observability state before spawning the writer.
-    fn new(writer_lock: Option<Arc<crate::WriterLockGuard>>) -> Self {
+    fn new(writer_lock: Arc<crate::WriterLockGuard>) -> Self {
         Self {
             _writer_lock: writer_lock,
             handle: Mutex::new(None),
@@ -894,11 +894,27 @@ impl RolloutRecorder {
     /// file creation/open until an explicit `persist()` call.
     ///
     /// For resumed sessions, this immediately opens the existing rollout file.
+    ///
+    /// The recorder takes its thread's writer lock in `config`'s Codex home and holds it until
+    /// its writer task ends; another live writer makes this fail with `WouldBlock`.
     pub async fn new(
         config: &impl RolloutConfigView,
         params: RolloutRecorderParams,
     ) -> std::io::Result<Self> {
-        Self::new_inner(config, params, /*writer_lock*/ None).await
+        let thread_id = match &params {
+            RolloutRecorderParams::Create {
+                conversation_id, ..
+            } => *conversation_id,
+            RolloutRecorderParams::Resume { path } => crate::thread_id_from_rollout_path(path)
+                .ok_or_else(|| {
+                    IoError::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("{} is not a rollout file name", path.display()),
+                    )
+                })?,
+        };
+        let writer_lock = acquire_writer_lock(config.codex_home().to_path_buf(), thread_id).await?;
+        Self::new_inner(config, params, writer_lock).await
     }
 
     /// Opens a recorder under existing thread-store ownership, retaining it through background IO.
@@ -908,13 +924,13 @@ impl RolloutRecorder {
         params: RolloutRecorderParams,
         writer_lock: Arc<crate::WriterLockGuard>,
     ) -> std::io::Result<Self> {
-        Self::new_inner(config, params, Some(writer_lock)).await
+        Self::new_inner(config, params, writer_lock).await
     }
 
     async fn new_inner(
         config: &impl RolloutConfigView,
         params: RolloutRecorderParams,
-        writer_lock: Option<Arc<crate::WriterLockGuard>>,
+        writer_lock: Arc<crate::WriterLockGuard>,
     ) -> std::io::Result<Self> {
         // Clone the cwd for the spawned task to collect git info asynchronously.
         let cwd = config.cwd().to_path_buf();
@@ -1812,11 +1828,11 @@ struct RolloutWriterState {
 
 impl RolloutWriterState {
     /// Ends the open frame of a framed rollout; a failure drops the writer like a failed write.
-    fn close_frame(&mut self) {
+    async fn close_frame(&mut self) {
         let Some(writer) = self.writer.as_mut() else {
             return;
         };
-        if let Err(err) = writer.sink.close_frame() {
+        if let Err(err) = writer.sink.close_frame().await {
             self.enter_recovery_mode(&err);
         }
     }
@@ -1903,7 +1919,10 @@ impl RolloutWriterState {
             return Ok(());
         }
 
-        let sink = open_log_file(self.rollout_path.as_path())?;
+        let path = self.rollout_path.clone();
+        let sink = tokio::task::spawn_blocking(move || open_log_file(path.as_path()))
+            .await
+            .map_err(IoError::other)??;
         self.writer = Some(JsonlWriter { sink });
         self.deferred_creation = false;
         Ok(())
@@ -1983,7 +2002,7 @@ async fn rollout_writer(
                 match tokio::time::timeout_at(deadline, rx.recv()).await {
                     Ok(cmd) => cmd,
                     Err(_) => {
-                        state.close_frame();
+                        state.close_frame().await;
                         continue;
                     }
                 }
@@ -2027,7 +2046,7 @@ async fn rollout_writer(
             },
         }
     }
-    state.close_frame();
+    state.close_frame().await;
 
     Ok(())
 }
@@ -2063,25 +2082,64 @@ async fn write_session_meta(
 
 /// Append one already-filtered rollout item to an existing rollout JSONL file.
 ///
-/// This is for metadata updates to unloaded threads. Live sessions should use
+/// This is for metadata updates to unloaded threads, so it takes the thread's writer lock and
+/// fails with `WouldBlock` while a live writer holds it. Live sessions should use
 /// `RolloutRecorder::record_canonical_items` so rollout writes remain ordered
 /// with the rest of the session stream.
 pub async fn append_rollout_item_to_path(
     rollout_path: &Path,
     item: &RolloutItem,
 ) -> std::io::Result<()> {
+    let writer_lock = lock_rollout_writer(rollout_path).await?;
     let (_rollout_path, sink, ordinal_state) =
-        open_rollout_for_append(rollout_path, /*writer_lock*/ None).await?;
+        open_rollout_for_append(rollout_path, writer_lock).await?;
     let ordinal = ordinal_state.current()?;
     let mut writer = JsonlWriter { sink };
     writer.write_rollout_item(item, ordinal).await?;
     // Nothing follows this line, so end its frame now rather than leave it for the next writer.
-    writer.sink.close_frame()
+    writer.sink.close_frame().await
+}
+
+/// The cross-process writer lock of the thread `path` belongs to, in the Codex home holding the
+/// path's `sessions` or `archived_sessions` root.
+async fn lock_rollout_writer(path: &Path) -> std::io::Result<Arc<crate::WriterLockGuard>> {
+    let invalid = || {
+        IoError::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a rollout under a Codex home", path.display()),
+        )
+    };
+    let thread_id = crate::thread_id_from_rollout_path(path).ok_or_else(invalid)?;
+    let codex_home = path
+        .ancestors()
+        .find(|ancestor| {
+            ancestor
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|name| name == SESSIONS_SUBDIR || name == ARCHIVED_SESSIONS_SUBDIR)
+        })
+        .and_then(Path::parent)
+        .ok_or_else(invalid)?
+        .to_path_buf();
+    acquire_writer_lock(codex_home, thread_id).await
+}
+
+/// Takes `thread_id`'s cross-process writer lock in `codex_home`, off the async runtime.
+async fn acquire_writer_lock(
+    codex_home: PathBuf,
+    thread_id: ThreadId,
+) -> std::io::Result<Arc<crate::WriterLockGuard>> {
+    tokio::task::spawn_blocking(move || {
+        Arc::new(crate::WriterLockCoordinator::new(codex_home.as_path())).acquire(thread_id)
+    })
+    .await
+    .map_err(IoError::other)?
+    .map(Arc::new)
 }
 
 async fn open_rollout_for_append(
     path: &Path,
-    writer_lock: Option<Arc<crate::WriterLockGuard>>,
+    writer_lock: Arc<crate::WriterLockGuard>,
 ) -> std::io::Result<(PathBuf, RolloutSink, RolloutOrdinalState)> {
     let path = compression::resolve_rollout_for_append(path, writer_lock.clone()).await?;
     let path_for_open = path.clone();
@@ -2131,7 +2189,7 @@ impl JsonlWriter {
     async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
         let mut json = serde_json::to_string(item)?;
         json.push('\n');
-        self.sink.append_line(json.as_bytes()).await
+        self.sink.append_line(json.into_bytes()).await
     }
 }
 

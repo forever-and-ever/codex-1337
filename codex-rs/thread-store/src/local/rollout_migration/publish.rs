@@ -134,7 +134,11 @@ pub(super) async fn compress_rollout_to_path(
             .read(true)
             .write(true)
             .open(&compressed_path)?;
-        codex_rollout::encode_framed_rollout(io::BufReader::new(input), output.try_clone()?)?;
+        codex_rollout::encode_framed_rollout(
+            io::BufReader::new(input),
+            &compressed_path,
+            output.try_clone()?,
+        )?;
         output.set_permissions(permissions)?;
         if let Some(modified_at) = modified_at {
             output.set_times(std::fs::FileTimes::new().set_modified(modified_at))?;

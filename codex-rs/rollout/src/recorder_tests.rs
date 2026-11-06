@@ -146,7 +146,7 @@ fn write_session_file(root: &Path, ts: &str, uuid: Uuid) -> std::io::Result<Path
 #[test]
 fn append_repair_terminates_nonempty_rollout_tail() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     fs::write(&rollout_path, b"{\"type\":\"event_msg\"}")?;
     drop(open_log_file(&rollout_path)?);
     drop(open_log_file(&rollout_path)?);
@@ -158,7 +158,7 @@ fn append_repair_terminates_nonempty_rollout_tail() -> std::io::Result<()> {
 #[tokio::test]
 async fn opening_existing_rollout_preserves_modified_time() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     write_paginated_rollout(&rollout_path, ThreadId::default(), &[])?;
     let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     File::options()
@@ -169,7 +169,8 @@ async fn opening_existing_rollout_preserves_modified_time() -> std::io::Result<(
     drop(open_log_file(&rollout_path)?);
     assert_eq!(fs::metadata(&rollout_path)?.modified()?, modified);
 
-    drop(open_rollout_for_append(&rollout_path, /*writer_lock*/ None).await?);
+    let writer_lock = acquire_writer_lock(home.path().to_path_buf(), ThreadId::default()).await?;
+    drop(open_rollout_for_append(&rollout_path, writer_lock).await?);
     assert_eq!(fs::metadata(&rollout_path)?.modified()?, modified);
     Ok(())
 }
@@ -178,7 +179,7 @@ async fn opening_existing_rollout_preserves_modified_time() -> std::io::Result<(
 #[test]
 fn open_log_file_materializes_rollout_when_acl_denies_timestamp_changes() -> anyhow::Result<()> {
     let home = TempDir::new()?;
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let compressed_path = rollout_path.with_extension("jsonl.zst");
     fs::write(
         &compressed_path,
@@ -291,7 +292,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
 #[tokio::test]
 async fn load_rollout_items_defaults_legacy_session_id() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let mut file = File::create(&rollout_path)?;
     let thread_id = ThreadId::new();
     let ts = "2025-01-03T12:00:00Z";
@@ -409,7 +410,7 @@ async fn load_rollout_items_ignores_unknown_fork_source_history_mode() -> std::i
 #[tokio::test]
 async fn load_rollout_items_preserves_legacy_guardian_assessment_lines() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let mut file = File::create(&rollout_path)?;
     let thread_id = ThreadId::new();
     let ts = "2025-01-03T12:00:00Z";
@@ -472,7 +473,7 @@ async fn load_rollout_items_preserves_legacy_guardian_assessment_lines() -> std:
 #[tokio::test]
 async fn load_rollout_items_preserves_security_risk_scores() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let thread_id = ThreadId::new();
     let security_risk = SecurityRiskScore {
         scores: BTreeMap::from([
@@ -523,7 +524,7 @@ async fn load_rollout_items_preserves_security_risk_scores() -> std::io::Result<
 async fn load_rollout_items_filters_legacy_ghost_snapshots_from_compaction_history()
 -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let mut file = File::create(&rollout_path)?;
     let thread_id = ThreadId::new();
     let ts = "2025-01-03T12:00:00Z";
@@ -834,6 +835,7 @@ async fn referenced_paginated_rollout_starts_at_history_cutoff_and_resumes() -> 
     recorder.persist().await?;
     assert!(recorder.unpersisted_session_meta().await?.is_none());
     recorder.shutdown().await?;
+    drop(recorder);
 
     let meta = crate::read_session_meta_line(&rollout_path).await?.meta;
     assert_eq!(
@@ -853,6 +855,7 @@ async fn referenced_paginated_rollout_starts_at_history_cutoff_and_resumes() -> 
         .await?;
     resumed.flush().await?;
     resumed.shutdown().await?;
+    drop(resumed);
 
     let resumed =
         RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path.clone())).await?;
@@ -951,7 +954,7 @@ async fn recorder_omits_ordinals_from_legacy_rollouts() -> std::io::Result<()> {
 async fn resumed_empty_rollout_omits_ordinals() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     File::create(&rollout_path)?;
 
     let recorder =
@@ -1031,7 +1034,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
 #[tokio::test]
 async fn writer_state_retries_write_error_before_reporting_flush_success() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     File::create(&rollout_path)?;
     let read_only_file = std::fs::OpenOptions::new().read(true).open(&rollout_path)?;
     let mut state = RolloutWriterState {
@@ -1071,7 +1074,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
 async fn resumed_paginated_rollout_continues_after_ordinal_gap() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     write_paginated_rollout(&rollout_path, ThreadId::new(), &[4])?;
 
     let recorder =
@@ -1135,6 +1138,7 @@ async fn resumed_paginated_rollout_continues_after_decimal_token_count() -> std:
         .await?;
     recorder.persist().await?;
     recorder.shutdown().await?;
+    drop(recorder);
 
     let resumed =
         RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path.clone())).await?;
@@ -1172,7 +1176,7 @@ async fn resumed_paginated_rollout_repairs_unsafe_tail() -> std::io::Result<()> 
     ] {
         let home = TempDir::new().expect("temp dir");
         let config = test_config(home.path());
-        let rollout_path = home.path().join("rollout.jsonl");
+        let rollout_path = rollout_path_in(home.path());
         write_paginated_rollout(&rollout_path, ThreadId::new(), &[4])?;
         let mut file = fs::OpenOptions::new().append(true).open(&rollout_path)?;
         write!(file, "{tail}")?;
@@ -1206,7 +1210,7 @@ async fn resumed_paginated_rollout_repairs_unsafe_tail() -> std::io::Result<()> 
 async fn paginated_ordinal_overflow_fails_without_appending() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     write_paginated_rollout(&rollout_path, ThreadId::new(), &[u64::MAX])?;
     let before = fs::read(&rollout_path)?;
 
@@ -1228,7 +1232,7 @@ async fn paginated_ordinal_overflow_fails_without_appending() -> std::io::Result
 async fn resumed_paginated_subagent_rollout_rejects_incomplete_prefix() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
-    let rollout_path = home.path().join("rollout.jsonl");
+    let rollout_path = rollout_path_in(home.path());
     let thread_id = ThreadId::new();
     let mut session_meta = paginated_session_meta_item(thread_id, home.path());
     let RolloutItem::SessionMeta(meta_line) = &mut session_meta else {
@@ -1267,8 +1271,11 @@ async fn resumed_paginated_subagent_rollout_rejects_incomplete_prefix() -> std::
 #[tokio::test]
 async fn append_rollout_item_to_path_assigns_next_paginated_ordinal() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
-    let rollout_path = home.path().join("rollout.jsonl");
-    write_paginated_rollout(&rollout_path, ThreadId::new(), &[4])?;
+    let thread_id = ThreadId::new();
+    let sessions = home.path().join(crate::SESSIONS_SUBDIR);
+    std::fs::create_dir_all(&sessions)?;
+    let rollout_path = sessions.join(format!("rollout-2025-01-01T00-00-00-{thread_id}.jsonl"));
+    write_paginated_rollout(&rollout_path, thread_id, &[4])?;
 
     append_rollout_item_to_path(&rollout_path, &agent_message_item("offline")).await?;
 
@@ -2052,4 +2059,12 @@ async fn resume_candidate_matches_cwd_reads_latest_turn_context() -> std::io::Re
         .await
     );
     Ok(())
+}
+
+/// A rollout path whose file name carries a thread id, which writer locks are keyed by.
+fn rollout_path_in(home: &Path) -> PathBuf {
+    home.join(format!(
+        "rollout-2025-01-01T00-00-00-{}.jsonl",
+        ThreadId::new()
+    ))
 }

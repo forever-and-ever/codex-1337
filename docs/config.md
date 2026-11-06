@@ -14,6 +14,15 @@ still allowing managed hooks from requirements and managed config layers. This
 setting is only supported in `requirements.toml`; putting it in `config.toml`
 does not enable managed-hooks-only mode.
 
+### Transcript path
+
+A hook input's `transcript_path` names the thread's rollout file on disk. A
+rollout written by this build is zstd-compressed JSONL (`.jsonl.zst`), a
+sequence of standard zstd frames that `zstd -dc` decodes. Older rollouts that
+have not been converted are plain `.jsonl`. While the thread is running, its
+last frame is still open: decoding yields every line recorded so far, and then
+`zstd` reports that the input is truncated.
+
 ### Hook selectors
 
 Each hook group accepts an optional typed `selector`. For `PreToolUse`,

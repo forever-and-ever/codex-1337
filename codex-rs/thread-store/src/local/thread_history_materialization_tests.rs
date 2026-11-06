@@ -159,6 +159,7 @@ async fn split_homes_support_backfill_listing_and_paginated_history() {
     recorder.persist().await.expect("persist paginated rollout");
     let rollout_path = recorder.rollout_path().to_path_buf();
     recorder.shutdown().await.expect("close paginated rollout");
+    drop(recorder);
 
     let runtime = codex_rollout::state_db::try_init(&rollout_config)
         .await
