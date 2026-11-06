@@ -71,7 +71,7 @@ async fn migration_requires_consent_and_preserves_shared_database_mode() -> Resu
     assert_eq!(std::fs::read(&path)?, before);
 
     // A later corrupt database must be reported without undoing a completed conversion.
-    std::fs::write(sqlite.logs_db_path(), b"corrupt SQLite database")?;
+    std::fs::write(sqlite.goals_db_path(), b"corrupt SQLite database")?;
     let mut partial = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
     let partial = partial
         .env("CODEX_HOME", home.path())
@@ -91,13 +91,13 @@ async fn migration_requires_consent_and_preserves_shared_database_mode() -> Resu
             .find(|line| line.starts_with("Error: migration failed"))
             .unwrap()
             .replace(home.path().to_str().unwrap(), "[HOME]"),
-        @"Error: migration failed for [HOME]/logs_2.sqlite. Keep all Codex instances stopped. Correct the error and rerun codex migrate-nfs-db"
+        @"Error: migration failed for [HOME]/goals_1.sqlite. Keep all Codex instances stopped. Correct the error and rerun codex migrate-nfs-db"
     );
     assert_eq!(
-        std::fs::read(sqlite.logs_db_path())?,
+        std::fs::read(sqlite.goals_db_path())?,
         b"corrupt SQLite database"
     );
-    std::fs::remove_file(sqlite.logs_db_path())?;
+    std::fs::remove_file(sqlite.goals_db_path())?;
 
     let mut command = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
     command

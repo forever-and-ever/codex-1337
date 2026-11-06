@@ -141,8 +141,6 @@ async fn failed_factory_connections_never_change_backend() -> Result<()> {
             loader,
             /*strict_config*/ false,
             crate::CloudConfigBundleLoader::default(),
-            codex_feedback::CodexFeedback::new(),
-            /*log_db*/ None,
             &mut state_db,
             Arc::clone(&app.environment_manager),
             policy,

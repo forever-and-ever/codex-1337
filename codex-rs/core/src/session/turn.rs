@@ -19,7 +19,6 @@ use crate::context::ContextualUserFragment;
 use crate::context::UserVerificationNotice;
 use crate::cyber_access_program;
 use crate::environment_selection::TurnEnvironmentSnapshot;
-use crate::feedback_tags;
 use crate::hook_runtime::drain_async_hook_results;
 use crate::hook_runtime::hooks_for_model_request;
 use crate::hook_runtime::inspect_pending_input;
@@ -2789,19 +2788,6 @@ async fn try_run_sampling_request(
     draining_for_mailbox: &mut bool,
 ) -> Result<SamplingRequestResult, SamplingFailure> {
     let turn_context = Arc::clone(&step_context.turn);
-    feedback_tags!(
-        model = step_context.settings.model_info.slug.clone(),
-        approval_policy = turn_context.approval_policy(),
-        sandbox_policy = &turn_context.sandbox_policy(),
-        effort = step_context.settings.reasoning_effort(),
-        auth_mode = sess.services.auth_manager.auth_mode(),
-        tags_json = tracing::field::display(serde_json::json!(crate::feedback_config::usage_tags(
-            &turn_context.config,
-            &sess.features,
-            &step_context.settings.model_info,
-            step_context.settings.service_tier.as_deref(),
-        ))),
-    );
     let inference_trace = sess.services.rollout_thread_trace.inference_trace_context(
         turn_context.sub_id.as_str(),
         step_context.settings.model_info.slug.as_str(),

@@ -493,6 +493,15 @@ client_request_definitions! {
         response: v1::InitializeResponse,
     },
 
+    #[experimental("debug/flightRecorder/read")]
+    /// Read this process's in-memory flight recorder. Never serialized behind a thread, so it
+    /// answers while a thread's request lane is wedged.
+    FlightRecorderRead => "debug/flightRecorder/read" {
+        params: v2::FlightRecorderReadParams,
+        serialization: None,
+        response: v2::FlightRecorderReadResponse,
+    },
+
     #[experimental("server/diagnostics")]
     /// Read content-free, process-local diagnostics.
     ServerDiagnostics => "server/diagnostics" {

@@ -5,7 +5,6 @@ use super::App;
 use super::AppEvent;
 use super::AppServerSession;
 use super::Arc;
-use super::FeedbackCategory;
 use super::HistoryLookupResponse;
 use super::Mutex;
 use super::Result;
@@ -32,12 +31,6 @@ pub(super) enum LocalThreadCompletion {
     HistoryLookup {
         thread_id: ThreadId,
         event: HistoryLookupResponse,
-    },
-    FeedbackSubmitted {
-        origin_thread_id: Option<ThreadId>,
-        category: FeedbackCategory,
-        include_logs: bool,
-        result: Result<String, String>,
     },
     VerificationFinished {
         thread_id: ThreadId,
@@ -180,15 +173,6 @@ impl App {
                 self.enqueue_thread_history_entry_response(thread_id, event)
                     .await?;
             }
-            LocalThreadCompletion::FeedbackSubmitted {
-                origin_thread_id,
-                category,
-                include_logs,
-                result,
-            } => {
-                self.handle_feedback_submitted(origin_thread_id, category, include_logs, result)
-                    .await;
-            }
             LocalThreadCompletion::VerificationFinished {
                 thread_id,
                 server_name,
@@ -232,9 +216,6 @@ impl App {
             ThreadBufferedEvent::HistoryEntryResponse(event) => {
                 self.enqueue_thread_history_entry_response(thread_id, event)
                     .await?;
-            }
-            ThreadBufferedEvent::FeedbackSubmission(event) => {
-                self.enqueue_thread_feedback_event(thread_id, event).await;
             }
             ThreadBufferedEvent::FarmReceipt {
                 thread_id,

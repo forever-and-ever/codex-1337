@@ -5,7 +5,6 @@ use sqlx::migrate::Migrator;
 use sqlx_sqlite::SqlitePool;
 
 pub(crate) static STATE_MIGRATOR: Migrator = sqlx_macros::migrate!("./migrations");
-pub(crate) static LOGS_MIGRATOR: Migrator = sqlx_macros::migrate!("./logs_migrations");
 pub(crate) static GOALS_MIGRATOR: Migrator = sqlx_macros::migrate!("./goals_migrations");
 pub(crate) static MEMORIES_MIGRATOR: Migrator = sqlx_macros::migrate!("./memory_migrations");
 pub(crate) static QUEUE_MIGRATOR: Migrator = sqlx_macros::migrate!("./queue_migrations");
@@ -31,10 +30,6 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
 
 pub(crate) fn runtime_state_migrator() -> Migrator {
     runtime_migrator(&STATE_MIGRATOR)
-}
-
-pub(crate) fn runtime_logs_migrator() -> Migrator {
-    runtime_migrator(&LOGS_MIGRATOR)
 }
 
 pub(crate) fn runtime_goals_migrator() -> Migrator {

@@ -68,7 +68,6 @@ impl ThreadEventStore {
                 }
                 ThreadBufferedEvent::Request(_)
                 | ThreadBufferedEvent::HistoryEntryResponse(_)
-                | ThreadBufferedEvent::FeedbackSubmission(_)
                 | ThreadBufferedEvent::FarmReceipt { .. } => {}
             }
         }

@@ -1200,10 +1200,6 @@ pub struct Config {
     /// Voluntarily left as Optional because the default value might depend on the client.
     pub analytics_enabled: Option<bool>,
 
-    /// When `false`, disables feedback uploads and background Guardian review retention. Explicit local exports remain available.
-    /// Defaults to `true`.
-    pub feedback_enabled: bool,
-
     /// Configured discoverable tools for tool suggestions.
     pub tool_suggest: ToolSuggestConfig,
 
@@ -4353,14 +4349,10 @@ impl Config {
             .unwrap_or_else(|| codex_home.clone());
         let enforce_delete_on_nfs =
             unsafe_enforce_sqlite_journal_mode.is_some_and(|required| required.value);
-        let mut sqlite = codex_state::SqliteConfig::from_sqlite_home_with_nfs_enforcement(
+        let sqlite = codex_state::SqliteConfig::from_sqlite_home_with_nfs_enforcement(
             sqlite_home,
             enforce_delete_on_nfs,
         );
-        let requirements = config_layer_stack.requirements_toml();
-        if cfg.log_dir.is_some() && requirements.sqlite_home.is_none() {
-            sqlite = sqlite.with_local_logs_home(log_dir.clone());
-        }
         let original_permission_profile = permission_profile.clone();
         apply_requirement_constrained_value(
             "approval_policy",
@@ -4777,11 +4769,6 @@ impl Config {
                 .or(cfg.disable_paste_burst)
                 .unwrap_or(false),
             analytics_enabled: cfg.analytics.as_ref().and_then(|a| a.enabled),
-            feedback_enabled: cfg
-                .feedback
-                .as_ref()
-                .and_then(|feedback| feedback.enabled)
-                .unwrap_or(true),
             tool_suggest,
             tui_notifications: cfg
                 .tui

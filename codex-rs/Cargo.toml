@@ -23,6 +23,7 @@ members = [
     "apply-patch",
     "arg0",
     "feedback",
+    "flight-recorder",
     "features",
     "install-context",
     "codex-backend-openapi-models",
@@ -240,6 +241,7 @@ codex-image-generation-extension = { path = "ext/image-generation" }
 codex-experimental-api-macros = { path = "codex-experimental-api-macros" }
 codex-features = { path = "features" }
 codex-feedback = { path = "feedback" }
+codex-flight-recorder = { path = "flight-recorder" }
 codex-install-context = { path = "install-context" }
 codex-file-search = { path = "file-search" }
 codex-file-watcher = { path = "file-watcher" }

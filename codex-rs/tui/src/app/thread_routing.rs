@@ -2001,9 +2001,6 @@ impl App {
             ThreadBufferedEvent::HistoryEntryResponse(event) => {
                 self.chat_widget.handle_history_entry_response(event);
             }
-            ThreadBufferedEvent::FeedbackSubmission(event) => {
-                self.handle_feedback_thread_event(event);
-            }
             ThreadBufferedEvent::FarmReceipt {
                 thread_id,
                 request_id,
@@ -2039,9 +2036,6 @@ impl App {
             }
             ThreadBufferedEvent::HistoryEntryResponse(event) => {
                 self.chat_widget.handle_history_entry_response(event)
-            }
-            ThreadBufferedEvent::FeedbackSubmission(event) => {
-                self.handle_feedback_thread_event(event);
             }
             ThreadBufferedEvent::FarmReceipt {
                 thread_id,

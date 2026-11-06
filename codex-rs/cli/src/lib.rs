@@ -3,6 +3,7 @@ pub mod cloud_config;
 pub(crate) mod debug_sandbox;
 pub(crate) mod exit_status;
 pub(crate) mod login;
+mod logs_cmd;
 mod quota;
 
 use clap::Args;
@@ -27,6 +28,8 @@ pub use login::run_login_with_browser;
 pub use login::run_login_with_device_code;
 pub use login::run_login_with_device_code_fallback_to_browser;
 pub use login::run_logout;
+pub use logs_cmd::LogsCommand;
+pub use logs_cmd::read_flight_recorder;
 pub use quota::QuotaCommand;
 pub use quota::read_account_quotas;
 

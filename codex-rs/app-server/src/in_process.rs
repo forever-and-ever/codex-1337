@@ -161,9 +161,9 @@ pub struct InProcessStartArgs {
     pub embedded_network_policy: EmbeddedNetworkPolicy,
     /// Loader used to fetch typed thread config sources before a thread starts.
     pub thread_config_loader: Arc<dyn ThreadConfigLoader>,
-    /// Feedback sink used by app-server/core telemetry and logs.
+    /// TELOS(no-feedback-upload): inert remnant of the removed feedback sink.
     pub feedback: CodexFeedback,
-    /// SQLite tracing layer used to flush recently emitted logs before feedback upload.
+    /// TELOS(no-feedback-upload): always `None`; no log database writer exists.
     pub log_db: Option<LogDbLayer>,
     /// Process-wide SQLite state handle shared with embedded app-server consumers.
     pub state_db: Option<StateDbHandle>,
@@ -460,18 +460,6 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 .with_process_reply_sender(process_reply_tx),
         );
 
-        let log_write_warning = crate::log_write_warning::LogWriteWarningReporter::new(
-            args.feedback.clone(),
-            &outgoing_message_sender,
-            &args.config,
-        );
-        if let Some(log_db) = &args.log_db {
-            log_db.set_failure_reporter(log_write_warning.clone());
-            if log_db.has_write_failure() {
-                log_write_warning.notify_failure();
-            }
-        }
-
         let (writer_tx, mut writer_rx) = mpsc::channel::<QueuedOutgoingMessage>(channel_capacity);
         let outbound_initialized = Arc::new(AtomicBool::new(false));
         let outbound_experimental_api_enabled = Arc::new(AtomicBool::new(false));
@@ -508,7 +496,6 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 startup_cwd,
                 config_manager,
                 environment_manager: args.environment_manager,
-                feedback: args.feedback,
                 log_db: args.log_db,
                 state_db: args.state_db,
                 alarm_owner: None,

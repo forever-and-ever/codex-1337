@@ -44,7 +44,6 @@ use codex_config::permissions_toml::WorkspaceRootsToml;
 use codex_config::types::AppToolApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::BundledSkillsConfig;
-use codex_config::types::FeedbackConfigToml;
 use codex_config::types::HistoryPersistence;
 use codex_config::types::McpServerEnvVar;
 use codex_config::types::McpServerOAuthConfig;
@@ -5810,16 +5809,8 @@ async fn sqlite_home_defaults_to_codex_home_for_workspace_write() -> std::io::Re
     .await?;
 
     assert_eq!(
-        (
-            config.sqlite.home(),
-            config.sqlite.logs_db_path(),
-            &config.log_dir
-        ),
-        (
-            codex_home.path(),
-            codex_home.path().join("logs_2.sqlite"),
-            &codex_home.path().join("log"),
-        ),
+        (config.sqlite.home(), &config.log_dir),
+        (codex_home.path(), &codex_home.path().join("log"),),
     );
     assert_eq!(config.configured_log_dir(), None);
 
@@ -5842,13 +5833,11 @@ async fn log_dir_routes_logs_without_moving_state() -> std::io::Result<()> {
     assert_eq!(
         (
             config.sqlite.home(),
-            config.sqlite.logs_db_path().parent(),
             config.log_dir.as_path(),
             config.configured_log_dir()
         ),
         (
             home.path(),
-            Some(diagnostics.as_path()),
             diagnostics.as_path(),
             Some(diagnostics.as_path())
         ),
@@ -5874,16 +5863,8 @@ async fn managed_sqlite_home_preserves_configured_log_dir() -> std::io::Result<(
         std::fs::write(home.path().join(CONFIG_TOML_FILE), user_config)?;
         let config = load_with_enterprise_requirement(&home, requirements).await?;
         assert_eq!(
-            (
-                config.sqlite.logs_db_path().parent(),
-                config.log_dir.as_path(),
-                config.configured_log_dir(),
-            ),
-            (
-                Some(state.as_path()),
-                diagnostics.as_path(),
-                Some(diagnostics.as_path()),
-            ),
+            (config.log_dir.as_path(), config.configured_log_dir(),),
+            (diagnostics.as_path(), Some(diagnostics.as_path()),),
         );
     }
     Ok(())
@@ -6266,26 +6247,6 @@ fn local_dev_builds_force_file_mcp_oauth_store_modes() {
         resolve_mcp_oauth_credentials_store_mode(OAuthCredentialsStoreMode::Keyring, "1.2.3"),
         OAuthCredentialsStoreMode::Keyring,
     );
-}
-
-#[tokio::test]
-async fn feedback_enabled_defaults_to_true() -> std::io::Result<()> {
-    let codex_home = TempDir::new()?;
-    let cfg = ConfigToml {
-        feedback: Some(FeedbackConfigToml::default()),
-        ..Default::default()
-    };
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert_eq!(config.feedback_enabled, true);
-
-    Ok(())
 }
 
 #[test]
@@ -13323,19 +13284,12 @@ enabled = false
     );
     assert_eq!(config.log_dir, required_log_dir);
     assert_eq!(
-        (
-            config.sqlite.logs_db_path().parent(),
-            config.configured_log_dir(),
-        ),
-        (
-            Some(required_sqlite_home.as_path()),
-            Some(required_log_dir.as_path())
-        ),
+        config.configured_log_dir(),
+        Some(required_log_dir.as_path())
     );
     assert_eq!(config.model_catalog, Some(catalog));
     assert!(!config.check_for_update_on_startup);
     assert!(!config.permissions.allow_login_shell);
-    assert!(!config.feedback_enabled);
     assert!(config.startup_warnings.iter().any(|warning| {
         warning.contains("Configured value for `check_for_update_on_startup` is overridden")
     }));

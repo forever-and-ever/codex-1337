@@ -16,6 +16,7 @@ use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigValueWriteParams;
 use codex_app_server_protocol::ConfigWriteResponse;
+use codex_app_server_protocol::FlightRecorderReadParams;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::LoginAccountResponse;
@@ -30,9 +31,6 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
-use codex_state::LogQuery;
-use codex_state::StateRuntime;
-use core_test_support::load_default_config_for_test;
 use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
@@ -51,8 +49,24 @@ use wiremock::matchers::path;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Reads the server's flight recorder, one record's text per line.
+async fn recorder_logs(app_server: &mut TestAppServer, thread_id: Option<&str>) -> Result<String> {
+    let response = app_server
+        .read_flight_recorder(FlightRecorderReadParams {
+            thread_id: thread_id.map(str::to_owned),
+            ..Default::default()
+        })
+        .await?;
+    Ok(response
+        .records
+        .into_iter()
+        .map(|record| record.text)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
 #[tokio::test]
-async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()> {
+async fn submission_metadata_reaches_feedback_logs() -> Result<()> {
     skip_if_wine_exec!(
         Ok(()),
         "command approval routing requires a host-native cwd under Wine-exec"
@@ -77,7 +91,7 @@ async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()>
             .write(codex_home.path())?;
         let mut app_server = TestAppServer::builder()
             .with_codex_home(codex_home.path())
-            // SQLite and feedback diagnostics must remain safe independently of stderr.
+            // Feedback diagnostics must remain complete independently of stderr.
             .with_env_overrides(&[("RUST_LOG", Some("off"))])
             .build()
             .await?;
@@ -141,30 +155,7 @@ async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()>
         )
         .await??;
 
-        let state = StateRuntime::init(
-            load_default_config_for_test(&codex_home)
-                .await
-                .sqlite_config()
-                .clone(),
-            "mock_provider".into(),
-        )
-        .await?;
-        // Feedback is read from SQLite, so this also verifies persistence.
-        let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
-            loop {
-                let logs =
-                    String::from_utf8(state.query_feedback_logs_for_threads(&[&thread.id]).await?)?;
-                if logs
-                    .lines()
-                    .any(|line| line.contains("Submission") && line.contains("exec_approval"))
-                {
-                    break Ok::<_, anyhow::Error>(logs);
-                }
-                tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
-            }
-        })
-        .await??;
-        state.close().await;
+        let feedback = recorder_logs(&mut app_server, Some(&thread.id)).await?;
         for (operation, fields) in [
             (
                 "exec_approval",
@@ -207,7 +198,7 @@ async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()>
 }
 
 #[tokio::test]
-async fn credentials_stay_out_of_persisted_and_feedback_logs() -> Result<()> {
+async fn credentials_stay_out_of_feedback_logs() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let bearer = "synthetic-provider-bearer";
@@ -382,44 +373,21 @@ supports_websockets = false
         app_server
             .send_response(RequestId::String(barrier.into()), json!({}))
             .await?;
-        let state = StateRuntime::init(
-            load_default_config_for_test(&codex_home)
-                .await
-                .sqlite_config()
-                .clone(),
-            "mock_provider".into(),
-        )
-        .await?;
-        let thread_ids = thread_ids.iter().map(String::as_str).collect::<Vec<_>>();
-        let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
-            loop {
-                let logs =
-                    String::from_utf8(state.query_feedback_logs_for_threads(&thread_ids).await?)?;
-                if logs.contains(barrier) {
-                    break Ok::<_, anyhow::Error>(logs);
-                }
-                tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
-            }
-        })
-        .await??;
-        let persisted = format!("{:?}", state.query_logs(&LogQuery::default()).await?);
-        state.close().await;
+        let feedback = recorder_logs(&mut app_server, /*thread_id*/ None).await?;
         // The HTTP assertions above prove the credentials were used. The barrier
-        // confirms earlier queued logs were persisted before we check for leaks.
-        for (sink, logs) in [("SQLite", persisted), ("feedback", feedback)] {
-            anyhow::ensure!(logs.contains(barrier), "missing log barrier in {sink} logs");
-            for secret in [
-                bearer,
-                header,
-                &initial_token,
-                &refreshed_token,
-                attestation,
-            ] {
-                anyhow::ensure!(
-                    !logs.contains(secret),
-                    "credential leaked into {sink} logs: {secret}"
-                );
-            }
+        // confirms the recorder saw later events before we check for leaks.
+        anyhow::ensure!(feedback.contains(barrier), "missing log barrier");
+        for secret in [
+            bearer,
+            header,
+            &initial_token,
+            &refreshed_token,
+            attestation,
+        ] {
+            anyhow::ensure!(
+                !feedback.contains(secret),
+                "credential leaked into feedback logs: {secret}"
+            );
         }
         Ok(())
     })

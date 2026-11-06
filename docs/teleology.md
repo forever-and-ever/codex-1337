@@ -490,6 +490,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: deleting the migration crate would add about 2.3 modify/delete conflicts per merge across the nine releases from `rust-v0.153.4` to `rust-v0.162.1`; retaining it unbuilt avoids those conflicts.
 - Evidence: maintainer capability-cut decision; protocol schemas and state migration history are retained verbatim.
 
+### no-feedback-upload
+
+- Telos: routine diagnostics never reach disk or a vendor; they stay in a bounded in-memory flight recorder that still answers while a thread is wedged.
+- Holds: `/feedback`, its views, uploads, saves, archives, feedback tags, guardian failed-review capture and the SQLite log sink are absent. `feedback/upload` and `feedback/save` answer an unsupported error; their protocol and schema stay unchanged. `codex-feedback` is an inert stub: `CodexFeedback` carries nothing and its tag emitters discard. `codex_state::log_db::LogDbLayer` is uninhabited, so every `Option<LogDbLayer>` is `None`, and `feedback_tags!` borrows and discards. No runtime opens `logs_2.sqlite`: its spec, migrations, `log_dir` placement, directory lock and the background page reclamation only it enabled are deleted, and an existing file is left for its owner. The guardian review table stays in the state migrations because SQLx validates migration history. `codex-flight-recorder` owns one ring per process with separate byte budgets for WARN+, INFO and DEBUG+TRACE (server 1/5/10 MiB, clients 0.5/1.5/2 MiB). It is read through the unserialized `debug/flightRecorder/read` RPC or `codex logs` (`--follow` polls by sequence number), and written to `$CODEX_HOME/log/flight-recorder/` only on SIGUSR1 or a panic, newest four dumps kept. The ring lock never spans tracing, I/O or awaits.
+- Owners: `codex-rs/flight-recorder/`, `codex-rs/app-server/src/request_processors/flight_recorder.rs`, `codex-rs/app-server-protocol/src/protocol/v2/flight_recorder.rs`, `codex-rs/cli/src/logs_cmd.rs`. Deleted prefixes live in `scripts/check_removed_capabilities.py`; resolve modify/delete conflicts with `git rm` and keep the stubs on modify/modify.
+- Tripwire: `python scripts/check_removed_capabilities.py --check`; the guardian v2 user-input cases check thread attribution through a recorder query, and `suite::logging` checks submission metadata and credential redaction through it.
+- Pressure: seven release merges from `rust-v0.159.1` to `rust-v0.166.0` touched 14 `feedback/` files, 5 app-server feedback files, 3 log-database files and 1 TUI feedback view: an estimated 3–4 modify/delete conflicts per merge. The stubs keep about 40 plumbing files merging without seams.
+- Evidence: maintainer decision 2026-11-06. Before the cut the log database was the server's largest write stream (3.2 MB/min of WAL against 0.24 MB/min of rollout appends).
+
 ## Build economy
 
 ### one-dependency-graph

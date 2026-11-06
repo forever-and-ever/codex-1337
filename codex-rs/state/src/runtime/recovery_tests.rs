@@ -16,7 +16,7 @@ async fn backup_moves_only_requested_runtime_db_files_to_backup_folder() -> std:
             expected_paths.push(path);
         }
     }
-    let failed_db_path = sqlite.logs_db_path();
+    let failed_db_path = sqlite.memories_db_path();
     let failed_paths = sqlite_paths(failed_db_path.as_path());
 
     let (result, report) =

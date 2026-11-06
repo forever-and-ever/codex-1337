@@ -403,7 +403,9 @@ fn composite_cell_preserves_child_web_links() {
     let destination = "https://chatgpt.com/settings/usage";
     let cell = CompositeHistoryCell::new(vec![
         Box::new(PlainHistoryCell::new(vec![Line::from("/status")])),
-        Box::new(WebHyperlinkHistoryCell::new(vec![Line::from(destination)])),
+        Box::new(WebHyperlinkHistoryCell::new_hyperlink_lines(
+            crate::terminal_hyperlinks::annotate_web_urls(vec![Line::from(destination)]),
+        )),
     ]);
 
     let lines = cell.display_hyperlink_lines(/*width*/ 80);

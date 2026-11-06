@@ -82,11 +82,11 @@ async fn network_only_selects_checks_without_database_or_mcp_scans() -> Result<(
         .await;
     let sqlite =
         SqliteConfig::new_for_testing(AbsolutePathBuf::try_from(home.path().to_path_buf())?);
-    let database = sqlite.logs_db_path();
+    let database = sqlite.goals_db_path();
     std::fs::write(&database, "not a SQLite database")?;
     let mcp_url = format!("{}/unrelated-mcp", server.uri());
     let output = local_command(&home)?
-        .args(["doctor", "--network-only", "--json", "--all", "--feedback"])
+        .args(["doctor", "--network-only", "--json", "--all"])
         .arg("-c")
         .arg(format!("mcp_servers.unrelated.url={mcp_url:?}"))
         .output()?;

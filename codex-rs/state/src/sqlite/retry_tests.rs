@@ -3,7 +3,6 @@
 use super::retry_on_busy;
 use crate::SqliteConfig;
 use crate::SqliteQueueStore;
-use crate::migrations::runtime_logs_migrator;
 use crate::migrations::runtime_queue_migrator;
 use crate::runtime::test_support::unique_temp_dir;
 use anyhow::Context;
@@ -29,7 +28,10 @@ async fn retries_after_a_competing_writer_releases_its_lock() -> anyhow::Result<
     });
     let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
     let pool = sqlite
-        .open_logs_db(&runtime_logs_migrator(), /*telemetry_override*/ None)
+        .open_read_write_pool(&sqlite_home.join("retry.sqlite"))
+        .await?;
+    sqlx::query("CREATE TABLE entries (body TEXT NOT NULL)")
+        .execute(&pool)
         .await?;
     let mut competing_writer = pool.acquire().await?;
     let mut writer = pool.acquire().await?;
@@ -44,12 +46,9 @@ async fn retries_after_a_competing_writer_releases_its_lock() -> anyhow::Result<
 
     retry_on_busy(|| async {
         let mut writer = writer.lock().await;
-        let result = sqlx::query(
-            "INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body) \
-             VALUES (1, 0, 'INFO', 'retry-test', 'saved once')",
-        )
-        .execute(&mut **writer)
-        .await;
+        let result = sqlx::query("INSERT INTO entries (body) VALUES ('saved once')")
+            .execute(&mut **writer)
+            .await;
         // Release the competing transaction only after SQLite actually rejected
         // the write. This cannot pass by racing the first attempt's busy wait.
         if result.is_err() {
@@ -62,7 +61,7 @@ async fn retries_after_a_competing_writer_releases_its_lock() -> anyhow::Result<
     })
     .await?;
 
-    let rows = sqlx::query_scalar::<_, String>("SELECT feedback_log_body FROM logs ORDER BY id")
+    let rows = sqlx::query_scalar::<_, String>("SELECT body FROM entries ORDER BY rowid")
         .fetch_all(&pool)
         .await?;
     assert_eq!(rows, vec!["saved once".to_string()]);

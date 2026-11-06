@@ -307,8 +307,6 @@ async fn daemon_startup_preserves_endpoint_ownership_on_connection_errors() -> c
             LoaderOverrides::default(),
             /*strict_config*/ false,
             CloudConfigBundleLoader::default(),
-            codex_feedback::CodexFeedback::new(),
-            /*log_db*/ None,
             &mut state_db,
             Arc::new(EnvironmentManager::default_for_tests()),
             Default::default(),

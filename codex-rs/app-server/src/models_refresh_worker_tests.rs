@@ -9,7 +9,9 @@ use codex_config::LoaderOverrides;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
-use codex_feedback::CodexFeedback;
+use codex_flight_recorder::Budgets;
+use codex_flight_recorder::FlightRecorder;
+use codex_flight_recorder::RecordFilter;
 use codex_http_client::HttpClientFactory;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
@@ -224,11 +226,10 @@ async fn background_refresh_blocks_invalid_requirements_then_recovers() -> anyho
         models_manager,
         auth_manager,
     ));
-    let feedback = CodexFeedback::new();
+    let recorder = FlightRecorder::new(Budgets::SERVER);
     // This test uses Tokio's current-thread runtime, so spawned refreshes share the subscriber.
-    let _subscriber_guard = tracing::subscriber::set_default(
-        tracing_subscriber::registry().with(feedback.logger_layer()),
-    );
+    let _subscriber_guard =
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(recorder.layer()));
     let worker = spawn_with_interval(&catalog, Duration::from_millis(/*millis*/ 10));
     tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
         for expected in 1..=2 {
@@ -260,12 +261,16 @@ async fn background_refresh_blocks_invalid_requirements_then_recovers() -> anyho
     })
     .await?;
     drop(worker);
-    let logs = String::from_utf8(
-        feedback
-            .snapshot(/*session_id*/ None)
-            .log_attachment(/*logs_override*/ None)
-            .buffer,
-    )?;
+    let logs = recorder
+        .excerpt(&RecordFilter::default())
+        .records
+        .iter()
+        .map(|record| &*record.text)
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
     assert!(logs.contains("model catalog refresh blocked by provider requirements"));
     assert!(logs.contains("error_kind=InvalidData"));
     assert!(!logs.contains("private-provider-token-marker"));

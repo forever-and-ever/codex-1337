@@ -62,7 +62,6 @@ mod experimental_api;
 mod experimental_feature_list;
 #[path = "extension_lease.rs"]
 mod extension_lease;
-mod feedback;
 mod frozen_cloud_skills;
 mod fs;
 #[path = "gateway_oauth_tests.rs"]

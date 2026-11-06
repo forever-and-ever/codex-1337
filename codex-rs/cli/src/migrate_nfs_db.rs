@@ -51,9 +51,6 @@ pub(crate) async fn run(
         .loader_overrides(loader_overrides)
         .build()
         .await?;
-    // Check the merged config for an explicit log directory.
-    let effective_config = config.config_layer_stack.effective_config();
-    let skip_logs = effective_config.get("log_dir").is_some();
     let sqlite = config.sqlite_config();
     if !sqlite.home().try_exists()? {
         println!("No databases found.");
@@ -61,9 +58,6 @@ pub(crate) async fn run(
     }
     let mut needs_permission_confirmation = false;
     for database in sqlite.runtime_db_paths() {
-        if skip_logs && database.path == sqlite.logs_db_path() {
-            continue;
-        }
         needs_permission_confirmation |=
             NfsDbMigration::needs_permission_confirmation(&database.path)?;
     }
@@ -87,10 +81,6 @@ pub(crate) async fn run(
     let mut migration = NfsDbMigration::lock(sqlite.home())?;
     let mut databases_found = 0;
     for database in sqlite.runtime_db_paths() {
-        if skip_logs && database.path == sqlite.logs_db_path() {
-            println!("Skipped logs database: log_dir is configured.");
-            continue;
-        }
         let outcome = migration.migrate(&database.path, &command.staging_dir).await.with_context(|| format!(
             "migration failed for {}. Keep all Codex instances stopped. Correct the error and rerun codex migrate-nfs-db",
             database.path.display()

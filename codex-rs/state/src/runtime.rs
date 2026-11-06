@@ -1,6 +1,3 @@
-use crate::LogEntry;
-use crate::LogQuery;
-use crate::LogRow;
 use crate::SortKey;
 use crate::SqliteConfig;
 use crate::ThreadMetadata;
@@ -8,7 +5,6 @@ use crate::ThreadMetadataBuilder;
 use crate::ThreadsPage;
 use crate::apply_rollout_item;
 use crate::migrations::runtime_goals_migrator;
-use crate::migrations::runtime_logs_migrator;
 use crate::migrations::runtime_memories_migrator;
 use crate::migrations::runtime_queue_migrator;
 use crate::migrations::runtime_state_migrator;
@@ -32,7 +28,6 @@ use sqlx::Row;
 use sqlx::Sqlite;
 use sqlx::SqliteConnection;
 use sqlx::SqlitePool;
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,9 +44,6 @@ mod comms;
 mod context_role;
 mod farm_requests;
 mod goals;
-mod guardian_feedback;
-mod logs;
-mod logs_maintenance;
 mod memories;
 mod memory_versions;
 mod projects;
@@ -60,7 +52,6 @@ pub use agent_mail::AgentMailRecord;
 pub use agent_mail::AgentMailState;
 
 mod queued_items;
-pub(crate) mod reclamation;
 pub(crate) mod recovery;
 mod remote_control;
 mod rollout_migration;
@@ -87,10 +78,6 @@ pub use goals::GoalAccountingMode;
 pub use goals::GoalAccountingOutcome;
 pub use goals::GoalStore;
 pub use goals::GoalUpdate;
-pub use guardian_feedback::GuardianReviewRecord;
-pub use guardian_feedback::MAX_GUARDIAN_REVIEW_BYTES;
-pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS;
-pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS_PER_THREAD;
 pub use memories::MemoryStore;
 pub use queued_items::SqliteQueueStore;
 pub use recovery::backup_runtime_db_for_fresh_start;
@@ -104,28 +91,17 @@ pub use thread_read_state::ReadStateUpdate;
 pub use thread_read_state::ThreadReadState;
 pub use threads::ThreadFilterOptions;
 
-// "Partition" is the retained-log-content bucket we cap at 10 MiB:
-// - one bucket per non-null thread_id
-// - one bucket per threadless (thread_id IS NULL) non-null process_uuid
-// - one bucket for threadless rows with process_uuid IS NULL
-// This budget tracks each row's persisted rendered log body plus non-body
-// metadata, rather than the exact sum of all persisted SQLite column bytes.
-const LOG_PARTITION_SIZE_LIMIT_BYTES: i64 = 10 * 1024 * 1024;
-const LOG_PARTITION_ROW_LIMIT: i64 = 1_000;
-
 #[derive(Clone)]
 pub struct StateRuntime {
     sqlite: SqliteConfig,
     default_provider: String,
     pool: Arc<sqlx::SqlitePool>,
-    logs_pool: Arc<sqlx::SqlitePool>,
     thread_goals: GoalStore,
     memories: MemoryStore,
     memories_v2: Arc<tokio::sync::OnceCell<MemoryStore>>,
     thread_queue: SqliteQueueStore,
     thread_updated_at_millis: Arc<AtomicI64>,
     thread_recency_at_millis: Arc<AtomicI64>,
-    reclamation: Arc<reclamation::SqliteReclamationWorker>,
 }
 
 impl StateRuntime {
@@ -133,7 +109,7 @@ impl StateRuntime {
     ///
     /// This opens (and migrates) the SQLite databases under the configured
     /// `sqlite_home`.
-    /// Logs and paginated thread history live in dedicated files to reduce
+    /// Paginated thread history lives in a dedicated file to reduce
     /// lock contention with the rest of the state store.
     pub async fn init(sqlite: SqliteConfig, default_provider: String) -> anyhow::Result<Arc<Self>> {
         Self::init_inner(sqlite, default_provider, /*telemetry_override*/ None).await
@@ -155,12 +131,10 @@ impl StateRuntime {
     ) -> anyhow::Result<Arc<Self>> {
         tokio::fs::create_dir_all(sqlite.home()).await?;
         let state_migrator = runtime_state_migrator();
-        let logs_migrator = runtime_logs_migrator();
         let goals_migrator = runtime_goals_migrator();
         let memories_migrator = runtime_memories_migrator();
         let queue_migrator = runtime_queue_migrator();
         let state_path = sqlite.state_db_path();
-        let logs_path = sqlite.logs_db_path();
         let goals_path = sqlite.goals_db_path();
         let memories_path = sqlite.memories_db_path();
         let queue_path = sqlite.queue_db_path();
@@ -175,17 +149,6 @@ impl StateRuntime {
             }
         };
         let has_memories_v2 = tokio::fs::try_exists(sqlite.memories_v2_db_path()).await?;
-        let logs_pool = match sqlite
-            .open_logs_db(&logs_migrator, telemetry_override)
-            .await
-        {
-            Ok(db) => Arc::new(db),
-            Err(err) => {
-                warn!("failed to open logs db at {}: {err}", logs_path.display());
-                close_sqlite_pools(&[pool.as_ref()]).await;
-                return Err(err);
-            }
-        };
         let goals_pool = match sqlite
             .open_goals_db(&goals_migrator, telemetry_override)
             .await
@@ -193,7 +156,7 @@ impl StateRuntime {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open goals db at {}: {err}", goals_path.display());
-                close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref()]).await;
+                close_sqlite_pools(&[pool.as_ref()]).await;
                 return Err(err);
             }
         };
@@ -207,7 +170,7 @@ impl StateRuntime {
                     "failed to open memories db at {}: {err}",
                     memories_path.display()
                 );
-                close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref(), goals_pool.as_ref()]).await;
+                close_sqlite_pools(&[pool.as_ref(), goals_pool.as_ref()]).await;
                 return Err(err);
             }
         };
@@ -218,13 +181,8 @@ impl StateRuntime {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open queue db at {}: {err}", queue_path.display());
-                close_sqlite_pools(&[
-                    pool.as_ref(),
-                    logs_pool.as_ref(),
-                    goals_pool.as_ref(),
-                    memories_pool.as_ref(),
-                ])
-                .await;
+                close_sqlite_pools(&[pool.as_ref(), goals_pool.as_ref(), memories_pool.as_ref()])
+                    .await;
                 return Err(err);
             }
         };
@@ -240,7 +198,6 @@ impl StateRuntime {
         if let Err(err) = backfill_state_result {
             close_sqlite_pools(&[
                 pool.as_ref(),
-                logs_pool.as_ref(),
                 goals_pool.as_ref(),
                 memories_pool.as_ref(),
                 queue_pool.as_ref(),
@@ -269,7 +226,6 @@ impl StateRuntime {
                 Err(err) => {
                     close_sqlite_pools(&[
                         pool.as_ref(),
-                        logs_pool.as_ref(),
                         goals_pool.as_ref(),
                         memories_pool.as_ref(),
                         queue_pool.as_ref(),
@@ -281,13 +237,11 @@ impl StateRuntime {
         let thread_updated_at_millis = thread_updated_at_millis.unwrap_or(0);
         let thread_recency_at_millis = thread_recency_at_millis.unwrap_or(0);
         let runtime = Arc::new(Self {
-            reclamation: reclamation::SqliteReclamationWorker::spawn(sqlite.clone()),
             thread_goals: GoalStore::new(Arc::clone(&goals_pool)),
             memories: MemoryStore::new(Arc::clone(&memories_pool), Arc::clone(&pool)),
             memories_v2: Arc::new(tokio::sync::OnceCell::new()),
             thread_queue: SqliteQueueStore::new(queue_pool),
             pool,
-            logs_pool,
             sqlite,
             default_provider,
             thread_updated_at_millis: Arc::new(AtomicI64::new(thread_updated_at_millis)),
@@ -303,7 +257,6 @@ impl StateRuntime {
             runtime.close().await;
             return Err(err);
         }
-        runtime.start_periodic_logs_maintenance(std::time::Duration::from_secs(30 * 60));
         Ok(runtime)
     }
 
@@ -327,14 +280,12 @@ impl StateRuntime {
 
     /// Close all SQLite pools and wait for outstanding pool workers to exit.
     pub async fn close(&self) {
-        self.reclamation.close().await;
         self.thread_queue.close().await;
         self.memories.close().await;
         if let Some(memories) = self.memories_v2.get() {
             memories.close().await;
         }
         self.thread_goals.close().await;
-        self.logs_pool.close().await;
         self.pool.close().await;
     }
 
@@ -413,77 +364,25 @@ ON CONFLICT(id) DO NOTHING
     Ok(())
 }
 
-/// Integrity-check rows, including those emitted before interruption.
-#[derive(Debug, Eq, PartialEq)]
-pub enum SqliteIntegrityCheck {
-    Complete(Vec<String>),
-    TimedOut(Vec<String>),
-}
-
-/// Run SQLite's built-in integrity check against an existing database file.
+/// Run SQLite's built-in integrity check against an existing database file, returning its rows.
 pub async fn sqlite_integrity_check(
     sqlite: &SqliteConfig,
     path: &Path,
-    deadline: Option<Instant>,
-) -> anyhow::Result<SqliteIntegrityCheck> {
+) -> anyhow::Result<Vec<String>> {
     let pool = sqlite
-        .open_read_only_pool(
-            path,
-            deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())),
-        )
+        .open_read_only_pool(path, /*busy_timeout*/ None)
         .await?;
-    let mut connection = pool.acquire().await?;
-    if let Some(deadline) = deadline {
-        // Lock waits do not invoke the progress handler; share the remaining budget.
-        QueryBuilder::<Sqlite>::new("PRAGMA busy_timeout = ")
-            .push(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis(),
-            )
-            .build()
-            .execute(&mut *connection)
-            .await?;
-        // Interrupt SQLite itself: dropping a timed-out future leaves its worker scanning.
-        connection
-            .lock_handle()
-            .await?
-            .set_progress_handler(/*num_ops*/ 1_000, move || Instant::now() < deadline);
-    }
-    let mut rows = Vec::<String>::new();
-    // Keep corruption rows even when a later step interrupts the scan.
-    let result = sqlx::query::<Sqlite>("PRAGMA integrity_check")
-        .try_map(|row| {
-            rows.push(row.try_get(/*index*/ 0)?);
-            Ok(())
-        })
-        .fetch_all(&mut *connection)
+    let rows = sqlx::query_scalar::<Sqlite, String>("PRAGMA integrity_check")
+        .fetch_all(&pool)
         .await;
-    drop(connection);
     pool.close().await;
-    match result {
-        Ok(_) => Ok(SqliteIntegrityCheck::Complete(rows)),
-        Err(sqlx::Error::Database(error))
-            if deadline.is_some()
-                && error.code().is_some_and(|code| {
-                    matches!(
-                        code.parse::<i32>().ok().map(|code| code & 0xff),
-                        Some(libsqlite3_sys::SQLITE_INTERRUPT | libsqlite3_sys::SQLITE_BUSY)
-                    )
-                }) =>
-        {
-            Ok(SqliteIntegrityCheck::TimedOut(rows))
-        }
-        Err(error) => Err(error.into()),
-    }
+    Ok(rows?)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SqliteIntegrityCheck;
     use super::StateRuntime;
     use super::runtime_state_migrator;
-    use super::sqlite_integrity_check;
     use super::test_support::test_thread_metadata;
     use super::test_support::unique_temp_dir;
     use crate::DB_INIT_METRIC;
@@ -499,8 +398,6 @@ mod tests {
     use std::path::Path;
     use std::sync::Mutex;
     use std::sync::atomic::Ordering;
-    use std::time::Duration;
-    use std::time::Instant;
 
     #[derive(Default)]
     struct TestTelemetry {
@@ -560,93 +457,6 @@ mod tests {
             .open_read_write_pool(path)
             .await
             .expect("open sqlite pool")
-    }
-
-    #[tokio::test]
-    async fn sqlite_integrity_check_can_be_interrupted_and_retried() {
-        let codex_home = unique_temp_dir();
-        tokio::fs::create_dir_all(&codex_home)
-            .await
-            .expect("create codex home");
-        let sqlite = crate::SqliteConfig::new_for_testing(codex_home.as_path().abs());
-        let path = sqlite.state_db_path();
-        let pool = sqlite
-            .open_read_write_pool(&path)
-            .await
-            .expect("open sqlite db");
-        sqlx::query("CREATE TABLE sample (id INTEGER PRIMARY KEY, value INTEGER, other INTEGER)")
-            .execute(&pool)
-            .await
-            .expect("create sample table");
-        sqlx::query("CREATE UNIQUE INDEX sample_value ON sample(value)")
-            .execute(&pool)
-            .await
-            .expect("create sample index");
-        sqlx::query(
-            "WITH RECURSIVE rows(id) AS (SELECT 1 UNION ALL SELECT id + 1 FROM rows WHERE id < 2048) INSERT INTO sample SELECT id, id, CASE WHEN id = 1 THEN 0 ELSE id END FROM rows",
-        )
-        .execute(&pool)
-        .await
-        .expect("populate enough rows to invoke the progress handler");
-        pool.close().await;
-
-        assert_eq!(
-            sqlite_integrity_check(&sqlite, &path, Some(Instant::now()))
-                .await
-                .expect("interrupt integrity check"),
-            SqliteIntegrityCheck::TimedOut(Vec::new()),
-        );
-
-        let result = sqlite_integrity_check(&sqlite, &path, /*deadline*/ None)
-            .await
-            .expect("integrity check should run");
-
-        assert_eq!(
-            result,
-            SqliteIntegrityCheck::Complete(vec!["ok".to_string()])
-        );
-
-        let pool = sqlite
-            .open_read_write_pool(&path)
-            .await
-            .expect("reopen sqlite db");
-        let mut connection = pool.acquire().await.expect("acquire writer");
-        // WAL readers do not wait on this writer, so use a rollback journal.
-        sqlx::query("PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE")
-            .execute(&mut *connection)
-            .await
-            .expect("hold an exclusive lock");
-        let started = Instant::now();
-        let result =
-            sqlite_integrity_check(&sqlite, &path, Some(started + Duration::from_millis(50)))
-                .await
-                .expect("interrupt lock wait");
-        let elapsed = started.elapsed();
-        sqlx::query("ROLLBACK")
-            .execute(&mut *connection)
-            .await
-            .expect("release lock");
-        assert_eq!(result, SqliteIntegrityCheck::TimedOut(Vec::new()));
-        assert!(elapsed < Duration::from_secs(1), "lock wait: {elapsed:?}");
-
-        // Misdescribe one index entry so SQLite emits an error before its first progress callback.
-        sqlx::query(
-            "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql='CREATE UNIQUE INDEX sample_value ON sample(other)' WHERE name='sample_value'; PRAGMA writable_schema=OFF",
-        )
-        .execute(&mut *connection)
-        .await
-        .expect("introduce an index mismatch");
-        drop(connection);
-        pool.close().await;
-        assert_eq!(
-            sqlite_integrity_check(&sqlite, &path, Some(Instant::now()))
-                .await
-                .expect("retain corruption before interruption"),
-            SqliteIntegrityCheck::TimedOut(vec![
-                "row 1 missing from index sample_value".to_string()
-            ]),
-        );
-        let _ = tokio::fs::remove_dir_all(codex_home).await;
     }
 
     #[tokio::test]
@@ -719,8 +529,6 @@ mod tests {
         let expected = [
             "open_state",
             "migrate_state",
-            "open_logs",
-            "migrate_logs",
             "open_goals",
             "migrate_goals",
             "open_memories",

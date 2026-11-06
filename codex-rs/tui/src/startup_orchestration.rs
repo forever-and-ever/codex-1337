@@ -858,9 +858,8 @@ pub(super) async fn run_main_inner(
         (None, None)
     };
 
-    let feedback = codex_feedback::CodexFeedback::new();
-    let feedback_layer = feedback.logger_layer();
-    let feedback_metadata_layer = feedback.metadata_layer();
+    let recorder =
+        codex_flight_recorder::FlightRecorder::install(codex_flight_recorder::Budgets::CLIENT);
 
     if cli.oss && model_provider_override.is_some() {
         // We're in the oss section, so provider_id should be Some
@@ -898,21 +897,27 @@ pub(super) async fn run_main_inner(
         .as_ref()
         .and_then(codex_otel::OtelProvider::tracing_layer);
 
-    let log_db = state_db
-        .clone()
-        .map(|state_db| log_db::start(state_db, std::sync::Arc::new(feedback.clone())));
-    let log_db_layer = log_db
-        .clone()
-        .map(|layer| layer.with_filter(log_db::default_filter()));
-
     let _ = tracing_subscriber::registry()
         .with(tui_file_layer)
-        .with(feedback_layer)
-        .with(feedback_metadata_layer)
-        .with(log_db_layer)
+        .with(recorder.layer())
         .with(otel_logger_layer)
         .with(otel_tracing_layer)
         .try_init();
+    // Diagnostics stay in memory; they reach disk only on SIGUSR1 or a panic.
+    let recorder_dumps = codex_flight_recorder::dump_dir(config.codex_home.as_path());
+    codex_flight_recorder::install_panic_hook(
+        recorder,
+        recorder_dumps.clone(),
+        codex_flight_recorder::Process::Tui,
+    );
+    #[cfg(unix)]
+    if let Err(err) = codex_flight_recorder::spawn_signal_dump(
+        recorder,
+        recorder_dumps,
+        codex_flight_recorder::Process::Tui,
+    ) {
+        tracing::warn!("failed to install the flight recorder's SIGUSR1 dump: {err}");
+    }
 
     if let Err(err) = screen_reader_result {
         tracing::warn!("Could not save screen-reader detection: {err}");
@@ -931,8 +936,6 @@ pub(super) async fn run_main_inner(
         overrides,
         cli_kv_overrides,
         cloud_config_bundle,
-        feedback,
-        log_db,
         state_db,
         environment_manager,
         embedded_network_policy,

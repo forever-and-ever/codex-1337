@@ -23,11 +23,43 @@ CUT_PREFIXES = (
     "codex-rs/app-server/src/external_agent_migration/",
     "codex-rs/app-server/tests/suite/v2/external_agent",
     "codex-rs/state/src/runtime/external_agent_config_imports",
+    "codex-rs/tui/src/bottom_pane/feedback_",
+    "codex-rs/tui/src/app/feedback_upload.rs",
+    "codex-rs/app-server/src/request_processors/feedback_",
+    "codex-rs/app-server/src/log_write_warning",
+    "codex-rs/app-server/tests/suite/v2/feedback.rs",
+    "codex-rs/feedback/src/archive",
+    "codex-rs/feedback/src/daemon_logs",
+    "codex-rs/feedback/src/feedback_",
+    "codex-rs/feedback/src/guardian",
+    "codex-rs/feedback/src/lib_tests.rs",
+    "codex-rs/feedback/src/metadata_tests.rs",
+    "codex-rs/feedback/src/report_upload.rs",
+    "codex-rs/feedback/src/rollout_",
+    "codex-rs/feedback/src/save_rollout_tests.rs",
+    "codex-rs/feedback/src/upload.rs",
+    "codex-rs/state/src/runtime/logs",
+    "codex-rs/state/src/runtime/guardian_feedback",
+    "codex-rs/state/src/model/log.rs",
+    "codex-rs/state/src/log_db_",
+    "codex-rs/state/src/log_write_telemetry_tests.rs",
+    "codex-rs/core/src/guardian/feedback.rs",
+    "codex-rs/core/src/feedback_config",
+    "codex-rs/ext/guardian-reviewer/src/feedback",
+    "codex-rs/cli/src/bin/logs_client.rs",
+    "codex-rs/state/logs_migrations/",
+    "codex-rs/state/src/runtime/reclamation",
+    "codex-rs/file-system/src/local_logs.rs",
 )
 CUT_SNAPSHOTS = (
     "__slash_pets",
     "__ambient_pet",
     "__footer_status_line_enabled_mode_and_ide_context_right",
+    "__feedback_note_view__",
+    "__feedback_view__",
+    "__feedback_selection_popup",
+    "__feedback_upload_consent_popup",
+    "__feedback_good_result_consent_popup",
 )
 UNHOOKED = "codex-rs/external-agent-migration/"
 PROTOCOL_COMPATIBILITY = (
@@ -51,7 +83,10 @@ CUT_REFERENCES = re.compile(
     r"|\b(?:IdeContextState|set_ide_context_active|maybe_apply_ide_context)\b"
     r"|(?:mod |crate::)ide_context\b"
     r"|\b(?:mod |pub use )external_agent_(?:config|migration)\w*"
-    r"|\bexternal_agent_config_processor\b|codex_external_agent_migration::",
+    r"|\bexternal_agent_config_processor\b|codex_external_agent_migration::"
+    r"|SlashCommand::Feedback\b|\bFeedbackRequestProcessor\b|\blog_db::start\b"
+    r"|\bquery_feedback_logs\w*|\bguardian_review_failures\b|\brecord_guardian_review_failure\b"
+    r"|\b(?:logs_db_path|with_local_logs_home|LocalLogsDir|SqliteReclamationWorker)\b",
     re.IGNORECASE,
 )
 

@@ -572,8 +572,7 @@ impl App {
                     ThreadBufferedEvent::Request(request) => {
                         server_request_thread_id(request) == Some(thread_id)
                     }
-                    ThreadBufferedEvent::HistoryEntryResponse(_)
-                    | ThreadBufferedEvent::FeedbackSubmission(_) => true,
+                    ThreadBufferedEvent::HistoryEntryResponse(_) => true,
                     ThreadBufferedEvent::FarmReceipt {
                         thread_id: origin, ..
                     } => *origin == thread_id,

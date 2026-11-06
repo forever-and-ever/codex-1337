@@ -14,7 +14,6 @@ use crate::migrations::repair_legacy_recency_migration_version;
 use crate::runtime::recovery::RuntimeDbInitError;
 use crate::telemetry;
 use crate::telemetry::DbKind;
-use codex_file_system::LocalLogsDir;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use log::LevelFilter;
 use sqlx::ConnectOptions;
@@ -46,7 +45,6 @@ use validation::SqliteQuickCheckManager;
 
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
 const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
 const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
@@ -66,20 +64,12 @@ struct RuntimeDbSpec {
     kind: DbKind,
     open_phase: &'static str,
     migrate_phase: &'static str,
-    /// Opt in only after auditing writers for deferred read-to-write upgrades:
-    /// an intervening reclamation commit can make those fail with SQLITE_BUSY_SNAPSHOT.
-    background_reclamation: bool,
     recovery: RecoveryMode,
 }
 
 impl RuntimeDbSpec {
     fn path(self, sqlite: &SqliteConfig) -> PathBuf {
-        let home = if matches!(self.kind, DbKind::Logs) {
-            sqlite.logs_home()
-        } else {
-            sqlite.home()
-        };
-        home.join(self.filename)
+        sqlite.home().join(self.filename)
     }
 }
 
@@ -89,18 +79,6 @@ const STATE_DB: RuntimeDbSpec = RuntimeDbSpec {
     kind: DbKind::State,
     open_phase: "open_state",
     migrate_phase: "migrate_state",
-    background_reclamation: false,
-    recovery: RecoveryMode::BackupAndRebuild,
-};
-
-const LOGS_DB: RuntimeDbSpec = RuntimeDbSpec {
-    label: "log DB",
-    filename: LOGS_DB_FILENAME,
-    kind: DbKind::Logs,
-    open_phase: "open_logs",
-    migrate_phase: "migrate_logs",
-    // Log transactions write before reading, so they already hold the writer lock.
-    background_reclamation: true,
     recovery: RecoveryMode::BackupAndRebuild,
 };
 
@@ -110,7 +88,6 @@ const GOALS_DB: RuntimeDbSpec = RuntimeDbSpec {
     kind: DbKind::Goals,
     open_phase: "open_goals",
     migrate_phase: "migrate_goals",
-    background_reclamation: false,
     recovery: RecoveryMode::BackupAndRebuild,
 };
 
@@ -120,14 +97,12 @@ const MEMORIES_DB: RuntimeDbSpec = RuntimeDbSpec {
     kind: DbKind::Memories,
     open_phase: "open_memories",
     migrate_phase: "migrate_memories",
-    background_reclamation: false,
     recovery: RecoveryMode::BackupAndRebuild,
 };
 
 const MEMORIES_V2_DB: RuntimeDbSpec = RuntimeDbSpec {
     label: "memories v2 DB",
     filename: "memories_v2_1.sqlite",
-    background_reclamation: false,
     ..MEMORIES_DB
 };
 
@@ -137,7 +112,6 @@ const QUEUE_DB: RuntimeDbSpec = RuntimeDbSpec {
     kind: DbKind::Queue,
     open_phase: "open_queue",
     migrate_phase: "migrate_queue",
-    background_reclamation: false,
     // TELOS(authoritative-queue-integrity): Accepted mail has no rebuildable canonical copy.
     recovery: RecoveryMode::Unavailable,
 };
@@ -148,13 +122,11 @@ const THREAD_HISTORY_DB: RuntimeDbSpec = RuntimeDbSpec {
     kind: DbKind::ThreadHistory,
     open_phase: "open_thread_history",
     migrate_phase: "migrate_thread_history",
-    background_reclamation: false,
     recovery: RecoveryMode::Unavailable,
 };
 
-const RUNTIME_DBS: [RuntimeDbSpec; 7] = [
+const RUNTIME_DBS: [RuntimeDbSpec; 6] = [
     STATE_DB,
-    LOGS_DB,
     GOALS_DB,
     MEMORIES_DB,
     MEMORIES_V2_DB,
@@ -166,7 +138,6 @@ const RUNTIME_DBS: [RuntimeDbSpec; 7] = [
 pub struct RuntimeDbPath {
     pub label: &'static str,
     pub path: PathBuf,
-    pub(crate) background_reclamation: bool,
 }
 
 /// Resolved configuration shared by all Codex SQLite connections.
@@ -174,9 +145,7 @@ pub struct RuntimeDbPath {
 #[derive(Clone, Debug)]
 pub struct SqliteConfig {
     sqlite_home: AbsolutePathBuf,
-    local_logs_dir: Option<LocalLogsDir>,
     is_nfs: Arc<OnceCell<bool>>,
-    logs_is_nfs: Arc<OnceCell<bool>>,
     enforce_delete_on_nfs: bool,
     quick_check_manager: SqliteQuickCheckManager,
     queue_integrity: queue_integrity::QueueIntegrity,
@@ -188,8 +157,6 @@ impl PartialEq for SqliteConfig {
     fn eq(&self, other: &Self) -> bool {
         self.sqlite_home == other.sqlite_home
             && self.enforce_delete_on_nfs == other.enforce_delete_on_nfs
-            && self.local_logs_dir.as_ref().map(LocalLogsDir::path)
-                == other.local_logs_dir.as_ref().map(LocalLogsDir::path)
     }
 }
 
@@ -213,9 +180,7 @@ impl SqliteConfig {
     ) -> Self {
         Self {
             sqlite_home,
-            local_logs_dir: None,
             is_nfs: Arc::new(OnceCell::new()),
-            logs_is_nfs: Arc::new(OnceCell::new()),
             enforce_delete_on_nfs,
             quick_check_manager: SqliteQuickCheckManager::new(),
             queue_integrity: queue_integrity::QueueIntegrity::default(),
@@ -240,41 +205,14 @@ impl SqliteConfig {
         self.sqlite_home.as_path()
     }
 
-    /// Select the logs directory without accessing it until its database is opened.
-    pub fn with_local_logs_home(mut self, home: PathBuf) -> Self {
-        self.local_logs_dir = Some(LocalLogsDir::new(home));
-        self.logs_is_nfs = Arc::new(OnceCell::new());
-        self
-    }
-
-    pub(crate) fn logs_home(&self) -> &Path {
-        self.local_logs_dir
-            .as_ref()
-            .map_or(self.home(), LocalLogsDir::path)
-    }
-
     /// Detects if the sqlite_home directory is under the NFS mount (once per the lifetime)
     pub async fn is_nfs(&self) -> anyhow::Result<bool> {
         probe_nfs(self.home(), &self.is_nfs).await
     }
 
-    pub(crate) async fn logs_are_on_nfs(&self) -> anyhow::Result<bool> {
-        probe_nfs(self.logs_home(), &self.logs_is_nfs).await
-    }
-
     /// Return the path to the primary state database.
     pub fn state_db_path(&self) -> PathBuf {
         STATE_DB.path(self)
-    }
-
-    /// Return the path to the logs database.
-    pub fn logs_db_path(&self) -> PathBuf {
-        LOGS_DB.path(self)
-    }
-
-    pub(crate) fn legacy_logs_db_path(&self) -> Option<PathBuf> {
-        let path = self.home().join(LOGS_DB_FILENAME);
-        (path != self.logs_db_path()).then_some(path)
     }
 
     /// Return the path to the goals database.
@@ -317,20 +255,7 @@ impl SqliteConfig {
             .map(|spec| RuntimeDbPath {
                 label: spec.label,
                 path: spec.path(self),
-                background_reclamation: spec.background_reclamation,
             })
-            .collect()
-    }
-
-    pub(crate) fn reclamation_db_paths(&self) -> Vec<RuntimeDbPath> {
-        self.runtime_db_paths()
-            .into_iter()
-            .filter(|db| db.background_reclamation)
-            .chain(self.legacy_logs_db_path().map(|path| RuntimeDbPath {
-                label: "legacy log DB",
-                path,
-                background_reclamation: true,
-            }))
             .collect()
     }
 
@@ -343,15 +268,6 @@ impl SqliteConfig {
         // existing DB requires a full VACUUM. Do not attempt that during process
         // startup: it is maintenance work that can contend with foreground writers.
         self.open_runtime_db(STATE_DB, migrator, telemetry_override)
-            .await
-    }
-
-    pub(super) async fn open_logs_db(
-        &self,
-        migrator: &Migrator,
-        telemetry_override: Option<&dyn DbTelemetry>,
-    ) -> anyhow::Result<SqlitePool> {
-        self.open_runtime_db(LOGS_DB, migrator, telemetry_override)
             .await
     }
 
@@ -437,7 +353,6 @@ impl SqliteConfig {
     }
 
     /// Open a writable Codex SQLite database, creating it if necessary.
-    /// Keep this configuration alive to retain the cleanup lock for local logs.
     pub async fn open_read_write_pool(&self, path: &Path) -> anyhow::Result<SqlitePool> {
         self.open_read_write_pool_with_spec(
             path, /*recover_spec*/ None, /*telemetry_override*/ None,
@@ -451,14 +366,11 @@ impl SqliteConfig {
         recover_spec: Option<RuntimeDbSpec>,
         telemetry_override: Option<&dyn DbTelemetry>,
     ) -> anyhow::Result<SqlitePool> {
-        self.prepare_logs_directory(path).await?;
         let directory = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let is_nfs = if self.local_logs_dir.is_some() && directory == self.logs_home() {
-            self.logs_are_on_nfs().await?
-        } else if directory == self.home() {
+        let is_nfs = if directory == self.home() {
             self.is_nfs().await?
         } else {
             probe_nfs(directory, &OnceCell::new()).await?
@@ -523,13 +435,11 @@ impl SqliteConfig {
     }
 
     /// Open an existing Codex SQLite database without creating or modifying it.
-    /// Keep this configuration alive to retain the cleanup lock for local logs.
     pub async fn open_read_only_pool(
         &self,
         path: &Path,
         busy_timeout: Option<Duration>,
     ) -> Result<SqlitePool, Error> {
-        self.prepare_logs_directory(path).await.map_err(Error::Io)?;
         let mut options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(false)
@@ -542,43 +452,6 @@ impl SqliteConfig {
             .max_connections(1)
             .connect_with(options)
             .await
-    }
-
-    /// Open old logs for cleanup without creating, migrating, or rebuilding the database.
-    /// Skip legacy NFS logs when managed DELETE enforcement is active.
-    pub(crate) async fn open_legacy_logs_for_cleanup(&self) -> anyhow::Result<Option<SqlitePool>> {
-        let Some(path) = self.legacy_logs_db_path() else {
-            return Ok(None);
-        };
-        if !tokio::fs::try_exists(&path).await? {
-            return Ok(None);
-        }
-        if self.enforce_delete_on_nfs && self.is_nfs().await? {
-            return Ok(None);
-        }
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(false)
-            .busy_timeout(Duration::ZERO)
-            .log_statements(LevelFilter::Off);
-        SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map(Some)
-            .map_err(anyhow::Error::from)
-    }
-
-    async fn prepare_logs_directory(&self, path: &Path) -> std::io::Result<()> {
-        // Login, login status, and logout load configuration without opening SQLite.
-        // Create and lock the logs directory only when opening its database.
-        // An unavailable log_dir must not prevent those commands from loading configuration.
-        if let Some(directory) = &self.local_logs_dir
-            && path == self.logs_db_path()
-        {
-            directory.initialize().await?;
-        }
-        Ok(())
     }
 }
 

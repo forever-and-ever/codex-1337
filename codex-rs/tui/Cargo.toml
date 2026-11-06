@@ -39,6 +39,7 @@ codex-history = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-features = { workspace = true }
 codex-feedback = { workspace = true }
+codex-flight-recorder = { workspace = true }
 codex-file-search = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-http-client = { workspace = true }

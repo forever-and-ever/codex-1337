@@ -32,6 +32,8 @@ use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigValueWriteParams;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditParams;
 use codex_app_server_protocol::ExperimentalFeatureListParams;
+use codex_app_server_protocol::FlightRecorderReadParams;
+use codex_app_server_protocol::FlightRecorderReadResponse;
 use codex_app_server_protocol::FsCopyParams;
 use codex_app_server_protocol::FsCreateDirectoryParams;
 use codex_app_server_protocol::FsGetMetadataParams;
@@ -1575,6 +1577,15 @@ impl TestAppServer {
     ///
     /// The request builder receives a fresh ID so tests do not need to manage
     /// the JSON-RPC request ID themselves.
+    /// Reads the server's flight recorder; unserialized, so it answers while a thread is wedged.
+    pub async fn read_flight_recorder(
+        &mut self,
+        params: FlightRecorderReadParams,
+    ) -> anyhow::Result<FlightRecorderReadResponse> {
+        self.request(|request_id| ClientRequest::FlightRecorderRead { request_id, params })
+            .await
+    }
+
     pub async fn request<T: DeserializeOwned>(
         &mut self,
         make_request: impl FnOnce(RequestId) -> ClientRequest,

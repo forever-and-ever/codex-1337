@@ -174,6 +174,9 @@ enum Subcommand {
     /// Read saved account quotas from the shared server as JSON.
     Quota(codex_cli::QuotaCommand),
 
+    /// Read the shared server's in-memory flight recorder.
+    Logs(codex_cli::LogsCommand),
+
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
@@ -1601,6 +1604,14 @@ async fn cli_main(
             )?;
             codex_cli::read_account_quotas(root_config_overrides.clone(), args).await?;
         }
+        Some(Subcommand::Logs(args)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "logs",
+            )?;
+            codex_cli::read_flight_recorder(args).await?;
+        }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2192,6 +2203,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::App(_)) => Some("app"),
         Some(Subcommand::Login(_)) => Some("login"),
         Some(Subcommand::Quota(_)) => Some("quota"),
+        Some(Subcommand::Logs(_)) => Some("logs"),
         Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),

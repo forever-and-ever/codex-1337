@@ -44,7 +44,6 @@ pub(crate) use history::INITIAL_HISTORY_TURN_LIMIT;
 pub(crate) use startup_launch::StartupLaunchChoices;
 
 use crate::app_event::PermissionProfileSelection;
-use crate::bottom_pane::FeedbackAudience;
 use crate::legacy_core::config::Config;
 use crate::local_settings::LocalSettings;
 use crate::service_tier_resolution;
@@ -283,7 +282,6 @@ pub(crate) struct AppServerBootstrap {
     /// should be fired.
     pub(crate) requires_openai_auth: bool,
     pub(crate) default_model: String,
-    pub(crate) feedback_audience: FeedbackAudience,
     pub(crate) has_chatgpt_account: bool,
     pub(crate) available_models: Vec<ModelPreset>,
     pub(crate) collaboration_modes: Vec<codex_protocol::config_types::CollaborationModeMask>,
@@ -652,36 +650,20 @@ impl AppServerSession {
         self.default_model = Some(default_model.clone());
         self.available_models = available_models.clone();
 
-        let (
-            account_email,
-            auth_mode,
-            status_account_display,
-            plan_type,
-            feedback_audience,
-            has_chatgpt_account,
-        ) = match account.account {
-            Some(Account::ApiKey {}) => (
-                None,
-                Some(TelemetryAuthMode::ApiKey),
-                Some(StatusAccountDisplay::ApiKey),
-                None,
-                FeedbackAudience::External,
-                false,
-            ),
-            Some(Account::Chatgpt {
-                email,
-                plan_type,
-                workspace_name,
-            }) => {
-                let feedback_audience = if email
-                    .as_deref()
-                    .is_some_and(|email| email.ends_with("@openai.com"))
-                {
-                    FeedbackAudience::OpenAiEmployee
-                } else {
-                    FeedbackAudience::External
-                };
-                (
+        let (account_email, auth_mode, status_account_display, plan_type, has_chatgpt_account) =
+            match account.account {
+                Some(Account::ApiKey {}) => (
+                    None,
+                    Some(TelemetryAuthMode::ApiKey),
+                    Some(StatusAccountDisplay::ApiKey),
+                    None,
+                    false,
+                ),
+                Some(Account::Chatgpt {
+                    email,
+                    plan_type,
+                    workspace_name,
+                }) => (
                     email.clone(),
                     Some(TelemetryAuthMode::Chatgpt),
                     Some(StatusAccountDisplay::ChatGpt {
@@ -690,20 +672,17 @@ impl AppServerSession {
                         workspace: workspace_display(workspace_name, account.workspace_routing),
                     }),
                     Some(plan_type),
-                    feedback_audience,
                     true,
-                )
-            }
-            Some(Account::ClaudeSubscription { email }) => (
-                email.clone(),
-                None,
-                Some(StatusAccountDisplay::ClaudeSubscription { email }),
-                None,
-                FeedbackAudience::External,
-                false,
-            ),
-            None => (None, None, None, None, FeedbackAudience::External, false),
-        };
+                ),
+                Some(Account::ClaudeSubscription { email }) => (
+                    email.clone(),
+                    None,
+                    Some(StatusAccountDisplay::ClaudeSubscription { email }),
+                    None,
+                    false,
+                ),
+                None => (None, None, None, None, false),
+            };
         Ok(AppServerBootstrap {
             duration: started_at.elapsed(),
             account_email,
@@ -712,7 +691,6 @@ impl AppServerSession {
             plan_type,
             requires_openai_auth: account.requires_openai_auth,
             default_model,
-            feedback_audience,
             has_chatgpt_account,
             available_models,
             collaboration_modes,
@@ -1999,14 +1977,12 @@ mod tests {
                 bootstrap.account_email.as_deref(),
                 bootstrap.auth_mode,
                 bootstrap.plan_type,
-                bootstrap.feedback_audience,
                 bootstrap.has_chatgpt_account,
             ),
             (
                 Some("teammate@openai.com"),
                 Some(TelemetryAuthMode::Chatgpt),
                 Some(codex_protocol::account::PlanType::Plus),
-                FeedbackAudience::OpenAiEmployee,
                 true,
             )
         );

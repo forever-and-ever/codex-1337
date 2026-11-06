@@ -27,8 +27,8 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
             .sqlite;
         let runtime = StateRuntime::init(sqlite.clone(), "openai".to_string()).await?;
         runtime.close().await;
-        let logs_path = sqlite.logs_db_path();
-        let pool = sqlite.open_read_write_pool(&logs_path).await?;
+        let memories_path = sqlite.memories_db_path();
+        let pool = sqlite.open_read_write_pool(&memories_path).await?;
         // The schema and migrations remain readable; opening the database alone succeeds.
         sqlx::raw_sql(
             "CREATE TABLE sample(value INTEGER);
@@ -41,7 +41,7 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
         .await?;
         pool.close().await;
 
-        // Logs recover inside the pool opener; the unreadable goals header forces
+        // Memories recover inside the pool opener; the unreadable goals header forces
         // the outer startup fallback and a retry after that first recovery.
         tokio::fs::write(sqlite.goals_db_path(), b"damaged goals database").await?;
 
@@ -57,10 +57,10 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
         assert!(details.contains("Some database-only metadata may be unavailable"));
         let mut backups = std::fs::read_dir(sqlite.home().join("db-backups"))?
             .collect::<std::io::Result<Vec<_>>>()?;
-        let logs_home = logs_path.parent().expect("logs directory");
-        if logs_home != sqlite.home() {
+        let memories_home = memories_path.parent().expect("memories directory");
+        if memories_home != sqlite.home() {
             backups.extend(
-                std::fs::read_dir(logs_home.join("db-backups"))?
+                std::fs::read_dir(memories_home.join("db-backups"))?
                     .collect::<std::io::Result<Vec<_>>>()?,
             );
         }
@@ -68,19 +68,19 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
         for backup in &backups {
             assert!(details.contains(&backup.path().display().to_string()));
         }
-        assert!(details.contains(&sqlite.logs_db_path().display().to_string()));
+        assert!(details.contains(&sqlite.memories_db_path().display().to_string()));
         assert!(details.contains(&sqlite.goals_db_path().display().to_string()));
         let backup_dir = backups
             .iter()
             .map(std::fs::DirEntry::path)
             .find(|path| {
-                path.join(logs_path.file_name().expect("log filename"))
+                path.join(memories_path.file_name().expect("memories filename"))
                     .exists()
             })
-            .expect("preserved logs database");
+            .expect("preserved memories database");
         let backup_pool = sqlite
             .open_read_only_pool(
-                &backup_dir.join(logs_path.file_name().expect("log filename")),
+                &backup_dir.join(memories_path.file_name().expect("memories filename")),
                 /*busy_timeout*/ None,
             )
             .await?;
@@ -105,7 +105,7 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
             tokio::fs::read(sqlite.queue_db_path()).await?,
             damaged_queue
         );
-        let mut backup_roots = vec![sqlite.home(), logs_home];
+        let mut backup_roots = vec![sqlite.home(), memories_home];
         backup_roots.sort();
         backup_roots.dedup();
         let backup_count = backup_roots

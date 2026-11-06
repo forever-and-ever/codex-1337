@@ -1704,6 +1704,32 @@ class SlashTmpFileSystemSpecialPath(BaseModel):
     kind: Literal["slash_tmp"]
 
 
+class FlightRecorderLevel(Enum):
+    error = "error"
+    warn = "warn"
+    info = "info"
+    debug = "debug"
+    trace = "trace"
+
+
+class FlightRecorderRecord(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    level: FlightRecorderLevel
+    seq: Annotated[int, Field(description="Increases by push order within one process.", ge=0)]
+    target: str
+    text: Annotated[str, Field(description="Span chain, message and fields.")]
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+    unix_ms: Annotated[int, Field(alias="unixMs")]
+
+
+class FlightRecorderTierName(Enum):
+    info = "info"
+    alert = "alert"
+    chatter = "chatter"
+
+
 class ForcedChatgptWorkspaceIds(RootModel[str | list[str]]):
     root: Annotated[
         str | list[str],
@@ -10021,6 +10047,16 @@ class FileUpdateChange(BaseModel):
     diff: str
     kind: PatchChangeKind
     path: str
+
+
+class FlightRecorderTier(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    budget_bytes: Annotated[int, Field(alias="budgetBytes", ge=0)]
+    oldest_unix_ms: Annotated[int | None, Field(alias="oldestUnixMs")] = None
+    tier: FlightRecorderTierName
+    used_bytes: Annotated[int, Field(alias="usedBytes", ge=0)]
 
 
 class InputImageFunctionCallOutputContentItem(BaseModel):

@@ -1517,42 +1517,6 @@ fn reasoning_effort_for_requests_preserves_non_ultra_and_persistent_behavior() {
     );
 }
 
-#[derive(Default)]
-struct TagCollectorVisitor {
-    tags: BTreeMap<String, String>,
-}
-
-impl Visit for TagCollectorVisitor {
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.tags
-            .insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.tags
-            .insert(field.name().to_string(), format!("{value:?}"));
-    }
-}
-
-#[derive(Clone)]
-struct TagCollectorLayer {
-    tags: Arc<Mutex<BTreeMap<String, String>>>,
-}
-
-impl<S> Layer<S> for TagCollectorLayer
-where
-    S: Subscriber + for<'a> LookupSpan<'a>,
-{
-    fn on_event(&self, event: &Event<'_>, _ctx: LayerContext<'_, S>) {
-        if event.metadata().target() != "feedback_tags" {
-            return;
-        }
-        let mut visitor = TagCollectorVisitor::default();
-        event.record(&mut visitor);
-        self.tags.lock().unwrap().extend(visitor.tags);
-    }
-}
-
 fn started_inference_attempt(temp: &TempDir) -> anyhow::Result<InferenceTraceAttempt> {
     let writer = Arc::new(TraceWriter::create(
         temp.path(),
@@ -1855,44 +1819,6 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
     assert_eq!(rollout.raw_payloads.len(), 2);
 
     Ok(())
-}
-
-#[tokio::test]
-async fn response_stream_records_last_model_feedback_ids() {
-    let tags = Arc::new(Mutex::new(BTreeMap::new()));
-    let _guard = tracing_subscriber::registry()
-        .with(TagCollectorLayer { tags: tags.clone() })
-        .set_default();
-
-    let api_stream = futures::stream::iter([
-        Ok(ResponseEvent::Created { response_id: None }),
-        Ok(ResponseEvent::Completed {
-            response_id: "resp-123".to_string(),
-            token_usage: None,
-            usage_metadata: None,
-            end_turn: Some(true),
-        }),
-    ]);
-    let mut stream = super::map_response_events(
-        Some("req-123".to_string()),
-        api_stream,
-        test_session_telemetry(),
-        InferenceTraceAttempt::disabled(),
-        test_model_provider(),
-        /*last_response_tx*/ None,
-    );
-
-    while stream.next().await.is_some() {}
-
-    let tags = tags.lock().unwrap().clone();
-    assert_eq!(
-        tags.get("last_model_request_id").map(String::as_str),
-        Some("\"req-123\"")
-    );
-    assert_eq!(
-        tags.get("last_model_response_id").map(String::as_str),
-        Some("\"resp-123\"")
-    );
 }
 
 #[derive(Debug)]

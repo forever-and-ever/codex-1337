@@ -171,10 +171,6 @@ pub struct DoctorCommand {
     #[arg(long, default_value_t = false)]
     network_only: bool,
 
-    /// Limit database integrity scans when collecting a feedback attachment.
-    #[arg(long, hide = true, default_value_t = false)]
-    feedback: bool,
-
     /// Only show grouped check rows and the final count summary.
     #[arg(long, default_value_t = false)]
     summary: bool,
@@ -485,7 +481,7 @@ async fn build_report(
                         terminal_title_check(config)
                     })
                 },
-                run_async_check("state", progress.clone(), state_check(config, command)),
+                run_async_check("state", progress.clone(), state_check(config)),
                 run_async_check(
                     "thread inventory",
                     progress.clone(),
@@ -838,7 +834,7 @@ fn json_detail_value(key: &str, value: &str) -> String {
     {
         // Editor and pager configuration can contain arbitrary arguments or
         // inline environment assignments. Keep full values local to human output
-        // because the JSON report may be attached to feedback.
+        // because the JSON report is meant to be shared.
         "set".to_string()
     } else {
         value.to_string()
@@ -2095,43 +2091,29 @@ fn terminal_size_issues(inputs: &TerminalCheckInputs) -> Vec<DoctorIssue> {
     issues
 }
 
-async fn state_check(config: &Config, command: &DoctorCommand) -> DoctorCheck {
+async fn state_check(config: &Config) -> DoctorCheck {
     let mut details = Vec::new();
     path_readiness(&mut details, "CODEX_HOME", &config.codex_home);
     path_readiness(&mut details, "log dir", &config.log_dir);
     path_readiness(&mut details, "sqlite home", config.sqlite_config().home());
 
-    let mut status = CheckStatus::Ok;
     let mut failed_databases = Vec::new();
     for db in config.sqlite_config().runtime_db_paths() {
         path_readiness(&mut details, db.label, &db.path);
-        // Feedback collection gives each database its own budget; direct runs scan fully.
-        let deadline = command
-            .feedback
-            .then(|| Instant::now() + Duration::from_secs(1));
-        let db_status = sqlite_integrity_detail(
-            config.sqlite_config(),
-            &mut details,
-            db.label,
-            &db.path,
-            deadline,
-        )
-        .await;
-        if db_status == CheckStatus::Fail {
+        if !sqlite_integrity_detail(config.sqlite_config(), &mut details, db.label, &db.path).await
+        {
             failed_databases.push(db.path.display().to_string());
         }
-        status = status.max(db_status);
     }
     rollout_stats_details(&mut details, &config.codex_home);
     standalone_release_cache_details(&mut details);
 
-    let summary = match status {
-        CheckStatus::Ok => "state paths and databases are inspectable".to_string(),
-        CheckStatus::Warning => {
-            "some database integrity checks exceeded their time limit".to_string()
-        }
-        CheckStatus::Fail => "state database integrity check failed".to_string(),
+    let (status, summary) = if failed_databases.is_empty() {
+        (CheckStatus::Ok, "state paths and databases are inspectable")
+    } else {
+        (CheckStatus::Fail, "state database integrity check failed")
     };
+    let summary = summary.to_string();
     let mut check = DoctorCheck::new("state.paths", "state", status, summary).details(details);
     if status == CheckStatus::Fail {
         let noun = if failed_databases.len() == 1 {
@@ -2155,40 +2137,30 @@ async fn state_check(config: &Config, command: &DoctorCommand) -> DoctorCheck {
     check
 }
 
+/// Records the check's outcome in `details` and returns whether the database passed.
 async fn sqlite_integrity_detail(
     sqlite: &codex_state::SqliteConfig,
     details: &mut Vec<String>,
     label: &str,
     path: &Path,
-    deadline: Option<Instant>,
-) -> CheckStatus {
+) -> bool {
     if !path.is_file() {
         details.push(format!("{label} integrity: skipped (missing)"));
-        return CheckStatus::Ok;
+        return true;
     }
-
-    let (rows, timed_out) = match codex_state::sqlite_integrity_check(sqlite, path, deadline).await
-    {
-        Ok(codex_state::SqliteIntegrityCheck::Complete(rows)) => (rows, false),
-        Ok(codex_state::SqliteIntegrityCheck::TimedOut(rows)) => (rows, true),
+    match codex_state::sqlite_integrity_check(sqlite, path).await {
+        Ok(rows) if rows.iter().all(|row| row == "ok") => {
+            details.push(format!("{label} integrity: ok"));
+            true
+        }
+        Ok(rows) => {
+            details.push(format!("{label} integrity: {}", rows.join("; ")));
+            false
+        }
         Err(err) => {
             details.push(format!("{label} integrity: {err}"));
-            return CheckStatus::Fail;
+            false
         }
-    };
-    if timed_out {
-        details.push(format!(
-            "{label} integrity: incomplete (1 second time limit)"
-        ));
-    }
-    if rows.iter().any(|row| row != "ok") {
-        details.push(format!("{label} integrity: {}", rows.join("; ")));
-        CheckStatus::Fail
-    } else if timed_out {
-        CheckStatus::Warning
-    } else {
-        details.push(format!("{label} integrity: ok"));
-        CheckStatus::Ok
     }
 }
 

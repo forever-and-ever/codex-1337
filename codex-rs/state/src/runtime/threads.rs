@@ -1199,11 +1199,7 @@ ON CONFLICT(id) DO UPDATE SET
             .iter()
             .map(ThreadId::to_string)
             .collect::<Vec<_>>();
-        for (thread_id, thread_id_string) in thread_ids.iter().zip(&thread_id_strings) {
-            sqlx::query("DELETE FROM logs WHERE thread_id = ?")
-                .bind(thread_id_string)
-                .execute_with_busy_retry(self.logs_pool.as_ref())
-                .await?;
+        for thread_id in thread_ids {
             self.thread_queue
                 .delete_thread_agent_mail(*thread_id)
                 .await?;
@@ -2216,11 +2212,11 @@ mod tests {
             .await?;
         seed_thread_cleanup_state(&runtime, thread_id, child_thread_id).await?;
 
-        runtime.logs_pool.close().await;
+        runtime.thread_goals().close().await;
         runtime
             .delete_thread(thread_id)
             .await
-            .expect_err("closed log db should fail deletion");
+            .expect_err("closed goals db should fail deletion");
 
         assert!(runtime.get_thread(thread_id).await?.is_some());
         assert_eq!(
@@ -2251,10 +2247,6 @@ mod tests {
                 /*token_budget*/ None,
             )
             .await?;
-        sqlx::query("INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (1, 0, 'INFO', 'test', 'feedback log', ?)")
-            .bind(thread_id.to_string())
-            .execute(runtime.logs_pool.as_ref())
-            .await?;
         Ok(())
     }
 
@@ -2274,13 +2266,6 @@ mod tests {
             runtime.thread_goals().get_thread_goal(thread_id).await?,
             None
         );
-        let logs = runtime
-            .query_logs(&LogQuery {
-                thread_ids: vec![thread_id.to_string()],
-                ..Default::default()
-            })
-            .await?;
-        assert!(logs.is_empty());
         Ok(())
     }
 

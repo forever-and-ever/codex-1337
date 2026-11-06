@@ -11,10 +11,6 @@ autobins = false
 name = "codex"
 path = "src/bin/codex.rs"
 
-[[bin]]
-name = "logs_client"
-path = "src/bin/logs_client.rs"
-
 [[test]]
 name = "app_server_daemon_package"
 path = "tests/app_server_daemon/package.rs"

@@ -175,16 +175,16 @@ async fn quick_check_failure_is_recovered_before_runtime_init_returns() -> anyho
         .execute(&state_pool)
         .await?;
     state_pool.close().await;
-    let logs_path = sqlite.logs_db_path();
+    let memories_path = sqlite.memories_db_path();
     sqlite
-        .open_logs_db(
-            &crate::migrations::runtime_logs_migrator(),
+        .open_memories_db(
+            &crate::migrations::runtime_memories_migrator(),
             /*telemetry_override*/ None,
         )
         .await?
         .close()
         .await;
-    let fixture = logs_path.with_extension("fixture");
+    let fixture = memories_path.with_extension("fixture");
     let pool = sqlx::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(&fixture)
@@ -202,8 +202,8 @@ async fn quick_check_failure_is_recovered_before_runtime_init_returns() -> anyho
     .await?;
     pool.close().await;
     // Replacing an already-validated file must trigger a new check at the same path.
-    tokio::fs::remove_file(&logs_path).await?;
-    tokio::fs::rename(&fixture, &logs_path).await?;
+    tokio::fs::remove_file(&memories_path).await?;
+    tokio::fs::rename(&fixture, &memories_path).await?;
     let runtime = StateRuntime::init_with_telemetry_for_tests(
         sqlite.clone(),
         "openai".to_string(),
@@ -222,7 +222,7 @@ async fn quick_check_failure_is_recovered_before_runtime_init_returns() -> anyho
         *telemetry.0.lock().expect("telemetry lock"),
         vec![CorruptionEvent {
             count: 1,
-            tags: BTreeMap::from([("db".to_string(), "logs".to_string())]),
+            tags: BTreeMap::from([("db".to_string(), "memories".to_string())]),
         }]
     );
     let backups =
@@ -230,7 +230,7 @@ async fn quick_check_failure_is_recovered_before_runtime_init_returns() -> anyho
     assert_eq!(backups.len(), 1);
     let backup_path = backups[0]
         .path()
-        .join(logs_path.file_name().expect("logs filename"));
+        .join(memories_path.file_name().expect("memories filename"));
     let backup_pool = sqlite
         .open_read_only_pool(&backup_path, /*busy_timeout*/ None)
         .await?;
@@ -276,7 +276,7 @@ async fn repeated_pool_opens_share_completed_and_incomplete_attempts() -> anyhow
         .execute(&pool)
         .await?;
         pool.close().await;
-        let path = sqlite.logs_db_path();
+        let path = sqlite.memories_db_path();
         tokio::fs::rename(&fixture, &path).await?;
         let pool = sqlite
             .open_read_only_pool(&path, /*busy_timeout*/ None)
@@ -287,9 +287,9 @@ async fn repeated_pool_opens_share_completed_and_incomplete_attempts() -> anyhow
             .await?;
         pool.close().await;
 
-        let migrator = crate::migrations::runtime_logs_migrator();
+        let migrator = crate::migrations::runtime_memories_migrator();
         let pool = sqlite
-            .open_logs_db(&migrator, /*telemetry_override*/ None)
+            .open_memories_db(&migrator, /*telemetry_override*/ None)
             .await?;
         sqlx::raw_sql(
             "UPDATE sample SET value=NULL WHERE value=1;
@@ -303,8 +303,8 @@ async fn repeated_pool_opens_share_completed_and_incomplete_attempts() -> anyhow
         // Corruption introduced after the first attempt exposes any repeated scan.
         let cloned_sqlite = sqlite.clone();
         let (first, second) = tokio::join!(
-            sqlite.open_logs_db(&migrator, /*telemetry_override*/ None),
-            cloned_sqlite.open_logs_db(&migrator, /*telemetry_override*/ None),
+            sqlite.open_memories_db(&migrator, /*telemetry_override*/ None),
+            cloned_sqlite.open_memories_db(&migrator, /*telemetry_override*/ None),
         );
         let first = first?;
         let second = second?;
@@ -319,7 +319,7 @@ async fn repeated_pool_opens_share_completed_and_incomplete_attempts() -> anyhow
         // A separately constructed configuration must check and recover the file.
         let independent_sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
         let repaired = independent_sqlite
-            .open_logs_db(&migrator, /*telemetry_override*/ None)
+            .open_memories_db(&migrator, /*telemetry_override*/ None)
             .await?;
         assert_eq!(
             quick_check(&repaired, Instant::now() + Duration::from_secs(/*secs*/ 5)).await?,
@@ -340,7 +340,7 @@ async fn concurrent_first_checks_share_an_in_flight_attempt() -> anyhow::Result<
     });
     let validation = SqliteQuickCheckManager::new();
     let sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
-    let path = sqlite.logs_db_path();
+    let path = sqlite.memories_db_path();
     sqlx::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(&path)
@@ -398,7 +398,7 @@ async fn cancelled_check_counts_as_an_attempt() -> anyhow::Result<()> {
     });
     let validation = SqliteQuickCheckManager::new();
     let sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
-    let path = sqlite.logs_db_path();
+    let path = sqlite.memories_db_path();
     sqlx::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(&path)
@@ -461,7 +461,7 @@ async fn corruption_attempts_are_cached_per_owner() -> anyhow::Result<()> {
     });
     let validation = SqliteQuickCheckManager::new();
     let sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
-    let path = sqlite.logs_db_path();
+    let path = sqlite.memories_db_path();
     let pool = sqlx::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(&path)
@@ -513,7 +513,7 @@ async fn interrupted_check_leaves_connection_usable() -> anyhow::Result<()> {
         let _ = std::fs::remove_dir_all(home);
     });
     let sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
-    let path = sqlite.logs_db_path();
+    let path = sqlite.memories_db_path();
     let pool = sqlite.open_read_write_pool(&path).await?;
     sqlx::raw_sql(
         "CREATE TABLE sample(value INTEGER);
@@ -573,7 +573,7 @@ async fn locked_database_does_not_count_as_corruption() -> anyhow::Result<()> {
         let _ = std::fs::remove_dir_all(home);
     });
     let sqlite = SqliteConfig::new_for_testing(home.as_path().abs());
-    let path = sqlite.logs_db_path();
+    let path = sqlite.memories_db_path();
     let writer_pool = sqlite.open_read_write_pool(&path).await?;
     let mut writer = writer_pool.acquire().await?;
     sqlx::query("PRAGMA journal_mode=DELETE")

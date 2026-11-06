@@ -29,7 +29,6 @@ use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
 use crate::request_processors::ConfigRequestProcessor;
 use crate::request_processors::EnvironmentRequestProcessor;
-use crate::request_processors::FeedbackRequestProcessor;
 use crate::request_processors::FsRequestProcessor;
 use crate::request_processors::GitRequestProcessor;
 use crate::request_processors::InitializeRequestProcessor;
@@ -49,6 +48,7 @@ use crate::request_processors::ThreadRequestProcessor;
 use crate::request_processors::ThreadResumeTarget;
 use crate::request_processors::TurnRequestProcessor;
 use crate::request_processors::WindowsSandboxRequestProcessor;
+use crate::request_processors::read_flight_recorder;
 use crate::request_processors::read_server_diagnostics;
 use crate::request_serialization::QueuedInitializedRequest;
 use crate::request_serialization::RequestSerializationQueueKey;
@@ -83,7 +83,6 @@ use codex_core::config::ThreadStoreConfig;
 use codex_exec_server::EnvironmentManager;
 use codex_extension_api::TurnStartAdmission;
 use codex_features::Feature;
-use codex_feedback::CodexFeedback;
 use codex_goal_extension::GoalService;
 use codex_home::CodexHomeUserInstructionsProvider;
 use codex_login::AuthManager;
@@ -161,7 +160,6 @@ pub(crate) struct MessageProcessor {
     process_exec_processor: ProcessExecRequestProcessor,
     config_processor: ConfigRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
-    feedback_processor: FeedbackRequestProcessor,
     fs_processor: FsRequestProcessor,
     git_processor: GitRequestProcessor,
     initialize_processor: InitializeRequestProcessor,
@@ -265,7 +263,6 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) startup_cwd: Option<std::path::PathBuf>,
     pub(crate) config_manager: ConfigManager,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
-    pub(crate) feedback: CodexFeedback,
     pub(crate) log_db: Option<LogDbLayer>,
     pub(crate) state_db: Option<StateDbHandle>,
     pub(crate) alarm_owner: Option<codex_install_context::Channel>,
@@ -295,7 +292,6 @@ impl MessageProcessor {
             startup_cwd,
             config_manager,
             environment_manager,
-            feedback,
             log_db,
             state_db,
             alarm_owner,
@@ -490,14 +486,6 @@ impl MessageProcessor {
             outgoing.clone(),
             Arc::clone(&environment_manager_for_requests),
         );
-        let feedback_processor = FeedbackRequestProcessor::new(
-            auth_manager.clone(),
-            Arc::clone(&thread_manager),
-            Arc::clone(&config),
-            feedback,
-            log_db.clone(),
-            state_db.clone(),
-        );
         let git_processor = GitRequestProcessor::new();
         let marketplace_processor =
             MarketplaceRequestProcessor::new(config_manager.clone(), Arc::clone(&thread_manager));
@@ -653,7 +641,6 @@ impl MessageProcessor {
             process_exec_processor,
             config_processor,
             environment_processor,
-            feedback_processor,
             fs_processor,
             git_processor,
             initialize_processor,
@@ -1222,6 +1209,9 @@ impl MessageProcessor {
                 .await;
             }
             ClientRequest::ServerDiagnostics { .. } => Ok(Some(read_server_diagnostics().into())),
+            ClientRequest::FlightRecorderRead { params, .. } => {
+                read_flight_recorder(params).map(|response| Some(response.into()))
+            }
             ClientRequest::ConfigRead { params, .. } => self
                 .config_processor
                 .read(params)
@@ -2121,11 +2111,8 @@ impl MessageProcessor {
                     .process_resize_pty(request_id.clone(), params)
                     .await
             }
-            ClientRequest::FeedbackUpload { params, .. } => {
-                self.feedback_processor.feedback_upload(params).await
-            }
-            ClientRequest::FeedbackSave { params, .. } => {
-                self.feedback_processor.feedback_save(params).await
+            ClientRequest::FeedbackUpload { .. } | ClientRequest::FeedbackSave { .. } => {
+                Err(invalid_request("Feedback is unsupported"))
             }
         };
 

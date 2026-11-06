@@ -95,7 +95,6 @@ impl AgentStatusThreadPreview {
                 }
                 ThreadBufferedEvent::Request(_)
                 | ThreadBufferedEvent::HistoryEntryResponse(_)
-                | ThreadBufferedEvent::FeedbackSubmission(_)
                 | ThreadBufferedEvent::FarmReceipt { .. } => continue,
             };
             if !seen_item_ids.insert(item.id().to_string()) {

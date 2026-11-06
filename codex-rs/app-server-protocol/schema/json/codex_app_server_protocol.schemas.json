@@ -14166,6 +14166,108 @@
         ],
         "type": "object"
       },
+      "FlightRecorderLevel": {
+        "enum": [
+          "error",
+          "warn",
+          "info",
+          "debug",
+          "trace"
+        ],
+        "type": "string"
+      },
+      "FlightRecorderRecord": {
+        "properties": {
+          "level": {
+            "$ref": "#/definitions/v2/FlightRecorderLevel"
+          },
+          "seq": {
+            "description": "Increases by push order within one process.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "target": {
+            "type": "string"
+          },
+          "text": {
+            "description": "Span chain, message and fields.",
+            "type": "string"
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unixMs": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "seq",
+          "target",
+          "text",
+          "unixMs"
+        ],
+        "type": "object"
+      },
+      "FlightRecorderTier": {
+        "properties": {
+          "budgetBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "oldestUnixMs": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tier": {
+            "$ref": "#/definitions/v2/FlightRecorderTierName"
+          },
+          "usedBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "budgetBytes",
+          "tier",
+          "usedBytes"
+        ],
+        "type": "object"
+      },
+      "FlightRecorderTierName": {
+        "oneOf": [
+          {
+            "enum": [
+              "info"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "WARN and ERROR.",
+            "enum": [
+              "alert"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "DEBUG and TRACE.",
+            "enum": [
+              "chatter"
+            ],
+            "type": "string"
+          }
+        ]
+      },
       "ForcedChatgptWorkspaceIds": {
         "anyOf": [
           {

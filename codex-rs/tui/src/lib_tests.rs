@@ -251,8 +251,6 @@ pub(crate) async fn start_test_embedded_app_server(
         LoaderOverrides::default(),
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
-        codex_feedback::CodexFeedback::new(),
-        /*log_db*/ None,
         state_db,
         Arc::new(EnvironmentManager::default_for_tests()),
         Default::default(),
@@ -1391,8 +1389,6 @@ async fn embedded_app_server_start_failure_is_returned() -> color_eyre::Result<(
         LoaderOverrides::default(),
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
-        codex_feedback::CodexFeedback::new(),
-        /*log_db*/ None,
         /*state_db*/ None,
         Arc::new(EnvironmentManager::default_for_tests()),
         Default::default(),
@@ -1451,8 +1447,8 @@ async fn embedded_state_db_corruption_preserves_failed_database_for_cli_recovery
     let sqlite_home = temp_dir.path().join("sqlite-home");
     std::fs::create_dir_all(&sqlite_home)?;
     let sqlite = codex_state::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
-    let logs_db_path = sqlite.logs_db_path();
-    std::fs::write(&logs_db_path, "not a sqlite database")?;
+    let queue_db_path = sqlite.queue_db_path();
+    std::fs::write(&queue_db_path, "not a sqlite database")?;
     config.sqlite = sqlite;
 
     let err = match init_state_db_for_app_server_target(&config, &AppServerTarget::Embedded).await {
@@ -1464,7 +1460,7 @@ async fn embedded_state_db_corruption_preserves_failed_database_for_cli_recovery
         .and_then(|err| err.downcast_ref::<LocalStateDbStartupError>())
         .expect("state db startup failure should retain its typed context");
 
-    assert_eq!(startup_error.database_path(), logs_db_path.as_path());
+    assert_eq!(startup_error.database_path(), queue_db_path.as_path());
     assert!(
         startup_error.is_corruption(),
         "startup error should preserve the SQLite corruption cause, got: {}",

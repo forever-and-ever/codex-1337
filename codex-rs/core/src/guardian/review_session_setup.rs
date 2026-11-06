@@ -265,11 +265,6 @@ impl ReviewerRequest for PreparedReview {
         if recovery_requested {
             result.disposition = SessionDisposition::Discard;
         }
-        if self.context.reviewer_selection == ReviewerSelection::FreshParentCheckpoint
-            || !recovery_requested
-        {
-            record_failed_review(&session.session, &self.params, &result.outcome).await;
-        }
         let checkpoint = if result.disposition == SessionDisposition::Reusable
             && matches!(result.outcome, GuardianReviewSessionOutcome::Completed(_))
             && !matches!(kind, GuardianReviewSessionKind::EphemeralForked)

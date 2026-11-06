@@ -102,9 +102,9 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let sqlite = codex_state::SqliteConfig::new_for_testing(temp_dir.path().abs());
         let state_path = sqlite.state_db_path();
-        let failed_db_path = sqlite.logs_db_path();
+        let failed_db_path = sqlite.goals_db_path();
         tokio::fs::write(state_path.as_path(), b"state").await?;
-        tokio::fs::write(failed_db_path.as_path(), b"logs").await?;
+        tokio::fs::write(failed_db_path.as_path(), b"goals").await?;
 
         let startup_error =
             LocalStateDbStartupError::new(failed_db_path.clone(), anyhow::anyhow!("corrupt"));

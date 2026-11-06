@@ -23,6 +23,7 @@ use axum::routing::post;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::FlightRecorderReadParams;
 use codex_app_server_protocol::ImageReference;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemGuardianApprovalReviewStartedNotification;
@@ -262,6 +263,15 @@ enum ThreadLifecycle {
 }
 
 impl ThreadLifecycle {
+    /// The root user's message after the worker's first check.
+    fn root_followup(self) -> &'static str {
+        if matches!(self, Self::RootRestriction | Self::RootUserRestriction) {
+            ROOT_RESTRICTION
+        } else {
+            "Ask the worker to check the tool again."
+        }
+    }
+
     fn uses_root_worker(self) -> bool {
         matches!(
             self,
@@ -813,6 +823,11 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         mcp_server_name: Some(server_name),
         mcp_tool_sequence: review_continuations.then_some(&[TEST_TOOL_NAME; 3]),
         root_worker: lifecycle.uses_root_worker(),
+        // The worker's completion mail can still be in flight when the follow-up arrives.
+        root_user_followup: (lifecycle.uses_root_worker()
+            && !lifecycle.has_root_user_input()
+            && !late_root_restriction)
+            .then(|| lifecycle.root_followup()),
         root_user_restriction: matches!(lifecycle, ThreadLifecycle::RootUserRestriction),
         root_user_input_restriction: lifecycle.has_root_user_input(),
         compact_root_after_answer: matches!(lifecycle, ThreadLifecycle::RootUserInputCompaction),
@@ -1753,21 +1768,28 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         && !matches!(risk, GuardianRisk::InvalidResponse)
         && !late_root_restriction
     {
-        let state_db = StateRuntime::init(
-            load_default_config_for_test(&codex_home).await.sqlite,
-            "mock_provider".to_owned(),
-        )
-        .await?;
-        // Exercise the same log export used by feedback/upload, including async
-        // classifier events that cannot rely on inheriting a thread tracing span.
+        // Async classification runs outside the reviewed thread's tracing span. Its result must
+        // still be attributed to that thread: a per-thread flight-recorder query is how a wedged
+        // or misbehaving thread is diagnosed. The target keeps each poll's response small; the
+        // harness echoes every message it reads.
         let logs = timeout(TIMEOUT, async {
             loop {
-                let logs = String::from_utf8(
-                    state_db
-                        .query_feedback_logs_for_threads(&[&reviewed_thread_id])
-                        .await?,
-                )?;
-                if logs.contains("Guardian V2 classification result") {
+                let response = app_server
+                    .read_flight_recorder(FlightRecorderReadParams {
+                        thread_id: Some(reviewed_thread_id.clone()),
+                        target_prefix: Some("codex_guardian_v2::async_scorer".to_owned()),
+                        ..Default::default()
+                    })
+                    .await?;
+                let logs = response
+                    .records
+                    .into_iter()
+                    .map(|record| record.text)
+                    .collect::<Vec<_>>();
+                if logs
+                    .iter()
+                    .any(|line| line.contains("Guardian V2 classification result"))
+                {
                     return anyhow::Ok(logs);
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1783,9 +1805,9 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             "accepted=true".into(),
         ];
         assert!(
-            logs.lines()
+            logs.iter()
                 .any(|line| expected.iter().all(|field| line.contains(field))),
-            "missing feedback log with fields: {expected:?}"
+            "missing recorder record with fields: {expected:?}"
         );
     }
 
@@ -1896,14 +1918,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 .send_turn_start_request(TurnStartParams {
                     thread_id,
                     input: vec![UserInput::Text {
-                        text: if matches!(
-                            lifecycle,
-                            ThreadLifecycle::RootRestriction | ThreadLifecycle::RootUserRestriction
-                        ) {
-                            ROOT_RESTRICTION.to_owned()
-                        } else {
-                            "Ask the worker to check the tool again.".to_owned()
-                        },
+                        text: lifecycle.root_followup().to_owned(),
                         text_elements: Vec::new(),
                     }],
                     ..Default::default()

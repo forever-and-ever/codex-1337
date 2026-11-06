@@ -70,10 +70,10 @@ use codex_core::config::find_codex_home;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimeOptions;
 use codex_features::Feature;
-use codex_feedback::CodexFeedback;
+use codex_flight_recorder::Budgets;
+use codex_flight_recorder::FlightRecorder;
 use codex_protocol::protocol::SessionSource;
 use codex_rollout::state_db as rollout_state_db;
-use codex_state::log_db;
 use codex_websocket_auth::WebsocketAuthSettings;
 use codex_websocket_auth::policy_from_settings;
 use tokio::sync::mpsc;
@@ -135,7 +135,6 @@ mod image_url;
 pub mod in_process;
 mod jira_store;
 mod local_exec;
-mod log_write_warning;
 #[cfg(unix)]
 mod managed_daemon;
 mod mcp_refresh;
@@ -623,7 +622,7 @@ pub async fn run_main_with_transport_options(
         outgoing_tx,
         analytics_events_client.clone(),
     ));
-    let feedback = CodexFeedback::new();
+    let recorder = FlightRecorder::install(Budgets::SERVER);
 
     // Install a simple subscriber so `tracing` output is visible. Users can
     // control the log level with `RUST_LOG` and switch to JSON logs with
@@ -645,25 +644,25 @@ pub async fn run_main_with_transport_options(
             .boxed(),
     };
 
-    let log_write_warning = log_write_warning::LogWriteWarningReporter::new(
-        feedback.clone(),
-        &outgoing_message_sender,
-        &config,
-    );
-    let feedback_layer = feedback.logger_layer();
-    let feedback_metadata_layer = feedback.metadata_layer();
-    let log_db = state_db
-        .clone()
-        .map(|state_db| log_db::start(state_db, log_write_warning.clone()));
-    let log_db_layer = log_db
-        .clone()
-        .map(|layer| layer.with_filter(log_db::default_filter()));
+    // Diagnostics stay in memory; they reach disk only on SIGUSR1 or a panic.
     let _ = tracing_subscriber::registry()
         .with(stderr_fmt)
-        .with(feedback_layer)
-        .with(feedback_metadata_layer)
-        .with(log_db_layer)
+        .with(recorder.layer())
         .try_init();
+    let recorder_dumps = codex_flight_recorder::dump_dir(config.codex_home.as_path());
+    codex_flight_recorder::install_panic_hook(
+        recorder,
+        recorder_dumps.clone(),
+        codex_flight_recorder::Process::AppServer,
+    );
+    #[cfg(unix)]
+    if let Err(err) = codex_flight_recorder::spawn_signal_dump(
+        recorder,
+        recorder_dumps,
+        codex_flight_recorder::Process::AppServer,
+    ) {
+        warn!(%err, "failed to install the flight recorder's SIGUSR1 dump");
+    }
     #[cfg(unix)]
     if let Some(Err(err)) = nofile_limit_result {
         warn!(%err, "failed to raise managed app-server file descriptor limit");
@@ -897,8 +896,7 @@ pub async fn run_main_with_transport_options(
             startup_cwd,
             config_manager,
             environment_manager,
-            feedback: feedback.clone(),
-            log_db,
+            log_db: None,
             state_db: state_db.clone(),
             alarm_owner: managed_daemon.then(codex_install_context::Channel::current),
             config_warnings,

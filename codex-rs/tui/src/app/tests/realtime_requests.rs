@@ -2106,8 +2106,6 @@ async fn overridden_voice_save_keeps_effective_voice() -> Result<()> {
             codex_config::LoaderOverrides::without_managed_config_for_tests(),
             /*strict_config*/ false,
             codex_config::CloudConfigBundleLoader::default(),
-            codex_feedback::CodexFeedback::new(),
-            /*log_db*/ None,
             /*state_db*/ None,
             Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
             Default::default(),

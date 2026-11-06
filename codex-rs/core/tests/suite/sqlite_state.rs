@@ -33,7 +33,6 @@ use codex_web_search_extension::install as install_web_search_extension;
 use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_completed;
-use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::ev_web_search_call_done;
 use core_test_support::responses::mount_sse_once;
@@ -53,7 +52,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
@@ -973,90 +971,4 @@ async fn mcp_call_marks_thread_memory_mode_polluted_when_configured() -> Result<
 
     assert_eq!(memory_mode.as_deref(), Some("polluted"));
     Ok(())
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_call_logs_include_thread_id() -> Result<()> {
-    let server = start_mock_server().await;
-    mock_server::run(&[&server], async {
-        let call_id = "call-1";
-        let args = json!({
-            "cmd": "echo hello",
-            "yield_time_ms": 1_000,
-            "login": false,
-        });
-        let args_json = serde_json::to_string(&args)?;
-        mount_sse_sequence(
-            &server,
-            vec![
-                responses::sse(vec![
-                    ev_response_created("resp-1"),
-                    ev_function_call(call_id, "exec_command", &args_json),
-                    ev_completed("resp-1"),
-                ]),
-                responses::sse(vec![ev_completed("resp-2")]),
-            ],
-        )
-        .await;
-
-        let mut builder = test_codex().with_config(|config| {
-            config
-                .features
-                .enable(Feature::Sqlite)
-                .expect("test config should allow feature update");
-        });
-        let test = builder.build(&server).await?;
-        let db = test.codex.state_db().expect("state db enabled");
-        let expected_thread_id = test.session_configured.thread_id.to_string();
-
-        test.submit_turn("run a shell command").await?;
-
-        let log_db_layer =
-            codex_state::log_db::start(db.clone(), Arc::new(codex_feedback::CodexFeedback::new()));
-        let subscriber = tracing_subscriber::registry().with(log_db_layer.clone());
-        let dispatch = tracing::Dispatch::new(subscriber);
-        tracing::dispatcher::with_default(&dispatch, || {
-            let span = tracing::info_span!("test_log_span", thread_id = %expected_thread_id);
-            let _entered = span.enter();
-            tracing::info!("ToolCall: exec_command {{\"cmd\":\"echo hello\"}}");
-        });
-        log_db_layer.flush().await;
-
-        let logs_path = test.config.sqlite_config().logs_db_path();
-        assert_eq!(db.sqlite().logs_db_path(), logs_path);
-        assert!(logs_path.is_file());
-
-        let mut found = None;
-        for _ in 0..80 {
-            let query = codex_state::LogQuery {
-                descending: true,
-                limit: Some(20),
-                ..Default::default()
-            };
-            let rows = db.query_logs(&query).await?;
-            if let Some(row) = rows.into_iter().find(|row| {
-                row.message
-                    .as_deref()
-                    .is_some_and(|m| m.contains("ToolCall:"))
-            }) {
-                let thread_id = row.thread_id;
-                let message = row.message;
-                found = Some((thread_id, message));
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-
-        let (thread_id, message) = found.expect("expected ToolCall log row");
-        assert_eq!(thread_id, Some(expected_thread_id));
-        assert!(
-            message
-                .as_deref()
-                .is_some_and(|text| text.contains("ToolCall:")),
-            "expected ToolCall message, got {message:?}"
-        );
-
-        Ok(())
-    })
-    .await
 }

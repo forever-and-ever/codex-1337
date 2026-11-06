@@ -1669,25 +1669,6 @@ pub(crate) enum AppEvent {
         crate::bottom_pane::user_verification::UserVerificationRequest,
     ),
 
-    /// Open the feedback note entry overlay after the user selects a category.
-    OpenFeedbackNote {
-        category: FeedbackCategory,
-        include_logs: bool,
-    },
-
-    /// Open the upload consent popup for feedback after selecting a category.
-    OpenFeedbackConsent {
-        category: FeedbackCategory,
-    },
-
-    /// Submit feedback for the current thread via the app-server feedback RPC.
-    SubmitFeedback {
-        category: FeedbackCategory,
-        reason: Option<String>,
-        turn_id: Option<String>,
-        include_logs: bool,
-    },
-
     /// Launch the external editor after a normal draw has completed.
     LaunchExternalEditor,
 
@@ -1870,13 +1851,4 @@ pub(crate) enum RunningTaskExitAction {
     CancelTask,
     RunInBackground,
     Exit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FeedbackCategory {
-    BadResult,
-    GoodResult,
-    Bug,
-    SafetyCheck,
-    Other,
 }

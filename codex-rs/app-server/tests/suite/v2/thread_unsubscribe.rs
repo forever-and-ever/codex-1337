@@ -770,6 +770,18 @@ enabled_tools = []
         .await?;
     let parent = mcp.start_thread(ThreadStartParams::default()).await?.thread;
     let mut child_id = None;
+    // Each child completion wakes the parent with mail, and the next prompt may steer that mail
+    // turn. Sampled before the next round's mocks exist, the mail turn must still complete
+    // rather than fail and drop the steered prompt.
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path_regex(".*/responses$"))
+        .and(wiremock::matchers::header("thread-id", parent.id.clone()))
+        .respond_with(responses::sse_response(responses::sse(vec![
+            responses::ev_completed("parent-mail"),
+        ])))
+        .with_priority(u8::MAX)
+        .mount(&server)
+        .await;
 
     for (tool, args) in [
         (

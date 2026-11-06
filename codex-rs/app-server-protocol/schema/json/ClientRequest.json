@@ -1450,6 +1450,16 @@
       ],
       "type": "object"
     },
+    "FlightRecorderLevel": {
+      "enum": [
+        "error",
+        "warn",
+        "info",
+        "debug",
+        "trace"
+      ],
+      "type": "string"
+    },
     "FsCopyParams": {
       "description": "Copy a file or directory tree on the host filesystem.",
       "properties": {

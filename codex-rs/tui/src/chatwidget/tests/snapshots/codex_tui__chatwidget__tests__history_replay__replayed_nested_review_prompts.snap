@@ -1,6 +1,5 @@
 ---
 source: tui/src/chatwidget/tests/history_replay.rs
-assertion_line: 480
 expression: rendered
 ---
 >> Code review started: current changes <<
@@ -11,7 +10,7 @@ expression: rendered
 
 › current changes
 
-■ Conversation interrupted - use /feedback if something went wrong
+■ Conversation interrupted
 
 >> Code review started: current changes <<
 

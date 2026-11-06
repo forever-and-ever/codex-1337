@@ -45,10 +45,9 @@ fn assistant_output_text(text: &str) -> ResponseItem {
 
 #[test]
 fn post_sampling_token_estimate_is_disabled_by_always_on_sinks() {
-    let feedback = codex_feedback::CodexFeedback::new();
-    let subscriber = tracing_subscriber::registry()
-        .with(feedback.logger_layer())
-        .with(tracing_subscriber::fmt::layer().with_filter(codex_state::log_db::default_filter()));
+    let recorder =
+        codex_flight_recorder::FlightRecorder::new(codex_flight_recorder::Budgets::CLIENT);
+    let subscriber = tracing_subscriber::registry().with(recorder.layer());
 
     static METADATA: tracing::Metadata<'static> = tracing::metadata! {
         name: "post sampling token estimate filter probe",
