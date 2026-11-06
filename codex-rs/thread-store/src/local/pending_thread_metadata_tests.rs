@@ -47,7 +47,7 @@ async fn naming_empty_paginated_thread_materializes_rollout() {
         .await
         .expect("name empty thread");
 
-    assert!(rollout_path.exists());
+    assert!(codex_rollout::test_support::rollout_file(&rollout_path).exists());
     assert_eq!(named.name.as_deref(), Some("Scheduled task"));
     assert_eq!(named.history_mode, ThreadHistoryMode::Paginated);
     assert_eq!(

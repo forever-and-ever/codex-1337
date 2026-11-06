@@ -8,6 +8,8 @@ use serde_json::Value;
 
 pub(crate) mod compression;
 pub(crate) mod config;
+mod conversion;
+mod framed;
 pub(crate) mod list;
 mod maintenance;
 pub(crate) mod metadata;
@@ -19,11 +21,13 @@ pub(crate) mod recorder;
 mod reverse_jsonl_scanner;
 mod rollout_file_name;
 mod rollout_reference_index;
+mod rollout_sink;
 pub(crate) mod search;
 mod seekable_reader;
 pub(crate) mod session_index;
 mod sqlite_metrics;
 pub mod state_db;
+pub mod test_support;
 mod writer_lock;
 
 pub use codex_history::CompactedItem;
@@ -95,25 +99,45 @@ pub static INTERACTIVE_SESSION_SOURCES: LazyLock<Vec<SessionSource>> = LazyLock:
 });
 
 pub use codex_protocol::protocol::SessionMeta;
-pub use compression::RolloutCompressionTrigger;
 pub use compression::RolloutLineReader;
 pub use compression::existing_rollout_path;
+pub use compression::existing_rollout_with_metadata_sync;
 pub use compression::open_rollout_line_reader;
 pub use compression::plain_rollout_path;
-pub use compression::spawn_rollout_compression_worker;
 pub use seekable_reader::open_rollout_seekable_reader;
 pub use seekable_reader::read_rollout_prefix;
+pub use seekable_reader::read_rollout_text;
+pub use seekable_reader::rollout_logical_len;
+
+/// Writes every line of `input` into the empty, readable and writable `output` as a framed
+/// rollout with every frame closed. Returns the decoded length.
+pub fn encode_framed_rollout(
+    input: impl std::io::BufRead,
+    output: std::fs::File,
+) -> std::io::Result<u64> {
+    framed::reencode(input, output)
+}
 pub use seekable_reader::rollout_contains_prefix;
 
-/// Materializes a compressed rollout as plain JSONL before another rollout references it.
+/// TELOS(framed-rollouts): every representation is read by logical offset, so a reference no
+/// longer rewrites its source; this returns the representation on disk.
 pub async fn materialize_rollout_for_reference(
     path: &std::path::Path,
 ) -> std::io::Result<std::path::PathBuf> {
-    compression::materialize_rollout_for_append(path, /*writer_lock*/ None).await
+    Ok(existing_rollout_path(path)
+        .await
+        .unwrap_or_else(|| path.to_path_buf()))
 }
 pub use config::Config;
 pub use config::RolloutConfig;
 pub use config::RolloutConfigView;
+pub use conversion::ConversionTally;
+pub use conversion::RolloutCensus;
+pub use conversion::RolloutEncoding;
+pub use conversion::convert_rollouts;
+pub use conversion::local_rollouts;
+pub use conversion::spawn_rollout_census;
+pub use conversion::spawn_rollout_conversion;
 pub use list::Cursor;
 pub use list::SortDirection;
 pub use list::ThreadItem;

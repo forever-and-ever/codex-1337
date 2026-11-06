@@ -541,9 +541,6 @@ pub fn thread_store_from_config(
 ) -> Arc<dyn ThreadStore> {
     match &config.experimental_thread_store {
         ThreadStoreConfig::Local => {
-            let compression_enabled = config
-                .features
-                .enabled(Feature::LocalThreadStoreCompression);
             let background_migration_enabled = config
                 .features
                 .enabled(Feature::BackgroundPaginatedRolloutMigration);
@@ -573,23 +570,11 @@ pub fn thread_store_from_config(
             );
             if has_state_db && background_migration_enabled {
                 let startup_store = Arc::clone(&store);
-                let codex_home = config.codex_home.to_path_buf();
                 tokio::spawn(async move {
                     if let Err(err) = startup_store.migrate_rollouts_on_startup().await {
                         warn!("failed to migrate legacy rollouts on startup: {err}");
                     }
-                    if compression_enabled {
-                        codex_rollout::spawn_rollout_compression_worker(
-                            codex_home,
-                            codex_rollout::RolloutCompressionTrigger::Startup,
-                        );
-                    }
                 });
-            } else if compression_enabled {
-                codex_rollout::spawn_rollout_compression_worker(
-                    config.codex_home.to_path_buf(),
-                    codex_rollout::RolloutCompressionTrigger::Startup,
-                );
             }
             store
         }

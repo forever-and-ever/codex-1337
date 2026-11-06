@@ -252,16 +252,21 @@ fn write_session_end_hook(home: &Path) -> Result<()> {
     let script = format!(
         r#"import json
 from pathlib import Path
+import shutil
 import sys
 
 payload = json.load(sys.stdin)
 transcript = Path(payload["transcript_path"])
 payload["transcript_exists"] = transcript.exists()
-payload["transcript_text"] = transcript.read_text(encoding="utf-8") if transcript.exists() else ""
+if transcript.exists():
+    copy = Path(r"{home}") / ("session_end_transcript" + "".join(transcript.suffixes))
+    shutil.copyfile(transcript, copy)
+    payload["transcript_copy"] = str(copy)
 with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(payload) + "\n")
 print(json.dumps({{"continue": False, "decision": "block", "reason": "ignored"}}))
 "#,
+        home = home.display(),
         log_path = log_path.display(),
     );
     let hooks = serde_json::json!({
@@ -1430,7 +1435,7 @@ async fn stop_hook_can_block_multiple_times_in_same_turn() -> Result<()> {
         );
 
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        let rollout_text = fs::read_to_string(&rollout_path)?;
+        let rollout_text = codex_rollout::read_rollout_text(&rollout_path)?;
         let hook_prompt_texts = rollout_hook_prompt_texts(&rollout_text)?;
         assert!(
             hook_prompt_texts.contains(&FIRST_CONTINUATION_PROMPT.to_string()),
@@ -1546,9 +1551,11 @@ async fn session_end_flushes_transcript_and_ignores_control_output() -> Result<(
     assert_eq!(inputs[0]["hook_event_name"], "SessionEnd");
     assert_eq!(inputs[0]["reason"], "other");
     assert_eq!(inputs[0]["transcript_exists"], true);
-    let transcript = inputs[0]["transcript_text"]
-        .as_str()
-        .expect("session end transcript text");
+    let transcript = codex_rollout::read_rollout_text(
+        inputs[0]["transcript_copy"]
+            .as_str()
+            .expect("session end transcript copy"),
+    )?;
     assert!(transcript.contains("persist this before shutdown"));
     assert!(transcript.contains("persisted answer"));
     Ok(())
@@ -2785,7 +2792,7 @@ async fn multiple_blocking_stop_hooks_persist_multiple_hook_prompt_fragments() -
         );
 
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        let rollout_text = fs::read_to_string(&rollout_path)?;
+        let rollout_text = codex_rollout::read_rollout_text(&rollout_path)?;
         assert_eq!(
             rollout_hook_prompt_texts(&rollout_text)?,
             vec![
@@ -2838,7 +2845,8 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
     .await;
     test.submit_turn("second prompt").await?;
 
-    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    let rollout =
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))?;
     assert!(!rollout.contains("blocked first prompt"));
     assert!(rollout.contains("second prompt"));
 
@@ -2986,7 +2994,8 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
 
     assert_eq!(requests.len(), 2);
 
-    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    let rollout =
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))?;
     assert!(!rollout.contains("blocked queued prompt"));
     assert!(rollout.contains("accepted queued prompt"));
 

@@ -221,7 +221,7 @@ async fn new_thread_is_recorded_in_state_db() -> Result<()> {
 
     let db = test.codex.state_db().expect("state db enabled");
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "fresh thread rollout should not be materialized before first user message"
     );
 
@@ -246,7 +246,7 @@ async fn new_thread_is_recorded_in_state_db() -> Result<()> {
     assert_eq!(metadata.id, thread_id);
     assert_eq!(metadata.rollout_path, rollout_path.to_path_buf());
     assert!(
-        rollout_path.exists(),
+        codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "rollout should be materialized after first user message"
     );
 
@@ -483,7 +483,7 @@ async fn resume_restores_legacy_dynamic_tools_from_rollout_with_sqlite_enabled()
     })
     .await;
 
-    let mut rollout_lines = fs::read_to_string(&rollout_path)?
+    let mut rollout_lines = codex_rollout::read_rollout_text(&rollout_path)?
         .lines()
         .map(serde_json::from_str::<serde_json::Value>)
         .collect::<serde_json::Result<Vec<_>>>()?;

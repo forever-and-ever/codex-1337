@@ -194,7 +194,7 @@ async fn model_switch_program_pair(
                 let rollout_path = initial.codex.rollout_path().expect("rollout");
                 if matches!(history, History::Rollback | History::IncompleteRollback) {
                     // Live rollback is unsupported; replay its persisted marker, as older rollouts do.
-                    let text = fs::read_to_string(&rollout_path)?;
+                    let text = codex_rollout::read_rollout_text(&rollout_path)?;
                     let mut lines = text
                         .lines()
                         .map(serde_json::from_str::<Value>)
@@ -353,7 +353,7 @@ async fn model_switch_program_pair(
         }
 
         // Even when the previous model summarizes, the replacement belongs to the current model.
-        let rollout = fs::read_to_string(thread.rollout_path().expect("rollout"))?
+        let rollout = codex_rollout::read_rollout_text(thread.rollout_path().expect("rollout"))?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<Result<Vec<_>, _>>()?;

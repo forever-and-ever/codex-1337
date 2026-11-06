@@ -1440,7 +1440,7 @@ async fn thread_resume_preserves_goal_first_and_fork_approvals_reviewer() -> Res
             .await??;
         }
 
-        let persisted_rollout = std::fs::read_to_string(rollout_path)?;
+        let persisted_rollout = codex_rollout::read_rollout_text(rollout_path)?;
         assert_eq!(
             persisted_rollout
                 .matches(r#""type":"thread_settings_applied""#)

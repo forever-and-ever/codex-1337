@@ -224,21 +224,16 @@ pub(super) async fn shutdown_thread(
         }
     }
     sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
+    // The logical `.jsonl` name may be backed by its framed `.jsonl.zst` file.
+    let rollout_file = codex_rollout::existing_rollout_path(&rollout_path).await;
     if let Some(metrics) = codex_otel::global()
-        && let Ok(metadata) = tokio::fs::metadata(&rollout_path).await
+        && let Some(rollout_file) = rollout_file.as_deref()
+        && let Ok(metadata) = tokio::fs::metadata(rollout_file).await
     {
         let size_bytes = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
         let _ = metrics.histogram(ROLLOUT_SIZE_BYTES_METRIC, size_bytes, &[]);
     }
-    let rollout_exists = match tokio::fs::try_exists(&rollout_path).await {
-        Ok(rollout_exists) => rollout_exists,
-        Err(err) => {
-            warn!(
-                "failed to check rollout path after shutdown for {thread_id}; preserving pending metadata: {err}"
-            );
-            true
-        }
-    };
+    let rollout_exists = rollout_file.is_some();
     store.live_recorders.lock().await.remove(&thread_id);
     drop(_live_writer_guard);
     if !rollout_exists && pending_metadata.take().is_some() {

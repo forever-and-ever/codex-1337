@@ -639,7 +639,7 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
             let path = thread.path.as_ref().expect("legacy rollout path");
             timeout(TIMEOUT, async {
                 loop {
-                    let persisted = std::fs::read_to_string(path).unwrap_or_default();
+                    let persisted = codex_rollout::read_rollout_text(path).unwrap_or_default();
                     if persisted
                         .lines()
                         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -693,7 +693,8 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
     }
 
     app_server.shutdown_gracefully().await?;
-    let rollout = std::fs::read_to_string(thread.path.as_ref().expect("saved rollout path"))?;
+    let rollout =
+        codex_rollout::read_rollout_text(thread.path.as_ref().expect("saved rollout path"))?;
     for line in rollout
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())

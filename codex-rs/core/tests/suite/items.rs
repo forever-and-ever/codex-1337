@@ -374,7 +374,7 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
 
     test.codex.flush_rollout().await?;
     let rollout_path = test.codex.rollout_path().expect("paginated rollout path");
-    let rollout = std::fs::read_to_string(rollout_path)?;
+    let rollout = codex_rollout::read_rollout_text(rollout_path)?;
     let persisted_completion = rollout
         .lines()
         .map(codex_rollout::parse_rollout_line)

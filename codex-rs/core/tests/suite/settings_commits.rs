@@ -41,7 +41,7 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 
 fn assert_checkpoints(test: &TestCodex, expected: &[ThreadSettingsSnapshot]) -> Result<()> {
     let rollout_path = test.codex.rollout_path().expect("rollout path");
-    let rollout: Vec<RolloutLine> = std::fs::read_to_string(rollout_path)?
+    let rollout: Vec<RolloutLine> = codex_rollout::read_rollout_text(rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<std::result::Result<_, _>>()?;
@@ -377,7 +377,7 @@ async fn compaction_checkpoints_settings_changed_during_its_model_request() -> R
     test.codex.shutdown_and_wait().await?;
 
     let rollout_path = test.session_configured.rollout_path.expect("rollout path");
-    let rollout: Vec<RolloutLine> = std::fs::read_to_string(rollout_path)?
+    let rollout: Vec<RolloutLine> = codex_rollout::read_rollout_text(rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<std::result::Result<_, _>>()?;

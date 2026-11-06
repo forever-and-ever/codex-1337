@@ -1,7 +1,8 @@
 //! Reads rollout bytes and positions independently of their plain or compressed representation.
 //!
-//! Offsets always address the original JSONL bytes. Readers retain an open file, or an anonymous
-//! decoded snapshot, so a concurrent compression cannot invalidate an in-progress scan.
+//! Offsets always address the original JSONL bytes. Framed rollouts are read in place one frame
+//! at a time; single-frame ones decode to an anonymous snapshot. Readers retain an open file, so a
+//! concurrent conversion cannot invalidate an in-progress scan.
 //! Cancellation is checked during decompression and subsequent bounded reads and seeks.
 
 use std::fs::File;
@@ -12,11 +13,14 @@ use std::io::SeekFrom;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::framed::FramedReader;
 use crate::plain_rollout_path;
 
 enum RolloutReader {
     Plain(File),
-    Compressed(File),
+    Framed(File),
+    /// Upstream's whole-file encoding, kept readable until `codex rollouts compress` converts it.
+    SingleFrame(File),
 }
 
 impl RolloutReader {
@@ -30,7 +34,8 @@ impl RolloutReader {
                 Err(err) => return Err(err),
             }
             match File::open(&compressed_path) {
-                Ok(file) => return Ok(Self::Compressed(file)),
+                Ok(file) if crate::framed::is_framed(&file)? => return Ok(Self::Framed(file)),
+                Ok(file) => return Ok(Self::SingleFrame(file)),
                 Err(err) if err.kind() == io::ErrorKind::NotFound && attempt < 3 => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -51,18 +56,42 @@ pub fn read_rollout_prefix(path: &Path, max_bytes: usize) -> io::Result<Option<V
     }
     let source = RolloutReader::open(path)?;
     let file = match &source {
-        RolloutReader::Plain(file) | RolloutReader::Compressed(file) => file,
+        RolloutReader::Plain(file)
+        | RolloutReader::Framed(file)
+        | RolloutReader::SingleFrame(file) => file,
     };
     if !file.metadata()?.is_file() {
         return Ok(None);
     }
     let reader: Box<dyn Read> = match source {
         RolloutReader::Plain(file) => Box::new(file),
-        RolloutReader::Compressed(file) => Box::new(zstd::stream::read::Decoder::new(file)?),
+        RolloutReader::Framed(file) => Box::new(FramedReader::open(file)?),
+        RolloutReader::SingleFrame(file) => Box::new(zstd::stream::read::Decoder::new(file)?),
     };
     let mut bytes = Vec::new();
     reader.take(max_bytes as u64).read_to_end(&mut bytes)?;
     Ok(Some(bytes))
+}
+
+/// The decoded JSONL length of a rollout in any representation. A framed rollout's is unchanged
+/// by closing or sealing frames, which add no content.
+pub fn rollout_logical_len(path: &Path) -> io::Result<u64> {
+    match RolloutReader::open(path)? {
+        RolloutReader::Plain(file) => Ok(file.metadata()?.len()),
+        RolloutReader::Framed(file) => Ok(FramedReader::open(file)?.logical_len()),
+        RolloutReader::SingleFrame(file) => io::copy(
+            &mut zstd::stream::read::Decoder::new(file)?,
+            &mut io::sink(),
+        ),
+    }
+}
+
+/// The whole decoded JSONL of a rollout in any representation.
+pub fn read_rollout_text(path: impl AsRef<Path>) -> io::Result<String> {
+    let bytes = read_rollout_prefix(path.as_ref(), usize::MAX)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "rollout is not a regular file")
+    })?;
+    String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
 /// Opens the original JSONL bytes for blocking offset reads without changing the rollout on disk.
@@ -78,9 +107,10 @@ pub fn open_rollout_seekable_reader(
     if is_cancelled() {
         return Err(io::Error::other("rollout read cancelled"));
     }
-    let file = match RolloutReader::open(path)? {
-        RolloutReader::Plain(file) => file,
-        RolloutReader::Compressed(file) => {
+    let source = match RolloutReader::open(path)? {
+        RolloutReader::Plain(file) => Snapshot::File(file),
+        RolloutReader::Framed(file) => Snapshot::Framed(FramedReader::open(file)?),
+        RolloutReader::SingleFrame(file) => {
             let mut decoded = tempfile::tempfile()?;
             // Empty and skippable frames can consume input without producing decoded bytes.
             let file = CancellableReader {
@@ -93,13 +123,37 @@ pub fn open_rollout_seekable_reader(
             };
             io::copy(&mut reader, &mut decoded)?;
             decoded.rewind()?;
-            decoded
+            Snapshot::File(decoded)
         }
     };
     Ok(CancellableReader {
-        inner: file,
+        inner: source,
         is_cancelled,
     })
+}
+
+/// The logical JSONL bytes: a plain file or decoded snapshot, or a framed rollout read in place.
+enum Snapshot {
+    File(File),
+    Framed(FramedReader),
+}
+
+impl Read for Snapshot {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::File(file) => file.read(buffer),
+            Self::Framed(reader) => reader.read(buffer),
+        }
+    }
+}
+
+impl Seek for Snapshot {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        match self {
+            Self::File(file) => file.seek(position),
+            Self::Framed(reader) => reader.seek(position),
+        }
+    }
 }
 
 struct CancellableReader<R, F> {
@@ -149,7 +203,10 @@ pub fn rollout_contains_prefix(
     }
     match RolloutReader::open(path)? {
         RolloutReader::Plain(file) => Ok(end_byte_offset <= file.metadata()?.len()),
-        RolloutReader::Compressed(file) => {
+        RolloutReader::Framed(file) => {
+            Ok(end_byte_offset <= FramedReader::open(file)?.logical_len())
+        }
+        RolloutReader::SingleFrame(file) => {
             let mut file = CancellableReader {
                 inner: file,
                 is_cancelled: &is_cancelled,

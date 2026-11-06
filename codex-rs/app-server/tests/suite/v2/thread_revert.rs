@@ -300,7 +300,7 @@ async fn thread_revert_preserves_fork_cutoff_after_cold_resume() -> Result<()> {
         .end_ordinal_exclusive;
     assert_eq!(child_meta.forked_from_ordinal_exclusive, Some(fork_cutoff));
     let inherited_revert_cutoff =
-        std::fs::read_to_string(parent.path.as_ref().expect("parent rollout"))?
+        codex_rollout::read_rollout_text(parent.path.as_ref().expect("parent rollout"))?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<Result<Vec<_>, _>>()?

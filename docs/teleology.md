@@ -499,6 +499,25 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: seven release merges from `rust-v0.159.1` to `rust-v0.166.0` touched 14 `feedback/` files, 5 app-server feedback files, 3 log-database files and 1 TUI feedback view: an estimated 3–4 modify/delete conflicts per merge. The stubs keep about 40 plumbing files merging without seams.
 - Evidence: maintainer decision 2026-11-06. Before the cut the log database was the server's largest write stream (3.2 MB/min of WAL against 0.24 MB/min of rollout appends).
 
+## Disk economy
+
+### framed-rollouts
+
+- Telos: a rollout costs its compressed size on disk from its first line, with no cold-file pass and no plain copy for readers.
+- Holds: new rollouts are written only as `.jsonl.zst` in the framed encoding. The file is a sequence of standard zstd frames (level 3, window log 23, XXH64 checksum), each holding at most 16 MiB of logical bytes. Each frame is followed by a skippable trailer that records the frame start, logical start, logical length and the previous trailer. A 24-byte skippable hint at offset 0 names the last trailer. The writer flushes each acknowledged batch to a block boundary and closes a frame at 16 MiB, after 10 idle minutes and on shutdown. When it reopens a file, it seals a torn frame at the last block that ends on a newline. Readers decode by logical offset and walk the trailer chain once. Stored paths (`threads.rollout_path`, the API `path`, `RolloutRecorder::rollout_path`) keep the logical `.jsonl` name. `existing_rollout_path` resolves the file on disk and prefers a plain file. Plain and upstream single-frame files stay readable. Appending to a plain file keeps it plain; appending to a single-frame file converts it first. `codex rollouts compress` and the experimental `rollout/compress` RPC convert the rest, each file under its thread's writer lock. The app server logs a startup census. Upstream's cold-compression worker and `Feature::LocalThreadStoreCompression` are removed. Hooks receive the file on disk as `transcript_path`; for a framed rollout that file is zstd, which `zstd -dc` reads.
+- Owners: `codex-rs/rollout/src/framed.rs`, `codex-rs/rollout/src/framed/`, `codex-rs/rollout/src/rollout_sink.rs`, `codex-rs/rollout/src/conversion.rs`, `codex-rs/rollout/src/test_support.rs`, `codex-rs/cli/src/rollouts_cmd.rs`. Seams in upstream files:
+  - `rollout/src/compression.rs`: `resolve_rollout_for_append`, `convert_rollout_blocking`, and the framed dispatch in `reader::open_once`;
+  - `recorder.rs`: `RolloutSink` and the idle frame close;
+  - `seekable_reader.rs`, `ordinal.rs`, and `lib.rs` (`materialize_rollout_for_reference`);
+  - `thread-store/src/local/history_revision.rs`: the logical-length revision;
+  - `rollout_lineage.rs`, `live_writer.rs` and `rollout_migration/publish.rs`;
+  - `core/src/thread_manager.rs` and `core/src/session/mod.rs` (`hook_transcript_path`);
+  - `app-server/src/lib.rs` (the census) and `app-server/src/request_processors/rollout.rs`;
+  - `tui/src/resume_picker_transcript_preview.rs` and `features/src/lib.rs`.
+- Tripwire: `codex-rs/rollout/src/framed_tests.rs` (crash-truncation property, a seek across frames, a concurrent reader and writer); `rollout_compress_converts_a_plain_rollout` (app server); `framed_shared_fork_resume_preserves_checkpoint_and_frozen_history` (core); `python scripts/check_removed_capabilities.py --check` for the worker's deletion and the removed feature.
+- Pressure: upstream's compression worker (`mod worker` and `mod metrics` in `compression.rs`) and its materialization paths. Any upstream reader or test that opens the logical `.jsonl` path directly fails on a framed rollout. Route it through `existing_rollout_path`, `open_rollout_seekable_reader` or `read_rollout_text`; tests use `codex_rollout::test_support`.
+- Evidence: maintainer decision 2026-11-06. Production held 5,123 plain rollouts (38.4 GB) and 1,169 single-frame ones (6.0 GB). A deterministic sample of 102 plain rollouts (461 MiB) converts to 81 MiB (5.7×) in 1.2 s. Flushing after every line, the worst case for a live writer, gives 83 MiB (5.55×). `zstd -dc` reproduces the converted files byte for byte.
+
 ## Build economy
 
 ### one-dependency-graph
@@ -686,7 +705,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/app/app_server_thread_ownership.rs`: fast-ui-thread
 - `codex-rs/tui/src/chatwidget/backend_banners.rs`: fast-ui-thread
 - `codex-rs/tui/src/chatwidget/transcript_export.rs`: fast-ui-thread
-- `codex-rs/features/src/lib.rs`: append-only-tool-declarations
+- `codex-rs/features/src/lib.rs`: append-only-tool-declarations, framed-rollouts
 - `codex-rs/core/src/session/step_context.rs`: append-only-tool-declarations
 - `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations, standing-context-trims
 - `codex-rs/Cargo.toml`: one-dependency-graph, pipelined-crate-graph, removed-stacks
@@ -694,7 +713,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
-- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility, scoped-config-overrides, provider-login
+- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility, scoped-config-overrides, provider-login, framed-rollouts
 - `codex-rs/exec/src/main.rs`: scoped-config-overrides
 - `codex-rs/utils/cli/src/lib.rs`: scoped-config-overrides
 - `codex-rs/exec-server/src/fs_sandbox.rs`: helper-image-read-roots
@@ -788,7 +807,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/thread-store/src/local/revert_thread.rs`: accepted-agent-mail
 - `codex-rs/core/src/session/handlers.rs`: accepted-agent-mail
 - `codex-rs/tui/src/bottom_pane/chat_composer.rs`: client-only-shell, warpaint
-- `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling
+- `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling, framed-rollouts
 - `codex-rs/ansi-escape/src/lib.rs`: warpaint
 - `codex-rs/ansi-escape/src/ansi_escape_tests.rs`: warpaint
 - `codex-rs/tui/src/insert_history.rs`: warpaint
@@ -852,7 +871,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server-protocol/src/protocol/v2/shared.rs`: recoverable-sign-in
 - `codex-rs/app-server/src/request_processors.rs`: goal-boxes, recoverable-sign-in
 - `codex-rs/app-server/src/request_processors/thread_processor.rs`: recoverable-sign-in, warpaint
-- `codex-rs/core/src/session/mod.rs`: recoverable-sign-in, recoverable-output, interleaved-turn-accounting
+- `codex-rs/core/src/session/mod.rs`: recoverable-sign-in, recoverable-output, interleaved-turn-accounting, framed-rollouts
 - `codex-rs/ext/guardian-reviewer/src/retry.rs`: recoverable-sign-in
 - `codex-rs/model-provider/src/models_endpoint.rs`: recoverable-sign-in
 - `codex-rs/models-manager/src/manager.rs`: recoverable-sign-in
@@ -1197,3 +1216,16 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/thread_metadata.rs`: warpaint
 - `codex-rs/tui/src/app/warpaint.rs`: warpaint
 - `codex-rs/tui/src/app_server_session/fork_preparation.rs`: warpaint
+- `codex-rs/rollout/src/compression.rs`: framed-rollouts
+- `codex-rs/rollout/src/recorder.rs`: framed-rollouts
+- `codex-rs/rollout/src/seekable_reader.rs`: framed-rollouts
+- `codex-rs/rollout/src/ordinal.rs`: framed-rollouts
+- `codex-rs/rollout/src/lib.rs`: framed-rollouts
+- `codex-rs/rollout/src/writer_lock.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/history_revision.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/rollout_lineage.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/live_writer.rs`: framed-rollouts
+- `codex-rs/thread-store/src/local/rollout_migration/publish.rs`: framed-rollouts
+- `codex-rs/core/src/thread_manager.rs`: framed-rollouts
+- `codex-rs/app-server/src/request_processors/rollout.rs`: framed-rollouts
+- `codex-rs/tui/src/resume_picker_transcript_preview.rs`: framed-rollouts

@@ -194,7 +194,7 @@ fn is_retained_user_message(item: &ResponseItem, retained_text: &str) -> bool {
 }
 
 fn annotate_retained_user_in_rollout(path: &Path, retained_text: &str) -> Result<()> {
-    let mut rollout = fs::read_to_string(path)?
+    let mut rollout = codex_rollout::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(codex_rollout::parse_rollout_line)
@@ -222,7 +222,7 @@ fn annotate_retained_user_in_rollout(path: &Path, retained_text: &str) -> Result
 }
 
 fn assert_compacted_user_metadata(path: &Path, retained_text: &str) -> Result<()> {
-    let replacement_history = fs::read_to_string(path)?
+    let replacement_history = codex_rollout::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(codex_rollout::parse_rollout_line)
@@ -510,7 +510,7 @@ async fn remote_compact_v2_retains_only_client_developer_messages_when_enabled(
             .for_each(assert_compact_request_omits_harness_metadata);
 
         codex.shutdown_and_wait().await?;
-        let replacement_history = fs::read_to_string(&rollout_path)?
+        let replacement_history = codex_rollout::read_rollout_text(&rollout_path)?
             .lines()
             .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
             .filter_map(|line| match line.item {
@@ -618,7 +618,7 @@ async fn remote_compact_v2_records_usage_before_output_validation() -> Result<()
         );
         codex.shutdown_and_wait().await?;
 
-        let record = fs::read_to_string(&rollout_path)?
+        let record = codex_rollout::read_rollout_text(&rollout_path)?
             .lines()
             .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
             .filter_map(|line| match line.item {

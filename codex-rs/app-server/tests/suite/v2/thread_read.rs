@@ -1438,7 +1438,7 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
     let thread_path = thread.path.clone().expect("thread path");
     assert!(
-        !thread_path.exists(),
+        !codex_rollout::test_support::rollout_file(&thread_path).exists(),
         "fresh thread rollout should not be materialized yet"
     );
 
@@ -1646,7 +1646,7 @@ async fn thread_read_include_turns_rejects_unmaterialized_loaded_thread() -> Res
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
     let thread_path = thread.path.clone().expect("thread path");
     assert!(
-        !thread_path.exists(),
+        !codex_rollout::test_support::rollout_file(&thread_path).exists(),
         "fresh thread rollout should not be materialized yet"
     );
 
@@ -1695,7 +1695,7 @@ async fn thread_turns_list_rejects_unmaterialized_loaded_thread() -> Result<()> 
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
     let thread_path = thread.path.clone().expect("thread path");
     assert!(
-        !thread_path.exists(),
+        !codex_rollout::test_support::rollout_file(&thread_path).exists(),
         "fresh thread rollout should not be materialized yet"
     );
 

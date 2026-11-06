@@ -3035,7 +3035,7 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix(
     let rollout_path = child_thread
         .rollout_path()
         .expect("child rollout should exist");
-    let lines = std::fs::read_to_string(&rollout_path)
+    let lines = codex_rollout::read_rollout_text(&rollout_path)
         .expect("read child rollout")
         .lines()
         .map(|line| codex_rollout::parse_rollout_line(line).expect("parse rollout line"))
@@ -3326,7 +3326,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
     let rollout_path = child_thread
         .rollout_path()
         .expect("child rollout should exist");
-    let lines = std::fs::read_to_string(&rollout_path)
+    let lines = codex_rollout::read_rollout_text(&rollout_path)
         .expect("read child rollout")
         .lines()
         .map(|line| codex_rollout::parse_rollout_line(line).expect("parse rollout line"))
@@ -6701,9 +6701,11 @@ async fn resume_agent_from_rollout_skips_descendants_when_parent_resume_fails() 
         .await;
     assert_eq!(report.submit_failed, Vec::<ThreadId>::new());
     assert_eq!(report.timed_out, Vec::<ThreadId>::new());
-    tokio::fs::remove_file(&child_rollout_path)
-        .await
-        .expect("child rollout path should be removable");
+    tokio::fs::remove_file(codex_rollout::test_support::rollout_file(
+        &child_rollout_path,
+    ))
+    .await
+    .expect("child rollout path should be removable");
 
     let resumed_parent_thread_id = harness
         .control

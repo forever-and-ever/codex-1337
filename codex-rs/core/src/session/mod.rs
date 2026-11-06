@@ -5657,7 +5657,12 @@ impl Session {
         };
         self.ensure_rollout_materialized(PersistContext::Standard)
             .await;
-        Some(rollout_path)
+        // Hooks read the file on disk, which for a framed rollout is its `.jsonl.zst` sibling.
+        Some(
+            codex_rollout::existing_rollout_path(&rollout_path)
+                .await
+                .unwrap_or(rollout_path),
+        )
     }
 
     pub(crate) async fn take_pending_session_start_source(

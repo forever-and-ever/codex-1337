@@ -87,9 +87,11 @@ async fn run_removal_session_end_test(operation: &str) -> Result<()> {
     assert_eq!(payloads[0]["hook_event_name"], "SessionEnd");
     assert_eq!(payloads[0]["reason"], "other");
     assert_eq!(payloads[0]["transcript_exists"], true);
-    let transcript = payloads[0]["transcript_text"]
-        .as_str()
-        .expect("session end transcript text");
+    let transcript = codex_rollout::read_rollout_text(
+        payloads[0]["transcript_copy"]
+            .as_str()
+            .expect("session end transcript copy"),
+    )?;
     assert!(transcript.contains("persist this before removal"));
     assert!(transcript.contains("persisted answer"));
     Ok(())
@@ -172,16 +174,21 @@ fn write_config_and_hook(codex_home: &Path, server_uri: &str) -> Result<std::pat
         format!(
             r#"import json
 from pathlib import Path
+import shutil
 import sys
 
 payload = json.load(sys.stdin)
 transcript_path = payload.get("transcript_path")
 transcript = Path(transcript_path) if transcript_path else None
 payload["transcript_exists"] = bool(transcript and transcript.exists())
-payload["transcript_text"] = transcript.read_text(encoding="utf-8") if transcript and transcript.exists() else ""
+if payload["transcript_exists"]:
+    copy = Path(r"{}") / ("session-end-transcript" + "".join(transcript.suffixes))
+    shutil.copyfile(transcript, copy)
+    payload["transcript_copy"] = str(copy)
 with Path(r"{}").open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(payload) + "\n")
 "#,
+            codex_home.display(),
             log_path.display()
         ),
     )?;

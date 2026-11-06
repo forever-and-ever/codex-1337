@@ -86,6 +86,7 @@ mod plugin_cmd;
 mod queue_cmd;
 mod reload_probe;
 mod remote_control_cmd;
+mod rollouts_cmd;
 mod sandbox_command;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
@@ -234,6 +235,9 @@ enum Subcommand {
 
     /// Inspect or migrate legacy local sessions to paginated thread history.
     MigrateRollouts(migrate_rollouts::MigrateRolloutsCommand),
+
+    /// Inspect or convert local rollout files.
+    Rollouts(rollouts_cmd::RolloutsCommand),
 
     /// [experimental] Migrate configured SQLite databases to DELETE mode in place.
     MigrateNfsDb(migrate_nfs_db::MigrateNfsDbCommand),
@@ -1546,6 +1550,14 @@ async fn cli_main(
             )?;
             migrate_rollouts::run(command, root_config_overrides).await?;
         }
+        Some(Subcommand::Rollouts(command)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "rollouts",
+            )?;
+            rollouts_cmd::run(command, root_config_overrides).await?;
+        }
         Some(Subcommand::MigrateNfsDb(command)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2200,6 +2212,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
+        Some(Subcommand::Rollouts(_)) => Some("rollouts"),
         Some(Subcommand::MigrateNfsDb(_)) => Some("migrate-nfs-db"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),

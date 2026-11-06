@@ -980,9 +980,7 @@ async fn any_new_input_interrupts_sleep(input: WaitInput) {
     wait_for_event(&codex, |event| matches!(event, EventMsg::ShutdownComplete)).await;
 
     let rollout_path = codex.rollout_path().expect("rollout path");
-    let rollout = tokio::fs::read_to_string(rollout_path)
-        .await
-        .expect("read rollout");
+    let rollout = codex_rollout::read_rollout_text(rollout_path).expect("read rollout");
     let persisted_sleep_items = rollout
         .lines()
         .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())

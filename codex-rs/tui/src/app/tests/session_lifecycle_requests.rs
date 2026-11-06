@@ -3247,8 +3247,8 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let forked = app.chat_widget.thread_id().expect("forked thread");
     assert_ne!(forked, original);
     let forked_rollout = app.chat_widget.rollout_path().expect("forked rollout");
-    assert!(fs::read_to_string(&rollout)?.contains("saved history"));
-    let copied = fs::read_to_string(&forked_rollout)?;
+    assert!(codex_rollout::read_rollout_text(&rollout)?.contains("saved history"));
+    let copied = codex_rollout::read_rollout_text(&forked_rollout)?;
     let meta = codex_rollout::read_session_meta_line(&forked_rollout).await?;
     let base = meta.meta.history_base;
     assert!(copied.contains("saved history") || base.is_some_and(|h| h.thread_id == original));

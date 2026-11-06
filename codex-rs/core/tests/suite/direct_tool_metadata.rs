@@ -875,7 +875,7 @@ async fn direct_metadata_limit_respects_provider_support(
                 .remove_thread(&test.session_configured.thread_id)
                 .await;
         }
-        let rollout = tokio::fs::read_to_string(&rollout_path).await?;
+        let rollout = codex_rollout::read_rollout_text(&rollout_path)?;
         let rollout = rollout
             .lines()
             .map(serde_json::from_str::<Value>)

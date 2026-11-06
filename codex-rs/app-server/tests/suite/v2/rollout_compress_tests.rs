@@ -27,13 +27,12 @@ use tokio::time::timeout;
 const READ_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 20);
 
 #[tokio::test]
-async fn rollout_compress_runs_after_startup_with_compression_disabled() -> Result<()> {
+async fn rollout_compress_converts_a_plain_rollout() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
-        .with_args(&["-c", "features.local_thread_store_compression=false"])
         .build_initialized()
         .await?;
 

@@ -1102,7 +1102,7 @@ async fn cold_resume_refreshes_legacy_collaboration_snapshot_once(
         .expect("initial session should have a rollout path");
     initial.codex.shutdown_and_wait().await?;
     let mut rewrote_snapshot = false;
-    let legacy_rollout = std::fs::read_to_string(&rollout_path)?
+    let legacy_rollout = codex_rollout::read_rollout_text(&rollout_path)?
         .lines()
         .map(|original_line| {
             let mut line = codex_rollout::parse_rollout_line(original_line)?;

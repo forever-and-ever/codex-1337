@@ -56,5 +56,6 @@ zstd = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+rand = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 pretty_assertions = { workspace = true }

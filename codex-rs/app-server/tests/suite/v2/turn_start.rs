@@ -529,7 +529,7 @@ async fn tool_call_metadata_stays_out_of_raw_response_item_notifications(
         let status = timeout(DEFAULT_READ_TIMEOUT, mcp.shutdown_gracefully()).await??;
         assert!(status.success());
         // Read raw JSON: ResponseItem deserialization intentionally discards host-owned metadata.
-        let rollout = std::fs::read_to_string(rollout_path)?;
+        let rollout = codex_rollout::read_rollout_text(rollout_path)?;
         let entries = rollout
             .lines()
             .map(serde_json::from_str::<Value>)

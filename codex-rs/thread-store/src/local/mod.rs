@@ -31,9 +31,6 @@ mod unarchive_thread;
 mod update_thread_metadata;
 
 #[cfg(test)]
-#[path = "compression_writer_tests.rs"]
-mod compression_writer_tests;
-#[cfg(test)]
 #[path = "daybreak_metadata_tests.rs"]
 mod daybreak_metadata_tests;
 #[cfg(test)]
@@ -344,26 +341,6 @@ impl LocalThreadStore {
     /// Return the live local rollout path for legacy local-only code paths.
     pub async fn live_rollout_path(&self, thread_id: ThreadId) -> ThreadStoreResult<PathBuf> {
         live_writer::rollout_path(self, thread_id).await
-    }
-
-    /// Select only materialized rollout inputs without creating a file for untouched threads.
-    pub(crate) async fn feedback_rollout_path(
-        &self,
-        thread_id: ThreadId,
-    ) -> ThreadStoreResult<Option<PathBuf>> {
-        let (recorder, _, _) = live_writer::live_writer_parts(self, thread_id).await?;
-        if recorder
-            .unpersisted_session_meta()
-            .await
-            .map_err(|error| ThreadStoreError::Internal {
-                message: error.to_string(),
-            })?
-            .is_some()
-        {
-            return Ok(None);
-        }
-        // Keep the path even if a materialized file was deleted: collection must report that error.
-        Ok(Some(recorder.rollout_path().to_path_buf()))
     }
 
     pub(super) async fn ensure_live_recorder_absent(
@@ -1412,7 +1389,7 @@ mod tests {
         live_thread.shutdown().await.expect("shutdown thread");
 
         assert!(
-            tokio::fs::try_exists(rollout_path.as_path())
+            tokio::fs::try_exists(codex_rollout::test_support::rollout_file(&rollout_path))
                 .await
                 .expect("rollout path should be checkable")
         );

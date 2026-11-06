@@ -270,7 +270,7 @@ async fn rebuilding_retained_context_reasserts_current_instructions() -> Result<
 
     // A missing turn-context record forces full reassertion within the retained window.
     let mut lines = Vec::new();
-    for line in std::fs::read_to_string(&path)?.lines() {
+    for line in codex_rollout::read_rollout_text(&path)?.lines() {
         let item: serde_json::Value = serde_json::from_str(line)?;
         if item["type"] == "turn_context" {
             continue;

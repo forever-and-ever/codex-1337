@@ -1257,8 +1257,7 @@ async fn initially_empty_deferred_tool_world_state_is_not_rendered_or_persisted(
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        let world_states = tokio::fs::read_to_string(rollout_path)
-            .await?
+        let world_states = codex_rollout::read_rollout_text(rollout_path)?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<serde_json::Result<Vec<_>>>()?
@@ -1303,8 +1302,7 @@ async fn deferred_tool_world_state_survives_resume_without_duplicate_updates() -
             .rollout_path
             .clone()
             .expect("rollout path");
-        let persisted_tools = tokio::fs::read_to_string(&rollout_path)
-            .await?
+        let persisted_tools = codex_rollout::read_rollout_text(&rollout_path)?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<serde_json::Result<Vec<_>>>()?

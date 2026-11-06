@@ -314,7 +314,7 @@ async fn thread_archive_without_turns(history_mode: ThreadHistoryMode) -> Result
 
     let rollout_path = thread.path.clone().expect("thread path");
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "fresh thread rollout should not exist yet at {}",
         rollout_path.display()
     );
@@ -395,12 +395,12 @@ async fn thread_archive_without_turns(history_mode: ThreadHistoryMode) -> Result
     let archived_rollout_path =
         archived_directory.join(rollout_path.file_name().expect("rollout file name"));
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "expected rollout path {} to be moved",
         rollout_path.display()
     );
     assert!(
-        archived_rollout_path.exists(),
+        codex_rollout::test_support::rollout_file(&archived_rollout_path).exists(),
         "expected archived rollout path {} to exist",
         archived_rollout_path.display()
     );
@@ -974,8 +974,8 @@ async fn thread_archive_clears_stale_subscriptions_before_resume() -> Result<()>
 }
 
 fn assert_paths_match_on_disk(actual: &Path, expected: &Path) -> std::io::Result<()> {
-    let actual = actual.canonicalize()?;
-    let expected = expected.canonicalize()?;
+    let actual = codex_rollout::test_support::rollout_file(actual).canonicalize()?;
+    let expected = codex_rollout::test_support::rollout_file(expected).canonicalize()?;
     assert_eq!(actual, expected);
     Ok(())
 }

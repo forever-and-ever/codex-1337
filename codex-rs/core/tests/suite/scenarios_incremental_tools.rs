@@ -345,7 +345,7 @@ let changed_tools = diff[0]["tools"].as_array().expect("namespace members");
     test.codex.ensure_rollout_materialized().await;
     test.codex.flush_rollout().await?;
     let rollout =
-        tokio::fs::read_to_string(test.codex.rollout_path().expect("rollout path")).await?;
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))?;
     let rollout = rollout
         .lines()
         .map(codex_rollout::parse_rollout_line)

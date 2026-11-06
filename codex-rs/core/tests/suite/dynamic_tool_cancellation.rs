@@ -332,7 +332,7 @@ async fn terminated_cell_persists_failure_and_excludes_late_reply_from_context()
             .contains("LATE_RESULT_MUST_NOT_REACH_MODEL")
     }));
     thread.flush_rollout().await?;
-    let rollout = std::fs::read_to_string(thread.rollout_path().unwrap())?;
+    let rollout = codex_rollout::read_rollout_text(thread.rollout_path().unwrap())?;
     let completions: Vec<_> = rollout
         .lines()
         .map(codex_rollout::parse_rollout_line)

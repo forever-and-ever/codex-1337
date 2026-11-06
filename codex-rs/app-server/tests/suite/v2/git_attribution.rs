@@ -325,7 +325,7 @@ fn replace_attribution_fragment_with_legacy(
     rollout_path: &Path,
     legacy_attribution: LegacyAttribution,
 ) -> Result<()> {
-    let rollout = std::fs::read_to_string(rollout_path)?;
+    let rollout = codex_rollout::read_rollout_text(rollout_path)?;
     let mut replaced = false;
     let mut removed_saved_attribution = false;
     let lines = rollout
@@ -366,7 +366,7 @@ fn replace_attribution_fragment_with_legacy(
         removed_saved_attribution,
         "rollout did not contain saved git attribution state"
     );
-    std::fs::write(rollout_path, format!("{}\n", lines.join("\n")))?;
+    codex_rollout::test_support::rewrite_rollout(rollout_path, &format!("{}\n", lines.join("\n")))?;
     Ok(())
 }
 

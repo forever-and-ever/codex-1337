@@ -80,7 +80,7 @@ fn response_message_contains_text(item: &ResponseItem, expected: &str) -> bool {
 }
 
 fn seed_first_checkpoint_harness_metadata(path: &Path, retained_text: &str) -> Result<()> {
-    let mut lines = std::fs::read_to_string(path)?
+    let mut lines = codex_rollout::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(codex_rollout::parse_rollout_line)
@@ -113,7 +113,7 @@ fn assert_latest_checkpoint_retains_harness_metadata(
     path: &Path,
     retained_text: &str,
 ) -> Result<()> {
-    let replacement_history = std::fs::read_to_string(path)?
+    let replacement_history = codex_rollout::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(codex_rollout::parse_rollout_line)
@@ -212,13 +212,13 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
     user_turn(&base, "AFTER_COMPACT").await;
     let base_path = fetch_conversation_path(&base);
     assert!(
-        base_path.exists(),
+        codex_rollout::test_support::rollout_file(&base_path).exists(),
         "compact+resume test expects base path {base_path:?} to exist",
     );
 
     shutdown_conversation(&base).await;
     let preambles = |path: &Path| {
-        std::fs::read_to_string(path)
+        codex_rollout::read_rollout_text(path)
             .expect("rollout")
             .lines()
             .map(codex_rollout::parse_rollout_line)
@@ -240,7 +240,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
     user_turn(&resumed, "AFTER_RESUME").await;
     let resumed_path = fetch_conversation_path(&resumed);
     assert!(
-        resumed_path.exists(),
+        codex_rollout::test_support::rollout_file(&resumed_path).exists(),
         "compact+resume test expects resumed path {resumed_path:?} to exist",
     );
 
@@ -390,7 +390,7 @@ async fn compact_resume_after_second_compaction_preserves_history() -> Result<()
     user_turn(&base, "AFTER_COMPACT").await;
     let base_path = fetch_conversation_path(&base);
     assert!(
-        base_path.exists(),
+        codex_rollout::test_support::rollout_file(&base_path).exists(),
         "second compact test expects base path {base_path:?} to exist",
     );
 
@@ -400,7 +400,7 @@ async fn compact_resume_after_second_compaction_preserves_history() -> Result<()
     user_turn(&resumed, "AFTER_RESUME").await;
     let resumed_path = fetch_conversation_path(&resumed);
     assert!(
-        resumed_path.exists(),
+        codex_rollout::test_support::rollout_file(&resumed_path).exists(),
         "second compact test expects resumed path {resumed_path:?} to exist",
     );
 
@@ -411,7 +411,7 @@ async fn compact_resume_after_second_compaction_preserves_history() -> Result<()
     user_turn(&forked, "AFTER_COMPACT_2").await;
     let forked_path = fetch_conversation_path(&forked);
     assert!(
-        forked_path.exists(),
+        codex_rollout::test_support::rollout_file(&forked_path).exists(),
         "second compact test expects forked path {forked_path:?} to exist",
     );
 

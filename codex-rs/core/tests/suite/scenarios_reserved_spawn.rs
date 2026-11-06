@@ -274,7 +274,8 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     let child_network_policy = worker.config().await.application_network_policy.clone();
     assert_eq!(child_network_policy, network_policy);
     assert_eq!(
-        worker.rollout_path().context("child rollout")?.is_file(),
+        codex_rollout::test_support::rollout_file(&worker.rollout_path().context("child rollout")?)
+            .is_file(),
         fork_history,
         "only copied history should be materialized at creation"
     );

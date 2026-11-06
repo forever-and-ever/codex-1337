@@ -127,7 +127,8 @@ async fn extension_window_prefix_survives_compaction(compaction: &str) -> Result
     .await;
 
     test.codex.flush_rollout().await?;
-    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    let rollout =
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))?;
     let replacement = rollout
         .lines()
         .map(codex_rollout::parse_rollout_line)

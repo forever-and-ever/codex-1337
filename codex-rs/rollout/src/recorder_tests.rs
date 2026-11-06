@@ -103,7 +103,7 @@ fn write_paginated_rollout(
 }
 
 fn read_rollout_lines(path: &Path) -> std::io::Result<Vec<RolloutLine>> {
-    fs::read_to_string(path)?
+    crate::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| crate::parse_rollout_line(line).map_err(std::io::Error::other))
@@ -735,7 +735,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
         .await?;
     recorder.flush().await?;
     assert!(
-        rollout_path.exists(),
+        crate::test_support::rollout_file(&rollout_path).exists(),
         "flush with pending items should materialize the rollout"
     );
 
@@ -756,9 +756,12 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     recorder.persist().await?;
     // Second call verifies `persist()` is idempotent after materialization.
     recorder.persist().await?;
-    assert!(rollout_path.exists(), "rollout file should be materialized");
+    assert!(
+        crate::test_support::rollout_file(&rollout_path).exists(),
+        "rollout file should be materialized"
+    );
 
-    let text = std::fs::read_to_string(&rollout_path)?;
+    let text = crate::read_rollout_text(&rollout_path)?;
     let lines = read_rollout_lines(&rollout_path)?;
     assert_eq!(
         lines.iter().map(|line| line.ordinal).collect::<Vec<_>>(),
@@ -788,7 +791,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
         buffered_idx < user_idx,
         "buffered items should preserve ordering"
     );
-    let text_after_second_persist = std::fs::read_to_string(&rollout_path)?;
+    let text_after_second_persist = crate::read_rollout_text(&rollout_path)?;
     assert_eq!(text_after_second_persist, text);
 
     recorder.shutdown().await?;
@@ -934,7 +937,7 @@ async fn recorder_omits_ordinals_from_legacy_rollouts() -> std::io::Result<()> {
         .await?;
     recorder.flush().await?;
 
-    let text = fs::read_to_string(recorder.rollout_path())?;
+    let text = crate::read_rollout_text(recorder.rollout_path())?;
     let values = text
         .lines()
         .map(serde_json::from_str::<serde_json::Value>)
@@ -958,7 +961,7 @@ async fn resumed_empty_rollout_omits_ordinals() -> std::io::Result<()> {
         .await?;
     recorder.flush().await?;
 
-    let text = fs::read_to_string(rollout_path)?;
+    let text = crate::read_rollout_text(rollout_path)?;
     let values = text
         .lines()
         .map(serde_json::from_str::<serde_json::Value>)
@@ -1015,7 +1018,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
 
     fs::remove_file(sessions_blocker_path)?;
     recorder.flush().await?;
-    let text = std::fs::read_to_string(&rollout_path)?;
+    let text = crate::read_rollout_text(&rollout_path)?;
     assert!(
         text.contains("buffered-before-persist"),
         "retry should preserve items buffered before the failed persist"
@@ -1033,7 +1036,9 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     let read_only_file = std::fs::OpenOptions::new().read(true).open(&rollout_path)?;
     let mut state = RolloutWriterState {
         writer: Some(JsonlWriter {
-            file: tokio::fs::File::from_std(read_only_file),
+            sink: crate::rollout_sink::RolloutSink::Plain(tokio::fs::File::from_std(
+                read_only_file,
+            )),
         }),
         deferred_creation: false,
         pending_items: Vec::new(),
@@ -1054,7 +1059,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     ))]);
 
     state.flush().await?;
-    let text_after_retry = std::fs::read_to_string(&rollout_path)?;
+    let text_after_retry = crate::read_rollout_text(&rollout_path)?;
     assert!(
         text_after_retry.contains("queued-after-writer-error"),
         "flush should retry after reopening and write buffered items"
@@ -1181,7 +1186,7 @@ async fn resumed_paginated_rollout_repairs_unsafe_tail() -> std::io::Result<()> 
             .await?;
         recorder.flush().await?;
 
-        let contents = fs::read_to_string(&rollout_path)?;
+        let contents = crate::read_rollout_text(&rollout_path)?;
         assert!(contents.ends_with('\n'), "{name} tail should be terminated");
         let ordinals = contents
             .lines()

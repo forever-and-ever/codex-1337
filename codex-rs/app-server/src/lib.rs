@@ -663,6 +663,8 @@ pub async fn run_main_with_transport_options(
     ) {
         warn!(%err, "failed to install the flight recorder's SIGUSR1 dump");
     }
+    // Plain and single-frame readers stay until this counts none of either.
+    codex_rollout::spawn_rollout_census(config.codex_home.to_path_buf());
     #[cfg(unix)]
     if let Some(Err(err)) = nofile_limit_result {
         warn!(%err, "failed to raise managed app-server file descriptor limit");

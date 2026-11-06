@@ -9,6 +9,30 @@ use std::path::Path;
 pub(super) async fn read(path: &Path) -> Option<String> {
     let path = codex_rollout::existing_rollout_path(path).await?;
     let path = tokio::fs::canonicalize(path).await.ok()?;
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".zst"))
+    {
+        // TELOS(framed-rollouts): closing an idle frame appends bytes but no content, so a
+        // compressed rollout's revision is its identity and decoded length.
+        let metadata = tokio::fs::metadata(&path).await.ok()?;
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            Some((metadata.dev(), metadata.ino()))
+        };
+        #[cfg(not(unix))]
+        let identity: Option<(u64, u64)> = None;
+        let logical_path = path.clone();
+        let logical_len = tokio::task::spawn_blocking(move || {
+            codex_rollout::rollout_logical_len(logical_path.as_path())
+        })
+        .await
+        .ok()?
+        .ok()?;
+        return serde_json::to_string(&("local-framed", path, logical_len, identity)).ok();
+    }
     let metadata = tokio::fs::metadata(&path).await.ok()?;
     let modified = metadata.modified().ok()?;
     let created = metadata.created().ok();

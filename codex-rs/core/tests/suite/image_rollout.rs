@@ -163,14 +163,14 @@ fn extract_image_url(item: &ResponseItem) -> Option<String> {
 async fn read_rollout_text(path: &Path) -> anyhow::Result<String> {
     for _ in 0..50 {
         if path.exists()
-            && let Ok(text) = std::fs::read_to_string(path)
+            && let Ok(text) = codex_rollout::read_rollout_text(path)
             && !text.trim().is_empty()
         {
             return Ok(text);
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    std::fs::read_to_string(path)
+    codex_rollout::read_rollout_text(path)
         .with_context(|| format!("read rollout file at {}", path.display()))
 }
 
@@ -647,7 +647,7 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
     .save(&image_path)?;
     let original_image_url = data_url_from_bytes("image/png", &fs::read(&image_path)?);
 
-    let mut rollout_lines = fs::read_to_string(&rollout_path)?
+    let mut rollout_lines = codex_rollout::read_rollout_text(&rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<serde_json::Result<Vec<_>>>()?;
@@ -841,7 +841,9 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
         })
         .restart(&server, &replayed)
         .await?;
-    let existing_rollout_lines = fs::read_to_string(&rollout_path)?.lines().count();
+    let existing_rollout_lines = codex_rollout::read_rollout_text(&rollout_path)?
+        .lines()
+        .count();
     replayed
         .codex
         .inject_response_items(vec![
@@ -866,7 +868,7 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
             .into(),
         ])
         .await?;
-    let persisted_developer_metadata = fs::read_to_string(&rollout_path)?
+    let persisted_developer_metadata = codex_rollout::read_rollout_text(&rollout_path)?
         .lines()
         .skip(existing_rollout_lines)
         .filter_map(|line| {

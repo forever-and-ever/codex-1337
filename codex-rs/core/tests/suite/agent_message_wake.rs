@@ -113,7 +113,7 @@ async fn interrupt_during_completion_preserves_running_status() -> Result<()> {
     // Interrupted would make a child eligible for capacity eviction while its
     // completion callback still owns the rollout writer.
     assert_eq!(status_while_finishing, AgentStatus::Running);
-    let terminal_events = std::fs::read_to_string(rollout_path)?
+    let terminal_events = codex_rollout::read_rollout_text(rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<std::result::Result<Vec<_>, _>>()?

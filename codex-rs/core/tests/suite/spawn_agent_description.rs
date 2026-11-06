@@ -595,7 +595,7 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
 
         let mut removed_recorded_usage_hint = false;
         let mut removed_usage_hint_presence = false;
-        let legacy_rollout = std::fs::read_to_string(&rollout_path)?
+        let legacy_rollout = codex_rollout::read_rollout_text(&rollout_path)?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<std::result::Result<Vec<_>, _>>()?

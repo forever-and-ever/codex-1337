@@ -49,8 +49,10 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
 
 transcript_path = payload.get("transcript_path")
 if transcript_path is not None:
-    snapshot = Path(transcript_path).read_text(encoding="utf-8")
-    Path(r"{transcript_snapshot_path}").write_text(snapshot, encoding="utf-8")
+    snapshot = Path(r"{transcript_snapshot_path}")
+    if transcript_path.endswith(".zst"):
+        snapshot = snapshot.with_name(snapshot.name + ".zst")
+    snapshot.write_bytes(Path(transcript_path).read_bytes())
 
 message = json.loads({system_message_json:?})
 if message is not None:
@@ -207,7 +209,7 @@ async fn interrupt_hook_runs_before_turn_aborted_and_records_payload() -> Result
     );
     assert!(payload.get("last_assistant_message").is_none());
 
-    let transcript_snapshot = fs::read_to_string(
+    let transcript_snapshot = codex_rollout::read_rollout_text(
         test.codex_home_path()
             .join("interrupt_transcript_snapshot.jsonl"),
     )?;

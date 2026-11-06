@@ -551,7 +551,9 @@ fn resumable_thread(
 }
 
 fn rollout_path_is_resumable(rollout_path: &Path) -> bool {
-    std::fs::metadata(rollout_path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+    // The logical `.jsonl` name may be backed by its framed `.jsonl.zst` file.
+    codex_rollout::existing_rollout_with_metadata_sync(rollout_path)
+        .is_some_and(|(_, metadata)| metadata.len() > 0)
 }
 
 fn errors_for_cwd(cwd: &Path, response: &SkillsListResponse) -> Vec<SkillErrorInfo> {

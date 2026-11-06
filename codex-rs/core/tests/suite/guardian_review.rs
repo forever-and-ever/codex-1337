@@ -1303,7 +1303,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
         test.thread_store.flush_thread(guardian_thread_id).await,
         Err(codex_thread_store::ThreadStoreError::ThreadNotFound { .. })
     ));
-    let guardian_rollout = fs::read_to_string(guardian_rollout_path)?
+    let guardian_rollout = codex_rollout::read_rollout_text(guardian_rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<serde_json::Result<Vec<_>>>()?;

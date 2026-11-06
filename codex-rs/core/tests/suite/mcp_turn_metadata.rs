@@ -1587,8 +1587,7 @@ async fn apps_default_writes_prompts_for_writes_but_not_reads() -> Result<()> {
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        let persisted_hints = tokio::fs::read_to_string(rollout_path)
-            .await?
+        let persisted_hints = codex_rollout::read_rollout_text(rollout_path)?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<serde_json::Result<Vec<_>>>()?

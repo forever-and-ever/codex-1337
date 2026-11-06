@@ -99,8 +99,7 @@ pub(super) async fn decompress_rollout_to_path(
     let locks = Arc::clone(locks);
     tokio::task::spawn_blocking(move || -> io::Result<()> {
         let _locks = locks;
-        let input = std::fs::File::open(compressed_path)?;
-        let mut decoder = zstd::stream::read::Decoder::new(input)?;
+        let mut decoder = codex_rollout::open_rollout_seekable_reader(&compressed_path, || false)?;
         let mut options = std::fs::OpenOptions::new();
         options.create(true).truncate(true).write(true);
         #[cfg(unix)]
@@ -128,15 +127,14 @@ pub(super) async fn compress_rollout_to_path(
     let locks = Arc::clone(locks);
     tokio::task::spawn_blocking(move || -> io::Result<()> {
         let _locks = locks;
-        let mut input = std::fs::File::open(plain_path)?;
+        let input = std::fs::File::open(plain_path)?;
         let output = std::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
+            .read(true)
             .write(true)
             .open(&compressed_path)?;
-        let mut encoder = zstd::stream::write::Encoder::new(output, 3)?;
-        io::copy(&mut input, &mut encoder)?;
-        let output = encoder.finish()?;
+        codex_rollout::encode_framed_rollout(io::BufReader::new(input), output.try_clone()?)?;
         output.set_permissions(permissions)?;
         if let Some(modified_at) = modified_at {
             output.set_times(std::fs::FileTimes::new().set_modified(modified_at))?;

@@ -345,7 +345,7 @@ fn read_hook_log(home: &Path, filename: &str) -> Result<Vec<serde_json::Value>> 
     if !path.exists() {
         return Ok(Vec::new());
     }
-    fs::read_to_string(path)?
+    codex_rollout::read_rollout_text(path)?
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).map_err(Into::into))
@@ -546,8 +546,7 @@ async fn setup_turn_one_with_custom_spawned_child(
             .ok_or_else(|| anyhow::anyhow!("expected parent rollout path"))?;
         let deadline = Instant::now() + Duration::from_secs(6);
         loop {
-            let has_notification = tokio::fs::read_to_string(&rollout_path)
-                .await
+            let has_notification = codex_rollout::read_rollout_text(&rollout_path)
                 .is_ok_and(|rollout| rollout.contains("<subagent_notification>"));
             if has_notification {
                 break;

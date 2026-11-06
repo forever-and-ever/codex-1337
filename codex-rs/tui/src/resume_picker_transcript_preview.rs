@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -149,8 +148,8 @@ fn scan_legacy_transcript_preview(
     inline_visualization_context: Option<&InlineVisualizationContext>,
 ) -> std::io::Result<Option<Vec<TranscriptPreviewLine>>> {
     let mut lines = Vec::with_capacity(MAX_TRANSCRIPT_PREVIEW_LINES);
-    let file = File::open(path)?;
-    let end_offset = file.metadata()?.len();
+    let mut file = codex_rollout::open_rollout_seekable_reader(path, || false)?;
+    let end_offset = file.seek(SeekFrom::End(0))?;
     let minimum_offset = end_offset.saturating_sub(MAX_LEGACY_TRANSCRIPT_PREVIEW_SCAN_BYTES as u64);
     let mut scanner = ReverseJsonlScanner::new_at(
         BoundedRolloutTailReader {
@@ -201,18 +200,18 @@ fn scan_legacy_transcript_preview(
 }
 
 /// Prevents reverse scans from reading past the bounded suffix of a rollout.
-struct BoundedRolloutTailReader {
-    file: File,
+struct BoundedRolloutTailReader<R> {
+    file: R,
     minimum_offset: u64,
 }
 
-impl Read for BoundedRolloutTailReader {
+impl<R: Read> Read for BoundedRolloutTailReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         self.file.read(buffer)
     }
 }
 
-impl Seek for BoundedRolloutTailReader {
+impl<R: Seek> Seek for BoundedRolloutTailReader<R> {
     fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
         let offset = self.file.seek(position)?;
         if offset < self.minimum_offset {

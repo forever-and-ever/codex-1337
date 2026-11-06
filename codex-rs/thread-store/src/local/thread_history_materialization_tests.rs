@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -455,8 +454,8 @@ ORDER BY rollout_ordinal
         vec![("user-1".to_string(), 2), ("agent-1".to_string(), 3)]
     );
 
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     let projection_state = sqlx::query_as::<_, (i64, i64)>(
         r#"
 SELECT next_rollout_byte_offset, next_rollout_ordinal
@@ -804,7 +803,7 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
         .live_rollout_path(thread_id)
         .await
         .expect("rollout path");
-    let expected_rows = fs::read_to_string(rollout_path.as_path())
+    let expected_rows = codex_rollout::read_rollout_text(rollout_path.as_path())
         .expect("read canonical rollout")
         .lines()
         .map(|line| codex_rollout::parse_rollout_line(line).expect("parse rollout line"))
@@ -1254,11 +1253,11 @@ async fn paginated_fork_persists_empty_source() {
         .live_rollout_path(thread_id)
         .await
         .expect("rollout path");
-    assert!(!rollout_path.exists());
+    assert!(!codex_rollout::test_support::rollout_file(&rollout_path).exists());
 
     let prepared = prepare_paginated_fork(&store, thread_id, ForkBoundary::Latest).await;
 
-    assert!(rollout_path.exists());
+    assert!(codex_rollout::test_support::rollout_file(&rollout_path).exists());
     assert_eq!(prepared.history_base, None);
     assert!(matches!(
         prepared.model_context.as_slice(),
@@ -1300,8 +1299,7 @@ async fn paginated_fork_reads_compressed_shared_lineage_without_materializing() 
         .await
         .expect("shutdown ancestor");
 
-    // A standalone source still becomes plain before its first shared reference, so the default
-    // mode does not introduce compressed lineages that older readers cannot follow.
+    // A standalone source is referenced in its own encoding; nothing rewrites it.
     compress_rollout(ancestor_path.as_path());
     assert_eq!(
         prepare_paginated_fork(&store, ancestor_thread_id, ForkBoundary::Latest)
@@ -1309,7 +1307,7 @@ async fn paginated_fork_reads_compressed_shared_lineage_without_materializing() 
             .history_base,
         Some(ancestor_base)
     );
-    assert!(ancestor_path.exists());
+    assert!(codex_rollout::test_support::rollout_file(&ancestor_path).exists());
 
     let source_thread_id = ThreadId::default();
     create_paginated_subagent_thread(
@@ -1342,10 +1340,10 @@ async fn paginated_fork_reads_compressed_shared_lineage_without_materializing() 
         .shutdown_thread(source_thread_id)
         .await
         .expect("shutdown source");
-    let ancestor_compressed_path = ancestor_path.with_extension("jsonl.zst");
-    let source_compressed_path = source_path.with_extension("jsonl.zst");
-    compress_rollout(ancestor_path.as_path());
-    compress_rollout(source_path.as_path());
+    let ancestor_compressed_path = compress_rollout(ancestor_path.as_path());
+    let source_compressed_path = compress_rollout(source_path.as_path());
+    let ancestor_path = codex_rollout::plain_rollout_path(&ancestor_path);
+    let source_path = codex_rollout::plain_rollout_path(&source_path);
     let ancestor_modified = fs::metadata(&ancestor_compressed_path)
         .and_then(|metadata| metadata.modified())
         .expect("read compressed ancestor timestamp");
@@ -2212,12 +2210,8 @@ ORDER BY turns.rollout_ordinal
         ]
     );
 
-    let rollout_len = i64::try_from(
-        fs::metadata(rollout_path.as_path())
-            .expect("rollout metadata")
-            .len(),
-    )
-    .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 11));
 }
 
@@ -2301,8 +2295,8 @@ SELECT
         .live_rollout_path(thread_id)
         .await
         .expect("rollout path");
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 3));
 }
 
@@ -2398,8 +2392,8 @@ async fn catch_up_preserves_trailing_partial_line_boundaries() {
         .await
         .expect("catch up completed partial suffix");
 
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     let turn_position = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
         "SELECT rollout_byte_offset, rollout_end_ordinal, rollout_end_byte_offset FROM thread_turns WHERE thread_id = ? AND turn_id = ?",
     )
@@ -2547,7 +2541,8 @@ async fn catch_up_preserves_committed_batches_on_reader_or_writer_failure() {
             );
         }
         append_suffix(rollout_path.as_path(), "\n");
-        let valid_len = fs::metadata(rollout_path.as_path())
+        let valid_len = rollout_logical_len(rollout_path.as_path());
+        let valid_file_len = fs::metadata(codex_rollout::test_support::rollout_file(&rollout_path))
             .expect("rollout metadata")
             .len();
         match failure {
@@ -2596,9 +2591,9 @@ async fn catch_up_preserves_committed_batches_on_reader_or_writer_failure() {
         match failure {
             Failure::Reader => fs::OpenOptions::new()
                 .write(true)
-                .open(rollout_path.as_path())
+                .open(codex_rollout::test_support::rollout_file(&rollout_path))
                 .expect("open rollout")
-                .set_len(valid_len)
+                .set_len(valid_file_len)
                 .expect("remove invalid suffix"),
             Failure::Writer => {
                 sqlx::query("DROP TRIGGER reject_projection")
@@ -2761,7 +2756,8 @@ async fn catch_up_rejects_missing_rollout_after_projection() {
         .shutdown_thread(thread_id)
         .await
         .expect("close rollout");
-    fs::remove_file(rollout_path.as_path()).expect("remove rollout");
+    fs::remove_file(codex_rollout::test_support::rollout_file(&rollout_path))
+        .expect("remove rollout");
 
     super::materialize_to_sqlite(&store, thread_id, rollout_path.as_path())
         .await
@@ -2822,19 +2818,10 @@ async fn blank_and_rejected_rollout_lines_advance_projection() {
         .live_rollout_path(thread_id)
         .await
         .expect("rollout path");
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(rollout_path.as_path())
-        .expect("open rollout for rejected line");
-    file.write_all(b"{not json}\n\n")
+    codex_rollout::test_support::append_rollout_bytes(rollout_path.as_path(), b"{not json}\n\n")
         .expect("append blank and rejected lines");
-    file.flush().expect("flush rejected line");
-    let rejected_tail_len = i64::try_from(
-        fs::metadata(rollout_path.as_path())
-            .expect("rollout metadata")
-            .len(),
-    )
-    .expect("rollout length");
+    let rejected_tail_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     super::materialize_to_sqlite(&store, thread_id, rollout_path.as_path())
         .await
         .expect("skip rejected tail");
@@ -2887,8 +2874,8 @@ async fn blank_and_rejected_rollout_lines_advance_projection() {
     .await
     .expect("read projected turn byte offset");
     assert_eq!(start_byte_offset, Some(expected_start_byte_offset));
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 2));
 }
 
@@ -2950,8 +2937,8 @@ async fn unknown_rollout_lines_leave_ordinals_pending_for_valid_retries() {
         .await
         .expect("project valid retry and later history");
 
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 4));
     let turn_ordinals = sqlx::query_as::<_, (String, i64)>(
         "SELECT turn_id, rollout_ordinal FROM thread_turns WHERE thread_id = ? ORDER BY rollout_ordinal",
@@ -3020,8 +3007,8 @@ async fn event_timestamps_allow_invalid_rollout_timestamps() {
     .await
     .expect("read projected item timestamp");
     assert_eq!(created_at_ms, 0);
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 3));
 }
 
@@ -3058,8 +3045,8 @@ async fn malformed_rollout_lines_skip_inferred_ordinal_gaps() {
     ))
     .await
     .expect("open thread history db");
-    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
-        .expect("rollout length");
+    let rollout_len =
+        i64::try_from(rollout_logical_len(rollout_path.as_path())).expect("rollout length");
     assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 3));
     let turn_ordinal = sqlx::query_scalar::<_, i64>(
         "SELECT rollout_ordinal FROM thread_turns WHERE thread_id = ? AND turn_id = ?",
@@ -3330,7 +3317,9 @@ fn agent_message(id: &str, phase: MessagePhase) -> TurnItem {
 }
 
 fn rollout_line_byte_offsets(path: &std::path::Path, ordinal: u64) -> (i64, i64) {
-    let bytes = fs::read(path).expect("read rollout");
+    let bytes = codex_rollout::read_rollout_text(path)
+        .expect("read rollout")
+        .into_bytes();
     let mut start_byte_offset = 0;
     for line in bytes.split_inclusive(|byte| *byte == b'\n') {
         let end_byte_offset = start_byte_offset + line.len();
@@ -3349,16 +3338,19 @@ fn rollout_line_byte_offsets(path: &std::path::Path, ordinal: u64) -> (i64, i64)
     panic!("missing rollout ordinal {ordinal}");
 }
 
-fn compress_rollout(path: &Path) {
-    let mut compressed_path = path.as_os_str().to_os_string();
-    compressed_path.push(".zst");
-    let compressed = zstd::stream::encode_all(
-        fs::File::open(path).expect("open rollout for compression"),
-        /*level*/ 0,
-    )
-    .expect("compress rollout");
-    fs::write(compressed_path, compressed).expect("write compressed rollout");
-    fs::remove_file(path).expect("remove plain rollout");
+/// Re-encodes a rollout as upstream's single zstd frame, the encoding `codex rollouts compress`
+/// converts, and returns its path.
+fn compress_rollout(path: &std::path::Path) -> std::path::PathBuf {
+    let contents = codex_rollout::read_rollout_text(path).expect("read rollout");
+    let compressed =
+        zstd::stream::encode_all(contents.as_bytes(), /*level*/ 3).expect("compress rollout");
+    let plain_path = codex_rollout::plain_rollout_path(path);
+    let compressed_path = plain_path.with_extension("jsonl.zst");
+    std::fs::write(&compressed_path, compressed).expect("write compressed rollout");
+    if plain_path.exists() {
+        std::fs::remove_file(plain_path).expect("remove plain rollout");
+    }
+    compressed_path
 }
 
 async fn projection_state(pool: &sqlx::SqlitePool, thread_id: ThreadId) -> (i64, i64) {
@@ -3385,10 +3377,12 @@ fn rollout_line(ordinal: Option<u64>, item: RolloutItem) -> String {
 }
 
 fn append_suffix(rollout_path: &std::path::Path, suffix: &str) {
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(rollout_path)
-        .expect("open rollout suffix");
-    file.write_all(suffix.as_bytes()).expect("append suffix");
-    file.flush().expect("flush suffix");
+    codex_rollout::test_support::append_rollout_bytes(rollout_path, suffix.as_bytes())
+        .expect("append suffix");
+}
+
+fn rollout_logical_len(rollout_path: &std::path::Path) -> u64 {
+    codex_rollout::read_rollout_text(rollout_path)
+        .expect("read rollout")
+        .len() as u64
 }

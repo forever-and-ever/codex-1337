@@ -502,10 +502,10 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         let marker_clone = marker.clone();
         let path =
             fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
-                if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                if !p.to_string_lossy().ends_with(".jsonl.zst") {
                     return false;
                 }
-                let Ok(content) = std::fs::read_to_string(p) else {
+                let Ok(content) = codex_rollout::read_rollout_text(p) else {
                     return false;
                 };
                 content.contains(&marker_clone)
@@ -547,7 +547,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
             assert!((1..=31).contains(&d), "Day out of range: {d}");
         }
 
-        let content = std::fs::read_to_string(&path).expect("failed to read session file");
+        let content = codex_rollout::read_rollout_text(&path).expect("failed to read session file");
         let mut lines = content.lines();
         let meta_line = lines
             .next()
@@ -613,10 +613,10 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         let marker2_clone = marker2.clone();
         let resumed_path =
             fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
-                if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                if !p.to_string_lossy().ends_with(".jsonl.zst") {
                     return false;
                 }
-                std::fs::read_to_string(p)
+                codex_rollout::read_rollout_text(p)
                     .map(|content| content.contains(&marker2_clone))
                     .unwrap_or(false)
             })
@@ -628,7 +628,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
             "resume should create a new session file"
         );
 
-        let resumed_content = std::fs::read_to_string(&resumed_path)?;
+        let resumed_content = codex_rollout::read_rollout_text(&resumed_path)?;
         assert!(
             resumed_content.contains(&marker),
             "resumed file missing original marker"

@@ -1384,7 +1384,8 @@ async fn deferred_executor_promotes_primary_environment_when_startup_completes()
 
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
-        let rollout = fs::read_to_string(test.codex.rollout_path().context("rollout path")?)?;
+        let rollout =
+            codex_rollout::read_rollout_text(test.codex.rollout_path().context("rollout path")?)?;
         let world_state_patch = rollout
             .lines()
             .map(codex_rollout::parse_rollout_line)
@@ -3672,7 +3673,7 @@ async fn deferred_executor_compaction_preserves_then_updates_environment_once() 
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
         let rollout_path = test.codex.rollout_path().context("rollout path")?;
-        let rollout = fs::read_to_string(rollout_path)?;
+        let rollout = codex_rollout::read_rollout_text(rollout_path)?;
         let world_state_items = rollout
             .lines()
             .map(codex_rollout::parse_rollout_line)

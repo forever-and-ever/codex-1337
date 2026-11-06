@@ -1,4 +1,4 @@
-//! Shared cross-process ownership for local thread writers and rollout publication.
+//! Shared cross-process ownership for local thread writers and rollout conversion.
 //! Thread lock-file creation and removal uses a bounded wait for the home coordination lock.
 
 use std::fs;
@@ -85,26 +85,6 @@ impl WriterLockCoordinator {
             path,
             file: Some(file),
         })
-    }
-
-    /// Holds coordination through publication after probing that the thread is idle.
-    /// Every writer takes coordination before opening its thread lock, so the probe
-    /// itself can be released. Encoding and verification must finish before this call.
-    pub(crate) fn try_acquire_for_publication(
-        &self,
-        thread_id: ThreadId,
-    ) -> io::Result<Option<File>> {
-        let coordination_lock = self.lock_coordination()?;
-        let path = self.directory.join(format!("{thread_id}.lock"));
-        match OpenOptions::new().read(true).write(true).open(path) {
-            Ok(file) => match file.try_lock() {
-                Ok(()) => Ok(Some(coordination_lock)),
-                Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-                Err(std::fs::TryLockError::Error(err)) => Err(err),
-            },
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Some(coordination_lock)),
-            Err(err) => Err(err),
-        }
     }
 
     fn lock_coordination(&self) -> io::Result<File> {

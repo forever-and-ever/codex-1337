@@ -518,7 +518,10 @@ async fn managed_force_shutdown_exits_with_blocked_rollout_writer() -> Result<()
         .thread
         .path
         .context("persistent thread rollout path")?;
-    assert!(!rollout.exists(), "idle rollout should still be deferred");
+    assert!(
+        !codex_rollout::test_support::rollout_file(&rollout).exists(),
+        "idle rollout should still be deferred"
+    );
     let compressed = rollout.with_extension("jsonl.zst");
     std::fs::create_dir_all(compressed.parent().context("rollout directory")?)?;
     assert!(

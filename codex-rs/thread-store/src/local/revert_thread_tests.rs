@@ -115,7 +115,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .expect("close source writer");
     // A failed append was newline-terminated on reopen, then durably retried with the same
     // ordinal and a new timestamp. Reconciliation must prove the retry, never skip bad mail.
-    let original = std::fs::read_to_string(&original_path).expect("read canonical source");
+    let original = codex_rollout::read_rollout_text(&original_path).expect("read canonical source");
     let mut retried = String::new();
     for line in original.lines() {
         if line.contains(mail[0].id.as_ref().expect("mail identity").as_str()) {
@@ -262,8 +262,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     );
 
     // Simulate an older binary replacing the rollout without the creator fields it does not know.
-    let rollout = tokio::fs::read_to_string(&first_replacement_path)
-        .await
+    let rollout = codex_rollout::read_rollout_text(&first_replacement_path)
         .expect("read replacement rollout");
     let (meta_line, remaining_lines) = rollout.split_once('\n').expect("session metadata line");
     let mut meta_line: serde_json::Value = serde_json::from_str(meta_line).expect("parse metadata");
@@ -278,6 +277,9 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     )
     .await
     .expect("write legacy replacement rollout");
+    // The older binary's plain file replaces the framed one.
+    std::fs::remove_file(first_replacement_path.with_extension("jsonl.zst"))
+        .expect("remove framed rollout");
 
     store
         .revert_thread(RevertThreadParams {
@@ -514,9 +516,17 @@ fn turn_completed(turn_id: &str) -> RolloutItem {
     }))
 }
 
-fn compress_rollout(path: &std::path::Path) {
-    let contents = std::fs::read(path).expect("read rollout");
-    let compressed = zstd::stream::encode_all(contents.as_slice(), 3).expect("compress rollout");
-    std::fs::write(path.with_extension("jsonl.zst"), compressed).expect("write compressed rollout");
-    std::fs::remove_file(path).expect("remove plain rollout");
+/// Re-encodes a rollout as upstream's single zstd frame, the encoding `codex rollouts compress`
+/// converts, and returns its path.
+fn compress_rollout(path: &std::path::Path) -> std::path::PathBuf {
+    let contents = codex_rollout::read_rollout_text(path).expect("read rollout");
+    let compressed =
+        zstd::stream::encode_all(contents.as_bytes(), /*level*/ 3).expect("compress rollout");
+    let plain_path = codex_rollout::plain_rollout_path(path);
+    let compressed_path = plain_path.with_extension("jsonl.zst");
+    std::fs::write(&compressed_path, compressed).expect("write compressed rollout");
+    if plain_path.exists() {
+        std::fs::remove_file(plain_path).expect("remove plain rollout");
+    }
+    compressed_path
 }

@@ -403,7 +403,7 @@ async fn assert_copied_fork_persists_inherited_history(history_mode: ThreadHisto
 
 fn read_rollout_items(path: &std::path::Path) -> Vec<RolloutItem> {
     let read_message = format!("failed to read rollout file {}", path.display());
-    let text = std::fs::read_to_string(path).expect(&read_message);
+    let text = codex_rollout::read_rollout_text(path).expect(&read_message);
     let mut items: Vec<RolloutItem> = Vec::new();
     for line in text.lines() {
         if line.trim().is_empty() {

@@ -581,7 +581,7 @@ async fn live_mode_change_appends_mode_without_reappending_usage_hint() -> Resul
         );
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
-        let rollout_values = std::fs::read_to_string(rollout_path)?
+        let rollout_values = codex_rollout::read_rollout_text(rollout_path)?
             .lines()
             .map(serde_json::from_str::<Value>)
             .collect::<serde_json::Result<Vec<_>>>()?;

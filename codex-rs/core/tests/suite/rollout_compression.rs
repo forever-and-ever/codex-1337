@@ -1,16 +1,11 @@
-//! Exercises cold shared rollout compression through fork, checkpoint resume, and model input.
+//! Exercises framed shared rollouts through fork, checkpoint resume, and model input.
 
-use std::fs::FileTimes;
-use std::fs::OpenOptions;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
 
 use anyhow::Context;
 use anyhow::Result;
 use codex_core::CodexThread;
 use codex_core::TurnInputRequest;
-use codex_features::Feature;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_protocol::mcp::ClientMcpExtensions;
@@ -35,7 +30,7 @@ use pretty_assertions::assert_eq;
 use wiremock::MockServer;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn compressed_shared_fork_resume_preserves_checkpoint_and_frozen_history() -> Result<()> {
+async fn framed_shared_fork_resume_preserves_checkpoint_and_frozen_history() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -43,10 +38,6 @@ async fn compressed_shared_fork_resume_preserves_checkpoint_and_frozen_history()
         .with_history_mode(ThreadHistoryMode::Paginated)
         .with_config(|config| {
             config.model_provider.name = "Local compaction test provider".to_string();
-            config
-                .features
-                .disable(Feature::LocalThreadStoreCompression)
-                .expect("disable compression while building the lineage");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -120,42 +111,17 @@ async fn compressed_shared_fork_resume_preserves_checkpoint_and_frozen_history()
         Some(test.session_configured.thread_id),
     );
 
-    let paths = [&parent_path, &child_path];
-    let original_bytes = paths
-        .iter()
-        .map(std::fs::read)
-        .collect::<std::io::Result<Vec<_>>>()?;
-    let old = SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60);
-    for path in paths {
-        OpenOptions::new()
-            .write(true)
-            .open(path)?
-            .set_times(FileTimes::new().set_modified(old))?;
+    for path in [&parent_path, &child_path] {
+        assert!(
+            !path.exists() && path.with_extension("jsonl.zst").exists(),
+            "{} should be written framed",
+            path.display()
+        );
     }
-    let mut config = test.config.clone();
-    config
-        .features
-        .enable(Feature::LocalThreadStoreCompression)?;
-    // Use production feature wiring, rather than manually writing zstd files or calling the worker.
+    let config = test.config.clone();
+    // A fresh store, as after a restart, reads the framed lineage from disk.
     let store =
         codex_core::thread_store_from_config(&config, codex_core::init_state_db(&config).await);
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            if paths
-                .iter()
-                .all(|path| !path.exists() && path.with_extension("jsonl.zst").exists())
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .context("shared rollout compression should finish")?;
-    for (path, original) in paths.into_iter().zip(original_bytes) {
-        let compressed = std::fs::File::open(path.with_extension("jsonl.zst"))?;
-        assert_eq!(zstd::stream::decode_all(compressed)?, original);
-    }
 
     // Follow the paginated resume path: load the latest checkpoint from disk, then resume core.
     let context = store

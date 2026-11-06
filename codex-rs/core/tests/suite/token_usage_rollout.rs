@@ -18,7 +18,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 fn token_usage_records(path: &std::path::Path) -> Vec<TokenUsageRecord> {
-    std::fs::read_to_string(path)
+    codex_rollout::read_rollout_text(path)
         .expect("read rollout")
         .lines()
         .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())

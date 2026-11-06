@@ -1,13 +1,7 @@
 //! Persist Codex session rollouts (.jsonl) so sessions can be replayed or inspected later.
 
 use std::collections::HashSet;
-use std::fs;
-use std::fs::File;
 use std::io::Error as IoError;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,7 +19,6 @@ use time::OffsetDateTime;
 use time::format_description::FormatItem;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
-use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -51,13 +44,13 @@ use super::list::parse_cursor;
 use super::list::parse_timestamp_uuid_from_filename;
 use super::metadata;
 use super::ordinal::RolloutOrdinalState;
-use super::ordinal::ordinal_state_for_rollout;
 use super::rollout_file_name::RolloutFileName;
 use super::session_index::find_thread_names_by_ids;
 use crate::InitialHistory;
 use crate::ResumedHistory;
 use crate::RolloutItem;
 use crate::config::RolloutConfigView;
+use crate::rollout_sink::RolloutSink;
 use crate::state_db;
 use crate::state_db::StateDbHandle;
 use codex_git_utils::collect_git_info;
@@ -1010,10 +1003,10 @@ impl RolloutRecorder {
                 }
             }
             RolloutRecorderParams::Resume { path } => {
-                let (path, file, ordinal_state) =
+                let (path, sink, ordinal_state) =
                     open_rollout_for_append(path.as_path(), writer_lock.clone()).await?;
                 RolloutWriterState {
-                    writer: Some(JsonlWriter { file }),
+                    writer: Some(JsonlWriter { sink }),
                     deferred_creation: false,
                     pending_items: Vec::new(),
                     meta: None,
@@ -1795,36 +1788,9 @@ fn precompute_new_rollout_path(
     Ok((path, timestamp))
 }
 
-fn open_log_file(path: &Path) -> std::io::Result<File> {
-    let refresh_modified_time = !compression::plain_rollout_path(path).try_exists()?;
-    let path = compression::materialize_rollout_for_append_blocking(path)?;
-    let Some(parent) = path.parent() else {
-        return Err(IoError::other(format!(
-            "rollout path has no parent: {}",
-            path.display()
-        )));
-    };
-    fs::create_dir_all(parent)?;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open(path)?;
-    if refresh_modified_time {
-        refresh_rollout_modified_time(&file)?;
-    }
-    ensure_rollout_is_newline_terminated(&mut file)?;
-    Ok(file)
-}
-
-fn refresh_rollout_modified_time(file: &File) -> std::io::Result<()> {
-    match file.set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now())) {
-        Ok(()) => Ok(()),
-        // A preserved ACL can permit appending while denying explicit timestamp changes.
-        // The append itself will update mtime, so this refresh must not prevent it.
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
-        Err(err) => Err(err),
-    }
+fn open_log_file(path: &Path) -> std::io::Result<RolloutSink> {
+    let path = compression::resolve_rollout_for_append_blocking(path)?;
+    RolloutSink::create(path.as_path())
 }
 
 /// Mutable state owned by the background rollout writer.
@@ -1845,6 +1811,16 @@ struct RolloutWriterState {
 }
 
 impl RolloutWriterState {
+    /// Ends the open frame of a framed rollout; a failure drops the writer like a failed write.
+    fn close_frame(&mut self) {
+        let Some(writer) = self.writer.as_mut() else {
+            return;
+        };
+        if let Err(err) = writer.sink.close_frame() {
+            self.enter_recovery_mode(&err);
+        }
+    }
+
     fn add_items(&mut self, items: Vec<RolloutItem>) {
         self.pending_items.extend(items);
     }
@@ -1927,10 +1903,8 @@ impl RolloutWriterState {
             return Ok(());
         }
 
-        let file = open_log_file(self.rollout_path.as_path())?;
-        self.writer = Some(JsonlWriter {
-            file: tokio::fs::File::from_std(file),
-        });
+        let sink = open_log_file(self.rollout_path.as_path())?;
+        self.writer = Some(JsonlWriter { sink });
         self.deferred_creation = false;
         Ok(())
     }
@@ -1957,7 +1931,7 @@ impl RolloutWriterState {
         self.write_pending_items_once().await?;
 
         if let Some(writer) = self.writer.as_mut() {
-            writer.file.flush().await?;
+            writer.sink.flush().await?;
         }
         Ok(())
     }
@@ -1998,8 +1972,27 @@ async fn rollout_writer(
     mut state: RolloutWriterState,
     mut rx: mpsc::Receiver<RolloutCmd>,
 ) -> std::io::Result<()> {
-    // Process rollout commands
-    while let Some(cmd) = rx.recv().await {
+    loop {
+        let idle_deadline = state
+            .writer
+            .as_ref()
+            .and_then(|writer| writer.sink.idle_deadline());
+        let cmd = match idle_deadline {
+            Some(deadline) => {
+                let deadline = tokio::time::Instant::from_std(deadline);
+                match tokio::time::timeout_at(deadline, rx.recv()).await {
+                    Ok(cmd) => cmd,
+                    Err(_) => {
+                        state.close_frame();
+                        continue;
+                    }
+                }
+            }
+            None => rx.recv().await,
+        };
+        let Some(cmd) = cmd else {
+            break;
+        };
         match cmd {
             RolloutCmd::ReadUnpersistedSessionMeta { ack } => {
                 let metadata = if state.is_deferred() {
@@ -2034,6 +2027,7 @@ async fn rollout_writer(
             },
         }
     }
+    state.close_frame();
 
     Ok(())
 }
@@ -2076,56 +2070,33 @@ pub async fn append_rollout_item_to_path(
     rollout_path: &Path,
     item: &RolloutItem,
 ) -> std::io::Result<()> {
-    let (_rollout_path, file, ordinal_state) =
+    let (_rollout_path, sink, ordinal_state) =
         open_rollout_for_append(rollout_path, /*writer_lock*/ None).await?;
     let ordinal = ordinal_state.current()?;
-    let mut writer = JsonlWriter { file };
-    writer.write_rollout_item(item, ordinal).await
+    let mut writer = JsonlWriter { sink };
+    writer.write_rollout_item(item, ordinal).await?;
+    // Nothing follows this line, so end its frame now rather than leave it for the next writer.
+    writer.sink.close_frame()
 }
 
 async fn open_rollout_for_append(
     path: &Path,
     writer_lock: Option<Arc<crate::WriterLockGuard>>,
-) -> std::io::Result<(PathBuf, tokio::fs::File, RolloutOrdinalState)> {
-    let refresh_modified_time =
-        !tokio::fs::try_exists(compression::plain_rollout_path(path)).await?;
-    let path = compression::materialize_rollout_for_append(path, writer_lock.clone()).await?;
+) -> std::io::Result<(PathBuf, RolloutSink, RolloutOrdinalState)> {
+    let path = compression::resolve_rollout_for_append(path, writer_lock.clone()).await?;
     let path_for_open = path.clone();
-    let (file, ordinal_state) = tokio::task::spawn_blocking(move || {
+    let (sink, ordinal_state) = tokio::task::spawn_blocking(move || {
         let _writer_lock = writer_lock;
-        let mut file = File::options()
-            .read(true)
-            .append(true)
-            .open(path_for_open.as_path())?;
-        if refresh_modified_time {
-            refresh_rollout_modified_time(&file)?;
-        }
-        ensure_rollout_is_newline_terminated(&mut file)?;
-        let ordinal_state = ordinal_state_for_rollout(&mut file, path_for_open.as_path())?;
-        Ok::<_, std::io::Error>((file, ordinal_state))
+        RolloutSink::resume(path_for_open.as_path())
     })
     .await
     .map_err(IoError::other)??;
-    Ok((path, tokio::fs::File::from_std(file), ordinal_state))
-}
-
-fn ensure_rollout_is_newline_terminated(file: &mut File) -> std::io::Result<()> {
-    if file.metadata()?.len() == 0 {
-        return Ok(());
-    }
-
-    file.seek(SeekFrom::End(-1))?;
-    let mut final_byte = [0];
-    file.read_exact(&mut final_byte)?;
-    if final_byte[0] != b'\n' {
-        file.write_all(b"\n")?;
-        file.flush()?;
-    }
-    Ok(())
+    // Callers keep the logical plain name; each open resolves the file behind it.
+    Ok((compression::plain_rollout_path(&path), sink, ordinal_state))
 }
 
 struct JsonlWriter {
-    file: tokio::fs::File,
+    sink: RolloutSink,
 }
 
 #[derive(serde::Serialize)]
@@ -2160,9 +2131,7 @@ impl JsonlWriter {
     async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
         let mut json = serde_json::to_string(item)?;
         json.push('\n');
-        self.file.write_all(json.as_bytes()).await?;
-        self.file.flush().await?;
-        Ok(())
+        self.sink.append_line(json.as_bytes()).await
     }
 }
 

@@ -364,7 +364,7 @@ async fn model_change_appends_model_instructions_developer_message() -> Result<(
         test.codex.ensure_rollout_materialized().await;
         test.codex.flush_rollout().await?;
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        let model_states = std::fs::read_to_string(rollout_path)?
+        let model_states = codex_rollout::read_rollout_text(rollout_path)?
             .lines()
             .map(codex_rollout::parse_rollout_line)
             .collect::<serde_json::Result<Vec<_>>>()?

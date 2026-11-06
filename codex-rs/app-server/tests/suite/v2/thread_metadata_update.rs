@@ -763,7 +763,7 @@ async fn thread_metadata_update_sanitizes_git_origin_before_persisting() -> Resu
         persisted.git_origin_url.as_deref(),
         Some("https://example.invalid/org/repo.git")
     );
-    let rollout = fs::read_to_string(persisted.rollout_path)?;
+    let rollout = codex_rollout::read_rollout_text(persisted.rollout_path)?;
     assert!(!rollout.contains("synthetic-git-secret"));
     assert!(rollout.contains("https://example.invalid/org/repo.git"));
 

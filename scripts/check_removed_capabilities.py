@@ -50,6 +50,7 @@ CUT_PREFIXES = (
     "codex-rs/state/logs_migrations/",
     "codex-rs/state/src/runtime/reclamation",
     "codex-rs/file-system/src/local_logs.rs",
+    "codex-rs/thread-store/src/local/compression_writer_tests.rs",
 )
 CUT_SNAPSHOTS = (
     "__slash_pets",
@@ -86,7 +87,9 @@ CUT_REFERENCES = re.compile(
     r"|\bexternal_agent_config_processor\b|codex_external_agent_migration::"
     r"|SlashCommand::Feedback\b|\bFeedbackRequestProcessor\b|\blog_db::start\b"
     r"|\bquery_feedback_logs\w*|\bguardian_review_failures\b|\brecord_guardian_review_failure\b"
-    r"|\b(?:logs_db_path|with_local_logs_home|LocalLogsDir|SqliteReclamationWorker)\b",
+    r"|\b(?:logs_db_path|with_local_logs_home|LocalLogsDir|SqliteReclamationWorker)\b"
+    r"|\b(?:spawn_rollout_compression_worker|RolloutCompressionTrigger|persist_temp_file_noclobber)\b"
+    r"|\b(?:materialize_rollout_for_append\w*|try_acquire_for_publication|feedback_rollout_path)\b",
     re.IGNORECASE,
 )
 
@@ -138,7 +141,11 @@ def main() -> int:
     if "codex-external-agent-migration" in (ROOT / "codex-rs/Cargo.lock").read_text():
         failures.append("import crate restored to Cargo.lock")
     features = (ROOT / "codex-rs/features/src/lib.rs").read_text()
-    for feature in ("ExternalAgentMemoryImport", "ExternalMigration"):
+    for feature in (
+        "ExternalAgentMemoryImport",
+        "ExternalMigration",
+        "LocalThreadStoreCompression",
+    ):
         if not re.search(
             rf"id: Feature::{feature},[^}}]*stage: Stage::Removed,", features
         ):

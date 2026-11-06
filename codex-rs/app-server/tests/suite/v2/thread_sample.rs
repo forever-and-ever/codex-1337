@@ -296,7 +296,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
         timeout(WAIT, client.read_notification("turn/completed")).await??;
     assert_eq!(completed.turn.status, parent_status);
     let path = parent.thread.path.as_ref().expect("persistent source path");
-    let before = std::fs::read(path)?;
+    let before = codex_rollout::read_rollout_text(path)?;
     client.clear_message_buffer();
     let result = sample(
         &mut client,
@@ -329,7 +329,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             output_tokens: Some(5),
         }
     );
-    assert_eq!(std::fs::read(path)?, before);
+    assert_eq!(codex_rollout::read_rollout_text(path)?, before);
     assert!(
         !client
             .pending_notification_methods()

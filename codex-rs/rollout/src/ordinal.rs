@@ -1,7 +1,7 @@
-use std::fs::File;
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
@@ -53,7 +53,7 @@ impl RolloutOrdinalState {
 }
 
 pub(crate) fn ordinal_state_for_rollout(
-    file: &mut File,
+    file: &mut (impl Read + Seek),
     path: &Path,
 ) -> io::Result<RolloutOrdinalState> {
     let Some((history_mode, subagent_history_start_ordinal)) = read_history_metadata(file, path)?
@@ -64,7 +64,7 @@ pub(crate) fn ordinal_state_for_rollout(
         return Ok(RolloutOrdinalState::Legacy);
     }
 
-    let mut scanner = ReverseJsonlScanner::new(file)?;
+    let mut scanner = ReverseJsonlScanner::new(&mut *file)?;
     let record = loop {
         match scanner.scan_next_rollout_line()? {
             Some(ScanOutcome::Parsed(record)) => break record,
@@ -100,11 +100,11 @@ pub(crate) fn ordinal_state_for_rollout(
 }
 
 fn read_history_metadata(
-    file: &mut File,
+    file: &mut (impl Read + Seek),
     path: &Path,
 ) -> io::Result<Option<(ThreadHistoryMode, Option<u64>)>> {
     file.seek(SeekFrom::Start(0))?;
-    let reader = BufReader::new(file);
+    let reader = BufReader::new(&mut *file);
     for line in reader.lines() {
         let line = line?;
         if line.trim().is_empty() {

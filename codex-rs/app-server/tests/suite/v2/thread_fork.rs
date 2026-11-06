@@ -179,7 +179,7 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
         &RolloutItem::SessionMeta(Box::new(session_meta)),
     )
     .await?;
-    let original_contents = std::fs::read_to_string(&original_path)?;
+    let original_contents = codex_rollout::read_rollout_text(&original_path)?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -222,7 +222,7 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
         "thread/fork should not serialize a top-level `sessionId`"
     );
 
-    let after_contents = std::fs::read_to_string(&original_path)?;
+    let after_contents = codex_rollout::read_rollout_text(&original_path)?;
     assert_eq!(
         after_contents, original_contents,
         "fork should not mutate the original rollout file"
@@ -660,7 +660,7 @@ async fn assert_thread_fork_at_named_boundary_keeps_only_terminal_prefix(
         .await??;
     }
 
-    let original_contents = std::fs::read_to_string(source_path.as_path())?;
+    let original_contents = codex_rollout::read_rollout_text(source_path.as_path())?;
     // Membership added after the requested history cutoff must still be inherited.
     let attachment: ThreadAttachmentAddResponse = mcp
         .request(|request_id| ClientRequest::ThreadAttachmentAdd {
@@ -705,6 +705,7 @@ async fn assert_thread_fork_at_named_boundary_keeps_only_terminal_prefix(
             .thread
             .path
             .as_ref()
+            .map(|path| codex_rollout::test_support::rollout_file(path))
             .expect("durable fork path")
             .exists()
     );
@@ -821,13 +822,13 @@ async fn assert_thread_fork_at_named_boundary_keeps_only_terminal_prefix(
         assert_eq!(forked_thread.preview, "first");
     }
     assert_eq!(
-        std::fs::read_to_string(source_path.as_path())?,
+        codex_rollout::read_rollout_text(source_path.as_path())?,
         original_contents,
         "forking at a turn must not mutate the source rollout"
     );
 
     let forked_path = forked_thread.path.clone().expect("forked thread path");
-    let forked_contents = std::fs::read_to_string(forked_path.as_path())?;
+    let forked_contents = codex_rollout::read_rollout_text(forked_path.as_path())?;
     if history_mode == ThreadHistoryMode::Paginated {
         assert!(
             read_session_meta_line(forked_path.as_path())
@@ -1560,7 +1561,9 @@ async fn thread_fork_creates_reference_backed_paginated_thread() -> Result<()> {
     assert_eq!(forked_thread.turns.len(), 1);
     let forked_thread_id = forked_thread.id.clone();
     let forked_path = forked_thread.path.expect("forked rollout path");
-    assert!(!std::fs::read_to_string(forked_path.as_path())?.contains("Saved user message"));
+    assert!(
+        !codex_rollout::read_rollout_text(forked_path.as_path())?.contains("Saved user message")
+    );
     let meta = read_session_meta_line(forked_path.as_path()).await?;
     let history_base = meta.meta.history_base.expect("history base");
     assert_eq!(
@@ -1996,7 +1999,7 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
         .meta
         .history_base
         .expect("fork history base");
-    let child_rollout = std::fs::read_to_string(forked_path.as_path())?
+    let child_rollout = codex_rollout::read_rollout_text(forked_path.as_path())?
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<Result<Vec<_>, _>>()?;
@@ -2054,10 +2057,11 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
             },
         })
         .await?;
-    let side_rollout = std::fs::read_to_string(side_persistent.path.expect("side rollout path"))?;
+    let side_rollout =
+        codex_rollout::read_rollout_text(side_persistent.path.expect("side rollout path"))?;
     assert!(!side_rollout.contains("<turn_aborted>"));
     assert!(side_rollout.contains("turn_aborted"));
-    assert!(!std::fs::read_to_string(&source_path)?.contains("turn_aborted"));
+    assert!(!codex_rollout::read_rollout_text(&source_path)?.contains("turn_aborted"));
 
     append_rollout_item_to_path(source_path.as_path(), &user_response_item("after-fork")).await?;
     append_rollout_item_to_path(
@@ -3274,7 +3278,10 @@ async fn inheriting_fork_requires_persisted_parent(
         error.error.message
     );
     if let Some(path) = parent.thread.path {
-        assert!(!path.exists(), "forking should not materialize the parent");
+        assert!(
+            !codex_rollout::test_support::rollout_file(&path).exists(),
+            "forking should not materialize the parent"
+        );
     }
     Ok(())
 }

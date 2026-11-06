@@ -11877,11 +11877,11 @@ async fn hook_transcript_path_does_not_persist_non_local_thread_store() {
 async fn hook_transcript_path_materializes_lazy_local_thread() {
     let (mut session, _) = make_session_and_context().await;
     let rollout_path = open_thread_persistence(&mut session).await;
-    assert!(!rollout_path.exists());
+    assert!(!codex_rollout::test_support::rollout_file(&rollout_path).exists());
 
     assert_eq!(
         session.hook_transcript_path().await,
-        Some(rollout_path.clone())
+        Some(codex_rollout::test_support::rollout_file(&rollout_path))
     );
     let (items, thread_id, parse_errors) = RolloutRecorder::load_rollout_items(&rollout_path)
         .await

@@ -213,7 +213,7 @@ async fn prepared_spawn_captures_policy_after_fork_history() -> anyhow::Result<(
     let rollout = parent
         .rollout_path()
         .expect("local parent has a rollout path");
-    assert!(!rollout.try_exists()?);
+    assert!(!codex_rollout::test_support::rollout_file(&rollout).try_exists()?);
     let mut preparation = std::pin::pin!(prepare_spawn(
         &parent,
         request,
@@ -222,7 +222,7 @@ async fn prepared_spawn_captures_policy_after_fork_history() -> anyhow::Result<(
     ));
     // Pause the fork as soon as it materializes the parent's rollout, then amend the policy.
     let materialized = poll_fn(|cx| {
-        if rollout.exists() {
+        if codex_rollout::test_support::rollout_file(&rollout).exists() {
             return Poll::Ready(());
         }
         assert!(

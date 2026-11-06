@@ -154,7 +154,7 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
     .expect("expected archived rollout path for thread id to exist");
     let archived_path_display = archived_path.display();
     assert!(
-        archived_path.exists(),
+        codex_rollout::test_support::rollout_file(&archived_path).exists(),
         "expected {archived_path_display} to exist"
     );
     let old_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
@@ -165,7 +165,7 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
     let times = FileTimes::new().set_modified(old_time);
     OpenOptions::new()
         .append(true)
-        .open(&archived_path)?
+        .open(codex_rollout::test_support::rollout_file(&archived_path))?
         .set_times(times)?;
 
     let unarchive_id = mcp
@@ -221,11 +221,11 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
 
     let rollout_path_display = rollout_path.display();
     assert!(
-        rollout_path.exists(),
+        codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "expected rollout path {rollout_path_display} to be restored"
     );
     assert!(
-        !archived_path.exists(),
+        !codex_rollout::test_support::rollout_file(&archived_path).exists(),
         "expected archived rollout path {archived_path_display} to be moved"
     );
 
@@ -385,8 +385,8 @@ impl Drop for InMemoryThreadStoreId {
 }
 
 fn assert_paths_match_on_disk(actual: &Path, expected: &Path) -> std::io::Result<()> {
-    let actual = actual.canonicalize()?;
-    let expected = expected.canonicalize()?;
+    let actual = codex_rollout::test_support::rollout_file(actual).canonicalize()?;
+    let expected = codex_rollout::test_support::rollout_file(expected).canonicalize()?;
     assert_eq!(actual, expected);
     Ok(())
 }

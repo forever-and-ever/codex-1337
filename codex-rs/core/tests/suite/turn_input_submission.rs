@@ -859,7 +859,7 @@ async fn recovery_preserves_durable_turn_attribution(
             .expect("suspended thread is loaded");
         if attempt == 0 && matches!(pause, RecoveryPause::LegacyRollout) {
             let mut legacy_rollout = String::new();
-            for line in std::fs::read_to_string(&rollout_path)?.lines() {
+            for line in codex_rollout::read_rollout_text(&rollout_path)?.lines() {
                 let mut item: Value = serde_json::from_str(line)?;
                 if let Some(payload) = item["payload"].as_object_mut() {
                     payload.remove("turn_attribution");

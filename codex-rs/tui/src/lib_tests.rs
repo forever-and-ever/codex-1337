@@ -953,7 +953,7 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         format!("gitdir: {}", admin.display()),
     )?;
 
-    let mut config = ConfigBuilder::default()
+    let config = ConfigBuilder::default()
         .codex_home(temp_dir.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             cwd: Some(project_cwd.clone()),
@@ -961,9 +961,6 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         })
         .build()
         .await?;
-    config
-        .features
-        .enable(codex_features::Feature::LocalThreadStoreCompression)?;
     let model_provider = config.model_provider_id.as_str();
     let project_thread_id = write_session_rollout(
         temp_dir.path(),
@@ -973,7 +970,7 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         model_provider,
         &project_cwd,
     )?;
-    let linked_thread_id = write_session_rollout(
+    write_session_rollout(
         temp_dir.path(),
         "2025-01-02T11-00-00",
         "2025-01-02T11:00:00Z",
@@ -989,14 +986,11 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         model_provider,
         &other_cwd,
     )?;
-    let rollout_paths = [
-        ("2025-01-02T10-00-00", project_thread_id),
-        ("2025-01-02T11-00-00", linked_thread_id),
-        ("2025-01-02T12-00-00", other_thread_id),
-    ]
-    .map(|(timestamp, thread_id)| {
-        app_test_support::rollout_path(temp_dir.path(), timestamp, &thread_id.to_string())
-    });
+    // Exercise the logical .jsonl paths thread/list returns for framed rollouts.
+    let rollouts = codex_rollout::local_rollouts(temp_dir.path())?;
+    assert_eq!(rollouts.len(), 3);
+    let conversion = codex_rollout::convert_rollouts(temp_dir.path(), rollouts);
+    assert_eq!((conversion.converted, conversion.failed.len()), (3, 0));
 
     let mut app_server = AppServerSession::new(
         crate::backend_id::BackendId::new(),
@@ -1005,16 +999,6 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         ),
         ThreadParamsMode::Embedded,
     );
-    // Exercise the logical .jsonl paths returned by thread/list after startup compression.
-    tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
-        while rollout_paths
-            .iter()
-            .any(|path| path.exists() || !path.with_extension("jsonl.zst").exists())
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 10)).await;
-        }
-    })
-    .await?;
     let filter_cwd = latest_session_cwd_filter(
         /*uses_remote_workspace*/ false, /*remote_cwd_override*/ None, &config,
         /*show_all*/ false,

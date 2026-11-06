@@ -135,7 +135,7 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         [json!("concise"), json!("detailed"), json!("detailed")]
     );
     let rollout =
-        std::fs::read_to_string(test.session_configured.rollout_path.expect("rollout path"))?;
+        codex_rollout::read_rollout_text(test.session_configured.rollout_path.expect("rollout path"))?;
     let items = rollout
         .lines()
         .map(codex_rollout::parse_rollout_line)

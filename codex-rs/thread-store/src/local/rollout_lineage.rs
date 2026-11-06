@@ -137,8 +137,11 @@ impl LocalThreadStore {
                             rollout_path.display()
                         ),
                     };
-                    let canonical_rollout_path = std::fs::canonicalize(rollout_path.as_path())
-                        .map_err(|_| outside_codex_home())?;
+                    let file = codex_rollout::existing_rollout_path(rollout_path.as_path())
+                        .await
+                        .unwrap_or_else(|| rollout_path.clone());
+                    let canonical_rollout_path =
+                        std::fs::canonicalize(file).map_err(|_| outside_codex_home())?;
                     // Resume can retain either the logical Codex home path or its canonical
                     // target. Keep references inside canonical managed roots so nested symlinks
                     // cannot escape them.

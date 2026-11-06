@@ -317,16 +317,13 @@ these values rather than message text. Native diagnostic payloads stay private.
 ## Local rollout compression
 
 The experimental `rollout/compress` method takes no parameters and immediately
-returns `{}` after scheduling one best-effort background pass over the app-server's
-local rollout storage. It does not change `features.local_thread_store_compression`
-or require that startup flag to be enabled. Non-local thread stores do not support
-this method.
-
-The worker retains its existing cold-file checks, maintenance and writer locks,
-concurrency limit, and cooldown. Acknowledgement does not imply completion or that
-any files were compressed; failures are reported through existing logs and metrics.
-There are no progress notifications or cancellation API. Clients sharing this
-Codex home must support compressed rollout files, including shared histories.
+returns `{}` after scheduling one best-effort background pass that converts the
+app-server's remaining plain and single-frame rollouts to the framed encoding,
+as `codex rollouts compress` does. New rollouts are written framed from their
+first line. A conversion holds its thread's writer lock, so threads with a live
+writer are skipped. Acknowledgement does not imply completion; the pass reports
+through logs. There are no progress notifications or cancellation API. Non-local
+thread stores do not support this method.
 
 ## Model provider admission
 

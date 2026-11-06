@@ -907,11 +907,11 @@ goals = true
         let source = app_server
             .thread_read(source_thread_id, /*include_turns*/ true)
             .await?;
-        std::fs::remove_file(
-            source
+        std::fs::remove_file(codex_rollout::test_support::rollout_file(
+            &source
                 .path
                 .expect("source thread should have a rollout path"),
-        )?;
+        ))?;
     }
 
     let primary_thread_id = ThreadId::new();

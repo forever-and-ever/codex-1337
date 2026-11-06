@@ -694,7 +694,8 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
         })
         .await;
         assert!(
-            !std::fs::read_to_string(&session_path)?.contains("\"type\":\"function_call_output\""),
+            !codex_rollout::read_rollout_text(&session_path)?
+                .contains("\"type\":\"function_call_output\""),
             "prompt-only repair should not be persisted to the rollout"
         );
 
@@ -3876,14 +3877,15 @@ async fn incomplete_response_is_terminal(
         expected_usage
     );
     test.codex.flush_rollout().await?;
-    let records = std::fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?
-        .lines()
-        .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
-        .filter_map(|line| match line.item {
-            RolloutItem::TokenUsageRecord(record) => Some(record.usage),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let records =
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))?
+            .lines()
+            .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
+            .filter_map(|line| match line.item {
+                RolloutItem::TokenUsageRecord(record) => Some(record.usage),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
     assert_eq!(
         records,
         if reported_usage.get("input_tokens").is_some() {

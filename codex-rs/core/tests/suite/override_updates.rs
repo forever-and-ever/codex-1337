@@ -50,7 +50,7 @@ async fn thread_settings_update_without_user_turn_does_not_record_permissions_up
 
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "did not expect a rollout before a new user turn"
     );
 
@@ -80,7 +80,7 @@ async fn thread_settings_update_without_user_turn_does_not_record_environment_up
 
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "did not expect a rollout before a new user turn"
     );
 
@@ -111,7 +111,7 @@ async fn thread_settings_update_without_user_turn_does_not_record_collaboration_
 
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     assert!(
-        !rollout_path.exists(),
+        !codex_rollout::test_support::rollout_file(&rollout_path).exists(),
         "did not expect a rollout before a new user turn"
     );
 

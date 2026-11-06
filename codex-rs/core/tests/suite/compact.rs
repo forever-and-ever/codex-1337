@@ -188,7 +188,7 @@ fn json_fragment(text: &str) -> String {
 }
 
 fn read_hook_inputs(path: &Path) -> Vec<Value> {
-    let text = fs::read_to_string(path).expect("failed to read hook input log");
+    let text = codex_rollout::read_rollout_text(path).expect("failed to read hook input log");
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("failed to parse hook input log line"))
@@ -360,7 +360,7 @@ fn assert_single_instruction_fragment(request: &responses::ResponsesRequest, exp
 }
 
 fn replacement_history_from_rollout(path: &Path) -> Result<Vec<Value>> {
-    let rollout_text = fs::read_to_string(path)?;
+    let rollout_text = codex_rollout::read_rollout_text(path)?;
     let mut replacement_history = None;
     for line in rollout_text
         .lines()
@@ -732,7 +732,7 @@ async fn summarize_context_three_requests_and_instructions(
 
     // Verify rollout contains user-turn TurnContext entries and a Compacted entry.
     println!("rollout path: {}", rollout_path.display());
-    let text = std::fs::read_to_string(&rollout_path).expect("failed to read rollout file");
+    let text = codex_rollout::read_rollout_text(&rollout_path).expect("failed to read rollout file");
     let mut turn_context_count = 0usize;
     let mut saw_compacted_summary = false;
     for line in text.lines() {
@@ -1491,7 +1491,7 @@ async fn manual_compact_records_durable_and_local_token_usage() {
         last > 0,
         "second TokenCount should reflect a non-zero estimated context size after compaction"
     );
-    let rollout_items = fs::read_to_string(rollout_path)
+    let rollout_items = codex_rollout::read_rollout_text(rollout_path)
         .expect("read rollout")
         .lines()
         .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
@@ -1615,7 +1615,8 @@ async fn manual_compact_emits_context_compaction_items() {
     );
 
     let rollout =
-        fs::read_to_string(test.codex.rollout_path().expect("rollout path")).expect("read rollout");
+        codex_rollout::read_rollout_text(test.codex.rollout_path().expect("rollout path"))
+            .expect("read rollout");
     let persisted_output = rollout
         .lines()
         .map(|line| {
@@ -4070,7 +4071,7 @@ async fn pre_sampling_compact_recovers_comp_hash_after_resume() {
     })
     .await;
 
-    let rollout = fs::read_to_string(&rollout_path).expect("read rollout");
+    let rollout = codex_rollout::read_rollout_text(&rollout_path).expect("read rollout");
     let persisted_comp_hash = rollout
         .lines()
         .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
@@ -4197,7 +4198,7 @@ async fn pre_sampling_compact_skips_missing_comp_hash_after_resume() {
     })
     .await;
 
-    let rollout = fs::read_to_string(&rollout_path).expect("read rollout");
+    let rollout = codex_rollout::read_rollout_text(&rollout_path).expect("read rollout");
     let persisted_turn_context = rollout
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -4346,7 +4347,8 @@ async fn auto_compact_persists_rollout_entries() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
 
     let rollout_path = session_configured.rollout_path.expect("rollout path");
-    let text = std::fs::read_to_string(&rollout_path).expect("failed to read rollout file");
+    let text =
+        codex_rollout::read_rollout_text(&rollout_path).expect("failed to read rollout file");
 
     let mut turn_context_count = 0usize;
     let mut saw_compaction = false;
@@ -6220,7 +6222,7 @@ async fn remote_v2_compaction_refreshes_instructions_and_preserves_them_on_cold_
             "running thread retains the selected same-path source"
         );
         assert_eq!(
-            fs::read_to_string(source.as_path())?,
+            codex_rollout::read_rollout_text(source.as_path())?,
             NEW_GLOBAL_INSTRUCTIONS,
             "the selected source path should contain the rewritten text"
         );

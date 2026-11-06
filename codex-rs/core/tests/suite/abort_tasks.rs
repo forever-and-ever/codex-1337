@@ -193,8 +193,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history(fail_child_write
     }
     shutdown_result.expect("finish tree cleanup before handing off the root");
     let child_rollout =
-        tokio::fs::read_to_string(descendant.rollout_path().expect("child rollout"))
-            .await
+        codex_rollout::read_rollout_text(descendant.rollout_path().expect("child rollout"))
             .expect("read closed child writer");
     assert!(child_rollout.lines().any(|line| matches!(
         codex_rollout::parse_rollout_line(line)
@@ -203,9 +202,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history(fail_child_write
         RolloutItem::EventMsg(EventMsg::TurnAborted(_))
     )));
     let rollout_path = codex.rollout_path().expect("rollout path");
-    let rollout = tokio::fs::read_to_string(&rollout_path)
-        .await
-        .expect("read durable rollout");
+    let rollout = codex_rollout::read_rollout_text(&rollout_path).expect("read durable rollout");
     let items = rollout
         .lines()
         .map(|line| {

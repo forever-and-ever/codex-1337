@@ -204,7 +204,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
     let _complete = wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let path = codex.rollout_path().expect("rollout path");
-    let text = std::fs::read_to_string(&path).expect("read rollout file");
+    let text = codex_rollout::read_rollout_text(&path).expect("read rollout file");
     let parent_thread_id = text
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -803,8 +803,8 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
     .await
     .expect("review rollout lookup should succeed")
     .expect("review thread should have a rollout");
-    let review_rollout =
-        std::fs::read_to_string(review_rollout_path).expect("review rollout should be readable");
+    let review_rollout = codex_rollout::read_rollout_text(review_rollout_path)
+        .expect("review rollout should be readable");
     let review_session_cwd = review_rollout
         .lines()
         .find_map(|line| {
@@ -1272,7 +1272,7 @@ async fn review_input_isolated_from_parent_history() {
 
     // Also verify that a user interruption note was recorded in the rollout.
     let path = codex.rollout_path().expect("rollout path");
-    let text = std::fs::read_to_string(&path).expect("read rollout file");
+    let text = codex_rollout::read_rollout_text(&path).expect("read rollout file");
     let mut saw_interruption_message = false;
     for line in text.lines() {
         if line.trim().is_empty() {

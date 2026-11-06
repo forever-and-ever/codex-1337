@@ -1,4 +1,4 @@
-//! Triggers local rollout maintenance without waiting for the background pass.
+//! Triggers one background pass converting local rollouts to the framed encoding.
 
 use super::ThreadRequestProcessor;
 use super::thread_processor::unsupported_thread_store_operation;
@@ -15,10 +15,7 @@ impl ThreadRequestProcessor {
             return Err(unsupported_thread_store_operation("rollout/compress"));
         }
 
-        codex_rollout::spawn_rollout_compression_worker(
-            self.config.codex_home.to_path_buf(),
-            codex_rollout::RolloutCompressionTrigger::Rpc,
-        );
+        codex_rollout::spawn_rollout_conversion(self.config.codex_home.to_path_buf());
         Ok(Some(RolloutCompressResponse {}.into()))
     }
 }

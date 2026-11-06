@@ -205,7 +205,7 @@ fn write_global_file(
 }
 
 fn remove_agents_md_world_state_section(rollout_path: &Path) -> Result<()> {
-    let rollout = std::fs::read_to_string(rollout_path)?;
+    let rollout = codex_rollout::read_rollout_text(rollout_path)?;
     let mut removed_section = false;
     let retained = rollout
         .lines()

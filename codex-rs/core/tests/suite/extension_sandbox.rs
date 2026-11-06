@@ -182,7 +182,7 @@ async fn generated_image_ui_item_is_file_backed_in_rollout() -> Result<()> {
     }
 
     let rollout_path = test.codex.rollout_path().context("rollout path")?;
-    let rollout = std::fs::read_to_string(rollout_path)?
+    let rollout = codex_rollout::read_rollout_text(rollout_path)?
         .lines()
         .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
         .map(|line| line.item)

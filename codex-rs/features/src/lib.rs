@@ -211,10 +211,9 @@ pub enum Feature {
     MemoryTool,
     /// Enable importing project-scoped memory from external agents.
     ExternalAgentMemoryImport,
-    /// Compress cold local thread-store rollout files, including shared histories.
-    /// Requires every reader of the Codex home to support compressed shared histories.
+    /// Removed compatibility flag; rollouts are written as framed zstd from their first line.
     LocalThreadStoreCompression,
-    /// Removed compatibility flag; local_thread_store_compression controls all rollout files.
+    /// Removed compatibility flag; rollouts are written as framed zstd from their first line.
     LocalThreadStoreSharedCompression,
     /// Migrate legacy local rollout files to paginated history in the background.
     BackgroundPaginatedRolloutMigration,
@@ -1376,7 +1375,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::LocalThreadStoreCompression,
         key: "local_thread_store_compression",
-        stage: Stage::UnderDevelopment,
+        stage: Stage::Removed,
         default_enabled: false,
     },
     FeatureSpec {
