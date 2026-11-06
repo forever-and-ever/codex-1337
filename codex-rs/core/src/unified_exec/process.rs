@@ -69,6 +69,8 @@ pub(crate) struct OutputHandles<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_MAX
     pub(crate) collection_finished: CancellationToken,
 }
 
+/// Ends output when its task ends. Built before the task is spawned, so an abort that drops the
+/// task unpolled still releases waiters on output closure.
 struct OutputTaskGuard {
     output_closed: Arc<super::runtime_hold::OutputTermination>,
     output_closed_notify: Arc<Notify>,
@@ -473,12 +475,13 @@ impl UnifiedExecProcess {
         let process = started.process;
         let mut events = process.subscribe_events();
         let mut state_rx = state_tx.subscribe();
+        let output_task_guard = OutputTaskGuard {
+            terminal_watches: Arc::clone(&terminal_watches),
+            output_closed: Arc::clone(&output_closed),
+            output_closed_notify: Arc::clone(&output_closed_notify),
+        };
         tokio::spawn(async move {
-            let _output_task_guard = OutputTaskGuard {
-                terminal_watches: Arc::clone(&terminal_watches),
-                output_closed: Arc::clone(&output_closed),
-                output_closed_notify: Arc::clone(&output_closed_notify),
-            };
+            let _output_task_guard = output_task_guard;
             let drain = async {
                 collection_finished.cancelled().await;
                 let _ = state_rx.wait_for(|state| state.has_exited).await;
@@ -683,12 +686,13 @@ impl UnifiedExecProcess {
             output_closed_notify,
             ..
         } = output_handles;
+        let output_task_guard = OutputTaskGuard {
+            terminal_watches: Arc::clone(&terminal_watches),
+            output_closed: Arc::clone(&output_closed),
+            output_closed_notify: Arc::clone(&output_closed_notify),
+        };
         tokio::spawn(async move {
-            let _output_task_guard = OutputTaskGuard {
-                terminal_watches: Arc::clone(&terminal_watches),
-                output_closed: Arc::clone(&output_closed),
-                output_closed_notify: Arc::clone(&output_closed_notify),
-            };
+            let _output_task_guard = output_task_guard;
             let mut stdout_open = true;
             let mut stderr_open = true;
             while stdout_open || stderr_open {
