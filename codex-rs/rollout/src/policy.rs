@@ -154,7 +154,26 @@ fn persisted_event_msg(
         | EventMsg::TurnComplete(_)
         | EventMsg::ThreadSettingsApplied(_) => Some(Cow::Borrowed(ev)),
         EventMsg::RawResponseCompleted(event) => {
-            event.thought.is_some().then_some(Cow::Borrowed(ev))
+            event.thought.as_ref()?;
+            // Replay projects only the thought and its reasoning-token count. The provider's raw
+            // usage can carry per-item token attribution that grows with the context.
+            Some(match &event.usage_metadata {
+                Some(usage) if usage.metadata.is_some() => {
+                    Cow::Owned(EventMsg::RawResponseCompleted(
+                        codex_protocol::protocol::RawResponseCompletedEvent {
+                            response_id: event.response_id.clone(),
+                            token_usage: event.token_usage.clone(),
+                            usage_metadata: Some(codex_protocol::ResponseUsageMetadata {
+                                amount: usage.amount.clone(),
+                                metadata: None,
+                                reported_reasoning_tokens: usage.reported_reasoning_tokens,
+                            }),
+                            thought: event.thought.clone(),
+                        },
+                    ))
+                }
+                _ => Cow::Borrowed(ev),
+            })
         }
 
         // Only persist these legacy events when the thread's history mode is Legacy.
