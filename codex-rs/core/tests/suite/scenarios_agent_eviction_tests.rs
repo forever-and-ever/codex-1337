@@ -189,6 +189,23 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
                 ]),
             )
             .await;
+            // The worker's completion mail wakes the idle parent for a turn of its own.
+            let expected_parent = parent_id.clone();
+            responses::mount_sse_once_match(
+                &server,
+                move |request: &wiremock::Request| {
+                    request
+                        .headers
+                        .get("thread-id")
+                        .is_some_and(|id| id == expected_parent.as_str())
+                        && String::from_utf8_lossy(&request.body).contains(answer)
+                },
+                sse(vec![
+                    ev_assistant_message("parent-ack", "Noted."),
+                    ev_completed("parent-ack"),
+                ]),
+            )
+            .await;
             child
                 .submit(Op::DynamicToolResponse {
                     id: call.call_id,
@@ -201,6 +218,12 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
                 })
                 .await?;
             wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+            // Settle the mail-woken turn, so the next user message starts its own turn.
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::TurnComplete(_))
+            })
+            .await;
+            ThreadIdle::wait(&test.codex).await;
             ThreadIdle::wait(&child).await;
             // Idle lifecycle delivery still precedes actual task settlement.
             tokio::time::timeout(
@@ -228,7 +251,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
     // Preserve each stream's complete history while removing parent/child scheduling order.
     requests
         .sort_by_key(|request| request.header("thread-id").as_deref() != Some(parent_id.as_str()));
-    assert_eq!(requests.len(), 8);
+    assert_eq!(requests.len(), 10);
     let temporary_workspaces: Vec<_> = requests
         .iter()
         .map(|request| {
@@ -243,10 +266,12 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
         .collect();
     assert_eq!(
         temporary_workspaces,
-        [false, false, false, false, false, true, false, true]
+        [
+            false, false, false, false, false, false, false, true, false, true
+        ]
     );
     let history = context_snapshot::format_request_history_snapshot(
-        "A parent with no configured environment delegates an API migration and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.",
+        "A parent with no configured environment delegates an API migration and follows up after idle eviction. Each worker result wakes the parent for a turn of its own. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.",
         &requests,
         &ContextSnapshotOptions::default().rewrite_known_segments(),
     );

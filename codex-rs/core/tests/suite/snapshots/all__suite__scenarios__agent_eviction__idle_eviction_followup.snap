@@ -2,7 +2,7 @@
 source: core/tests/suite/scenarios_agent_eviction_tests.rs
 expression: "format!(\"{history}\\n\\nResumed worker mailbox:\\n{mailbox}\")"
 ---
-Scenario: A parent with no configured environment delegates an API migration and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.
+Scenario: A parent with no configured environment delegates an API migration and follows up after idle eviction. Each worker result wakes the parent for a turn of its own. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.
 
 ## Window 1
 -- request 1 (turn) --
@@ -47,14 +47,19 @@ Scenario: A parent with no configured environment delegates an API migration and
 08:function_call_output:{"task_name":"/root/worker"}
 -- request 3 (turn) --
 09:agent_message
-10:message/user:
-    Run followup_task for the API migration.
 -- request 4 (turn) --
-11:function_call/wrangler_agents.followup_task:{"message":"Continue the API migration.","target":"worker"}
-12:function_call_output:
-
-## Window 2 (after request 4: input diverged at item 03)
+10:message/assistant:
+    Noted.
+11:message/user:
+    Run followup_task for the API migration.
 -- request 5 (turn) --
+12:function_call/wrangler_agents.followup_task:{"message":"Continue the API migration.","target":"worker"}
+13:function_call_output:
+-- request 6 (turn) --
+14:agent_message
+
+## Window 2 (after request 6: input diverged at item 03)
+-- request 7 (turn) --
 00:additional_tools/developer (2; hash=07d6dec49ba6dbe8):
         - namespace/functions; hash=bfc27356ed768294
           - custom/exec
@@ -90,7 +95,7 @@ Scenario: A parent with no configured environment delegates an API migration and
 05:message/user:
     <ENVIRONMENT_CONTEXT>
 06:agent_message
--- request 6 (turn) --
+-- request 8 (turn) --
 07:function_call/client_echo:{"message":"Mira owns the API migration."}
 08:function_call_output:Mira owns the API migration.
 09:message/developer:
@@ -100,7 +105,7 @@ Scenario: A parent with no configured environment delegates an API migration and
           - custom/exec
 11:message/user:
     <ENVIRONMENT_CONTEXT>
--- request 7 (turn) --
+-- request 9 (turn) --
 12:message/assistant:
     Mira owns the API migration.
 13:message/developer:
@@ -111,7 +116,7 @@ Scenario: A parent with no configured environment delegates an API migration and
 15:message/user:
     <ENVIRONMENT_CONTEXT>
 16:agent_message
--- request 8 (turn) --
+-- request 10 (turn) --
 17:function_call/client_echo:{"message":"I will continue with Mira using the new API."}
 18:function_call_output:I will continue with Mira using the new API.
 19:message/developer:
