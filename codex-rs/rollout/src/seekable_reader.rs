@@ -66,7 +66,7 @@ pub fn read_rollout_prefix(path: &Path, max_bytes: usize) -> io::Result<Option<V
     let reader: Box<dyn Read> = match source {
         RolloutReader::Plain(file) => Box::new(file),
         RolloutReader::Framed(file) => Box::new(FramedReader::open(file)?),
-        RolloutReader::SingleFrame(file) => Box::new(zstd::stream::read::Decoder::new(file)?),
+        RolloutReader::SingleFrame(file) => Box::new(crate::compression::max_window_decoder(file)?),
     };
     let mut bytes = Vec::new();
     reader.take(max_bytes as u64).read_to_end(&mut bytes)?;
@@ -80,7 +80,7 @@ pub fn rollout_logical_len(path: &Path) -> io::Result<u64> {
         RolloutReader::Plain(file) => Ok(file.metadata()?.len()),
         RolloutReader::Framed(file) => Ok(FramedReader::open(file)?.logical_len()),
         RolloutReader::SingleFrame(file) => io::copy(
-            &mut zstd::stream::read::Decoder::new(file)?,
+            &mut crate::compression::max_window_decoder(file)?,
             &mut io::sink(),
         ),
     }
@@ -118,7 +118,7 @@ pub fn open_rollout_seekable_reader(
                 is_cancelled: &is_cancelled,
             };
             let mut reader = CancellableReader {
-                inner: zstd::stream::read::Decoder::new(file)?,
+                inner: crate::compression::max_window_decoder(file)?,
                 is_cancelled: &is_cancelled,
             };
             io::copy(&mut reader, &mut decoded)?;
@@ -223,7 +223,7 @@ pub fn rollout_contains_prefix(
             }
             file.rewind()?;
             let mut prefix = CancellableReader {
-                inner: zstd::stream::read::Decoder::new(file)?,
+                inner: crate::compression::max_window_decoder(file)?,
                 is_cancelled: &is_cancelled,
             }
             .take(end_byte_offset);

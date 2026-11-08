@@ -563,6 +563,8 @@ fn compress_now(path: &std::path::Path) -> anyhow::Result<()> {
     let input = fs::File::open(path)?;
     let output = fs::File::create(compressed_path)?;
     let mut encoder = zstd::stream::write::Encoder::new(output, 3)?;
+    // Declares a window past the decoder's default 128 MiB limit, as legacy `--long=31` frames do.
+    encoder.window_log(28)?;
     let mut input = std::io::BufReader::new(input);
     std::io::copy(&mut input, &mut encoder)?;
     encoder.finish()?;

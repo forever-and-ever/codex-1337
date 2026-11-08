@@ -44,7 +44,7 @@ impl DiagnosticDecoder {
             header_len: 0,
         };
         Ok(Self {
-            decoder: zstd::stream::read::Decoder::new(source)?,
+            decoder: super::max_window_decoder(source)?,
             decoded_bytes: 0,
             failure: None,
         })

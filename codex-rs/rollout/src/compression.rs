@@ -105,6 +105,17 @@ pub(crate) fn resolve_rollout_for_append_blocking(path: &Path) -> io::Result<Pat
     }
 }
 
+/// Decodes a zstd rollout stream. A single-frame rollout's window can be as large as its content
+/// (`zstd --long=31` writes such frames), past the decoder's default 128 MiB limit, so this admits
+/// the format's 64-bit maximum.
+pub(crate) fn max_window_decoder<R: Read>(
+    input: R,
+) -> io::Result<zstd::stream::read::Decoder<'static, io::BufReader<R>>> {
+    let mut decoder = zstd::stream::read::Decoder::new(input)?;
+    decoder.window_log_max(31)?;
+    Ok(decoder)
+}
+
 /// Re-encodes the plain or single-frame rollout at `source` as the framed `.jsonl.zst` beside it,
 /// preserving its access metadata, then removes a plain source. Returns the framed path. The
 /// caller holds the rollout's writer lock.
@@ -122,7 +133,7 @@ pub(crate) fn convert_rollout_blocking(source: &Path) -> io::Result<PathBuf> {
         },
     )?;
     let decoded: Box<dyn Read> = if path::is_compressed_rollout_path(source) {
-        Box::new(zstd::stream::read::Decoder::new(&input)?)
+        Box::new(max_window_decoder(&input)?)
     } else {
         Box::new(&input)
     };
