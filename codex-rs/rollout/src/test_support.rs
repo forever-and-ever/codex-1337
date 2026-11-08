@@ -45,3 +45,17 @@ pub fn rollout_file(path: &Path) -> PathBuf {
     crate::compression::existing_rollout_with_metadata_sync(path)
         .map_or_else(|| path.to_path_buf(), |(path, _)| path)
 }
+
+/// A rollout's text, in either encoding.
+pub fn read_rollout(path: &Path) -> io::Result<String> {
+    let path = rollout_file(path);
+    if !crate::compression::is_compressed_rollout_path(path.as_path()) {
+        return std::fs::read_to_string(path);
+    }
+    let mut text = String::new();
+    io::Read::read_to_string(
+        &mut crate::compression::max_window_decoder(std::fs::File::open(path)?)?,
+        &mut text,
+    )?;
+    Ok(text)
+}

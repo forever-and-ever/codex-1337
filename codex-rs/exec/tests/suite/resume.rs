@@ -3,6 +3,7 @@ use anyhow::Context;
 use codex_core::config::ConfigBuilder;
 use codex_core::init_state_db;
 use codex_protocol::ThreadId;
+use codex_rollout::test_support::read_rollout;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex_exec::test_codex_exec;
@@ -30,11 +31,12 @@ fn find_session_file_containing_marker(
         if !entry.file_type().is_file() {
             continue;
         }
-        if !entry.file_name().to_string_lossy().ends_with(".jsonl") {
+        let name = entry.file_name().to_string_lossy();
+        if !name.ends_with(".jsonl") && !name.ends_with(".jsonl.zst") {
             continue;
         }
         let path = entry.path();
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Ok(content) = read_rollout(path) else {
             continue;
         };
         // Skip the first meta line and scan remaining JSONL entries.
@@ -67,7 +69,7 @@ fn find_session_file_containing_marker(
 
 /// Extract the conversation UUID from the first SessionMeta line in the rollout file.
 fn extract_conversation_id(path: &std::path::Path) -> String {
-    let content = std::fs::read_to_string(path).unwrap();
+    let content = read_rollout(path).unwrap();
     let mut lines = content.lines();
     let meta_line = lines.next().expect("missing meta line");
     let meta: Value = serde_json::from_str(meta_line).expect("invalid meta json");
@@ -79,7 +81,7 @@ fn extract_conversation_id(path: &std::path::Path) -> String {
 }
 
 fn last_user_image_count(path: &std::path::Path) -> usize {
-    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let content = read_rollout(path).unwrap_or_default();
     let mut last_count = 0;
     for line in content.lines() {
         if line.trim().is_empty() {
@@ -193,7 +195,7 @@ async fn exec_resume_last_appends_to_existing_file() -> anyhow::Result<()> {
     let sessions_dir = test.home_path().join("sessions");
     let path = find_session_file_containing_marker(&sessions_dir, &marker)
         .expect("no session file found after first run");
-    let content = std::fs::read_to_string(&path)?;
+    let content = read_rollout(&path)?;
     let meta: Value = serde_json::from_str(
         content
             .lines()
@@ -235,7 +237,7 @@ async fn exec_resume_last_appends_to_existing_file() -> anyhow::Result<()> {
         resumed_path, path,
         "resume --last should append to existing file"
     );
-    let content = std::fs::read_to_string(&resumed_path)?;
+    let content = read_rollout(&resumed_path)?;
     assert!(content.contains(&marker));
     assert!(content.contains(&marker2));
     let requests = response_mock.requests();
@@ -498,7 +500,7 @@ async fn exec_resume_last_accepts_prompt_after_flag_in_json_mode() -> anyhow::Re
         resumed_path, path,
         "resume --last should append to existing file"
     );
-    let content = std::fs::read_to_string(&resumed_path)?;
+    let content = read_rollout(&resumed_path)?;
     assert!(content.contains(&marker));
     assert!(content.contains(&marker2));
     Ok(())
@@ -585,14 +587,6 @@ async fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<(
         resumed_path_all, path_b,
         "resume --last --all should pick newest session"
     );
-
-    // Selection must still use the latest turn's cwd when only the compressed rollout exists.
-    zstd::stream::copy_encode(
-        std::fs::File::open(&path_b)?,
-        std::fs::File::create(path_b.with_extension("jsonl.zst"))?,
-        /*level*/ 3,
-    )?;
-    std::fs::remove_file(&path_b)?;
 
     let marker_a2 = format!("resume-cwd-a-2-{}", Uuid::new_v4());
     let prompt_a2 = format!("echo {marker_a2}");
@@ -765,7 +759,7 @@ async fn exec_resume_by_id_appends_to_existing_file() -> anyhow::Result<()> {
         resumed_path, path,
         "resume by id should append to existing file"
     );
-    let content = std::fs::read_to_string(&resumed_path)?;
+    let content = read_rollout(&resumed_path)?;
     assert!(content.contains(&marker));
     assert!(content.contains(&marker2));
     Ok(())
@@ -841,7 +835,7 @@ async fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<(
         .expect("no resumed session file containing marker2");
     assert_eq!(resumed_path, path, "resume should append to same file");
 
-    let content = std::fs::read_to_string(&resumed_path)?;
+    let content = read_rollout(&resumed_path)?;
     assert!(content.contains(&marker));
     assert!(content.contains(&marker2));
     Ok(())
@@ -930,7 +924,7 @@ async fn exec_fork_creates_distinct_threads_with_and_without_a_prompt() -> anyho
     let source_path = find_session_file_containing_marker(&sessions_dir, &source_marker)
         .expect("source thread should have a rollout");
     let source_id = extract_conversation_id(&source_path);
-    let original_source = std::fs::read_to_string(&source_path)?;
+    let original_source = read_rollout(&source_path)?;
     let source_meta: Value = serde_json::from_str(
         original_source
             .lines()
@@ -1058,7 +1052,7 @@ async fn exec_fork_creates_distinct_threads_with_and_without_a_prompt() -> anyho
         .expect("forked thread should have a separate rollout");
     assert_ne!(fork_path, source_path);
     assert_eq!(extract_conversation_id(&fork_path), fork_thread_id);
-    let fork_contents = std::fs::read_to_string(&fork_path)?;
+    let fork_contents = read_rollout(&fork_path)?;
     let fork_meta: Value = serde_json::from_str(
         fork_contents
             .lines()
@@ -1070,7 +1064,7 @@ async fn exec_fork_creates_distinct_threads_with_and_without_a_prompt() -> anyho
     assert_eq!(fork_meta["payload"]["history_base"]["thread_id"], source_id);
     assert!(!fork_contents.contains(&source_marker));
     assert!(fork_contents.contains(&fork_marker));
-    assert_eq!(std::fs::read_to_string(&source_path)?, original_source);
+    assert_eq!(read_rollout(&source_path)?, original_source);
 
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 2);

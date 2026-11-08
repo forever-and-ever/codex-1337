@@ -25,7 +25,10 @@ fn session_rollout_count(home_path: &std::path::Path) -> usize {
         .into_iter()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_file())
-        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            name.ends_with(".jsonl") || name.ends_with(".jsonl.zst")
+        })
         .count()
 }
 

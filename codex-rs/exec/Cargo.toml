@@ -80,4 +80,3 @@ tempfile = { workspace = true }
 uuid = { workspace = true }
 walkdir = { workspace = true }
 wiremock = { workspace = true }
-zstd = { workspace = true }
