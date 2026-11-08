@@ -19,10 +19,11 @@
 //! thread's `updated_at`. A projection is evicted only after 14 days without use, and never while
 //! its thread is loaded in this process or holds its cross-process writer lock elsewhere.
 //!
-//! Evicted pages are reclaimed by bounded `PRAGMA incremental_vacuum` chunks. A database created
-//! before this module is in `auto_vacuum=NONE` and is converted once, by a full VACUUM. The VACUUM
-//! runs only after an eviction pass, in a quiet window, and only while freed pages are at least
-//! half the file and live data is at most 6 GiB. A failed conversion retries at most daily.
+//! Evicted pages are reclaimed by bounded `PRAGMA incremental_vacuum` chunks. A chunk searches the
+//! freelist for every page it frees, so a freelist of millions of pages slows chunks to a crawl;
+//! while freed pages are at least half the file and live data is at most 6 GiB, the database is
+//! instead repacked by a full VACUUM, which also converts one still in `auto_vacuum=NONE`. A
+//! repack runs only in a quiet window, at most daily.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -57,16 +58,15 @@ const FIRST_PASS_DELAY: Duration = Duration::from_mins(10);
 const PASS_INTERVAL: Duration = Duration::from_hours(6);
 /// Space between evictions, each one transaction, so projection writers interleave.
 const EVICTION_PAUSE: Duration = Duration::from_millis(25);
-/// No projection write for this long before and immediately before the one-time VACUUM.
+/// No projection write for this long before and immediately before a repack's VACUUM.
 const QUIET_WINDOW: Duration = Duration::from_mins(5);
-const CONVERSION_RETRY: Duration = Duration::from_hours(24);
-const CONVERSION_MAX_LIVE_BYTES: i64 = 6 << 30;
-const CONVERSION_STEP: &str = "incremental-vacuum-conversion";
+const REPACK_RETRY: Duration = Duration::from_hours(24);
+const REPACK_MAX_LIVE_BYTES: i64 = 6 << 30;
+const REPACK_STEP: &str = "repack";
 /// Frees up to 2048 pages (8 MiB at the default page size) per write transaction.
 const VACUUM_CHUNK: &str = "PRAGMA incremental_vacuum(2048)";
 const VACUUM_CHUNK_PAUSE: Duration = Duration::from_millis(100);
 const VACUUM_PASS_BUDGET: Duration = Duration::from_secs(10);
-const AUTO_VACUUM_NONE: i64 = 0;
 const AUTO_VACUUM_INCREMENTAL: i64 = 2;
 
 /// Serializes projection passes per rollout and remembers this process's last projected write.
@@ -227,7 +227,7 @@ pub(super) async fn prune(store: &LocalThreadStore) -> ThreadStoreResult<usize> 
         return Ok(0);
     };
     let evicted = evict_unused(store, now_ms().saturating_sub(millis(EVICT_AFTER))).await?;
-    reclaim(store, db_path, evicted > 0).await?;
+    reclaim(store, db_path).await?;
     Ok(evicted)
 }
 
@@ -358,21 +358,15 @@ async fn evict(
     Ok(true)
 }
 
-/// Frees evicted pages: bounded incremental vacuums, after a one-time conversion if needed.
-async fn reclaim(
-    store: &LocalThreadStore,
-    db_path: PathBuf,
-    evicted: bool,
-) -> ThreadStoreResult<()> {
+/// Frees evicted pages: a repack while they are at least half the file, else bounded incremental
+/// vacuums.
+async fn reclaim(store: &LocalThreadStore, db_path: PathBuf) -> ThreadStoreResult<()> {
     let pool = store.thread_history_db().await?;
     let pages = page_census(pool).await?;
-    if pages.auto_vacuum == AUTO_VACUUM_NONE {
-        if !evicted || !pages.worth_converting() {
-            return Ok(());
-        }
+    if pages.worth_repacking() {
         // The pass's own deletes count as writes, so the window starts after them.
         tokio::time::sleep(QUIET_WINDOW).await;
-        return convert_to_incremental(store, db_path).await;
+        return repack(store, db_path).await;
     }
     if pages.auto_vacuum != AUTO_VACUUM_INCREMENTAL {
         return Ok(());
@@ -402,10 +396,10 @@ struct PageCensus {
 }
 
 impl PageCensus {
-    fn worth_converting(&self) -> bool {
+    fn worth_repacking(&self) -> bool {
         self.freelist.saturating_mul(2) >= self.page_count
             && (self.page_count - self.freelist).saturating_mul(self.page_size)
-                <= CONVERSION_MAX_LIVE_BYTES
+                <= REPACK_MAX_LIVE_BYTES
     }
 }
 
@@ -425,22 +419,20 @@ async fn page_census(pool: &sqlx::SqlitePool) -> ThreadStoreResult<PageCensus> {
     })
 }
 
-/// Rewrites the projection database once with `auto_vacuum=INCREMENTAL`. VACUUM is atomic, so a
-/// failure leaves the database as it was; the attempt is recorded first so retries are daily.
-async fn convert_to_incremental(
-    store: &LocalThreadStore,
-    db_path: PathBuf,
-) -> ThreadStoreResult<()> {
+/// Rewrites the projection database without its free pages, in `auto_vacuum=INCREMENTAL`. VACUUM
+/// is atomic, so a failure leaves the database as it was; the attempt is recorded first, so
+/// attempts are at most daily.
+async fn repack(store: &LocalThreadStore, db_path: PathBuf) -> ThreadStoreResult<()> {
     let pool = store.thread_history_db().await?;
     let attempted_at_ms = sqlx::query_scalar::<_, i64>(
         "SELECT attempted_at_ms FROM thread_history_maintenance WHERE step = ?",
     )
-    .bind(CONVERSION_STEP)
+    .bind(REPACK_STEP)
     .fetch_optional(pool)
     .await
     .map_err(pruning_error)?;
     if attempted_at_ms
-        .is_some_and(|attempted| now_ms().saturating_sub(attempted) < millis(CONVERSION_RETRY))
+        .is_some_and(|attempted| now_ms().saturating_sub(attempted) < millis(REPACK_RETRY))
         || !quiet(store, &db_path)
     {
         return Ok(());
@@ -449,7 +441,7 @@ async fn convert_to_incremental(
         "INSERT INTO thread_history_maintenance (step, attempted_at_ms) VALUES (?, ?) \
          ON CONFLICT(step) DO UPDATE SET attempted_at_ms = excluded.attempted_at_ms",
     )
-    .bind(CONVERSION_STEP)
+    .bind(REPACK_STEP)
     .bind(now_ms())
     .execute(pool)
     .await
@@ -487,7 +479,7 @@ async fn convert_to_incremental(
                 wal_bytes,
                 bytes_before = before.page_count * before.page_size,
                 bytes_after = after.page_count * after.page_size,
-                "converted the thread history database to incremental auto-vacuum"
+                "repacked the thread history database"
             );
             sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
                 .execute(&mut *connection)
@@ -496,10 +488,7 @@ async fn convert_to_incremental(
             Ok(())
         }
         Err(err) => {
-            warn!(
-                elapsed_ms,
-                "thread history database conversion failed: {err}"
-            );
+            warn!(elapsed_ms, "thread history database repack failed: {err}");
             Ok(())
         }
     }

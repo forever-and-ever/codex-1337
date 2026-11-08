@@ -20,7 +20,6 @@ use sqlx::ConnectOptions;
 use sqlx::Error;
 use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
-use sqlx::sqlite::SqliteAutoVacuum;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
@@ -391,17 +390,12 @@ impl SqliteConfig {
             JournalModePolicy::InitializeWal
         };
         let recovery = recover_spec.map_or(RecoveryMode::Unavailable, |spec| spec.recovery);
-        let mut options = SqliteConnectOptions::new()
+        let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
             .synchronous(SqliteSynchronous::Normal)
             .busy_timeout(DEFAULT_BUSY_TIMEOUT)
             .log_statements(LevelFilter::Off);
-        if recover_spec.is_some_and(|spec| matches!(spec.kind, DbKind::ThreadHistory)) {
-            // TELOS(history-pruning): a new projection database frees evicted pages through
-            // bounded incremental vacuums; an existing one converts once, after eviction.
-            options = options.auto_vacuum(SqliteAutoVacuum::Incremental);
-        }
         // Each failed attempt closes its pool before initialization is retried.
         let connect = || async {
             connect_once(&options, journal_mode_policy)

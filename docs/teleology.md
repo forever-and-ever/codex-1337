@@ -524,9 +524,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Holds:
   - Eviction: a projection unused for 14 days is evicted. Use is `accessed_at_ms`, which projected writes set and which reads and resumes advance at most hourly; rows from before the column fall back to `threads.updated_at`. Evicting deletes the projected rows and the projection state row in one transaction, and never touches a session file. It never runs while the thread is loaded in this process or holds its cross-process writer lock.
   - Reads: every paginated read first rebuilds an absent projection, or finishes one marked `rebuilding`, under the per-rollout lock that every catch-up pass takes. So a rebuild in progress is never read as empty or truncated.
-  - Reclamation: new projection databases use `auto_vacuum=INCREMENTAL`, and evicted pages are reclaimed in bounded `incremental_vacuum` chunks. An older database is converted once by a full VACUUM. The conversion runs only after an eviction pass, with freed pages at least half the file, live data at most 6 GiB and no projection write for 5 minutes, re-checked just before it starts. A failed conversion retries at most daily. No other database is ever vacuumed.
-- Owners: `codex-rs/thread-store/src/local/history_pruning.rs` (`ProjectionWarden`, `ensure_projected`, `evict`, `reclaim`, `convert_to_incremental`), `codex-rs/state/thread_history_migrations/0009_thread_history_lifecycle.sql`. Seams in upstream files:
-  - `state/src/sqlite.rs`: `auto_vacuum`;
+  - Reclamation: evicted pages are reclaimed in bounded `incremental_vacuum` chunks. A chunk searches the freelist for every page it frees, so while freed pages are at least half the file and live data is at most 6 GiB, a full VACUUM repacks the database instead; it also converts one still in `auto_vacuum=NONE`. A repack runs only with no projection write for 5 minutes, re-checked just before it starts, and is attempted at most daily. No other database is ever vacuumed.
+- Owners: `codex-rs/thread-store/src/local/history_pruning.rs` (`ProjectionWarden`, `ensure_projected`, `evict`, `reclaim`, `repack`), `codex-rs/state/thread_history_migrations/0009_thread_history_lifecycle.sql`. Seams in upstream files:
   - `thread-store/src/local/mod.rs`: the module and the `projection_warden` field;
   - `thread_history.rs`: the use stamp and the `rebuilding` mark in the upsert;
   - `thread_history_materialization.rs`: the per-rollout lock and `finish_rebuild`;
@@ -881,7 +880,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/pager_overlay.rs`: attention-gated-painting
 - `codex-rs/tui/src/pager_overlay/transcript.rs`: attention-gated-painting
 
-- `codex-rs/state/src/sqlite.rs`: authoritative-queue-integrity, history-pruning
+- `codex-rs/state/src/sqlite.rs`: authoritative-queue-integrity
 - `codex-rs/login/src/auth/storage.rs`: credential-backend-authority
 - `codex-rs/login/src/auth/storage_telemetry.rs`: credential-backend-authority
 - `codex-rs/login/src/auth/manager.rs`: pinned-accounts
