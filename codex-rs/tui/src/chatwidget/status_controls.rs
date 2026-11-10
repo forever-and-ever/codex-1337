@@ -248,7 +248,7 @@ impl ChatWidget {
             .collect();
         let agents_summary =
             crate::status::compose_agents_summary(&self.config, &self.instruction_source_paths);
-        let (cell, handle) = crate::status::new_status_output_with_rate_limits_handle(
+        let handle = crate::status::new_status_output_with_rate_limits_handle(
             &self.config,
             self.requires_openai_auth,
             self.thread_id
@@ -277,7 +277,7 @@ impl ChatWidget {
             handle.reserve_thread_usage_label_width();
             self.request_thread_usage_for_status(handle.clone());
         }
-        self.pending_status_outputs.push((cell, handle.clone()));
+        self.pending_status_outputs.push(handle.clone());
         self.flush_status_outputs();
         // Capture the displayed status inputs before later configuration or thread changes.
         let mut copy_targets = vec![
@@ -300,13 +300,12 @@ impl ChatWidget {
     }
 
     pub(super) fn flush_status_outputs(&mut self) {
-        let pending = std::mem::take(&mut self.pending_status_outputs);
-        for (cell, handle) in pending {
-            if handle.is_ready() {
-                self.add_to_history(cell);
-            } else {
-                self.pending_status_outputs.push((cell, handle));
-            }
+        let (ready, pending) = std::mem::take(&mut self.pending_status_outputs)
+            .into_iter()
+            .partition::<Vec<_>, _>(crate::status::StatusHistoryHandle::is_ready);
+        self.pending_status_outputs = pending;
+        for handle in ready {
+            self.add_to_history(handle.cell());
         }
     }
 

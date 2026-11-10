@@ -1,6 +1,4 @@
-use crate::history_cell::CompositeHistoryCell;
 use crate::history_cell::HistoryCell;
-use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::plain_lines;
 use crate::legacy_core::config::Config;
 use crate::line_truncation::line_width;
@@ -47,10 +45,18 @@ use super::rate_limits::format_status_limit_summary;
 use super::rate_limits::render_status_limit_progress_bar;
 use super::remote_connection::RemoteConnectionStatus;
 use super::thread_usage::StatusThreadUsage;
+use crate::history_cell::activity_parts::ActivityParts;
+use crate::history_cell::activity_parts::FoldState;
+use crate::history_cell::output_provenance::OutputMode;
+use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::transcript_view::EntryKind;
+use crate::transcript_view::FeedEntry;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_lines;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
@@ -86,6 +92,10 @@ pub(crate) struct StatusHistoryHandle {
 }
 
 impl StatusHistoryHandle {
+    pub(crate) fn cell(&self) -> Arc<StatusHistoryCell> {
+        Arc::clone(&self.card)
+    }
+
     pub(crate) fn begin_thread_usage_refresh(&self) {
         self.card
             .rate_limit_state
@@ -104,7 +114,7 @@ impl StatusHistoryHandle {
     }
     pub(crate) fn copy_text(&self) -> String {
         self.card
-            .content_lines(u16::MAX)
+            .content_lines(u16::MAX, "")
             .iter()
             .map(|line| line.to_string().trim_end().to_string())
             .collect::<Vec<_>>()
@@ -151,6 +161,7 @@ impl StatusHistoryHandle {
 
 #[derive(Debug)]
 pub(crate) struct StatusHistoryCell {
+    id: u64,
     model_name: String,
     model_details: Vec<String>,
     directory: PathBuf,
@@ -186,7 +197,7 @@ pub(crate) fn new_status_output(
     model_name: &str,
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
-) -> CompositeHistoryCell {
+) -> Arc<StatusHistoryCell> {
     let snapshots = rate_limits.map(std::slice::from_ref).unwrap_or_default();
     new_status_output_with_rate_limits(
         config,
@@ -223,7 +234,7 @@ pub(crate) fn new_status_output_with_rate_limits(
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
     refreshing_rate_limits: bool,
-) -> CompositeHistoryCell {
+) -> Arc<StatusHistoryCell> {
     new_status_output_with_rate_limits_handle(
         config,
         config.model_provider.requires_openai_auth,
@@ -244,7 +255,7 @@ pub(crate) fn new_status_output_with_rate_limits(
         "<none>".to_string(),
         refreshing_rate_limits,
     )
-    .0
+    .cell()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -267,8 +278,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
     agents_summary: String,
     refreshing_rate_limits: bool,
-) -> (CompositeHistoryCell, StatusHistoryHandle) {
-    let command = PlainHistoryCell::new(vec!["/status".magenta().into()]);
+) -> StatusHistoryHandle {
     let card = Arc::new(StatusHistoryCell::new(
         config,
         requires_openai_auth,
@@ -289,14 +299,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         agents_summary,
         refreshing_rate_limits,
     ));
-    let handle = StatusHistoryHandle {
-        card: Arc::clone(&card),
-    };
-
-    (
-        CompositeHistoryCell::new(vec![Box::new(command), Box::new(card)]),
-        handle,
-    )
+    StatusHistoryHandle { card }
 }
 
 impl StatusHistoryCell {
@@ -432,6 +435,7 @@ impl StatusHistoryCell {
         let thread_usage = StatusThreadUsage::default();
 
         Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             model_name,
             model_details,
             directory: config.cwd.to_path_buf(),
@@ -780,7 +784,7 @@ fn status_approval_label(
 }
 
 impl StatusHistoryCell {
-    fn content_lines(&self, width: u16) -> Vec<Line<'static>> {
+    fn content_lines(&self, width: u16, indent: &'static str) -> Vec<Line<'static>> {
         let available_width = usize::from(width);
         if available_width == 0 {
             return Vec::new();
@@ -854,7 +858,7 @@ impl StatusHistoryCell {
         self.collect_rate_limit_labels(&rate_limit_state, &mut seen, &mut labels);
         self.thread_usage.push_labels(&mut labels, &mut seen);
 
-        let formatter = FieldFormatter::from_labels(labels.iter().map(String::as_str));
+        let formatter = FieldFormatter::from_labels(labels.iter().map(String::as_str), indent);
         let value_width = formatter.value_width(available_width);
 
         if let Some(remote_connection) = self.remote_connection.as_ref() {
@@ -939,8 +943,8 @@ impl StatusHistoryCell {
         }
 
         // Leave room for the two-column title mark even in a tiny terminal.
-        let indent = if available_width >= FieldFormatter::INDENT.len() + 2 {
-            FieldFormatter::INDENT
+        let indent = if available_width >= indent.len() + 2 {
+            indent
         } else {
             ""
         };
@@ -1003,21 +1007,16 @@ impl StatusHistoryCell {
     }
 }
 
-impl HistoryCell for Arc<StatusHistoryCell> {
-    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        self.content_lines(width)
-    }
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-    fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(self.display_lines(u16::MAX))
-    }
+fn command_line() -> Line<'static> {
+    Line::from("/status".magenta())
+}
 
-    fn display_hyperlink_lines(
-        &self,
-        width: u16,
-    ) -> Vec<crate::terminal_hyperlinks::HyperlinkLine> {
+impl StatusHistoryCell {
+    fn hyperlink_lines(&self, width: u16, indent: &'static str) -> Vec<HyperlinkLine> {
         let mut lines =
-            crate::terminal_hyperlinks::plain_hyperlink_lines(self.display_lines(width));
+            crate::terminal_hyperlinks::plain_hyperlink_lines(self.content_lines(width, indent));
         // The usage URL has a known destination; wrapping preserves its underlined spans.
         // Attach that destination to every fragment instead of searching for the full URL.
         if self.show_chatgpt_usage_link {
@@ -1038,11 +1037,52 @@ impl HistoryCell for Arc<StatusHistoryCell> {
         }
         lines
     }
+}
 
-    fn transcript_hyperlink_lines(
-        &self,
-        width: u16,
-    ) -> Vec<crate::terminal_hyperlinks::HyperlinkLine> {
+impl HistoryCell for Arc<StatusHistoryCell> {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = vec![command_line(), Line::default()];
+        lines.extend(self.content_lines(width, FieldFormatter::INDENT));
+        lines
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        plain_lines(self.display_lines(u16::MAX))
+    }
+
+    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut lines = vec![command_line().into(), Line::default().into()];
+        lines.extend(self.hyperlink_lines(width, FieldFormatter::INDENT));
+        lines
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
+    }
+
+    /// Rate-limit and thread-usage refreshes land through [`StatusHistoryHandle`] after insertion.
+    fn has_stable_transcript_height(&self) -> bool {
+        false
+    }
+}
+
+impl FeedEntry for StatusHistoryCell {
+    fn feed_kind(&self) -> EntryKind {
+        EntryKind::Status
+    }
+
+    fn feed_id(&self) -> String {
+        format!("status:{}", self.id)
+    }
+
+    fn feed_title(&self) -> Line<'static> {
+        command_line()
+    }
+
+    fn feed_body(&self, width: u16, _expanded: &FoldState, _mode: OutputMode) -> ActivityParts {
+        ActivityParts {
+            lines: self.hyperlink_lines(width, ""),
+            ..ActivityParts::default()
+        }
     }
 }

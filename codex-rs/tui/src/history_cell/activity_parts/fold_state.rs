@@ -15,6 +15,7 @@ pub(crate) enum FoldGroup {
     Alarm,
     Compaction,
     Farm,
+    Status,
     Diff,
     Result,
     RawContext,

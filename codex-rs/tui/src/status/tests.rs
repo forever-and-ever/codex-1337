@@ -787,7 +787,7 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
     let model_slug = get_model_offline_for_tests(config.model.as_deref());
 
     config.model_provider.requires_openai_auth = true;
-    let (composite, _handle) = new_status_output_with_rate_limits_handle(
+    let composite = new_status_output_with_rate_limits_handle(
         &config,
         /*requires_openai_auth*/ false,
         Some("server-ollama"),
@@ -806,7 +806,8 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
         /*reasoning_effort_override*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
-    );
+    )
+    .cell();
     let rendered =
         sanitize_directory(render_lines(&composite.display_lines(/*width*/ 120))).join("\n");
     assert_snapshot!("status_server_auth_not_required", rendered);
@@ -818,7 +819,7 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
         requires_openai_auth: false,
         ..ModelProviderInfo::default()
     };
-    let (composite, _handle) = new_status_output_with_rate_limits_handle(
+    let composite = new_status_output_with_rate_limits_handle(
         &config,
         /*requires_openai_auth*/ true,
         Some("server-openai"),
@@ -837,7 +838,8 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
         /*reasoning_effort_override*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
-    );
+    )
+    .cell();
     let rendered =
         sanitize_directory(render_lines(&composite.display_lines(/*width*/ 120))).join("\n");
     assert_snapshot!("status_server_auth_required", rendered);
@@ -1513,7 +1515,7 @@ async fn status_wraps_long_paths_and_session_ids_without_losing_text() {
     let session =
         ThreadId::from_string("00000000-0000-0000-0000-000000000123").expect("session id");
     let usage = TokenUsage::default();
-    let (status, handle) = new_status_output_with_rate_limits_handle(
+    let handle = new_status_output_with_rate_limits_handle(
         &config,
         /*requires_openai_auth*/ true,
         /*model_provider_id*/ None,
@@ -1533,6 +1535,7 @@ async fn status_wraps_long_paths_and_session_ids_without_losing_text() {
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
     );
+    let status = handle.cell();
     let directory = directory.to_string_lossy();
     for width in [7, 12, 17, 18, 24, 25, 40, 80] {
         let lines = status.display_lines(width);
@@ -1756,7 +1759,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
 
         let model_slug = get_model_offline_for_tests(config.model.as_deref());
         let token_info = token_info_for(&model_slug, &config, &usage);
-        let (composite, _) = new_status_output_with_rate_limits_handle(
+        let composite = new_status_output_with_rate_limits_handle(
             &config,
             /*requires_openai_auth*/ true,
             /*model_provider_id*/ None,
@@ -1775,7 +1778,8 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
             /*reasoning_effort_override*/ Some(Some(ReasoningEffort::Medium)),
             "<none>".to_string(),
             /*refreshing_rate_limits*/ false,
-        );
+        )
+        .cell();
         let mut rendered_lines = render_lines(&composite.display_lines(/*width*/ 80));
         if cfg!(windows) {
             for line in &mut rendered_lines {
@@ -1869,7 +1873,7 @@ async fn transcript_overlay_remeasures_status_after_rate_limit_refresh() {
         .expect("timestamp");
     let model_slug = get_model_offline_for_tests(config.model.as_deref());
 
-    let (status, handle) = new_status_output_with_rate_limits_handle(
+    let handle = new_status_output_with_rate_limits_handle(
         &config,
         /*requires_openai_auth*/ true,
         /*model_provider_id*/ None,
@@ -1889,6 +1893,7 @@ async fn transcript_overlay_remeasures_status_after_rate_limit_refresh() {
         "<none>".to_string(),
         /*refreshing_rate_limits*/ true,
     );
+    let status = handle.cell();
     let mut overlay =
         TranscriptOverlay::new(vec![Arc::new(status)], RuntimeKeymap::defaults().pager);
     let area = Rect::new(

@@ -15,7 +15,7 @@ pub(crate) struct FieldFormatter {
 impl FieldFormatter {
     pub(crate) const INDENT: &'static str = "  ";
 
-    pub(crate) fn from_labels<S>(labels: impl IntoIterator<Item = S>) -> Self
+    pub(crate) fn from_labels<S>(labels: impl IntoIterator<Item = S>, indent: &'static str) -> Self
     where
         S: AsRef<str>,
     {
@@ -24,11 +24,11 @@ impl FieldFormatter {
             .map(|label| display_width(label.as_ref()))
             .max()
             .unwrap_or(0);
-        let indent_width = display_width(Self::INDENT);
+        let indent_width = display_width(indent);
         let value_offset = indent_width + label_width + 1 + 2;
 
         Self {
-            indent: Self::INDENT,
+            indent,
             label_width,
             value_offset,
             value_indent: " ".repeat(value_offset),

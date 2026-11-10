@@ -599,7 +599,7 @@ pub(crate) struct ChatWidget {
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
     // Ordinary terminal scrollback cannot be reliably patched after insertion.
     // Publish each card only once its requested remote data has arrived.
-    pending_status_outputs: Vec<(history_cell::CompositeHistoryCell, StatusHistoryHandle)>,
+    pending_status_outputs: Vec<StatusHistoryHandle>,
     next_status_refresh_request_id: u64,
     pending_rate_limit_reset_request_id: Option<u64>,
     pending_rate_limit_reset_idempotency_key: Option<String>,

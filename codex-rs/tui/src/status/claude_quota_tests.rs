@@ -38,7 +38,7 @@ async fn status_snapshot_claude_subscription_quota() {
     let account = StatusAccountDisplay::ClaudeSubscription {
         email: Some("claude@example.com".to_owned()),
     };
-    let (cell, handle) = new_status_output_with_rate_limits_handle(
+    let handle = new_status_output_with_rate_limits_handle(
         &config,
         /*requires_openai_auth*/ false,
         Some(&config.model_provider_id),
@@ -58,6 +58,7 @@ async fn status_snapshot_claude_subscription_quota() {
         "<none>".to_owned(),
         /*refreshing_rate_limits*/ true,
     );
+    let cell = handle.cell();
     let quota = AccountQuota {
         id: "claude".to_owned(),
         email: Some("claude@example.com".to_owned()),

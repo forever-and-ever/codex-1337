@@ -3,9 +3,10 @@
 //! The feed is a presentation over the retained cells, never a second transcript. Each cell
 //! the server billed belongs to its step's Feed Item: the step's Thought, the response's
 //! messages and calls, and their results. Steps that share a cell, and a Code Mode exec with
-//! the steps that wait on it, form one item. User turns, arrivals and Preambles are items of
-//! one cell each, and so is a finished reply no step claims, from a chat older than its
-//! bills. Every other cell stays loose, with its own clock and tokens.
+//! the steps that wait on it, form one item. User turns and every [`FeedEntry`] cell, such as an
+//! arrival, a Preamble or a `/status` card, are items of one cell each, and so is a finished
+//! reply no step claims, from a chat older than its bills. Every other cell stays loose, with
+//! its own clock and tokens.
 //!
 //! A Thought opens its step. The server announces it only when its response completes, after
 //! the response's messages and calls, so the transcript rotates it ahead of them once the
@@ -110,6 +111,9 @@ pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
     if let Some(alarm) = any.downcast_ref::<crate::history_cell::AlarmSoundingCell>() {
         return Some(alarm);
     }
+    if let Some(status) = any.downcast_ref::<Arc<crate::status::StatusHistoryCell>>() {
+        return Some(status.as_ref());
+    }
     any.downcast_ref::<crate::history_cell::CompactionCell>()
         .map(|compaction| compaction as &dyn FeedEntry)
 }
@@ -213,6 +217,7 @@ pub(crate) enum EntryKind {
     Alarm,
     Compaction,
     Farm,
+    Status,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -256,6 +261,7 @@ impl Kind {
                 EntryKind::Alarm => FoldGroup::Alarm,
                 EntryKind::Compaction => FoldGroup::Compaction,
                 EntryKind::Farm => FoldGroup::Farm,
+                EntryKind::Status => FoldGroup::Status,
             },
         }
     }
@@ -1581,8 +1587,8 @@ fn find(parent: &mut [usize], mut node: usize) -> usize {
     node
 }
 
-/// The cells that are items of their own, with their fold keys: user turns, arrivals,
-/// Preambles, and finished replies no step claims.
+/// The cells that are items of their own, with their fold keys: user turns, [`FeedEntry`] cells,
+/// and Code Mode blocks and finished replies no step claims.
 fn entry_kind(
     cell: &Arc<dyn HistoryCell>,
     steps: &[usize],
