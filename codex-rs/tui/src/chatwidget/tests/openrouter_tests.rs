@@ -129,8 +129,7 @@ async fn openrouter_status_snapshot() {
         &Ok(OpenRouterKeyStatus {
             key: OpenRouterKey {
                 name: "main".parse().unwrap(),
-                path: AbsolutePathBuf::try_from("/home/main/security/tokens/openrouter.token")
-                    .unwrap(),
+                path: AbsolutePathBuf::try_from("/secrets/openrouter.token").unwrap(),
                 is_default: true,
             },
             state: OpenRouterKeyState::Read {
