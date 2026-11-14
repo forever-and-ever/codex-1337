@@ -1,8 +1,11 @@
 # Codex 1337
 
-Private downstream fork of Codex, built and tested only on Linux; code for other
-platforms is inherited from upstream and not validated. Local builds carry the
-`-1337` suffix. Install the coordinated distribution with `scripts/install-local`.
+Unofficial fork of [openai/codex](https://github.com/openai/codex); not
+affiliated with or endorsed by OpenAI.
+
+Built and tested only on Linux; code for other platforms is inherited from
+upstream and not validated. Local builds carry the `-1337` suffix. Install the
+coordinated distribution with `scripts/install-local`.
 
 The shared app server, account scoping, and agent controls belong to this fork.
 Use `codex agents` for the session dashboard. The graphical Wrangler is retired.

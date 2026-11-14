@@ -1,4 +1,4 @@
-codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI only
+codex-1337: downstream fork of openai/codex; Linux and fullscreen TUI only
 
 ## gate
 - Tests: `just test`, never bare `cargo test`; narrowest filter while iterating; whole-crate and full-workspace runs for validation
