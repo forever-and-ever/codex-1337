@@ -261,6 +261,13 @@ impl ExecCommandHandler {
         };
         match result {
             Ok(response) => {
+                // Interruption can end collection while the process remains alive.
+                // Do not publish that cancellation as a successful background yield.
+                if context.cancellation_token.is_cancelled() {
+                    return Err(FunctionCallError::RespondToModel(
+                        "aborted by user".to_string(),
+                    ));
+                }
                 crate::tools::fence::Prerequisite::process_result(&response);
                 Ok(boxed_tool_output(response))
             }
