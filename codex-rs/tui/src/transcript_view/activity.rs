@@ -12,6 +12,10 @@ impl TranscriptView {
         // Empty live previews and hidden reasoning cells do not obscure the actual tail.
         for index in (0..=cells.len()).rev() {
             let Some(layout) = self.current_layout(cells, index) else {
+                // Missing retained preparation is not proof that the tail is visible.
+                if index < cells.len() {
+                    return false;
+                }
                 continue;
             };
             if layout.row_count() == 0 {
@@ -20,7 +24,7 @@ impl TranscriptView {
             let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
             return self.visible.last().is_some_and(|visible| {
                 visible.key == key
-                    && visible.layout.text() == layout.text()
+                    && visible.layout.same_activity_content(&layout)
                     && visible.row + 1 == layout.row_count()
             });
         }

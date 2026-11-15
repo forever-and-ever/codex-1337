@@ -34,6 +34,31 @@ fn credential_binding_keeps_both_endpoint_restrictions_and_account_revocation() 
     ));
     let permit = bound.acquire(&b).unwrap();
 
+    // Adopting an independently scoped account must retain its revocation source,
+    // not merely copy its numeric generation into the application account.
+    let alice = policy.clone().independent_account_scope().unwrap();
+    let bob = policy.clone().independent_account_scope().unwrap();
+    let alice_bound = policy
+        .clone()
+        .with_account_binding(&alice.clone().for_current_account())
+        .unwrap();
+    let bob_bound = policy
+        .clone()
+        .with_account_binding(&bob.for_current_account())
+        .unwrap();
+    assert!(
+        alice_bound
+            .clone()
+            .with_account_binding(&bob_bound)
+            .is_none()
+    );
+    alice.invalidate();
+    assert_eq!(
+        alice_bound.acquire(&b).unwrap_err(),
+        NetworkPolicyDenied::Revoked
+    );
+    assert!(bob_bound.acquire(&b).is_ok());
+
     policy.invalidate();
     assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
     assert!(matches!(

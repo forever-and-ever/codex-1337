@@ -200,6 +200,22 @@ impl AuthStorageBackend for AccountStorage {
         self.backend.load_account(&self.id)
     }
 
+    fn compare_exchange(
+        &self,
+        previous: &AuthDotJson,
+        updated: &AuthDotJson,
+    ) -> std::io::Result<bool> {
+        if identity(previous).as_deref() != Some(&self.id)
+            || identity(updated).as_deref() != Some(&self.id)
+        {
+            return Err(std::io::Error::other(
+                "Token refresh changed the pinned account identity.",
+            ));
+        }
+        // TELOS(credential-backend-authority): preserve the backend's atomic source choice.
+        self.backend.compare_exchange(previous, updated)
+    }
+
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         if identity(auth).as_deref() != Some(&self.id) {
             return Err(std::io::Error::other(
@@ -234,7 +250,7 @@ impl AuthStorageBackend for AccountStorage {
         let removed = document.wrangler_accounts.remove(&self.id).is_some();
         if identity(&document.active).as_deref() == Some(&self.id) {
             let Some((_, replacement)) = document.wrangler_accounts.pop_first() else {
-                return self.backend.delete();
+                return self.backend.delete_unlocked();
             };
             document.active = replacement;
         }
@@ -243,6 +259,10 @@ impl AuthStorageBackend for AccountStorage {
         }
         self.write(&document)?;
         Ok(removed)
+    }
+
+    fn delete_unlocked(&self) -> std::io::Result<bool> {
+        self.delete()
     }
 
     fn load_account_grant(&self) -> std::io::Result<Option<AuthDotJson>> {

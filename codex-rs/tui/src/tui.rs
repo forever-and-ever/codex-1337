@@ -78,6 +78,7 @@ mod input_boundary;
 mod job_control;
 mod keyboard_modes;
 mod link_pointer;
+pub(crate) use link_pointer::PointerShape;
 mod notification_preview;
 #[cfg(test)]
 #[path = "tui/owned_screen_tests.rs"]
@@ -718,6 +719,8 @@ pub struct Tui {
     window_focused: Option<bool>,
     #[cfg(target_os = "linux")]
     desktop_attention: Option<tokio::sync::watch::Receiver<DesktopAttention>>,
+    shortcut_hud: Option<crate::bottom_pane::ShortcutHud>,
+    pub(crate) shortcut_hud_area: Option<Rect>,
     draw_tx: broadcast::Sender<()>,
     pub(super) event_broker: Arc<EventBroker>,
     pub(crate) terminal_size_tags: crate::terminal_size_telemetry::LaunchTags,
@@ -809,6 +812,8 @@ impl Tui {
             desktop_attention: (!presentation_over_ssh).then(desktop_attention::start),
             #[cfg(all(target_os = "linux", test))]
             desktop_attention: None,
+            shortcut_hud: None,
+            shortcut_hud_area: None,
             draw_tx,
             event_broker: Arc::new(event_broker),
             terminal_size_tags: Vec::new(),
@@ -1361,6 +1366,54 @@ impl Tui {
         Ok(())
     }
 
+    /// A pager may draw several times while handling an event. Decorate only frames from its owner.
+    pub(crate) fn with_shortcut_hud<T>(
+        &mut self,
+        hud: Option<crate::bottom_pane::ShortcutHud>,
+        render: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = std::mem::replace(&mut self.shortcut_hud, hud);
+        let result = render(self);
+        self.shortcut_hud = previous;
+        result
+    }
+
+    /// On standalone screens, paste, loss of focus and mouse input dismiss pending chords.
+    /// A press on the visible guide belongs to the guide rather than the control beneath it.
+    pub(crate) fn dismiss_shortcut_on_input(
+        &self,
+        event: &TuiEvent,
+        matcher: &mut crate::keymap::KeyChordMatcher,
+    ) -> bool {
+        let covered = match event {
+            TuiEvent::Paste(_) | TuiEvent::FocusLost => false,
+            TuiEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved => {
+                matches!(mouse.kind, crossterm::event::MouseEventKind::Down(_))
+                    && self.shortcut_hud_contains(*mouse)
+            }
+            _ => return false,
+        };
+        if matcher.cancel() {
+            self.frame_requester.schedule_frame();
+            return covered;
+        }
+        false
+    }
+
+    pub(crate) fn shortcut_hud_contains(&self, mouse: crossterm::event::MouseEvent) -> bool {
+        self.shortcut_hud_area
+            .is_some_and(|area| area.contains((mouse.column, mouse.row).into()))
+    }
+
+    pub(crate) fn draw_with_shortcut_hud(
+        &mut self,
+        height: u16,
+        hud: Option<crate::bottom_pane::ShortcutHud>,
+        draw_fn: impl FnOnce(&mut custom_terminal::Frame),
+    ) -> Result<()> {
+        self.with_shortcut_hud(hud, |tui| tui.draw(height, draw_fn))
+    }
+
     pub fn draw(
         &mut self,
         height: u16,
@@ -1452,7 +1505,10 @@ impl Tui {
                 self.suspend_context.set_cursor_y(inline_area_bottom);
             }
 
-            terminal.draw_with_size(screen_size, draw_fn)
+            terminal.draw_with_size(screen_size, |frame| {
+                draw_fn(frame);
+                self.shortcut_hud_area = self.shortcut_hud.as_ref().map(|hud| hud.paint(frame));
+            })
         })??;
         Ok(())
     }
@@ -1462,10 +1518,11 @@ impl Tui {
     /// This is the feature-gated counterpart to `draw`. It intentionally skips
     /// `pending_viewport_area`, whose cursor-position heuristic is part of the legacy path, and
     /// instead lets transcript reflow rebuild scrollback before the frame is rendered.
-    pub fn draw_with_resize_reflow(
+    pub(crate) fn draw_with_resize_reflow(
         &mut self,
         height: u16,
         screen_size: Size,
+        hud: Option<crate::bottom_pane::ShortcutHud>,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
         if self.presentation_mode() == PresentationMode::Frozen {
@@ -1538,6 +1595,7 @@ impl Tui {
 
             terminal.draw_with_size(screen_size, |frame| {
                 draw_fn(frame);
+                self.shortcut_hud_area = hud.as_ref().map(|hud| hud.paint(frame));
             })
         })??;
         Ok(())

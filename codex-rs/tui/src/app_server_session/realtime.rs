@@ -12,7 +12,7 @@ impl AppServerSession {
     pub(crate) async fn thread_realtime_stop(&mut self, thread_id: ThreadId) -> Result<()> {
         let request_id = self.next_request_id();
         let _: ThreadRealtimeStopResponse = self
-            .client
+            .request_handle
             .request_typed(ClientRequest::ThreadRealtimeStop {
                 request_id,
                 params: ThreadRealtimeStopParams {

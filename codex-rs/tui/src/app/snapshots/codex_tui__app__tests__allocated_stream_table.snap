@@ -1,0 +1,28 @@
+---
+source: tui/src/app/tests.rs
+expression: normalize_snapshot_paths(frame.as_str())
+---
+  ? for shortcuts
+────────────────────────────────────────────
+              history-37
+
+              history-38
+
+              history-39
+
+        ╓     •  Left           Right
+        ║       ━━━━━━━━━━━━━  ━━━━━━━━━━━━━
+        ║        one two        red blue
+        ║        three four     green white
+        ║        five six       orange
+        ╙        seven
+────────────────────────────────────────────
+
+  • Ready
+
+────────────────────────────────────────────
+
+› Ask Codex to do anything
+                                          󰜗
+────────────────────────────────────────────
+  gpt-test default · /tmp/project

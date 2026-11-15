@@ -367,9 +367,14 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 crate::code_mode_transcript::Admission::item(owned, String::new())
             };
             reducers
-                .admit(owner.thread_id, admission, &cwd, false, &|_| {
-                    crate::multi_agents::AgentMetadata::default()
-                })
+                .admit(
+                    owner.thread_id,
+                    admission,
+                    &cwd,
+                    false,
+                    &|_| crate::multi_agents::AgentMetadata::default(),
+                    crate::history_cell::ImagePathOrigin::Local,
+                )
                 .unwrap()
                 .block
         };

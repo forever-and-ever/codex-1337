@@ -109,7 +109,7 @@ struct PendingRead {
 
 struct Response {
     result: CopyResult,
-    terminal_text: Option<(super::SelectionTarget, String)>,
+    terminal_sequence: Option<String>,
 }
 
 #[derive(Default)]
@@ -223,10 +223,17 @@ impl ClipboardWorker {
             self.start(
                 frames,
                 |text, format, destination, setup| {
-                    let terminal_text = Cell::new(/*value*/ None);
+                    let terminal_sequence = Cell::new(/*value*/ None);
                     let forward = |target| {
-                        super::osc52_sequence(text, target, super::is_tmux_session())?;
-                        terminal_text.set(Some((target, text.to_owned())));
+                        let transport = if super::is_tmux_session() {
+                            super::Osc52Target::Tmux
+                        } else if std::env::var_os("STY").is_some() {
+                            super::Osc52Target::Screen
+                        } else {
+                            super::Osc52Target::Direct
+                        };
+                        terminal_sequence
+                            .set(Some(super::osc52_sequence(text, target, transport)?));
                         Ok(())
                     };
                     let result = match destination {
@@ -253,7 +260,7 @@ impl ClipboardWorker {
                             }
                         }
                     };
-                    (result, terminal_text.into_inner())
+                    (result, terminal_sequence.into_inner())
                 },
                 crate::clipboard_paste::text::reader,
             )?;
@@ -363,10 +370,8 @@ impl ClipboardWorker {
             CopyFormat,
             SelectionTarget,
             &CopySetup,
-        ) -> (
-            Result<super::CopyOutcome, String>,
-            Option<(SelectionTarget, String)>,
-        ) + Send
+        ) -> (Result<super::CopyOutcome, String>, Option<String>)
+        + Send
         + 'static,
         make_reader: impl FnOnce() -> R + Send + 'static,
     ) -> Result<(), String>
@@ -384,7 +389,7 @@ impl ClipboardWorker {
                 // An ordinary copy must not relinquish PRIMARY, or vice versa.
                 let mut primary_lease: Option<ClipboardLease> = None;
                 while let Ok(request) = incoming.recv() {
-                    let (destination, outcome, terminal_text) = match request {
+                    let (destination, outcome, terminal_sequence) = match request {
                         Request::WarmTextReader => {
                             LazyCell::force(&read);
                             continue;
@@ -395,8 +400,9 @@ impl ClipboardWorker {
                             destination,
                             setup,
                         } => {
-                            let (outcome, terminal_text) = copy(&text, format, destination, &setup);
-                            (destination, outcome, terminal_text)
+                            let (outcome, terminal_sequence) =
+                                copy(&text, format, destination, &setup);
+                            (destination, outcome, terminal_sequence)
                         }
                         Request::Read {
                             source,
@@ -418,7 +424,7 @@ impl ClipboardWorker {
                     if outgoing
                         .send(Response {
                             result,
-                            terminal_text,
+                            terminal_sequence,
                         })
                         .is_err()
                     {
@@ -494,8 +500,8 @@ impl ClipboardWorker {
                         return self.completed.as_ref();
                     }
                     let mut result = response.result;
-                    if let Some((target, text)) = response.terminal_text
-                        && let Err(error) = super::osc52_copy_to(&text, target)
+                    if let Some(sequence) = response.terminal_sequence
+                        && let Err(error) = super::write_osc52(&sequence)
                         && result != Ok(CopyStatus::Confirmed)
                     {
                         result = Err(error);

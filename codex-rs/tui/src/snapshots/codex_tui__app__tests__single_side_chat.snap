@@ -1,0 +1,21 @@
+---
+source: tui/src/app/tests.rs
+expression: panel
+---
+  New activity · esc latest                                    │ Side chat×                      +
+───────────────────────────────────────────────────────────────│              child-24
+              parent-24                                        │
+                                                               │              child-25
+              parent-25                                        │
+                                                               │              child-26
+              parent-26                                        │
+                                                               │              child-27
+───────────────────────────────────────────────────────────────│
+             New activity · ↓ Back to bottom · esc             │              child-28
+  • Ready                                                      │
+                                                               │              child-29
+───────────────────────────────────────────────────────────────│
+                                                               │
+› parent draft                                                 │› child draft!
+                                                             󰜗 │
+───────────────────────────────────────────────────────────────│  GPT-6.1-Sol default

@@ -78,6 +78,16 @@ fn lite_tool_catalog_and_code_calls_are_visible() {
 
 #[test]
 fn code_mode_timing_normalization_preserves_status_and_user_output() {
+    let mut normalizer = Normalizer::default();
+    let recovery = "/run/user/1000/codex-1337/code-mode-output-Ab12Cd/sections-Ef34Gh.txt";
+    let other = "/run/user/1000/codex-1337/code-mode-output-Ab12Cd/sections-Ij56Kl.txt";
+    let text = format!(
+        "Truncated output: {recovery}\nRecover with fs.readFile({recovery}); cap 1000\nOther artifact: {other}"
+    );
+    assert_eq!(
+        normalizer.text(&text, TextSource::Other, &ContextSnapshotOptions::default()),
+        "Truncated output: <CODE_MODE_OUTPUT 1>/sections.txt\nRecover with fs.readFile(<CODE_MODE_OUTPUT 1>/sections.txt); cap 1000\nOther artifact: <CODE_MODE_OUTPUT 2>/sections.txt"
+    );
     for status in ["Script completed", "Script failed", "Script terminated"] {
         let text = format!(
             "{status}\nWall time 1.000 seconds (code-mode 1.001 seconds; overhead -0.001 seconds)\nOutput:\nWall time 2.0 seconds"

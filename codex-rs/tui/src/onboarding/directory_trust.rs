@@ -191,13 +191,7 @@ impl DirectoryTrustPreparation {
             steps: vec![Step::TrustDirectory(TrustDirectoryWidget {
                 restricted: project.trust_level == Some(TrustLevel::Untrusted),
                 existing_task: connected && self.resumed_thread.is_some(),
-                cancel: self
-                    .cancel
-                    .unwrap_or(if self.target.supports_command_center() {
-                        TrustCancelAction::AgentsOverview
-                    } else {
-                        TrustCancelAction::Quit
-                    }),
+                cancel: self.cancel.unwrap_or(TrustCancelAction::AgentsOverview),
                 cwd: project.cwd,
                 trust_target: project.trust_target,
                 show_windows_create_sandbox_hint: false,

@@ -2,7 +2,6 @@
 //! the ordinary input queue, which must remain blocked until the server accepts the new turn.
 
 use super::*;
-use crate::app_server_session::ThreadSettingsOwner;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::chatwidget::MisalignmentReview;
 use codex_app_server_protocol::TurnStartParams;
@@ -101,7 +100,7 @@ impl App {
             )])),
             ..Default::default()
         };
-        if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
+        {
             let config = self.chat_widget.config_ref();
             let explicit_profile =
                 self.runtime_permission_profile_override
@@ -128,7 +127,6 @@ impl App {
             params.runtime_workspace_roots =
                 Some(config.permissions.user_visible_workspace_roots().to_vec());
             params.approval_policy = Some(config.permissions.approval_policy.value().into());
-            params.approvals_reviewer = Some(config.approvals_reviewer.into());
             params.sandbox_policy = sandbox_policy;
             params.permissions = permissions;
         }

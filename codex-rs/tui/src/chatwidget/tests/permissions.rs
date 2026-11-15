@@ -345,10 +345,18 @@ async fn permission_discovery_discards_stale_results_and_preserves_covering_moda
     let second = chat.permission_popup_request_id().unwrap();
     chat.on_permission_profiles_loaded(first, Ok(Discovery::local(&chat.config)));
     assert!(chat.permission_popup_request_is_current(second));
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
-    );
+    {
+        chat.set_test_backend_auth(false);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     chat.on_permission_profiles_loaded(second, Ok(Discovery::local(&chat.config)));
     assert!(!chat.bottom_pane.has_active_view());
     assert!(

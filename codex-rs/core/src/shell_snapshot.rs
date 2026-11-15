@@ -16,7 +16,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use codex_exec_server::Environment;
 use codex_network_proxy::CredentialBrokerContext;
-use codex_network_proxy::NetworkProxy;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -30,7 +29,6 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use tokio::fs;
 use tokio::process::Command;
-use tokio::sync::watch;
 use tokio::time::timeout;
 use tracing::Instrument;
 use tracing::info_span;
@@ -44,7 +42,6 @@ pub(crate) use sandbox::snapshot_read_permissions;
 #[derive(Clone)]
 pub(crate) struct ShellSnapshot {
     config: Option<Arc<ShellSnapshotConfig>>,
-    credential_broker: Option<watch::Sender<SnapshotCredentialBrokerState>>,
 }
 
 struct ShellSnapshotConfig {
@@ -52,16 +49,7 @@ struct ShellSnapshotConfig {
     session_id: ThreadId,
     session_telemetry: SessionTelemetry,
     state_db: Option<StateDbHandle>,
-    credential_broker: Option<watch::Receiver<SnapshotCredentialBrokerState>>,
     prefer_executor_snapshots: bool,
-}
-
-#[derive(Clone, PartialEq)]
-pub(crate) enum SnapshotCredentialBrokerState {
-    Starting,
-    Inactive,
-    Unavailable,
-    Ready(NetworkProxy),
 }
 
 pub(crate) struct ShellSnapshotFile {
@@ -79,7 +67,6 @@ impl ShellSnapshot {
         session_id: ThreadId,
         session_telemetry: SessionTelemetry,
         state_db: Option<StateDbHandle>,
-        credential_broker: Option<watch::Sender<SnapshotCredentialBrokerState>>,
         prefer_executor_snapshots: bool,
     ) -> Self {
         Self {
@@ -88,31 +75,17 @@ impl ShellSnapshot {
                 session_id,
                 session_telemetry,
                 state_db,
-                credential_broker: credential_broker.as_ref().map(watch::Sender::subscribe),
                 prefer_executor_snapshots,
             })),
-            credential_broker,
         }
     }
 
     pub(crate) fn disabled() -> Self {
-        Self {
-            config: None,
-            credential_broker: None,
-        }
-    }
-
-    pub(crate) fn set_credential_broker(&self, state: SnapshotCredentialBrokerState) -> bool {
-        self.credential_broker.as_ref().is_some_and(|sender| {
-            let previous = sender.send_replace(state.clone());
-            previous != state
-        })
+        Self { config: None }
     }
 
     pub(crate) fn should_rebuild_inherited(&self) -> bool {
-        self.credential_broker.as_ref().is_some_and(|sender| {
-            !matches!(*sender.borrow(), SnapshotCredentialBrokerState::Inactive)
-        })
+        false
     }
 
     pub(crate) async fn build(
@@ -145,23 +118,8 @@ impl ShellSnapshot {
     ) -> Option<Arc<ShellSnapshotFile>> {
         let snapshot_span = info_span!("shell_snapshot", thread_id = %config.session_id);
         async {
-            if let Some(receiver) = config.credential_broker.as_ref() {
-                let mut receiver = receiver.clone();
-                if matches!(&*receiver.borrow(), SnapshotCredentialBrokerState::Starting)
-                    && receiver.changed().await.is_err()
-                {
-                    return None;
-                }
-                let state = receiver.borrow().clone();
-                match state {
-                    SnapshotCredentialBrokerState::Starting
-                    | SnapshotCredentialBrokerState::Unavailable => return None,
-                    SnapshotCredentialBrokerState::Inactive if config.prefer_executor_snapshots => {
-                        return None;
-                    }
-                    SnapshotCredentialBrokerState::Inactive => {}
-                    SnapshotCredentialBrokerState::Ready(network_proxy) => match network_proxy {},
-                }
+            if config.prefer_executor_snapshots {
+                return None;
             }
             let timer = config
                 .session_telemetry

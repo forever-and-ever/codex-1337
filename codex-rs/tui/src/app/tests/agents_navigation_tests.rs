@@ -6,8 +6,12 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     let mut app = make_test_app().await;
     let root = ThreadId::new();
     let child = ThreadId::new();
-    app.primary_thread_id = Some(root);
-    app.active_thread_id = Some(root);
+    app.enqueue_primary_thread_session(
+        test_thread_session(root, app.config.cwd.to_path_buf()),
+        Vec::new(),
+    )
+    .await
+    .expect("primary session");
     app.upsert_agent_picker_thread(
         child,
         Some("worker".into()),
@@ -25,6 +29,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         thread_id: child.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
             disabled_plugin_ids: Vec::new(),
+            environments: None,
             cwd: app.config.cwd.clone(),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::AutoReview,
@@ -223,7 +228,7 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
     );
     let first = app.agent_picker_selection_view_params(/*selected*/ None);
     assert_eq!(
-        app.agent_navigation.picker_order,
+        app.agent_navigation.picker_row_ids,
         vec![busy, root, idle, unloaded]
     );
     assert_eq!(first.initial_selected_idx, Some(2));
@@ -235,9 +240,9 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
             active_flags: Vec::new(),
         },
     );
-    let next = app.agent_picker_selection_view_params(first.initial_selected_idx);
+    let next = app.agent_picker_selection_view_params(Some(idle));
     assert_eq!(
-        app.agent_navigation.picker_order,
+        app.agent_navigation.picker_row_ids,
         vec![idle, root, busy, unloaded]
     );
     assert_eq!(next.initial_selected_idx, Some(0));
@@ -532,25 +537,20 @@ async fn agents_navigation_requires_shared_app_server() -> Result<()> {
     let endpoint = crate::RemoteAppServerEndpoint::UnixSocket {
         socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
     };
-    for (target, enabled) in [
-        (AppServerTarget::Embedded, false),
-        (
-            AppServerTarget::Remote {
-                endpoint: endpoint.clone(),
-            },
-            true,
-        ),
-        (
-            AppServerTarget::LocalDaemon {
-                endpoint,
-                allow_embedded_fallback: true,
-            },
-            true,
-        ),
+    for target in [
+        AppServerTarget::Embedded,
+        AppServerTarget::Remote {
+            endpoint: endpoint.clone(),
+        },
+        AppServerTarget::LocalDaemon {
+            endpoint,
+            allow_embedded_fallback: true,
+        },
     ] {
         let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let mut app_server = start_config_write_test_app_server(&app).await?;
+        let shared = !matches!(target, AppServerTarget::Embedded);
         app.app_server_target = target;
         let init = app.chatwidget_init_for_forked_or_resumed_thread(
             &mut tui,
@@ -560,10 +560,9 @@ async fn agents_navigation_requires_shared_app_server() -> Result<()> {
         app.replace_chat_widget(ChatWidget::new_with_app_event(init));
         while events.try_recv().is_ok() {}
         let composer = render_bottom_popup(&app.chat_widget, /*width*/ 96);
-        assert_eq!(composer.contains("← for agents"), enabled);
-        if matches!(app.app_server_target, AppServerTarget::Remote { .. }) {
-            let footer = composer.lines().last().expect("composer footer").trim();
-            insta::assert_snapshot!(normalize_snapshot_paths(footer), @"GPT-5.6-Sol default · /tmp/project · ← for agents");
+        let footer = composer.lines().last().expect("composer footer").trim();
+        insta::allow_duplicates! {
+            insta::assert_snapshot!(normalize_snapshot_paths(footer), @"← for agents · ? for shortcuts");
         }
         app.handle_tui_event(
             &mut tui,
@@ -571,14 +570,18 @@ async fn agents_navigation_requires_shared_app_server() -> Result<()> {
             TuiEvent::Key(KeyCode::Left.into()),
         )
         .await?;
-        if enabled {
-            let event = events.try_recv()?;
-            assert_matches!(event, AppEvent::OpenAgentsOverview);
-            app.handle_event(&mut tui, &mut app_server, event).await?;
-            assert!(app.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID));
-        } else {
-            assert!(events.try_recv().is_err());
-            assert!(app.chat_widget.no_modal_or_popup_active());
+        let event = events.try_recv()?;
+        assert_matches!(event, AppEvent::OpenAgentsOverview);
+        app.handle_event(&mut tui, &mut app_server, event).await?;
+        assert_eq!(
+            app.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID),
+            shared
+        );
+        if !shared {
+            assert!(
+                render_bottom_popup(&app.chat_widget, 96).contains("Shared agents unavailable")
+            );
+            assert!(render_bottom_popup(&app.chat_widget, 96).contains("Return to this session"));
         }
         app_server.shutdown().await?;
     }

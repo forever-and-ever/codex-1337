@@ -8,7 +8,7 @@ use codex_app_server_protocol::AccountQuota;
 impl ChatWidget {
     pub(super) fn request_status_with_claude_quota(&mut self) -> bool {
         let Some(StatusAccountDisplay::ClaudeSubscription { email }) =
-            self.status_account_display.as_ref()
+            self.status_account_display()
         else {
             return false;
         };

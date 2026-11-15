@@ -354,7 +354,7 @@ impl Session {
                 &config,
             );
         }
-        self.request_mcp_runtime_refresh();
+        self.request_mcp_runtime_refresh(McpRefreshReason::AccountWorkspaceSwitched);
         self.refresh_hooks(self.get_config().await).await;
         self.account_refresh_pending.store(false, Ordering::Release);
         self.deliver_event_raw(Event {

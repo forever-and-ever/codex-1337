@@ -267,7 +267,7 @@ impl App {
         let has_authoritative_mode = started.session.collaboration_mode.is_some();
         let unloaded = matches!(thread.status, api::ThreadStatus::NotLoaded);
         let restored_blank = matches!(presentation, ResumePresentation::CachedBlank);
-        let read_only = matches!(presentation, ResumePresentation::ReadOnly(_));
+        let read_only = matches!(presentation, ResumePresentation::ReadOnly { .. });
         let preserve_explicit = unloaded || read_only;
         self.runtime_approvals_reviewer_override = self
             .runtime_approvals_reviewer_override
@@ -289,14 +289,13 @@ impl App {
         tui.set_notification_settings(&self.local_settings.tui.notification_settings);
         self.file_search
             .update_search_dir(self.config.cwd.to_path_buf());
-        if let Err(error) = self
-            .replace_chat_widget_with_app_server_thread(
-                tui,
-                started,
-                ThreadAttachPresentation::SessionLineage,
-                None,
-            )
-            .await
+        if let Err(error) = Box::pin(self.replace_chat_widget_with_app_server_thread(
+            tui,
+            started,
+            ThreadAttachPresentation::SessionLineage,
+            None,
+        ))
+        .await
         {
             self.add_agents_overview_error(format!("Failed to attach to task: {error}"));
             if !read_only && !restored_blank && self.chat_widget.thread_id() != Some(thread_id) {
@@ -311,12 +310,8 @@ impl App {
             }
             return Ok(());
         }
-        if let ResumePresentation::ReadOnly(notice) = &presentation {
-            self.ensure_thread_channel(thread_id).mark_external_writer();
-            self.chat_widget.show_external_writer_thread();
-            if let Some(notice) = notice {
-                self.chat_widget.add_info_message((*notice).into(), None);
-            }
+        if let ResumePresentation::ReadOnly { notice, cause } = &presentation {
+            self.apply_resumed_read_only(thread_id, *notice, cause);
         }
         let mut destination = self.chat_widget.config_ref().clone();
         if self.app_server_target.uses_remote_workspace() {
@@ -387,6 +382,7 @@ impl App {
         // Keep restored source input parked until that continuation owns the fork.
         self.chat_widget.fork_in_progress = matches!(after, SelectionAfter::Fork);
         if let Some(mut input) = self.agents_overview.input_states.remove(&thread_id) {
+            presentation.refresh_provider_error(&mut input);
             let pending_settings = restored_blank
                 .then(|| input.pending_thread_settings.take())
                 .flatten();

@@ -18,7 +18,7 @@ use super::tool_output_tokens;
 use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::output_provenance::OutputMode;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct OwnedLiveTail {
     pub(crate) active: Option<Arc<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<Arc<dyn HistoryCell>>,
@@ -112,6 +112,9 @@ impl OwnedLiveTail {
         tokens: &tool_output_tokens::ToolOutputTokens,
         search: bool,
     ) -> TextLayout {
+        for cell in self.active.iter().chain(&self.auxiliary) {
+            crate::history_cell::prepare_links(cell.as_ref());
+        }
         let width = key.width;
         let columns = if self
             .active

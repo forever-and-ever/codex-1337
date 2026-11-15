@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 2665
 expression: "context_snapshot::format_request_history_snapshot(\"A non-deferred connector is called through code mode while another connector stays deferred.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: A non-deferred connector is called through code mode while another connector stays deferred.
@@ -16,8 +15,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=906a12e6d228cfad):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=709a0f5a355329cf
+  tools (8; hash=b8349745e04ff4b6):
+    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=acc19270413496d6
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069

@@ -12,6 +12,11 @@ use crate::state::TurnState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub(crate) enum IdleMailboxPolicy {
+    Empty,
+    RetainQueued,
+}
+
 impl Session {
     pub(crate) async fn begin_explicit_close(&self) {
         self.state.lock().await.runtime_holds.close();
@@ -47,7 +52,11 @@ impl Session {
         }
     }
 
-    pub(crate) fn seal_idle_runtime(&self, revision: u64) -> crate::runtime_holds::IdleSeal {
+    pub(crate) fn seal_idle_runtime(
+        &self,
+        revision: u64,
+        mailbox: &IdleMailboxPolicy,
+    ) -> crate::runtime_holds::IdleSeal {
         use crate::runtime_holds::IdleSeal;
         let Ok(_admission) = self.mcp_extension_admission.try_acquire() else {
             return IdleSeal::Contended;
@@ -61,7 +70,11 @@ impl Session {
         if active.is_some() || self.has_outstanding_durable_sleep() {
             return IdleSeal::Busy;
         }
-        match self.input_queue.can_prove_mailbox_empty() {
+        let mailbox_ready = match mailbox {
+            IdleMailboxPolicy::Empty => self.input_queue.can_prove_mailbox_empty(),
+            IdleMailboxPolicy::RetainQueued => self.input_queue.can_prove_mailbox_retainable(),
+        };
+        match mailbox_ready {
             None => return IdleSeal::Contended,
             Some(false) => return IdleSeal::Busy,
             Some(true) => {}

@@ -68,6 +68,11 @@ impl App {
         } else {
             self.chat_widget.config_ref().cwd.to_path_buf()
         };
+        let image_origin = if self.app_server_target.uses_remote_workspace() {
+            crate::history_cell::ImagePathOrigin::Remote
+        } else {
+            crate::history_cell::ImagePathOrigin::Local
+        };
         let tx = self.app_event_tx.clone();
         self.chat_widget.show_transcript_export_progress(0);
         let handle = self.request_server(
@@ -90,6 +95,7 @@ impl App {
                     cells,
                     &metadata,
                     &progress,
+                    image_origin,
                 )
                 .await;
                 Ok(cells
@@ -219,9 +225,17 @@ pub(super) async fn load_export_thread(
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     progress: &(dyn Fn() + Send + Sync),
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> Result<Option<codex_app_server_protocol::Thread>, String> {
-    let prepared =
-        crate::app_server_session::history_job::load(handle, thread_id, None, None, progress).await;
+    let prepared = crate::app_server_session::history_job::load(
+        handle,
+        thread_id,
+        None,
+        None,
+        progress,
+        image_origin,
+    )
+    .await;
     let thread = match prepared.result {
         Ok(thread) if thread.ephemeral => return Ok(None),
         Ok(thread) => thread,

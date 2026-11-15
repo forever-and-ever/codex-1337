@@ -15,6 +15,7 @@ use crate::session::session::Session;
 /// Created with the step and never reset. Once raised it stays raised for the rest of the
 /// step, so a later Code Mode call in the same response returns at once instead of blocking
 /// while the input that raised it waits for the next step.
+#[derive(Clone)]
 pub(crate) struct Interjection {
     /// Raised when user input is queued.
     steer: CancellationToken,

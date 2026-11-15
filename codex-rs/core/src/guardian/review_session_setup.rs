@@ -1,6 +1,7 @@
 //! Captures action-time parent context and starts or recovers its Guardian reviewer.
 //! Checkpoint recovery allows one fresh attempt under the original review deadline.
 //! Both attempts share captured context and use separate recovery flags.
+//! Completed assessments are revalidated before checkpoint publication.
 //! Checkpoints are captured before final authorization validation and published without yielding.
 //! Recorded reviewer items and interruptions are forwarded to the parent's raw-event subscription.
 
@@ -20,6 +21,7 @@ pub struct PreparedGuardianContext {
     parent: Arc<Session>,
     context: GuardianReviewContext,
     config: Config,
+    credentials: crate::CapturedProvider,
     context_policy: ReviewContextPolicy,
     key: GuardianReviewSessionReuseKey,
     parent_compaction: Option<ResponseItem>,
@@ -31,10 +33,14 @@ impl PreparedGuardianContext {
     async fn prepare(
         parent: Arc<Session>,
         mut context: GuardianReviewContext,
-        config: Config,
+        mut config: Config,
         history: &ContextManager,
         node_repl_policy: &GuardianNodeReplPolicy,
+        credentials: crate::CapturedProvider,
     ) -> anyhow::Result<Self> {
+        config.model_provider.supports_websockets &=
+            parent.services.model_client.responses_websocket_enabled();
+        let credentials = credentials.for_transport(&config.model_provider)?;
         let (reset_version, history_reset) = parent.history_reset().await;
         // Preparation may have raced with a history reset before capturing the reviewer context.
         if reset_version != history.reset_version {
@@ -58,12 +64,16 @@ impl PreparedGuardianContext {
         .with_environments(context.environments())
         .with_node_repl_policy_eligibility(context.model_info.computer_use_review_required())
         .with_node_repl_policy(node_repl_policy);
+        key.captured_authority = Some(crate::guardian::reviewer_route::CapturedReviewer(Arc::new(
+            credentials.clone(),
+        )));
         key.root_review_version = root_review_version;
         key.parent_reset_version = history.reset_version;
         Ok(Self {
             parent,
             context,
             config,
+            credentials,
             context_policy,
             key,
             parent_compaction,
@@ -103,13 +113,9 @@ impl PreparedGuardianContext {
             self.reviewer_selection,
             self.parent_compaction.as_ref(),
         );
-        let mut config = self.config.clone();
-        config.model_provider.supports_websockets &= self
-            .parent
-            .services
-            .model_client
-            .responses_websocket_enabled();
+        let config = self.config.clone();
         let options = crate::StartThreadOptions {
+            credentials: crate::StartCredentials::Captured(self.credentials.clone()),
             prompt_cache_key: self.parent.services.model_client.prompt_cache_key_policy(),
             history_mode: Some(codex_protocol::protocol::ThreadHistoryMode::Paginated),
             internal_parent: Some(crate::thread_manager::InternalSessionParent {
@@ -178,6 +184,7 @@ impl PreparedGuardianContext {
                 .is_some_and(|(parent, loaded)| parent == loaded.item);
         }
         let context = GuardianReviewSessionReuseKey {
+            captured_authority: self.key.captured_authority.clone(),
             user_instructions: inherited.user,
             thread_instructions: inherited.thread,
             ..context
@@ -254,13 +261,14 @@ impl ReviewerRequest for PreparedReview {
                 .thread_extension_data
                 .remove::<CheckpointRecovery>();
         }
-        let mut result = Box::pin(run_review_on_session(
+        // Keep the reviewer transport's future layout out of the pool's Send proof.
+        let review: BoxFuture<'_, ReviewSessionResult> = Box::pin(run_review_on_session(
             session,
             &self.params,
             kind,
             self.params.deadline,
-        ))
-        .await;
+        ));
+        let mut result = review.await;
         let recovery_requested = self.recovery_requested.load(Ordering::Acquire);
         if recovery_requested {
             result.disposition = SessionDisposition::Discard;
@@ -276,12 +284,10 @@ impl ReviewerRequest for PreparedReview {
             None
         };
         // All checkpoint capture and lock acquisition must precede validation. No await
-        // may follow a valid allow before publication; new guidance during capture must
-        // invalidate the attempt without overwriting the last committed review.
-        if let GuardianReviewSessionOutcome::Completed(Ok(Some(message))) = &result.outcome
-            && codex_guardian_reviewer::parse_guardian_assessment(message).is_ok_and(|assessment| {
-                assessment.outcome == super::super::GuardianAssessmentOutcome::Allow
-            })
+        // may follow a valid assessment before publication; new guidance during capture
+        // invalidates either verdict without overwriting the last committed review.
+        if let GuardianReviewSessionOutcome::Completed(Ok(Some(response))) = &result.outcome
+            && response.assessment().is_ok()
             && let Some(authorization) = &self.params.authorization
             && let Some(invalidation) = authorization
                 .invalidation(
@@ -364,6 +370,9 @@ pub(in crate::guardian) async fn prepare_review(
         params.spawn_config.clone(),
         &params.parent_history,
         &params.node_repl_policy,
+        params
+            .reviewer_route
+            .credentials(params.parent_context.turn())?,
     )
     .await?;
     Ok(PreparedReview {
@@ -390,15 +399,20 @@ pub(super) fn prepare_prewarm(
     turn: Arc<TurnContext>,
 ) -> BoxFuture<'static, anyhow::Result<PreparedGuardianContext>> {
     Box::pin(async move {
+        // Prewarming has no admitted user turn. Capture its own authority before
+        // catalog IO; action reviews must instead use their issuing turn's capture.
+        turn.extension_data.insert(parent.capture_provider().await?);
         let context = GuardianReviewContext::from(turn);
         let config = guardian_review_session_config(&parent, &context).await?;
         let history = parent.clone_history().await;
+        let credentials = config.reviewer_route.credentials(context.turn())?;
         PreparedGuardianContext::prepare(
             Arc::clone(&parent),
             context,
             config.spawn_config,
             &history,
             &config.node_repl_policy,
+            credentials,
         )
         .await
     })

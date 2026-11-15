@@ -82,6 +82,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
                 &cwd,
                 /*animations*/ false,
                 &|_| crate::multi_agents::AgentMetadata::default(),
+                crate::history_cell::ImagePathOrigin::Local,
             )
             .unwrap()
             .block

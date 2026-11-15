@@ -19,6 +19,7 @@ use codex_extension_api::ThreadStartInput;
 use codex_extension_api::ToolContributor;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
+use codex_model_provider::WorkspaceRoutingContext;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::openai_models::ModelInfo;
@@ -27,9 +28,7 @@ use crate::schema::LITERATURE_SEARCH_QUERY;
 use crate::tool::WebSearchTool;
 
 #[derive(Clone)]
-struct WebSearchExtension {
-    auth_manager: Arc<AuthManager>,
-}
+struct WebSearchExtension;
 
 #[derive(Clone)]
 struct WebSearchExtensionConfig {
@@ -40,20 +39,19 @@ struct WebSearchExtensionConfig {
 
 impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
-        let web_search_mode = config.web_search_mode.value();
         Self {
             route: codex_model_provider_info::SearchRoute::classify(
                 &config.model_provider,
                 &config.model_providers,
-                web_search_mode,
+                WebSearchMode::Live,
             ),
             http_client_factory: config.http_client_factory(),
-            settings: search_settings(config, web_search_mode),
+            settings: search_settings(config),
         }
     }
 }
 
-fn search_settings(config: &Config, web_search_mode: WebSearchMode) -> SearchSettings {
+fn search_settings(config: &Config) -> SearchSettings {
     let web_search_config = config.web_search_config.as_ref();
     SearchSettings {
         user_location: web_search_config
@@ -79,7 +77,6 @@ fn search_settings(config: &Config, web_search_mode: WebSearchMode) -> SearchSet
                 blocked_domains: None,
             }),
         allowed_callers: Some(vec![AllowedCaller::Direct]),
-        external_web_access: Some(external_web_access_for_mode(web_search_mode)),
         ..Default::default()
     }
 }
@@ -126,13 +123,20 @@ impl ToolContributor for WebSearchExtension {
     ) -> Vec<
         Arc<dyn for<'call> codex_extension_api::ToolExecutor<codex_extension_api::ToolCall<'call>>>,
     > {
-        let Some(config) = thread_store.get::<WebSearchExtensionConfig>() else {
+        let (Some(config), Some(workspace_routing), Some(mode)) = (
+            thread_store.get::<WebSearchExtensionConfig>(),
+            thread_store.get::<WorkspaceRoutingContext>(),
+            step_store.get::<WebSearchMode>(),
+        ) else {
             return Vec::new();
         };
+        if *mode == WebSearchMode::Disabled {
+            return Vec::new();
+        }
         let Some(route) = crate::search_route::SearchExecutor::from_route(
             &config.route,
             thread_store,
-            &self.auth_manager,
+            step_store,
         ) else {
             return Vec::new();
         };
@@ -141,7 +145,11 @@ impl ToolContributor for WebSearchExtension {
             session_id: session_store.level_id().to_string(),
             http_client_factory: config.http_client_factory.clone(),
             route,
-            settings: config.settings.clone(),
+            workspace_routing,
+            settings: SearchSettings {
+                external_web_access: Some(external_web_access_for_mode(*mode)),
+                ..config.settings.clone()
+            },
             supports_literature_search: step_store.get::<ModelInfo>().is_some_and(|model| {
                 model
                     .experimental_supported_tools
@@ -155,12 +163,16 @@ impl ToolContributor for WebSearchExtension {
     }
 }
 
-pub fn install(registry: &mut ExtensionRegistryBuilder<Config>, auth_manager: Arc<AuthManager>) {
-    let extension = Arc::new(WebSearchExtension { auth_manager });
+pub fn install(registry: &mut ExtensionRegistryBuilder<Config>, _auth_manager: Arc<AuthManager>) {
+    let extension = Arc::new(WebSearchExtension);
     registry.thread_lifecycle_contributor(extension.clone());
     registry.config_contributor(extension.clone());
     registry.tool_contributor(extension);
 }
+
+#[cfg(test)]
+#[path = "routing_tests.rs"]
+mod routing_tests;
 
 #[cfg(test)]
 mod tests {
@@ -170,6 +182,7 @@ mod tests {
     use codex_http_client::HttpClientFactory;
     use codex_http_client::OutboundProxyPolicy;
     use codex_login::CodexAuth;
+    use codex_model_provider::WorkspaceRoutingContext;
     use codex_model_provider_info::ModelProviderInfo;
     use pretty_assertions::assert_eq;
 
@@ -214,6 +227,16 @@ mod tests {
         let session_store = ExtensionData::new("session");
         let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
         let step_store = ExtensionData::new("step");
+        thread_store.insert(WorkspaceRoutingContext::new(
+            "https://chatgpt.com/backend-api".to_string(),
+        ));
+        step_store.insert(WebSearchMode::Cached);
+        step_store.insert(codex_model_provider::create_model_provider(
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+            Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+                "dummy",
+            ))),
+        ));
         thread_store.insert(WebSearchExtensionConfig {
             route: codex_model_provider_info::SearchRoute::Own {
                 provider: Box::new(ModelProviderInfo::create_openai_provider(

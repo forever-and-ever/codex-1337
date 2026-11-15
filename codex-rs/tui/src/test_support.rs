@@ -5,8 +5,6 @@ mod server_requests;
 pub(crate) use server_requests::thread_goal_get;
 pub(crate) use server_requests::thread_goal_set;
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::LazyLock;
 
 use codex_models_manager::bundled_models_response;
@@ -15,6 +13,47 @@ pub(crate) use codex_utils_absolute_path::test_support::PathBufExt;
 pub(crate) use codex_utils_absolute_path::test_support::test_path_buf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+pub(crate) async fn start_test_app_server(
+    backend_id: crate::backend_id::BackendId,
+    config: &crate::Config,
+    target: &crate::AppServerTarget,
+    cli_kv_overrides: Vec<(String, toml::Value)>,
+    loader_overrides: crate::LoaderOverrides,
+    state_db: Option<crate::StateDbHandle>,
+    environment_manager: std::sync::Arc<crate::EnvironmentManager>,
+) -> color_eyre::Result<crate::AppServerSession> {
+    let mut target = target.clone();
+    // The picker must connect to the backend that owns the supplied ID.
+    if let crate::AppServerTarget::LocalDaemon {
+        allow_embedded_fallback,
+        ..
+    } = &mut target
+    {
+        *allow_embedded_fallback = false;
+    }
+    let mut state_db = state_db;
+    let embedded_network_policy =
+        codex_app_server_client::EmbeddedNetworkPolicy::load(&loader_overrides).await;
+    let app_server = crate::start_app_server(
+        &mut target,
+        crate::Arg0DispatchPaths::default(),
+        config.clone(),
+        cli_kv_overrides,
+        loader_overrides,
+        /*strict_config*/ false,
+        crate::CloudConfigBundleLoader::default(),
+        &mut state_db,
+        environment_manager,
+        embedded_network_policy,
+    )
+    .await?;
+    Ok(crate::AppServerSession::new(
+        backend_id,
+        app_server,
+        target.thread_params_mode(),
+    ))
+}
 
 pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new(|| {
     let mut response = bundled_models_response()
@@ -67,17 +106,4 @@ where
         })
 }
 
-/// Construct a large test future outside its caller's poll frame before boxing it.
-/// `Box::pin(large_future())` can still reserve the future's full size on that stack.
-#[inline(never)]
-pub(crate) fn box_future<F: Future>(create: impl FnOnce() -> F) -> Pin<Box<F>> {
-    Box::pin(create())
-}
-
-// Keep boxed call sites shaped like ordinary calls, without closure indentation.
-macro_rules! boxed_future {
-    ($future:expr) => {
-        $crate::test_support::box_future(|| $future)
-    };
-}
-pub(crate) use boxed_future;
+pub(crate) use crate::boxed_future;

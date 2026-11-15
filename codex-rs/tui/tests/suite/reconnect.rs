@@ -120,7 +120,9 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                     "account/read" => {
                         json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": false})
                     }
-                    "model/list" => json!({"data": [], "nextCursor": null}),
+                    "model/list" => {
+                        json!({"data": [], "nextCursor": null, "modelProvider": "openai"})
+                    }
                     "config/read" => {
                         let params = request.params.as_ref().unwrap();
                         assert_eq!(params["cwd"], server_cwd.to_string_lossy().as_ref());
@@ -316,7 +318,17 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
     complete_tx.send(()).unwrap();
     terminal.wait_for_screen("Recovered turn completed.")?;
     terminal.write_input(b"\r")?;
-    tokio::time::timeout(Duration::from_secs(/*secs*/ 10), submitted_rx).await??;
+    // Keep draining redraws so a full PTY cannot block the TUI before it submits.
+    let submitted = tokio::time::timeout(Duration::from_secs(/*secs*/ 10), submitted_rx);
+    tokio::pin!(submitted);
+    loop {
+        tokio::select! {
+            result = &mut submitted => break result??,
+            _ = tokio::time::sleep(Duration::from_millis(/*millis*/ 20)) => {
+                terminal.read_output(Duration::ZERO)?;
+            }
+        }
+    }
     drop(terminal);
     let methods = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), server).await???;
     assert_eq!(

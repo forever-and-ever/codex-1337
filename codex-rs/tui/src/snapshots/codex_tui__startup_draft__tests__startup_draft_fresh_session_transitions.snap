@@ -14,7 +14,6 @@ before:
 
 › draft while loading
                                               󰜗
-
 after:
 
   >_ OpenAI Codex (v<VERSION>)
@@ -26,7 +25,6 @@ after:
 
 › draft while loading
                                               󰜗
-
 ---
 fork lookup fallback:
 before:
@@ -40,7 +38,6 @@ before:
 
 › draft while loading
                                               󰜗
-
 after:
 
   >_ OpenAI Codex (v<VERSION>)
@@ -52,7 +49,6 @@ after:
 
 › draft while loading
                                               󰜗
-
 ---
 resume picker cancellation:
 before:

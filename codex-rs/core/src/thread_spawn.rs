@@ -178,15 +178,19 @@ pub(crate) async fn prepare(
         let child_model_info = match config.model.as_deref() {
             Some(model) if model != turn.model_info().slug => Some(
                 session
-                    .services
-                    .models_manager
+                    .agent_models_manager(&config)
+                    .await
+                    .map_err(ThreadSpawnError::Preparation)?
                     .get_model_info(model, &config.to_models_manager_config())
                     .await,
             ),
             _ => None,
         };
         let child_multi_agent_messages = ResolvedModelMessages::from_model(
-            child_model_info.as_ref().unwrap_or(turn.model_info()),
+            child_model_info
+                .as_ref()
+                .map(|entry| entry.model.as_ref())
+                .unwrap_or(turn.model_info().as_ref()),
         )
         .multi_agent();
         Some(resolve_usage_hints(

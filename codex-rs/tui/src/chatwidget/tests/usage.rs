@@ -248,10 +248,18 @@ async fn account_update_invalidates_usage_menu_refresh_when_visible_state_is_unc
         })
     );
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     chat.finish_usage_menu_rate_limit_refresh(
         /*request_id*/ 1,
         vec![snapshot(/*percent*/ 92.0)],
@@ -284,7 +292,7 @@ async fn usage_command_can_check_reset_availability_before_startup_refresh_finis
 async fn usage_command_can_check_reset_availability_for_workspace_accounts() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Usage);
 
@@ -859,10 +867,18 @@ async fn account_change_invalidates_pending_reset_requests() {
     set_chatgpt_auth(&mut chat);
     let request_id = chat.show_rate_limit_reset_loading_popup();
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
-    );
+    {
+        chat.set_test_backend_auth(false);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
 
     assert!(!chat.finish_rate_limit_reset_credits_refresh(
         request_id,
@@ -978,10 +994,18 @@ async fn account_change_dismisses_reset_popup_beneath_overlay() {
     };
     show_usage_test_overlay(&mut chat);
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
-    );
+    {
+        chat.set_test_backend_auth(false);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     assert!(!chat.show_rate_limit_reset_confirmation(
         request_id,
         reset_credit_confirmation(),
@@ -1107,7 +1131,7 @@ async fn startup_check_omits_reset_hint_when_none_are_available() {
 async fn startup_check_shows_reset_hint_for_workspace_account_with_credit() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
     let hint_request_id = chat.start_rate_limit_reset_startup_check();
 
     assert!(chat.finish_rate_limit_reset_hint_refresh(

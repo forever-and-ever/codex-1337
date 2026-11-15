@@ -15,6 +15,7 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
     chat.thread_id = Some(thread_id);
     chat.apply_external_edit("unfinished prompt".into());
     let item = QueuedSubmission {
+        responsesapi_client_metadata: None,
         id: "queued-1".into(), client_user_message_id: "queued-1".into(), input: Vec::new(),
         tool_output: Some(Box::new(TurnToolOutput {
                 retain: false,

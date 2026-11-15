@@ -48,7 +48,7 @@ async fn luna_reserve_selector_supports_arrows_enter_shortcuts_and_escape_withou
         (vec![KeyCode::Down, KeyCode::Esc], None),
     ] {
         let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("gpt-reserve")).await;
-        chat.has_chatgpt_account = true;
+        chat.set_test_chatgpt_account(true);
         chat.apply_external_edit("saved draft".into());
         chat.on_rate_limit_snapshot(Some(reserve_snapshot(
             /*primary_used*/ 48, /*weekly_used*/ 20,
@@ -108,7 +108,7 @@ async fn luna_reserve_selector_supports_arrows_enter_shortcuts_and_escape_withou
 #[tokio::test]
 async fn luna_reserve_status_tracks_the_active_model() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-5.6-sol")).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.on_rate_limit_snapshot(Some(reserve_snapshot(
         /*primary_used*/ 25, /*weekly_used*/ 60,
     )));
@@ -157,7 +157,7 @@ async fn luna_reserve_status_tracks_the_active_model() {
 #[tokio::test]
 async fn luna_reserve_usage_survives_banner_dismissal_and_typing_during_a_turn() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-reserve")).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.on_rate_limit_snapshot(Some(reserve_snapshot(
         /*primary_used*/ 48, /*weekly_used*/ 20,
     )));
@@ -234,7 +234,7 @@ async fn luna_reserve_usage_survives_banner_dismissal_and_typing_during_a_turn()
 #[tokio::test]
 async fn luna_reserve_prompt_preserves_the_composer_palette_on_exit() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-reserve")).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.on_rate_limit_snapshot(Some(reserve_snapshot(
         /*primary_used*/ 25, /*weekly_used*/ 60,
     )));

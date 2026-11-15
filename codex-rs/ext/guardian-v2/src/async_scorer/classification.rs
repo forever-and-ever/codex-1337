@@ -33,7 +33,6 @@ use codex_guardian_context::PreviousReviews;
 use codex_guardian_context::ReviewEvidence;
 use codex_guardian_context::render_review_evidence;
 use codex_history::RolloutItem;
-use codex_model_provider::create_model_provider;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ContentItem;
 use codex_protocol::openai_models::ModelInfo;
@@ -63,6 +62,7 @@ pub(super) struct Classification {
     pub(super) guardian_config: GuardianV2Config,
     pub(super) score_progress: Arc<GuardianV2ScoreProgress>,
     pub(super) parent_model: Option<Arc<ModelInfo>>,
+    pub(super) captured_provider: Option<Arc<codex_core::CapturedProvider>>,
     pub(super) metrics: Option<Arc<dyn ExtensionMetrics>>,
     pub(super) analytics: Option<Arc<AnalyticsEventsClient>>,
     pub(super) sampled_at: SystemTime,
@@ -81,7 +81,6 @@ pub(super) struct Classification {
     pub(super) call_id: String,
     pub(super) mcp_tool: Option<McpToolContext>,
     pub(super) planned_action: String,
-    pub(super) review_model_override: Option<String>,
     pub(super) sync_reviews: Vec<Arc<GuardianReviewEvidenceRecord>>,
     pub(super) trusted_user_inputs: Vec<String>,
     pub(super) authorization_version: GuardianAuthorizationVersion,
@@ -119,6 +118,7 @@ impl Classification {
             guardian_config,
             score_progress,
             parent_model,
+            captured_provider,
             metrics,
             analytics,
             sampled_at,
@@ -137,7 +137,6 @@ impl Classification {
             call_id,
             mcp_tool,
             planned_action,
-            review_model_override,
             sync_reviews,
             trusted_user_inputs,
             authorization_version,
@@ -291,23 +290,22 @@ impl Classification {
         let mut classification_risk = None;
         let mut classification_finished_at = None;
         let result: Result<ClassificationOutcome, String> = async {
-            let review_model = if config.guardian_policy_config.is_none() {
-                let review_model_id = review_model_override.as_deref().unwrap_or_else(|| {
-                    create_model_provider(
-                        config.model_provider.clone(),
-                        Some(manager.auth_manager()),
-                    )
-                    .approval_review_preferred_model()
-                });
-                let review_model = manager
-                    .get_models_manager()
-                    .get_model_info(review_model_id, &config.to_models_manager_config())
-                    .await;
-                if review_model.used_fallback_model_metadata && review_model_override.is_none() {
-                    parent_model.clone()
-                } else {
-                    Some(Arc::new(review_model))
-                }
+            let review_model = if config.guardian_policy_config.is_none()
+                && let Some(parent_model) = parent_model.as_ref()
+            {
+                Some(
+                    async {
+                        let captured_provider = captured_provider.as_ref().ok_or_else(|| {
+                            anyhow::anyhow!("Guardian classification requires the issuing turn's admitted provider")
+                        })?;
+                        codex_core::guardian_policy_model(&thread, captured_provider, &config, Arc::clone(parent_model)).await
+                    }
+                    .await
+                    .map_err(|error| {
+                        failure_reason = "model_resolution_error";
+                        error.to_string()
+                    })?,
+                )
             } else {
                 None
             };
@@ -324,6 +322,7 @@ impl Classification {
             );
             let sampling = LunaSamplingRequest {
                 provider_account_id,
+                item_id_generator: Arc::clone(thread.item_id_generator()),
                 cyber_access_program,
                 parent_response_id,
                 instructions,

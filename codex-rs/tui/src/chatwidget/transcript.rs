@@ -16,8 +16,8 @@ pub(super) struct ActiveCellLayoutCacheKey {
 }
 
 pub(super) struct FlushedAgentMessage {
-    pub(super) turn_id: String,
-    pub(super) item_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) item_id: String,
     pub(super) source: String,
 }
 
@@ -37,10 +37,11 @@ pub(super) struct StatusCopySource {
     pub(super) fields: Vec<(String, Arc<str>)>,
 }
 
-pub(super) struct CompletedAgentMessage {
-    pub(super) turn_id: String,
-    pub(super) item_id: String,
-    pub(super) phase: Option<codex_protocol::models::MessagePhase>,
+#[derive(Clone, Debug)]
+pub(crate) struct CompletedAgentMessage {
+    pub(crate) turn_id: String,
+    pub(crate) item_id: String,
+    pub(crate) phase: Option<codex_protocol::models::MessagePhase>,
 }
 
 #[derive(Default)]
@@ -60,8 +61,10 @@ pub(super) struct TranscriptState {
     /// Latest `/status` card and fields, retained across copying until a later turn or command.
     pub(super) last_status_copy_targets: Option<StatusCopySource>,
     pub(super) last_completed_agent_message: Option<CompletedAgentMessage>,
+    pub(super) preparations: Vec<crate::streaming::completion::PreparedStream>,
     pub(super) agent_timestamp: Option<crate::history_cell::HistoryTimestamp>,
     pub(super) last_flushed_agent_message: Option<FlushedAgentMessage>,
+    pub(super) active_streamed_agent_message: Option<(String, String)>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,
     /// Whether this turn already produced a copyable response.

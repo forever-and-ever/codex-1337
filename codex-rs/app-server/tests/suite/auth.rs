@@ -226,6 +226,7 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
         assert_eq!(
             to_response::<GetAccountResponse>(response)?,
             GetAccountResponse {
+                user_id: Some("user-123".to_string()),
                 display_name: None,
                 account_id: None,
                 account: Some(Account::Chatgpt {

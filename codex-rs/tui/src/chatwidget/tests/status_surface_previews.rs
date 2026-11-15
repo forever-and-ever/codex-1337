@@ -28,16 +28,21 @@ async fn thread_color_preview_matches_footer() {
             let mut snapshot = Vec::new();
             let preview = chat.status_surface_preview_data();
             for use_colors in [true, false] {
-                let line = preview.status_line_for_items(items, use_colors).unwrap();
+                let line = preview
+                    .status_line_for_items(items, use_colors)
+                    .unwrap()
+                    .into_hyperlink_line()
+                    .line;
                 let footer = crate::bottom_pane::status_line_from_segments(
                     items
                         .into_iter()
                         .map(|item| (item, chat.status_line_value_for_item(item).unwrap())),
                     use_colors,
                     Some(id),
+                    /*pull_request_url*/ None,
                 )
                 .unwrap();
-                assert_eq!(line, footer);
+                assert_eq!(line, footer.line);
                 snapshot.push(format!("colors={use_colors}: {line:?}"));
             }
             insta::assert_snapshot!(snapshot.join("\n"));
@@ -49,7 +54,7 @@ fn status_preview_line_option(chat: &mut ChatWidget, items: &[StatusLineItem]) -
     let preview_data = chat.status_surface_preview_data();
     preview_data
         .status_line_for_items(items.iter().copied(), /*use_theme_colors*/ true)
-        .map(line_text)
+        .map(|content| line_text(content.into_hyperlink_line().line))
 }
 
 fn status_preview_line(chat: &mut ChatWidget, items: &[StatusLineItem]) -> String {
@@ -158,6 +163,7 @@ async fn status_surface_preview_lines_live_only_snapshot() {
 #[tokio::test]
 async fn status_line_setup_popup_live_only_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_feature_enabled(Feature::TuiExtensionsStatusLine, /*enabled*/ true);
     cache_project_root(&mut chat, "preview-live-root");
     chat.status_line_branch = Some("feature/live-preview-branch".to_string());
     chat.thread_name = Some("Live preview thread".to_string());
@@ -293,8 +299,8 @@ async fn status_surface_preview_lines_thread_usage_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.has_codex_backend_auth = true;
-    chat.plan_type = Some(PlanType::Business);
+    chat.set_test_backend_auth(true);
+    chat.test_account_mut().plan = Some(PlanType::Business);
     chat.local_settings.tui.status_line = Some(vec![
         "thread-credits".to_string(),
         "estimated-thread-cost".to_string(),
@@ -341,8 +347,8 @@ async fn status_surface_thread_usage_previews_omit_unavailable_usd_estimates() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.has_codex_backend_auth = true;
-    chat.plan_type = Some(PlanType::Business);
+    chat.set_test_backend_auth(true);
+    chat.test_account_mut().plan = Some(PlanType::Business);
     chat.local_settings.tui.status_line = Some(vec![
         "thread-credits".to_string(),
         "estimated-thread-cost".to_string(),
@@ -453,7 +459,7 @@ async fn status_line_setup_popup_rate_limits_snapshot() {
 #[tokio::test]
 async fn status_line_setup_popup_mixed_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
     chat.status_line_branch = Some("feature/mixed-preview".to_string());
     chat.thread_name = Some("Mixed preview thread".to_string());
@@ -509,7 +515,7 @@ async fn terminal_title_setup_popup_hardcoded_only_snapshot() {
 #[tokio::test]
 async fn terminal_title_setup_popup_mixed_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
     chat.thread_name = Some("Mixed preview thread".to_string());
     chat.set_daybreak_enabled(/*enabled*/ true);

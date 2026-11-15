@@ -21,6 +21,7 @@ pub(in crate::app) enum DetachScope {
     Exit,
     VoiceOnly,
     Navigation { destination: Option<ThreadId> },
+    NavigationKeepingRetainedSides { destination: ThreadId },
 }
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ pub(super) struct DetachTarget {
 #[derive(Clone)]
 pub(super) enum DetachKind {
     Conversation,
+    FailedSide,
     Side { turn_id: String, replay_only: bool },
 }
 
@@ -65,7 +67,7 @@ pub(in crate::app) struct DetachedTarget {
     pub(super) result: Result<(), TypedRequestError>,
 }
 
-pub(super) async fn unsubscribe(
+pub(in crate::app) async fn unsubscribe(
     handle: &AppServerRequestHandle,
     id: Uuid,
     thread_id: ThreadId,
@@ -128,11 +130,42 @@ pub(super) async fn send(
                     }
                 }
             }
-            unsubscribe(handle, id, thread_id).await
+            if matches!(target.kind, DetachKind::FailedSide) {
+                let _: api::ThreadDeleteResponse = handle.request_typed(ClientRequest::ThreadDelete {
+                    request_id: api::RequestId::String(format!("tui-operation-{id}-{thread_id}-rollback")),
+                    params: api::ThreadDeleteParams { thread_id: thread_id.to_string() },
+                }).await?;
+                Ok(())
+            } else { unsubscribe(handle, id, thread_id).await }
         }.await;
         results.push(DetachedTarget { thread_id, result });
     }
     results
+}
+
+pub(in crate::app) async fn close_side_subscription(
+    handle: &AppServerRequestHandle,
+    id: Uuid,
+    thread_id: ThreadId,
+    store: Arc<Mutex<ThreadEventStore>>,
+    turn_id: String,
+    replay_only: bool,
+) -> Result<(), TypedRequestError> {
+    let plan = DetachPlan {
+        targets: vec![DetachTarget {
+            thread_id,
+            store,
+            kind: DetachKind::Side {
+                turn_id,
+                replay_only,
+            },
+        }],
+        voice: None,
+    };
+    send(handle, id, &plan)
+        .await
+        .into_iter()
+        .try_for_each(|target| target.result)
 }
 
 impl App {
@@ -143,9 +176,13 @@ impl App {
     pub(in crate::app) async fn prepare_detach_plan(&mut self, scope: DetachScope) -> DetachPlan {
         let destination = match scope {
             DetachScope::Navigation { destination } => destination,
+            DetachScope::NavigationKeepingRetainedSides { destination } => Some(destination),
             _ => None,
         };
-        let voice = if matches!(scope, DetachScope::Navigation { .. }) {
+        let voice = if matches!(
+            scope,
+            DetachScope::Navigation { .. } | DetachScope::NavigationKeepingRetainedSides { .. }
+        ) {
             None
         } else {
             let thread_id = self
@@ -157,7 +194,9 @@ impl App {
             thread_id
         };
         match scope {
-            DetachScope::Exit | DetachScope::Navigation { .. } => {}
+            DetachScope::Exit
+            | DetachScope::Navigation { .. }
+            | DetachScope::NavigationKeepingRetainedSides { .. } => {}
             DetachScope::VoiceOnly => {
                 return DetachPlan {
                     targets: Vec::new(),
@@ -168,7 +207,9 @@ impl App {
         let mut targets = Vec::new();
         // Side conversations stop before unsubscribing; ordinary conversations keep running.
         for thread_id in self.side_threads.keys().copied().collect::<Vec<_>>() {
-            if destination == Some(thread_id) {
+            if matches!(scope, DetachScope::NavigationKeepingRetainedSides { .. })
+                || destination == Some(thread_id)
+            {
                 continue;
             }
             let channel = self.ensure_thread_channel(thread_id);
@@ -239,7 +280,7 @@ impl App {
                 continue;
             }
             match (&target.kind, result.result) {
-                (DetachKind::Side { .. }, Ok(())) => {
+                (DetachKind::Side { .. } | DetachKind::FailedSide, Ok(())) => {
                     self.abandoned_side_threads.insert(target.thread_id);
                     let drafts = self
                         .take_unsent_thread_operations(target.thread_id, &target.store)
@@ -254,7 +295,7 @@ impl App {
                     )
                     .await;
                 }
-                (DetachKind::Side { .. }, Err(error)) => {
+                (DetachKind::Side { .. } | DetachKind::FailedSide, Err(error)) => {
                     self.add_agents_overview_error(format!(
                         "Closing side conversation {} was not confirmed: {error}",
                         target.thread_id

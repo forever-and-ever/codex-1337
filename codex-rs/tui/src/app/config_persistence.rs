@@ -1736,7 +1736,7 @@ theme = "dracula"
         let mut app = make_test_app().await;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         app.local_settings.tui.theme = Some("dracula".to_string());
-        app.chat_widget.requires_openai_auth = false;
+        app.chat_widget.test_account_mut().requires_openai_auth = false;
         crate::markdown_render::preferences::init(Default::default());
         app.local_settings.tui.rendering.math = false;
         let mut legacy_config = app.config.clone();
@@ -1749,7 +1749,7 @@ theme = "dracula"
         );
         let replacement = ChatWidget::new_with_app_event(init);
         assert_eq!(replacement.local_settings, app.local_settings);
-        assert!(!replacement.requires_openai_auth);
+        assert!(!replacement.requires_openai_auth());
         app.replace_chat_widget(replacement);
         let source = r"Math: \(x^2\)";
         assert_eq!(

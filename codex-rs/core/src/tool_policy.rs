@@ -57,6 +57,7 @@ pub(crate) fn empty_router(policy: Arc<ToolPolicy>) -> Option<ToolRouter> {
         ToolMode::Direct,
         BTreeMap::default(),
         None,
+        None,
         &[],
     ))
 }

@@ -417,9 +417,17 @@ async fn notice_follows_threads_and_clears_on_account_change() {
         chat.usage_notice_state.current(),
         Some((low.primary.unwrap(), false))
     );
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| crate::status::StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     assert_eq!(chat.usage_notice_state.current(), None);
 }

@@ -267,6 +267,7 @@ fn invalid_turn_boundaries_reset_partial_measurements() {
 #[test]
 fn item_completion_persistence_depends_on_history_mode() {
     let item = RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+        content_token_count: None,
         thread_id: ThreadId::default(),
         turn_id: "turn".to_string(),
         item: TurnItem::UserMessage(UserMessageItem {
@@ -308,6 +309,7 @@ fn item_completion_persistence_depends_on_history_mode() {
 fn projected_items_report_post_projection_bytes() {
     let original_output = "x".repeat(PERSISTED_COMMAND_OUTPUT_MAX_BYTES * 2);
     let item = RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+        content_token_count: None,
         thread_id: ThreadId::default(),
         turn_id: "turn".to_string(),
         item: TurnItem::CommandExecution(CommandExecutionItem {
@@ -365,6 +367,7 @@ fn projected_items_report_post_projection_bytes() {
 fn review_mode_persistence_depends_on_history_mode() {
     let completed_items = vec![
         RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+            content_token_count: None,
             thread_id: ThreadId::default(),
             turn_id: "turn".to_string(),
             item: TurnItem::EnteredReviewMode(EnteredReviewModeItem {
@@ -378,6 +381,7 @@ fn review_mode_persistence_depends_on_history_mode() {
             completed_at_ms: 0,
         })),
         RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+            content_token_count: None,
             thread_id: ThreadId::default(),
             turn_id: "turn".to_string(),
             item: TurnItem::ExitedReviewMode(ExitedReviewModeItem {

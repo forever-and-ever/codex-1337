@@ -199,11 +199,12 @@ impl EmptyStateAnimation {
     /// Paint the static landing page only in unused space owned by the caller.
     pub(crate) fn render_first_screen(
         &mut self,
+        screen: Rect,
         available: Rect,
         buffer: &mut Buffer,
         composer: Option<ComposerState>,
     ) -> Option<Duration> {
-        self.render_landing_page(available, buffer, composer);
+        self.render_landing_page(available.intersection(screen), buffer, composer);
         None
     }
 

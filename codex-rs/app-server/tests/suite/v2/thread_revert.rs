@@ -481,6 +481,30 @@ async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
         )
         .await??;
         assert_eq!(reverted.thread_id, thread.id);
+        let ThreadItemsListResponse {
+            data: reverted_items,
+            ..
+        } = mcp
+            .request(|request_id| ClientRequest::ThreadItemsList {
+                request_id,
+                params: ThreadItemsListParams {
+                    thread_id: thread.id.clone(),
+                    turn_id: None,
+                    cursor: items_backwards_cursor
+                        .clone()
+                        .map(ThreadItemsListCursor::Opaque),
+                    limit: None,
+                    sort_direction: None,
+                    defer_output: None,
+                },
+            })
+            .await?;
+        assert!(!reverted_items.is_empty());
+        assert!(
+            reverted_items
+                .iter()
+                .all(|item| item.turn_id == turn_ids[0])
+        );
 
         assert_eq!(reverted_thread.id, thread.id);
         assert!(reverted_thread.turns.is_empty());
@@ -502,9 +526,12 @@ async fn thread_revert_replaces_paginated_history_before_turn() -> Result<()> {
             .request(|request_id| ClientRequest::ThreadItemsList {
                 request_id,
                 params: ThreadItemsListParams {
+                    defer_output: None,
                     thread_id: thread.id.clone(),
                     turn_id: None,
-                    cursor: items_backwards_cursor.map(ThreadItemsListCursor::Opaque),
+                    cursor: items_backwards_cursor
+                        .clone()
+                        .map(ThreadItemsListCursor::Opaque),
                     limit: None,
                     sort_direction: None,
                 },
@@ -763,6 +790,7 @@ async fn initialize_experimental(mcp: &mut TestAppServer) -> Result<()> {
                 version: "0.1.0".to_string(),
             },
             Some(InitializeCapabilities {
+                required_human_approval: false,
                 explicit_gateway_oauth: false,
                 experimental_api: true,
                 request_attestation: false,

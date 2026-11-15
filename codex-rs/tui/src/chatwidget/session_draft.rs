@@ -93,8 +93,7 @@ impl ChatWidget {
         self.config.model = Some(choice.model.model.clone());
         self.config.model_reasoning_effort = Some(choice.effort.clone());
         self.config.service_tier = Some("default".into());
-        self.requires_openai_auth = self.config.model_provider.requires_openai_auth;
-        self.status_account_display = None;
+        self.account = crate::app_server_session::BootstrapAccount::AwaitingResume;
         self.active_account_label = None;
         self.rate_limit_snapshots_by_limit_id.clear();
         Arc::make_mut(&mut self.model_catalog).models = vec![choice.model.clone()];

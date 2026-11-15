@@ -75,7 +75,8 @@ enum ExecutionProvider {
 
 #[derive(Debug)]
 enum CredentialOwner {
-    Anonymous,
+    Anonymous(SharedModelProvider),
+    ConfiguredBearer(codex_login::CodexAuth),
     // A private immutable captured source may rotate opaque bearer bytes. Its source,
     // not those bytes, is the authority. No mutable source manager escapes this module.
     Source(codex_login::CapturedAuthSource),
@@ -88,9 +89,31 @@ enum CredentialOwner {
 }
 
 impl CredentialOwner {
+    fn same_authority(&self, other: &Self) -> bool {
+        if self.validate().is_err() || other.validate().is_err() {
+            return false;
+        }
+        match (self, other) {
+            (Self::Anonymous(left), Self::Anonymous(right)) => Arc::ptr_eq(left, right),
+            (Self::ConfiguredBearer(left), Self::ConfiguredBearer(right)) => left == right,
+            (Self::Source(left), Self::Source(right)) => left.same_authority(right),
+            (
+                Self::Principal {
+                    credentials: left,
+                    owner_generation: left_generation,
+                },
+                Self::Principal {
+                    credentials: right,
+                    owner_generation: right_generation,
+                },
+            ) => left_generation == right_generation && left.same_credential_authority(right),
+            _ => false,
+        }
+    }
+
     fn credentials(&self) -> Option<Arc<AuthManager>> {
         match self {
-            Self::Anonymous => None,
+            Self::Anonymous(_) | Self::ConfiguredBearer(_) => None,
             Self::Source(source) => Some(source.credentials()),
             Self::Principal { credentials, .. } => Some(Arc::clone(credentials)),
         }
@@ -116,9 +139,9 @@ impl CredentialOwner {
 
     fn requires_auth(&self) -> bool {
         match self {
-            Self::Principal { .. } => true,
+            Self::Principal { .. } | Self::ConfiguredBearer(_) => true,
             Self::Source(source) => source.requires_auth(),
-            Self::Anonymous => false,
+            Self::Anonymous(_) => false,
         }
     }
 
@@ -127,7 +150,17 @@ impl CredentialOwner {
         auth: Option<&codex_login::CodexAuth>,
     ) -> Result<(), ProviderCaptureError> {
         self.validate()?;
+        if let Self::ConfiguredBearer(expected) = self {
+            return if auth == Some(expected) {
+                Ok(())
+            } else {
+                Err(ProviderCaptureError::OwnerChanged)
+            };
+        }
         match auth {
+            Some(_) if matches!(self, Self::Anonymous(_)) => {
+                return Err(ProviderCaptureError::OwnerChanged);
+            }
             None if self.requires_auth() => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
@@ -152,6 +185,13 @@ impl codex_model_provider::ProviderCredentialGuard for CredentialOwner {
     fn validate(&self, auth: Option<&codex_login::CodexAuth>) -> codex_protocol::error::Result<()> {
         Ok(self.validate_auth(auth)?)
     }
+
+    fn configured_bearer(&self) -> Option<codex_login::CodexAuth> {
+        match self {
+            Self::ConfiguredBearer(auth) => Some(auth.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -162,11 +202,94 @@ pub enum StartCredentials {
 }
 
 impl CapturedProvider {
+    /// Admit an explicitly selected Responses provider before auxiliary discovery or execution.
+    pub fn capture_responses(provider: SharedModelProvider) -> Result<Self, ProviderCaptureError> {
+        if provider.info().adapter != ModelProviderAdapter::OpenaiCompatible {
+            return Err(ProviderCaptureError::ProviderChanged);
+        }
+        if let Some(auth) = codex_model_provider::configured_bearer_credentials(provider.info())? {
+            let provider = match provider.auth_manager() {
+                Some(source) => provider.for_auth_context(ProviderAuthContext {
+                    credentials: AuthManager::from_api_key(
+                        &auth.get_token()?,
+                        source.runtime_config(),
+                    ),
+                    runtime_auth: provider.credential_runtime().cloned(),
+                })?,
+                None if provider.credential_runtime().is_some() => {
+                    return Err(ProviderCaptureError::RuntimeOwnerNotScoped);
+                }
+                None => provider,
+            };
+            let owner = Arc::new(CredentialOwner::ConfiguredBearer(auth));
+            let provider = provider.with_credential_guard(owner.clone())?;
+            let captured = Self(Arc::new(ExecutionProvider::Responses { provider, owner }));
+            captured.validate()?;
+            return Ok(captured);
+        }
+        let Some(source) = provider.auth_manager() else {
+            let owner = Arc::new(CredentialOwner::Anonymous(Arc::clone(&provider)));
+            let provider = provider.with_credential_guard(owner.clone())?;
+            return Ok(Self(Arc::new(ExecutionProvider::Responses {
+                provider,
+                owner,
+            })));
+        };
+        let revision = *source.auth_change_state_receiver().borrow();
+        let principal_owner = |credentials: Arc<AuthManager>| {
+            let owner_generation = credentials
+                .auth_change_state_receiver()
+                .borrow()
+                .owner_generation;
+            CredentialOwner::Principal {
+                credentials,
+                owner_generation,
+            }
+        };
+        let owner = if provider.credential_runtime().is_some() && source.has_external_auth() {
+            CredentialOwner::Source(source.capture_runtime_source()?)
+        } else if !source.has_external_auth()
+            && (source.selected_account_id().is_some()
+                || source
+                    .auth_cached()
+                    .is_some_and(|auth| auth.is_chatgpt_auth()))
+        {
+            CredentialOwner::Source(source.capture_job_source()?)
+        } else if provider.credential_runtime().is_some() {
+            principal_owner(Arc::clone(&source))
+        } else {
+            CredentialOwner::Source(source.capture_auxiliary_source()?)
+        };
+        if source
+            .auth_change_state_receiver()
+            .borrow()
+            .owner_generation
+            != revision.owner_generation
+        {
+            return Err(ProviderCaptureError::OwnerChanged);
+        }
+        let owner = Arc::new(owner);
+        let credentials = match owner.as_ref() {
+            CredentialOwner::Principal { credentials, .. } => Arc::clone(credentials),
+            CredentialOwner::Source(source) => source.credentials(),
+            CredentialOwner::Anonymous(_) | CredentialOwner::ConfiguredBearer(_) => unreachable!(),
+        };
+        let provider = provider
+            .for_auth_context(ProviderAuthContext {
+                credentials,
+                runtime_auth: provider.credential_runtime().cloned(),
+            })?
+            .with_credential_guard(owner.clone())?;
+        let captured = Self(Arc::new(ExecutionProvider::Responses { provider, owner }));
+        captured.validate()?;
+        Ok(captured)
+    }
+
     pub fn info(&self) -> &ModelProviderInfo {
         self.provider().info()
     }
 
-    fn provider(&self) -> &SharedModelProvider {
+    pub fn provider(&self) -> &SharedModelProvider {
         match self.0.as_ref() {
             ExecutionProvider::Responses { provider, .. }
             | ExecutionProvider::Claude { provider, .. }
@@ -193,7 +316,9 @@ impl CapturedProvider {
             }
             ExecutionProvider::Responses { owner, .. } => {
                 let credentials = match owner.as_ref() {
-                    CredentialOwner::Anonymous => return None,
+                    CredentialOwner::Anonymous(_) | CredentialOwner::ConfiguredBearer(_) => {
+                        return None;
+                    }
                     CredentialOwner::Source(source) => {
                         return source
                             .credentials()
@@ -213,6 +338,104 @@ impl CapturedProvider {
         self.provider().auth_manager()
     }
 
+    /// Compares admitted authority, never bearer bytes or a reusable account name alone.
+    pub(crate) fn same_authority(&self, other: &Self) -> bool {
+        if self.validate().is_err() || other.validate().is_err() {
+            return false;
+        }
+        let info = |capture: &Self| ModelProviderInfo {
+            request_max_retries: None,
+            stream_max_retries: None,
+            supports_websockets: false,
+            ..capture.info().clone()
+        };
+        if info(self) != info(other) {
+            return false;
+        }
+        let same_runtime = match (
+            self.provider().credential_runtime(),
+            other.provider().credential_runtime(),
+        ) {
+            (Some((left, left_mode)), Some((right, right_mode))) => {
+                left_mode == right_mode && left.same_registration_authority(right)
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !same_runtime {
+            return false;
+        }
+        match (self.0.as_ref(), other.0.as_ref()) {
+            (
+                ExecutionProvider::Responses { owner: left, .. },
+                ExecutionProvider::Responses { owner: right, .. },
+            ) => {
+                left.same_authority(right)
+                    && match (
+                        self.provider().auth_manager(),
+                        other.provider().auth_manager(),
+                    ) {
+                        (Some(left), Some(right)) => {
+                            left.http_client_factory().network_policy()
+                                == right.http_client_factory().network_policy()
+                        }
+                        (None, None) => {
+                            Arc::ptr_eq(left, right)
+                                || matches!(
+                                    (left.as_ref(), right.as_ref()),
+                                    (CredentialOwner::Anonymous(_), CredentialOwner::Anonymous(_))
+                                )
+                                || Arc::ptr_eq(self.provider(), other.provider())
+                        }
+                        _ => false,
+                    }
+            }
+            // Native account/key names do not prove the credential incarnation.
+            // Only the same immutable native provider binding proves reuse.
+            (
+                ExecutionProvider::Claude { account: left, .. },
+                ExecutionProvider::Claude { account: right, .. },
+            ) => left == right && Arc::ptr_eq(self.provider(), other.provider()),
+            (
+                ExecutionProvider::OpenRouter { key: left, .. },
+                ExecutionProvider::OpenRouter { key: right, .. },
+            ) => left == right && Arc::ptr_eq(self.provider(), other.provider()),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn for_transport(
+        &self,
+        info: &ModelProviderInfo,
+    ) -> Result<Self, ProviderCaptureError> {
+        self.matches(&ModelProviderInfo {
+            request_max_retries: self.info().request_max_retries,
+            stream_max_retries: self.info().stream_max_retries,
+            supports_websockets: self.info().supports_websockets,
+            ..info.clone()
+        })?;
+        let provider = self.provider().for_transport(
+            info.request_max_retries,
+            info.stream_max_retries,
+            info.supports_websockets,
+        )?;
+        let execution = match self.0.as_ref() {
+            ExecutionProvider::Responses { owner, .. } => ExecutionProvider::Responses {
+                provider,
+                owner: Arc::clone(owner),
+            },
+            ExecutionProvider::Claude { account, .. } => ExecutionProvider::Claude {
+                provider,
+                account: account.clone(),
+            },
+            ExecutionProvider::OpenRouter { key, .. } => ExecutionProvider::OpenRouter {
+                provider,
+                key: key.clone(),
+            },
+        };
+        Ok(Self(Arc::new(execution)))
+    }
+
     pub(crate) fn matches(&self, info: &ModelProviderInfo) -> Result<(), ProviderCaptureError> {
         self.validate()?;
         if self.info() != info {
@@ -229,18 +452,27 @@ impl CapturedProvider {
         self.provider().memory_consolidation_preferred_model()
     }
 
-    pub(crate) fn models_manager(
+    pub(crate) fn catalog_provider(
         &self,
         config: &Config,
-    ) -> Result<SharedModelsManager, ProviderCaptureError> {
+    ) -> Result<SharedModelProvider, ProviderCaptureError> {
+        self.validate()?;
         self.matches(&config.model_provider)?;
-        let provider = match self.0.as_ref() {
+        Ok(match self.0.as_ref() {
             ExecutionProvider::Claude { provider, account } => {
                 provider.for_anthropic_account(&account.to_string())?
             }
             _ => Arc::clone(self.provider()),
-        };
-        Ok(provider.models_manager(config.models_cache_path(), config.model_catalog.clone()))
+        })
+    }
+
+    pub fn models_manager(
+        &self,
+        config: &Config,
+    ) -> Result<SharedModelsManager, ProviderCaptureError> {
+        Ok(self
+            .catalog_provider(config)?
+            .models_manager(config.models_cache_path(), config.model_catalog.clone()))
     }
 
     pub async fn model_info(&self, config: &Config, model: &str) -> anyhow::Result<ModelInfo> {
@@ -270,12 +502,12 @@ impl CapturedProvider {
             .get_model_info(model, &config.to_models_manager_config())
             .await;
         self.validate()?;
-        Ok(info)
+        Ok(Arc::unwrap_or_clone(info.model))
     }
 }
 
 impl ModelClient {
-    pub async fn capture_provider(&self) -> Result<CapturedProvider, ProviderCaptureError> {
+    pub fn capture_provider(&self) -> Result<CapturedProvider, ProviderCaptureError> {
         let provider = Arc::clone(&self.state.provider);
         let captured = match provider.info().adapter {
             ModelProviderAdapter::ClaudeSubscription => {
@@ -285,7 +517,7 @@ impl ModelClient {
                     return Err(ProviderCaptureError::AccountRequired);
                 };
                 ExecutionProvider::Claude {
-                    provider,
+                    provider: provider.for_anthropic_account(&id)?,
                     account: id.parse().map_err(std::io::Error::other)?,
                 }
             }
@@ -298,76 +530,7 @@ impl ModelClient {
                 ExecutionProvider::OpenRouter { provider, key }
             }
             ModelProviderAdapter::OpenaiCompatible => {
-                let Some(source) = provider.auth_manager() else {
-                    return Ok(CapturedProvider(Arc::new(ExecutionProvider::Responses {
-                        provider,
-                        owner: Arc::new(CredentialOwner::Anonymous),
-                    })));
-                };
-                let revision = *source.auth_change_state_receiver().borrow();
-                let principal_owner = |credentials: Arc<AuthManager>| {
-                    let owner_generation = credentials
-                        .auth_change_state_receiver()
-                        .borrow()
-                        .owner_generation;
-                    CredentialOwner::Principal {
-                        credentials,
-                        owner_generation,
-                    }
-                };
-                let owner = if let Some((runtime, _)) = provider.credential_runtime() {
-                    codex_model_provider::validate_runtime_provider(
-                        provider.info(),
-                        Some(&source),
-                        runtime,
-                    )?;
-                    if source
-                        .auth_cached()
-                        .is_some_and(|auth| auth.is_chatgpt_auth())
-                        && !source.is_account_scoped()
-                    {
-                        return Err(ProviderCaptureError::RuntimeOwnerNotScoped);
-                    }
-                    if source.has_external_auth() {
-                        CredentialOwner::Source(source.capture_runtime_source()?)
-                    } else {
-                        principal_owner(Arc::clone(&source))
-                    }
-                } else if let Some(id) = source
-                    .selected_account_id()
-                    .filter(|_| !source.has_external_auth())
-                {
-                    principal_owner(source.for_account(&id).await?)
-                } else if !source.has_external_auth()
-                    && source
-                        .auth_cached()
-                        .is_some_and(|auth| auth.is_chatgpt_auth())
-                {
-                    principal_owner(Arc::clone(&source))
-                } else {
-                    CredentialOwner::Source(source.capture_auxiliary_source()?)
-                };
-                if source
-                    .auth_change_state_receiver()
-                    .borrow()
-                    .owner_generation
-                    != revision.owner_generation
-                {
-                    return Err(ProviderCaptureError::OwnerChanged);
-                }
-                let owner = Arc::new(owner);
-                let credentials = match owner.as_ref() {
-                    CredentialOwner::Principal { credentials, .. } => Arc::clone(credentials),
-                    CredentialOwner::Source(source) => source.credentials(),
-                    CredentialOwner::Anonymous => unreachable!(),
-                };
-                let provider = provider
-                    .for_auth_context(ProviderAuthContext {
-                        credentials,
-                        runtime_auth: provider.runtime_auth().cloned(),
-                    })?
-                    .with_credential_guard(owner.clone())?;
-                ExecutionProvider::Responses { provider, owner }
+                return CapturedProvider::capture_responses(provider);
             }
         };
         let captured = CapturedProvider(Arc::new(captured));
@@ -413,10 +576,14 @@ impl StartCredentials {
     pub(crate) fn models_manager(
         &self,
         config: &Config,
+        catalog: &crate::thread_manager::model_catalog::ThreadModelCatalog,
+        originator: &str,
     ) -> Result<Option<SharedModelsManager>, ProviderCaptureError> {
         match self {
             Self::Inherit => Ok(None),
-            Self::Captured(captured) => captured.models_manager(config).map(Some),
+            Self::Captured(captured) => {
+                catalog.for_captured(config, captured, originator).map(Some)
+            }
         }
     }
 }
@@ -441,6 +608,11 @@ impl CapturedProvider {
         &self,
     ) -> Result<Option<codex_login::CodexAuth>, ProviderCaptureError> {
         self.validate()?;
+        if let ExecutionProvider::Responses { owner, .. } = self.0.as_ref()
+            && let CredentialOwner::ConfiguredBearer(auth) = owner.as_ref()
+        {
+            return Ok(Some(auth.clone()));
+        }
         let auth = match self.auth_manager() {
             Some(credentials) => credentials.auth().await,
             None => None,
@@ -488,6 +660,25 @@ impl From<ProviderCaptureError> for CodexErr {
     fn from(error: ProviderCaptureError) -> Self {
         match error {
             ProviderCaptureError::Configuration(error) => error,
+            ProviderCaptureError::Credentials(error) => {
+                let error = match error.downcast::<Self>() {
+                    Ok(error) => return error,
+                    Err(error) => error,
+                };
+                if let Some(cause) = error.get_ref() {
+                    if let Some(failure) =
+                        cause.downcast_ref::<codex_protocol::auth::RefreshTokenFailedError>()
+                    {
+                        return Self::RefreshTokenFailed(failure.clone());
+                    }
+                    if let Some(codex_login::RefreshTokenError::Permanent(failure)) =
+                        cause.downcast_ref::<codex_login::RefreshTokenError>()
+                    {
+                        return Self::RefreshTokenFailed(failure.clone());
+                    }
+                }
+                Self::Io(error)
+            }
             error => Self::InvalidRequest(error.to_string()),
         }
     }
@@ -526,7 +717,7 @@ impl ModelClient {
     ) -> codex_protocol::error::Result<Self> {
         let info = self.state.provider.info();
         codex_model_provider::validate_runtime_destination(info.base_url.as_deref())?;
-        codex_model_provider::validate_runtime_provider(
+        codex_model_provider::select_runtime_provider(
             info,
             self.auth_manager().as_ref(),
             &manager,

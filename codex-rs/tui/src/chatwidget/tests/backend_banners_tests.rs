@@ -209,7 +209,7 @@ async fn backend_banner_turn_on_another_model_preserves_hidden_occurrence() {
 async fn backend_banner_restores_only_programmatically_displaced_switch_prompt() {
     for user_dismissed in [false, true] {
         let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-5")).await;
-        chat.has_chatgpt_account = true;
+        chat.set_test_chatgpt_account(true);
         chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 95.0)));
         chat.maybe_show_pending_rate_limit_prompt();
         assert!(render_bottom_popup(&chat, /*width*/ 90).contains("Approaching rate limits"));
@@ -237,10 +237,18 @@ async fn owner_notification_completion_cannot_cross_account_change() {
     let previous = chat
         .start_add_credits_nudge_email_request(AddCreditsNudgeCreditType::Credits)
         .expect("start previous account request");
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     let current = chat
         .start_add_credits_nudge_email_request(AddCreditsNudgeCreditType::UsageLimit)
         .expect("new account must be actionable");
@@ -322,7 +330,7 @@ async fn backend_banner_invalid_content_and_absence_restore_fallback() {
 #[tokio::test]
 async fn backend_banner_fallback_candidates_and_notice_follow_selected_model() {
     let (mut chat, _events, _ops) = make_chatwidget_manual(Some("test-model-a")).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     let template = chat.model_catalog.try_list_models().unwrap()[0].clone();
     let models = ["hidden-model", "test-model-b", "test-model-c"].map(|model| ModelPreset {
         model: model.into(),
@@ -340,9 +348,9 @@ async fn backend_banner_fallback_candidates_and_notice_follow_selected_model() {
         Some(models[2].clone())
     );
     // A retained ChatGPT login must not change a task whose server does not require auth.
-    chat.requires_openai_auth = false;
+    chat.test_account_mut().requires_openai_auth = false;
     assert_eq!(chat.backend_banner_fallback(), None);
-    chat.requires_openai_auth = true;
+    chat.test_account_mut().requires_openai_auth = true;
     let mut mode = chat.effective_collaboration_mode();
     mode.settings.model = "test-model-c".into();
     chat.finish_backend_banner_fallback(

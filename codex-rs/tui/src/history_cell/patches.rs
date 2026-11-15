@@ -3,6 +3,8 @@
 use super::*;
 use crate::history_cell::activity_parts::FoldState;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::terminal_hyperlinks::TerminalHyperlink;
+use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_utils_path_uri::LegacyAppPathString;
 
@@ -329,11 +331,36 @@ pub(crate) fn patch_apply_cells(
         .collect()
 }
 
+/// Whether a server-reported path belongs to this machine's filesystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImagePathOrigin {
+    Local,
+    Remote,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ViewImageHistoryCell {
     filename: String,
     path_label: String,
+    origin: ImagePathOrigin,
     pub(crate) timestamp: Option<HistoryTimestamp>,
+    link: std::sync::Arc<std::sync::OnceLock<Option<TerminalHyperlink>>>,
+}
+
+impl ViewImageHistoryCell {
+    /// Off-thread retained-layout preparation owns filesystem validation, never admission or paint.
+    pub(crate) fn link_local_image(&self) {
+        if self.origin == ImagePathOrigin::Remote {
+            return;
+        }
+        self.link.get_or_init(|| {
+            let start = "Viewed image ".len();
+            let end = start + crate::width::display_width(&self.path_label);
+            AbsolutePathBuf::try_from(PathBuf::from(&self.path_label))
+                .ok()
+                .and_then(|path| TerminalHyperlink::viewed_image(start..end, path.as_path()))
+        });
+    }
 }
 
 impl HistoryCell for ViewImageHistoryCell {
@@ -368,13 +395,40 @@ impl HistoryCell for ViewImageHistoryCell {
         )]
     }
 
+    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut lines = plain_hyperlink_lines(self.display_lines(width));
+        if let ([line], Some(link)) = (
+            lines.as_mut_slice(),
+            self.link.get().and_then(Option::as_ref),
+        ) {
+            let start = crate::width::display_width("• Viewed image ");
+            if start < line.width() {
+                line.hyperlinks.push(link.with_columns(start..line.width()));
+            }
+        }
+        lines
+    }
+
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        PrefixedWrappedHistoryCell::new(
-            Line::from(vec!["Viewed image ".bold(), self.path_label.clone().dim()]),
-            vec![agent_prefix(/*first*/ true)],
-            "  ",
+        visible_lines(self.transcript_hyperlink_lines(width))
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let mut line = HyperlinkLine::new(Line::from(vec![
+            "Viewed image ".bold(),
+            self.path_label.clone().dim(),
+        ]));
+        line.hyperlinks
+            .extend(self.link.get().and_then(Option::as_ref).cloned());
+        adaptive_wrap_hyperlink_lines(
+            &[line],
+            RtOptions::new(usize::from(width))
+                .initial_indent("• ".dim().into())
+                .subsequent_indent("  ".into()),
         )
-        .display_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -382,15 +436,20 @@ impl HistoryCell for ViewImageHistoryCell {
     }
 }
 
-pub(crate) fn new_view_image_tool_call(path: LegacyAppPathString) -> ViewImageHistoryCell {
+pub(crate) fn new_view_image_tool_call(
+    path: LegacyAppPathString,
+    origin: ImagePathOrigin,
+) -> ViewImageHistoryCell {
     let filename = path
         .to_inferred_path_uri()
         .and_then(|path| path.basename())
         .unwrap_or_else(|| path.render_for_ui());
     ViewImageHistoryCell {
         filename,
+        origin,
         path_label: path.into_string(),
         timestamp: None,
+        link: Default::default(),
     }
 }
 

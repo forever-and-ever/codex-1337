@@ -1,9 +1,9 @@
 ---
 source: tui/src/app/tests/disconnect_tests.rs
-expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.iter().rev().find(|cell|\ncell.as_any().is::<crate::history_cell::UserHistoryCell>()).expect(\"the optimistic user message remains in the transcript\").display_lines(80)),\nrender_bottom_popup(&app.chat_widget, 80))"
+expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.iter().rev().find(|cell|\ncell.as_any().is::<crate::history_cell::UserHistoryCell>()).expect(\"the optimistic user message remains in the transcript\").display_lines(80)),\nnormalize_reconnect_status(&render_bottom_popup(&app.chat_widget, 80)))"
 ---
 › only once
-  • Reconnecting to server… (0s)
+  • Reconnecting to server… (<elapsed>)
 
 ────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
@@ -13,4 +13,5 @@ expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.
 
 › keep this draft!
                                                                               󰜗
+  gpt-test default · /tmp/project
   ⌃c quit

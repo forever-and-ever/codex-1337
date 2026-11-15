@@ -6,12 +6,14 @@ use std::task::Poll;
 use std::task::Waker;
 use std::time::Duration;
 
+use codex_code_mode_protocol::CodeModeOutputTruncation;
 use pretty_assertions::assert_eq;
 use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::cell_actor::CompletionCommit;
+use crate::output::OutputCollector;
 
 struct RecordingDelegate;
 
@@ -84,10 +86,10 @@ async fn reports_cell_actor_panics_to_the_owner() {
     assert_eq!(
         started.initial_event().await,
         Ok(CellEvent::Completed {
-            content_items: vec![OutputItem::InputText {
+            content_items: OutputCollector::Client(vec![OutputItem::InputText {
                 max_tokens: None,
                 text: "done".to_string(),
-            }],
+            }]),
             result_buffered_for: Duration::ZERO,
             error_text: None,
         })
@@ -110,22 +112,13 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
         inner: Arc::clone(&runtime.inner),
         execution_context: opentelemetry::Context::new(),
     };
-    let completion = CellEvent::Completed {
-        content_items: vec![OutputItem::InputText {
-            max_tokens: None,
-            text: "uncommitted output".to_string(),
-        }],
-        result_buffered_for: Duration::ZERO,
-        error_text: None,
-    };
-
     let stored_values = runtime.inner.stored_values.lock().await;
     let commit = host.commit_completion(
         HashMap::from([(
             "candidate".to_string(),
             Arc::new(JsonValue::String("lost".to_string())),
         )]),
-        completion.clone(),
+        || panic!("terminated cell must not construct completion output"),
         Arc::clone(&cell_state),
     );
     tokio::pin!(commit);
@@ -135,9 +128,9 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
 
     let termination = cell_state.request_termination();
     drop(stored_values);
-    assert_eq!(commit.await, CompletionCommit::Rejected(completion));
+    assert_eq!(commit.await, CompletionCommit::Rejected);
     let terminated = CellEvent::Terminated {
-        content_items: Vec::new(),
+        content_items: OutputCollector::Client(Vec::new()),
     };
     assert_eq!(
         cell_state.finish_termination(terminated.clone()),
@@ -156,6 +149,7 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
     let reader = runtime
         .execute(
             CreateCellRequest {
+                output_truncation: CodeModeOutputTruncation::Client,
                 tool_call_id: "reader".to_string(),
                 enabled_tools: Vec::new(),
                 source: r#"text(String(load("candidate")));"#.to_string(),
@@ -168,10 +162,10 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
     assert_eq!(
         reader.initial_event().await,
         Ok(CellEvent::Completed {
-            content_items: vec![OutputItem::InputText {
+            content_items: OutputCollector::Client(vec![OutputItem::InputText {
                 max_tokens: None,
                 text: "undefined".to_string(),
-            }],
+            }]),
             result_buffered_for: Duration::ZERO,
             error_text: None,
         })
@@ -181,6 +175,7 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
 
 fn execute_request(source: &str) -> CreateCellRequest {
     CreateCellRequest {
+        output_truncation: CodeModeOutputTruncation::Client,
         tool_call_id: "call-1".to_string(),
         enabled_tools: Vec::new(),
         source: source.to_string(),
@@ -263,7 +258,7 @@ async fn drop_terminates_cells_when_the_registry_is_locked() {
     assert_eq!(
         started.initial_event().await,
         Ok(CellEvent::Yielded {
-            content_items: Vec::new(),
+            content_items: OutputCollector::Client(Vec::new()),
         })
     );
 

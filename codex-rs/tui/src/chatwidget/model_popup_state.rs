@@ -2,6 +2,8 @@
 //! Preserve highlighted models by wire slug, independent of their display names.
 
 use super::model_popups::ALL_MODELS_SELECTION_VIEW_ID;
+use super::model_popups::MODEL_LOADING_VIEW_ID;
+use super::model_popups::MODEL_OPTIONS_VIEW_ID;
 use super::model_popups::MODEL_SELECTION_VIEW_ID;
 use super::*;
 
@@ -26,6 +28,43 @@ impl ModelPopupRequest {
 }
 
 impl ChatWidget {
+    pub(crate) fn model_picker_unavailable(&self) -> Option<String> {
+        match self.model_catalog.provider_write.try_lock() {
+            Ok(changed) => changed.then(|| "The model list may be out of date. Restart the app server and TUI to refresh /model.".into()),
+            Err(_) => Some("Saving the default provider. Try /model after the save finishes.".into()),
+        }
+    }
+
+    pub(super) fn scope_model_picker_event(&self) -> impl Fn(AppEvent) -> AppEvent + use<> {
+        let backend = self.model_catalog.backend;
+        let thread_id = self.thread_id;
+        move |event| match backend {
+            Some(backend) => AppEvent::ScopedModelPicker {
+                backend,
+                thread_id,
+                event: Box::new(event),
+            },
+            None => event,
+        }
+    }
+
+    pub(crate) fn dismiss_stale_model_picker(&mut self) {
+        self.model_popup_request = None;
+        let had_popup = !self.no_modal_or_popup_active();
+        for id in [
+            EFFORT_LOADING_VIEW,
+            MODEL_LOADING_VIEW_ID,
+            MODEL_OPTIONS_VIEW_ID,
+            ALL_MODELS_SELECTION_VIEW_ID,
+            MODEL_SELECTION_VIEW_ID,
+        ] {
+            while self.bottom_pane.dismiss_view_by_id(id) {}
+        }
+        if had_popup && self.no_modal_or_popup_active() {
+            self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
+        }
+    }
+
     pub(super) fn set_model_refresh_request(&mut self, request_id: uuid::Uuid) {
         self.bottom_pane.dismiss_view_by_id(EFFORT_LOADING_VIEW);
         self.model_popup_request = Some(ModelPopupRequest::Refresh(request_id));
@@ -43,8 +82,13 @@ impl ChatWidget {
     }
 
     pub(super) fn refresh_account_scoped_models(&mut self) {
-        // An identity change can preserve the visible account type; old access programs
-        // are never evidence for the replacement account while its catalog is loading.
+        if self.loaded_account().is_none() {
+            return;
+        }
+        if self.model_catalog.provider_may_have_changed() {
+            return;
+        }
+        // Identity, not account kind, determines whether cached access programs are authoritative.
         for model in &mut Arc::make_mut(&mut self.model_catalog).models {
             model.available_access_programs = None;
         }
@@ -87,7 +131,9 @@ impl ChatWidget {
         request_id: uuid::Uuid,
         result: Result<crate::model_catalog::ModelListing, String>,
     ) -> bool {
-        if !self.model_popup_request_is_current(request_id) {
+        if self.model_catalog.provider_may_have_changed()
+            || !self.model_popup_request_is_current(request_id)
+        {
             self.cancel_model_request(request_id);
             return false;
         }
@@ -99,9 +145,14 @@ impl ChatWidget {
             Some(ModelPopupRequest::Refresh(_)) => None,
             None => unreachable!("a current model request must be pending"),
         };
+        let loading = self.bottom_pane.active_view_id() == Some(MODEL_LOADING_VIEW_ID);
+        self.bottom_pane.dismiss_view_by_id(MODEL_LOADING_VIEW_ID);
         let listing = match result {
             Ok(listing) => listing,
             Err(error) => {
+                if loading {
+                    self.add_error_message("Could not load models. Try /model again.".into());
+                }
                 if effort_model.is_some() {
                     self.add_error_message(format!("Cannot load reasoning choices: {error}"));
                 }
@@ -132,6 +183,12 @@ impl ChatWidget {
                 self.open_reasoning_popup(preset);
             } else {
                 self.add_error_message(format!("No reasoning choices were returned for {model}."));
+            }
+        }
+        if loading {
+            self.open_model_popup_with_presets(self.model_catalog.models.clone());
+            if self.no_modal_or_popup_active() {
+                self.on_modal_or_popup_closed();
             }
         }
         changed

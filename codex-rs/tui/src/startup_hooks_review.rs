@@ -144,7 +144,7 @@ pub(crate) async fn choose_startup_hooks_review(
         &keymap,
     );
     let mut chord_matcher = crate::keymap::KeyChordMatcher::default();
-    draw_view(tui, &view)?;
+    draw_view(tui, &view, &chord_matcher, &keymap)?;
 
     tui.discard_pending_input_before_interactive_screen()?;
     let tui_events = tui.event_stream();
@@ -155,10 +155,8 @@ pub(crate) async fn choose_startup_hooks_review(
             return Ok(HooksReviewDecision::Continue);
         };
         tui.screen_size_for_event(&event)?;
-        if matches!(&event, TuiEvent::Paste(_) | TuiEvent::FocusLost)
-            || matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved)
-        {
-            chord_matcher.cancel();
+        if tui.dismiss_shortcut_on_input(&event, &mut chord_matcher) {
+            continue;
         }
         match event {
             TuiEvent::Key(key_event) => {
@@ -170,14 +168,17 @@ pub(crate) async fn choose_startup_hooks_review(
                     crate::keymap::KeyChordMatch::PassThrough => key_event,
                     crate::keymap::KeyChordMatch::Completed(dispatch_event) => dispatch_event,
                     crate::keymap::KeyChordMatch::Pending(_)
-                    | crate::keymap::KeyChordMatch::Cancelled
-                    | crate::keymap::KeyChordMatch::Ignored => continue,
+                    | crate::keymap::KeyChordMatch::Cancelled => {
+                        tui.frame_requester().schedule_frame();
+                        continue;
+                    }
+                    crate::keymap::KeyChordMatch::Ignored => continue,
                 };
                 if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     view.handle_key_event(key_event);
                 }
                 let Some(selection) = selected_choice(&mut view) else {
-                    draw_view(tui, &view)?;
+                    draw_view(tui, &view, &chord_matcher, &keymap)?;
                     continue;
                 };
                 match selection {
@@ -195,14 +196,14 @@ pub(crate) async fn choose_startup_hooks_review(
                             app_event_tx.clone(),
                             &keymap,
                         );
-                        draw_view(tui, &view)?;
+                        draw_view(tui, &view, &chord_matcher, &keymap)?;
                         return Ok(HooksReviewDecision::TrustAll(entry));
                     }
                 }
             }
             TuiEvent::Paste(_) | TuiEvent::FocusLost | TuiEvent::Mouse(_) => {}
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
-                draw_view(tui, &view)?;
+                draw_view(tui, &view, &chord_matcher, &keymap)?;
             }
         }
     }
@@ -313,8 +314,14 @@ fn selection_item(name: &str, is_disabled: bool) -> SelectionItem {
     }
 }
 
-fn draw_view(tui: &mut Tui, view: &ListSelectionView) -> Result<()> {
-    tui.draw(u16::MAX, |frame| {
+fn draw_view(
+    tui: &mut Tui,
+    view: &ListSelectionView,
+    matcher: &crate::keymap::KeyChordMatcher,
+    keymap: &RuntimeKeymap,
+) -> Result<()> {
+    let hud = matcher.guide(&keymap.chords, &tui.frame_requester());
+    tui.draw_with_shortcut_hud(u16::MAX, hud, |frame| {
         let area = frame.area();
         frame.render_widget_ref(&Clear, area);
         let view_area = Rect::new(

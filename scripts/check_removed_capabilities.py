@@ -51,6 +51,19 @@ CUT_PREFIXES = (
     "codex-rs/state/src/runtime/reclamation",
     "codex-rs/file-system/src/local_logs.rs",
     "codex-rs/thread-store/src/local/compression_writer_tests.rs",
+    "codex-rs/cloud-client/",
+    "codex-rs/app-server-client/src/cloud.rs",
+    "codex-rs/app-server-client/src/cloud_backend/",
+    "codex-rs/app-server-client/src/cloud_tests.rs",
+    "codex-rs/tui/src/app/cloud_switch_wait.rs",
+    "codex-rs/tui/src/app_server_session/cloud_project",
+    "codex-rs/tui/src/transcript_view/turn_details",
+    "codex-rs/tui/src/transcript_image",
+    "codex-rs/cloud-tasks/",
+    "codex-rs/cloud-tasks-client/",
+    "codex-rs/cloud-tasks-mock-client/",
+    "codex-rs/cli/tests/cloud_auth.rs",
+    "codex-rs/tui/src/public_widgets/",
 )
 CUT_SNAPSHOTS = (
     "__slash_pets",
@@ -89,7 +102,10 @@ CUT_REFERENCES = re.compile(
     r"|\bquery_feedback_logs\w*|\bguardian_review_failures\b|\brecord_guardian_review_failure\b"
     r"|\b(?:logs_db_path|with_local_logs_home|LocalLogsDir|SqliteReclamationWorker)\b"
     r"|\b(?:spawn_rollout_compression_worker|RolloutCompressionTrigger|persist_temp_file_noclobber)\b"
-    r"|\b(?:materialize_rollout_for_append\w*|try_acquire_for_publication|feedback_rollout_path)\b",
+    r"|\b(?:materialize_rollout_for_append\w*|try_acquire_for_publication|feedback_rollout_path)\b"
+    r"|\bcodex_cloud_client\b|\b(?:AppServerTarget|ThreadParamsMode)::Cloud\b"
+    r"|\bcollapse_turn_details\b|\bmod turn_details\b"
+    r"|\bcodex_cloud_tasks\w*|\bCloudTasksCli\b|(?:mod |crate::)public_widgets\b",
     re.IGNORECASE,
 )
 
@@ -133,13 +149,29 @@ def main() -> int:
                 path.read_text(),
             ):
                 failures.append(f"{name}: import crate dependency restored")
+            elif path.name == "Cargo.toml" and re.search(
+                r"codex-cloud-(?:client|tasks)|path\s*=\s*[\"'][^\"']*/cloud-(?:client|tasks[\w-]*)[\"']",
+                path.read_text(),
+            ):
+                failures.append(f"{name}: Cloud connection dependency restored")
     workspace = tomllib.loads((ROOT / "codex-rs/Cargo.toml").read_text())["workspace"]
     if "external-agent-migration" in workspace["members"]:
         failures.append("import crate restored to workspace")
     if "external-agent-migration" not in workspace.get("exclude", []):
         failures.append("import crate must stay excluded from workspace")
-    if "codex-external-agent-migration" in (ROOT / "codex-rs/Cargo.lock").read_text():
+    lock = (ROOT / "codex-rs/Cargo.lock").read_text()
+    if "codex-external-agent-migration" in lock:
         failures.append("import crate restored to Cargo.lock")
+    for member in (
+        "cloud-client",
+        "cloud-tasks",
+        "cloud-tasks-client",
+        "cloud-tasks-mock-client",
+    ):
+        if member in workspace["members"]:
+            failures.append(f"Codex Cloud crate restored to workspace: {member}")
+    if re.search(r'^name = "codex-cloud-(?:client|tasks[\w-]*)"$', lock, re.M):
+        failures.append("Codex Cloud crate restored to Cargo.lock")
     features = (ROOT / "codex-rs/features/src/lib.rs").read_text()
     for feature in (
         "ExternalAgentMemoryImport",

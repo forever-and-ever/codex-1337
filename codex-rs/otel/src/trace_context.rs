@@ -10,6 +10,10 @@ pub fn current_span_w3c_trace_context() -> Option<W3cTraceContext> {
 pub fn span_w3c_trace_context(_span: &Span) -> Option<W3cTraceContext> {
     None
 }
+// TELOS(removed-stacks): trace extraction remains inert without the exporter stack.
+pub fn w3c_trace_context_from_context(_context: &Context) -> Option<W3cTraceContext> {
+    None
+}
 pub fn inject_span_w3c_trace_headers(_span: &Span, _headers: &mut http::HeaderMap) -> bool {
     false
 }

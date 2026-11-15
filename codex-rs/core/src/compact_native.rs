@@ -8,6 +8,7 @@
 
 use crate::context::CompactionContinuation;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::Prompt;
@@ -155,8 +156,9 @@ pub(crate) async fn run_native_compaction(
     );
     if estimated_deleted_tokens > 0 {
         let max_local_deleted_tokens = sess
-            .estimated_tokens_after_last_model_generated_item()
-            .await;
+            .clone_history()
+            .await
+            .estimated_tokens_since_last_usage();
         analytics_details.active_context_tokens_before = analytics_details
             .active_context_tokens_before
             .map(|tokens| {
@@ -289,6 +291,7 @@ async fn attempt(
         output_schema: None,
         output_schema_strict: true,
         cyber_access_program: turn_context.cyber_access_program,
+        prompt_cache_ttl: turn_context.prompt_cache_ttl,
     };
     let mut responses_metadata = sess
         .compaction_responses_metadata(turn_context.as_ref(), compaction_metadata)
@@ -408,6 +411,7 @@ async fn install_checkpoint(
         history,
         replacement_step_context.to_turn_context_item(),
         world_state_baseline,
+        BTreeSet::default(),
         CompactedHistoryMetadata {
             input_goal_ids: UserGoalUpdate::message_ids(
                 source.iter().map(|envelope| &envelope.item),
@@ -461,6 +465,7 @@ async fn install_reset(
         history,
         replacement_step_context.to_turn_context_item(),
         world_state_baseline,
+        BTreeSet::default(),
         CompactedHistoryMetadata {
             input_goal_ids: UserGoalUpdate::message_ids(
                 source.iter().map(|envelope| &envelope.item),

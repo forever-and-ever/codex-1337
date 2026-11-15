@@ -51,6 +51,11 @@ pub(super) struct SubmittedUserInput {
     pub(super) message: UserMessage,
     pub(super) history: UserMessageHistoryRecord,
     pub(super) source: UserMessageSource,
+    #[serde(
+        default,
+        skip_serializing_if = "super::submission_dispatch::UserTurnDispatch::is_frontend"
+    )]
+    pub(super) dispatch: super::submission_dispatch::UserTurnDispatch,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -117,6 +122,7 @@ impl UserTurnInput {
                     MessageDelivery::Unsent
                 },
                 source: input.source,
+                dispatch: input.dispatch,
                 history_record: input.history,
                 ..QueuedUserMessage::from(input.message)
             }),
@@ -158,6 +164,35 @@ pub(super) enum SteerInput {
 }
 
 impl SteerInput {
+    pub(super) fn take_client(&mut self, client_id: &str) -> Option<PendingSteer> {
+        if self
+            .replacement()
+            .is_some_and(|replacement| replacement.appended.client_id == client_id)
+        {
+            self.abort_replacement()
+        } else if self
+            .replacement()
+            .is_some_and(|replacement| replacement.previous.client_id == client_id)
+        {
+            let Self::Replacing {
+                replacement,
+                interrupt,
+            } = std::mem::take(self)
+            else {
+                unreachable!()
+            };
+            *self = Self::Pending {
+                steer: Box::new(replacement.appended),
+                interrupt,
+            };
+            Some(replacement.previous)
+        } else if self.client_id() == Some(client_id) {
+            self.take()
+        } else {
+            None
+        }
+    }
+
     pub(super) fn as_ref(&self) -> Option<Cow<'_, PendingSteer>> {
         match self {
             Self::Idle => None,

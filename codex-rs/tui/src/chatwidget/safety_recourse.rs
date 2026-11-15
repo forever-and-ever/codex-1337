@@ -1,16 +1,18 @@
 //! Turn-scoped safety recourse: match the terminal policy error and explain the block.
 
 mod metadata;
+mod rewrite;
 
 use super::*;
 use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnModerationMetadataNotification;
 use metadata::Domain;
 
+pub(super) const VIEW_ID: &str = "safety-recourse";
+
 pub(super) struct PendingRecourse {
     domain: Domain,
-    pub(super) notice: Box<dyn HistoryCell>,
-    result: Option<String>,
+    result: Option<metadata::Recourse>,
     pub(super) deferred_error: Option<TurnError>,
 }
 
@@ -29,10 +31,6 @@ pub(super) fn on_metadata(chat: &mut ChatWidget, notification: TurnModerationMet
     };
     let pending = chat.safety_recourse.get_or_insert(PendingRecourse {
         domain,
-        notice: Box::new(match domain {
-            Domain::Bio => history_cell::new_safety_access_block_event(),
-            Domain::Cyber => history_cell::new_cyber_policy_error_event(chat.cyber_policy_notice()),
-        }),
         result: None,
         deferred_error: None,
     });
@@ -40,7 +38,9 @@ pub(super) fn on_metadata(chat: &mut ChatWidget, notification: TurnModerationMet
         pending.result = result;
         chat.clear_safety_buffering();
         chat.bottom_pane.ensure_status_indicator();
-        chat.set_status_header("Finding an explanation and safer ways to continue…".into());
+        chat.set_status_header(
+            "I can’t help with this request. Preparing alternative suggestions…".into(),
+        );
     }
 }
 
@@ -83,22 +83,61 @@ pub(super) fn render_failure(
     if chat.has_queued_follow_up_messages() || !matches_error(pending.domain, error) {
         return false;
     }
+    let (Some(thread_id), Some(turn_id)) = (chat.thread_id(), chat.last_turn_id()) else {
+        return false;
+    };
+    let mut items = Vec::new();
+    for (label, prompt) in result.suggestions {
+        let turn_id = turn_id.to_string();
+        items.push(SelectionItem {
+            name: label,
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::ContinueSafetyRecourse {
+                    thread_id,
+                    turn_id: turn_id.clone(),
+                    prompt: prompt.clone(),
+                })
+            })],
+            ..Default::default()
+        });
+    }
     let mut cell = match pending.domain {
         Domain::Bio => history_cell::new_safety_access_block_event(),
         Domain::Cyber => {
             let notice = chat.cyber_policy_notice();
             if notice == crate::daybreak::Notice::Disabled {
-                return false;
+                items.push(SelectionItem {
+                    name: "Enable Daybreak".into(),
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::PersistDaybreakSelection {
+                            thread_id,
+                            enabled: true,
+                        })
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                });
             }
             history_cell::new_cyber_policy_error_event(notice)
         }
     };
-    cell.explanation = Some(result);
+    cell.explanation = Some(result.explanation);
     chat.input_queue
         .pending_steer
         .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
     chat.finalize_turn();
     chat.add_to_history(cell);
+    if !items.is_empty() {
+        chat.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some(VIEW_ID),
+            title: Some(
+                "You can choose a rewrite to start a new chat with your earlier context:".into(),
+            ),
+            items,
+            ..SelectionViewParams::picker()
+        });
+        chat.defer_input_until_settings_applied();
+    }
     chat.request_redraw();
     true
 }

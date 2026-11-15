@@ -64,6 +64,7 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode(
                 call_id: "call-1".to_string(),
                 tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
                 source: crate::tools::context::ToolCallSource::Direct,
+                native_call: None,
                 environments: Default::default(),
                 payload: ToolPayload::Function {
                     arguments: json!({
@@ -186,6 +187,7 @@ async fn request_user_input_sets_blocking_from_turn_mode() {
                 call_id: "call-1".to_string(),
                 tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
                 source: crate::tools::context::ToolCallSource::Direct,
+                native_call: None,
                 environments: Default::default(),
                 payload: ToolPayload::Function {
                     arguments: json!({

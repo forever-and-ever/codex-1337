@@ -1,8 +1,10 @@
 ---
 source: tui/src/app/owned_transcript_tests.rs
-assertion_line: 991
-expression: "rendered.lines().skip(usize::from(cursor.y)).take(3).map(str::trim).collect::<Vec<_>>().join(\"\\n\")"
+expression: "format!(\"{}\\n{completions}\", query.trim())"
 ---
 Find: alpha betax
-⌃x then · h move line start · esc cancel
-────────────────────────────────────────────────────────────────────────────────
+─ ⌃x ───────────────────────────────────
+
+  h · Move Line Start
+
+  Esc cancel

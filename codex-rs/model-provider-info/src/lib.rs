@@ -25,6 +25,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
+use std::num::NonZeroU64;
+use std::path::Component;
+use std::path::Path;
 use std::sync::PoisonError;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -38,6 +41,8 @@ pub use capabilities::ModelProviderCapabilities;
 pub use capabilities::RemoteCompactionSupport;
 pub use gateway_oauth::GatewayOAuthConfig;
 pub use gateway_oauth::GatewayOAuthDelivery;
+pub use gateway_oauth::GatewayOAuthSettings;
+pub use oauth_session::OAuthCredentialsStore;
 pub use oauth_session::OAuthSessionConfig;
 pub use search_route::SearchRoute;
 
@@ -69,13 +74,14 @@ pub fn read_managed_residency_requirement() -> Option<ResidencyRequirement> {
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
 const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
+const DEFAULT_CREDENTIAL_EXPORT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
 /// Hard cap for user-configured `stream_max_retries`.
 const MAX_STREAM_MAX_RETRIES: u64 = 100;
 /// Hard cap for user-configured `request_max_retries`.
 const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
-const OPENAI_PROVIDER_NAME: &str = "OpenAI";
+pub const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
 
@@ -186,7 +192,7 @@ pub struct ModelProviderInfo {
     pub experimental_bearer_token: Option<RedactedString>,
     /// Command-backed bearer-token configuration for this provider.
     pub auth: Option<ModelProviderAuthInfo>,
-    /// Secondary OAuth credentials required by the provider's gateway.
+    /// Gateway access token from OAuth or a credential export command.
     pub gateway_oauth: Option<GatewayOAuthConfig>,
     /// Which wire protocol this provider expects.
     #[serde(default)]
@@ -244,6 +250,49 @@ where
 {
     serde::de::IgnoredAny::deserialize(deserializer)?;
     Ok(false)
+}
+
+/// Command used to export credentials for a model provider.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CredentialExportConfig {
+    /// Executable to invoke directly, without a shell.
+    pub command: String,
+    /// Arguments passed to the credential export command.
+    #[serde(default)]
+    pub args: Vec<RedactedString>,
+    /// Maximum time to wait for the credential export command to complete.
+    #[serde(default = "default_credential_export_timeout_ms")]
+    pub timeout_ms: NonZeroU64,
+}
+
+impl CredentialExportConfig {
+    pub fn validate(&self, field: &str) -> Result<(), String> {
+        if self.command.trim().is_empty() {
+            return Err(format!("provider {field}.command must not be empty"));
+        }
+        let path = Path::new(&self.command);
+        let mut components = path.components();
+        let bare = matches!((components.next(), components.next()),
+            (Some(Component::Normal(name)), None) if name == path.as_os_str());
+        if !path.is_absolute() && !bare {
+            return Err(format!(
+                "provider {field}.command must be an absolute path or a bare executable name"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout_ms.get())
+    }
+}
+
+fn default_credential_export_timeout_ms() -> NonZeroU64 {
+    match NonZeroU64::new(DEFAULT_CREDENTIAL_EXPORT_TIMEOUT_MS) {
+        Some(timeout_ms) => timeout_ms,
+        None => panic!("credential export timeout must be non-zero"),
+    }
 }
 
 impl ModelProviderInfo {
@@ -482,6 +531,14 @@ impl ModelProviderInfo {
             capabilities: None,
             include_internal_metadata: true,
         }
+    }
+
+    /// Whether explicit Cyber programs may be selected and forwarded to this provider.
+    /// Use the configured provider ID, never its user-controlled display name, for defaults.
+    pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool {
+        self.capabilities
+            .and_then(|capabilities| capabilities.cyber_access_programs)
+            .unwrap_or(provider_id == OPENAI_PROVIDER_ID)
     }
 
     pub fn is_openai(&self) -> bool {

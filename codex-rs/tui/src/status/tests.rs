@@ -398,7 +398,7 @@ async fn status_snapshot_shows_chatgpt_plan_without_email() {
     write_models_cache(temp_home.path())
         .await
         .expect("write models cache");
-    let mut app_server = crate::start_app_server_for_picker(
+    let mut app_server = crate::test_support::start_test_app_server(
         crate::backend_id::BackendId::new(),
         &config,
         &crate::AppServerTarget::Embedded,
@@ -414,8 +414,11 @@ async fn status_snapshot_shows_chatgpt_plan_without_email() {
         .await
         .expect("bootstrap app server session");
     app_server.shutdown().await.expect("shut down app server");
-    let account_display = bootstrap
-        .status_account_display
+    let crate::app_server_session::BootstrapAccount::Loaded(account) = bootstrap.account else {
+        panic!("fresh bootstrap must capture its account");
+    };
+    let account_display = account
+        .display
         .expect("bootstrap should return ChatGPT account display");
     assert_eq!(
         account_display,

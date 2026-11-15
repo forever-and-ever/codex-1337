@@ -15,6 +15,9 @@ const RATE_LIMIT_RESET_CONFIRMATION_VIEW_ID: &str = "rate-limit-reset-confirmati
 
 impl ChatWidget {
     pub(super) fn open_usage_menu(&mut self) {
+        if self.refuse_pending_account_operation() {
+            return;
+        }
         self.clear_pending_rate_limit_reset_hint();
         let should_refresh_reset_availability = self.available_rate_limit_reset_credits == Some(0);
         self.bottom_pane
@@ -30,7 +33,7 @@ impl ChatWidget {
     }
 
     fn usage_menu_params(&self) -> SelectionViewParams {
-        let reset_eligible = self.has_chatgpt_account;
+        let reset_eligible = self.has_chatgpt_account();
         let (reset_action_enabled, reset_description) =
             match (reset_eligible, self.available_rate_limit_reset_credits) {
                 (true, Some(available_count)) if available_count > 0 => {
@@ -510,7 +513,7 @@ impl ChatWidget {
         for snapshot in snapshots {
             self.on_rate_limit_snapshot(Some(snapshot));
         }
-        if !self.has_codex_backend_auth {
+        if !self.has_codex_backend_auth() {
             return false;
         }
         if let Ok(response) = result {

@@ -48,6 +48,57 @@ async fn external_writer_snapshot_freezes_active_command_and_mcp_rows() {
 }
 
 #[tokio::test]
+async fn replayed_background_terminals_belong_to_the_displayed_thread() {
+    let (mut parent, _events, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let inherited = begin_unified_exec_startup(&mut parent, "parent-call", "42", "sleep 100");
+    let (mut fork, mut events, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    fork.thread_id = Some(ThreadId::new());
+    fork.replay_thread_item(
+        inherited,
+        "turn-1".into(),
+        ReplayKind::ResumeInitialMessages,
+    );
+
+    // A resumed fork can have terminals of its own alongside the inherited command history.
+    let request_id = fork.begin_background_terminal_restore();
+    let live = codex_app_server_protocol::ThreadBackgroundTerminal {
+        thread_id: fork.thread_id.expect("displayed fork").to_string(),
+        item_id: "child-call".into(),
+        process_id: "43".into(),
+        command: "sleep 200".into(),
+        cwd: fork.config.cwd.clone().into(),
+        os_pid: None,
+        cpu_percent: None,
+        rss_kb: None,
+    };
+    let exited = codex_app_server_protocol::ThreadBackgroundTerminal {
+        item_id: "exited-call".into(),
+        process_id: "44".into(),
+        command: "sleep 300".into(),
+        ..live.clone()
+    };
+    fork.track_unified_exec_process_end(&exited.item_id, Some(&exited.process_id));
+    fork.restore_background_terminals(request_id, vec![live, exited]);
+    assert_eq!(fork.unified_exec_processes.len(), 1);
+    let process = &fork.unified_exec_processes[0];
+    assert_eq!(
+        (
+            process.call_id.as_str(),
+            process.key.as_str(),
+            process.command_display.as_str()
+        ),
+        ("child-call", "43", "sleep 200")
+    );
+    fork.open_processes();
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::LiveWork(crate::app::live_work::Event::FocusProcesses)
+        ))
+    );
+}
+
+#[tokio::test]
 async fn replayed_command_completion_preserves_tracking_without_duplicate_starts() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
@@ -319,14 +370,15 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
 
     let cells = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => Some(cell),
+            AppEvent::InsertHistoryCell(cell) => Some(cell.transcript_lines(/*width*/ 80)),
             _ => None,
         })
+        .filter(|lines| !lines.is_empty())
         .collect::<Vec<_>>();
     assert_eq!(cells.len(), 4);
     let transcript = cells
         .iter()
-        .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
+        .map(|lines| lines_to_single_string(lines))
         .collect::<Vec<_>>()
         .join("\n");
     let live_transcript = std::iter::from_fn(|| live_rx.try_recv().ok())
@@ -338,7 +390,7 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(live_transcript, transcript);
-    let declined_heading = cells[3].display_lines(/*width*/ 80)[0].to_string();
+    let declined_heading = cells[3][0].to_string();
     assert!(declined_heading.contains("declined"));
     assert!(!declined_heading.contains("failed"));
     assert!(!declined_heading.contains("exit"));

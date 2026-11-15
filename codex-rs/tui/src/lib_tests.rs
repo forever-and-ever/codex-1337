@@ -282,7 +282,7 @@ async fn startup_resume_rejects_guardian_thread() -> color_eyre::Result<()> {
     std::fs::write(&rollout_path, format!("{meta}\n{history}"))?;
 
     let state_db = init_state_db_for_app_server_target(&config, &AppServerTarget::Embedded).await?;
-    let mut app_server = start_app_server_for_picker(
+    let mut app_server = crate::test_support::start_test_app_server(
         crate::backend_id::BackendId::new(),
         &config,
         &AppServerTarget::Embedded,
@@ -397,7 +397,7 @@ async fn startup_resume_and_fork_use_configured_or_explicit_cwd() -> color_eyre:
             final_config.cwd.as_path(),
             &expected_cwd,
         ));
-        let mut app_server = start_app_server_for_picker(
+        let mut app_server = crate::test_support::start_test_app_server(
             crate::backend_id::BackendId::new(),
             &final_config,
             &AppServerTarget::Embedded,
@@ -826,7 +826,7 @@ async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
     let cwd = temp_dir.path().join("project");
 
     let params = latest_session_lookup_params(
-        /*model_provider*/ None,
+        Some(Vec::new()),
         Some(cwd.as_path()),
         /*include_non_interactive*/ false,
         LatestSessionLookupMode::StateDbOnly,
@@ -840,7 +840,7 @@ async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
     assert!(params.use_state_db_only);
 
     let scan_params = latest_session_lookup_params(
-        /*model_provider*/ None,
+        Some(Vec::new()),
         Some(cwd.as_path()),
         /*include_non_interactive*/ false,
         LatestSessionLookupMode::ScanAndRepair,
@@ -853,7 +853,7 @@ async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
 async fn latest_session_lookup_params_omit_local_filters_for_remote_sessions() -> std::io::Result<()>
 {
     let params = latest_session_lookup_params(
-        /*model_provider*/ None,
+        Some(Vec::new()),
         /*cwd_filter*/ None,
         /*include_non_interactive*/ false,
         LatestSessionLookupMode::StateDbOnly,
@@ -867,7 +867,7 @@ async fn latest_session_lookup_params_omit_local_filters_for_remote_sessions() -
 #[tokio::test]
 async fn latest_session_lookup_params_can_include_non_interactive_sources() -> std::io::Result<()> {
     let params = latest_session_lookup_params(
-        /*model_provider*/ None,
+        Some(Vec::new()),
         /*cwd_filter*/ None,
         /*include_non_interactive*/ true,
         LatestSessionLookupMode::StateDbOnly,
@@ -891,7 +891,7 @@ async fn latest_session_lookup_params_keep_explicit_cwd_filter_for_remote_sessio
     let cwd = Path::new("repo/on/server");
 
     let params = latest_session_lookup_params(
-        /*model_provider*/ None,
+        Some(Vec::new()),
         Some(cwd),
         /*include_non_interactive*/ false,
         LatestSessionLookupMode::StateDbOnly,
@@ -1004,6 +1004,7 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         /*show_all*/ false,
     );
     let scoped_target = lookup_latest_session_target_with_app_server(
+        crate::resume_picker::SessionPickerAction::Fork,
         &mut app_server,
         filter_cwd,
         /*include_non_interactive*/ false,
@@ -1015,6 +1016,7 @@ async fn fork_last_filters_latest_session_by_cwd_unless_show_all() -> color_eyre
         /*show_all*/ true,
     );
     let show_all_target = lookup_latest_session_target_with_app_server(
+        crate::resume_picker::SessionPickerAction::Fork,
         &mut app_server,
         show_all_filter_cwd,
         /*include_non_interactive*/ false,
@@ -1056,11 +1058,12 @@ async fn latest_session_lookup_falls_back_for_rollout_missing_from_state_db()
         "2025-01-02T10-00-00",
         "2025-01-02T10:00:00Z",
         "legacy writer session",
-        config.model_provider_id.as_str(),
+        "previous-provider",
         &project_cwd,
     )?;
 
     let target = lookup_latest_session_target_with_app_server(
+        crate::resume_picker::SessionPickerAction::Resume,
         &mut app_server,
         Some(project_cwd.as_path()),
         /*include_non_interactive*/ false,
@@ -1354,6 +1357,7 @@ async fn resume_picker_loads_complete_paginated_and_legacy_transcripts() -> colo
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         )
         .await?;
         assert!(cells.len() > 100);

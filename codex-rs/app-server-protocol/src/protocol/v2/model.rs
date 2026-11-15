@@ -52,7 +52,7 @@ pub struct ModelProviderCapabilitiesReadResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ModelListParams {
-    /// Configured provider whose catalog should be read on the server.
+    /// List models for this configured provider instead of the app-server default.
     #[ts(optional = nullable)]
     pub model_provider: Option<String>,
     /// Opaque pagination cursor returned by a previous call.

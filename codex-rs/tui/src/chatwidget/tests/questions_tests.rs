@@ -537,7 +537,8 @@ async fn rejected_synchronous_literal_prompt_keeps_questions() {
 #[tokio::test]
 async fn reconnect_preserves_buffered_question_answer_source() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.thread_id = Some(ThreadId::new());
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
     chat.add_async_questions("old", &questions());
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
     chat.bottom_pane.handle_paste("answer".into());
@@ -548,7 +549,7 @@ async fn reconnect_preserves_buffered_question_answer_source() {
     let state = chat.capture_thread_input_state();
 
     let (mut restored, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    restored.thread_id = Some(ThreadId::new());
+    restored.thread_id = Some(thread_id);
     restored.restore_reconnected_input(
         state,
         &[],
@@ -835,6 +836,7 @@ fn open_questions(chat: &mut ChatWidget, options: Option<Vec<String>>) {
     chat.thread_id = Some(ThreadId::new());
     chat.on_agent_message_item_completed(
         AgentMessageItem {
+            moderation: None,
             id: "review".into(),
             content: Vec::new(),
             phase: None,
@@ -967,6 +969,7 @@ async fn question_drafts_survive_navigation_and_snapshot_replay() {
     let saved = chat.capture_thread_input_state();
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let item = AppServerThreadItemPayload::AgentMessage {
+        moderation: None,
         id: "buffered".into(),
         text: String::new(),
         phase: None,
@@ -1199,6 +1202,7 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         crate::terminal_palette::with_test_default_colors(
             crate::terminal_probe::DefaultColors {
@@ -1238,6 +1242,7 @@ async fn async_question_markdown_matches_loaded_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let title = "Keep `--verbose` for **failed** runs?";
     let item = AppServerThreadItemPayload::AgentMessage {
+        moderation: None,
         id: "ask".into(),
         text: format!("{title}\n- Only for **CI**\n\nSee the [guide](https://example.test/guide)?"),
         phase: None,
@@ -1271,6 +1276,7 @@ async fn async_question_markdown_matches_loaded_history() {
                 crate::thread_transcript::RawReasoningVisibility::Hidden,
                 /*config*/ None,
                 &|_| crate::multi_agents::AgentMetadata::default(),
+                crate::history_cell::ImagePathOrigin::Local,
             );
             assert_eq!(cells, [paged[0].transcript_lines(/*width*/ 80)]);
             insta::assert_debug_snapshot!("async_question_transcript", cells[0]);

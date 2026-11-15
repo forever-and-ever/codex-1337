@@ -196,20 +196,21 @@ impl McpHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-        let prepared_mcp_call = invocation
-            .session
-            .prepare_mcp_call(&self.definition.tool_info)
-            .await;
+        let preparation: BoxFuture<'_, anyhow::Result<codex_mcp::PreparedMcpCall>> =
+            Box::pin(invocation.session.prepare_projected_mcp_call(
+                &invocation.step_context.mcp,
+                &self.definition.tool_info,
+            ));
+        let prepared_mcp_call = preparation.await;
+        let prepared = prepared_mcp_call.as_ref().ok();
         // Use the executed call's binding; a later catalog refresh must not change eligibility.
         let result_metadata_capture_allowed = invocation
             .session
             .services
             .analytics_events_client
             .is_enabled()
-            && prepared_mcp_call
-                .as_ref()
-                .is_some_and(codex_mcp::PreparedMcpCall::is_host_owned_apps);
-        let mcp_tool = prepared_mcp_call.as_ref().map(|call| {
+            && prepared.is_some_and(codex_mcp::PreparedMcpCall::is_host_owned_apps);
+        let mcp_tool = prepared.map(|call| {
             McpToolContext::from_prepared_call(
                 call,
                 invocation
@@ -244,26 +245,26 @@ impl McpHandler {
         };
 
         // Capture presentation policy from the same config snapshot used for execution.
-        let truncation_policy = prepared_mcp_call
-            .as_ref()
+        let truncation_policy = prepared
             .and_then(codex_mcp::PreparedMcpCall::output_token_limit)
             .map(TruncationPolicy::Tokens)
             .unwrap_or(step_context.settings.model_info.truncation_policy.into());
         let started = Instant::now();
         // Bound the compiler's async-layout query depth for approval and dispatch.
-        let result = Box::pin(handle_mcp_tool_call(
-            Arc::clone(&session),
-            &step_context,
-            &cancellation_token,
-            call_id.clone(),
-            originating_call,
-            &self.definition.tool_info,
-            prepared_mcp_call,
-            tool_name,
-            &source,
-            payload,
-        ))
-        .await;
+        let dispatch: BoxFuture<'_, crate::mcp_tool_call::HandledMcpToolCall> =
+            Box::pin(handle_mcp_tool_call(
+                Arc::clone(&session),
+                &step_context,
+                &cancellation_token,
+                call_id.clone(),
+                originating_call,
+                &self.definition.tool_info,
+                prepared_mcp_call,
+                tool_name,
+                &source,
+                payload,
+            ));
+        let result = dispatch.await;
 
         Ok(boxed_tool_output(McpToolOutput {
             result: result.result,
@@ -320,8 +321,8 @@ impl CoreToolRuntime for McpHandler {
         true
     }
 
-    fn mcp_server_name(&self) -> Option<&str> {
-        Some(&self.definition.tool_info.server_name)
+    fn mcp_tool_info(&self) -> Option<&ToolInfo> {
+        Some(self.tool_info())
     }
 
     fn on_tool_result_accepted(&self, invocation: &ToolInvocation, result: &dyn ToolOutput) {
@@ -645,6 +646,7 @@ mod tests {
                 tool_name: codex_tools::ToolName::namespaced("mcp__foo", "exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                native_call: None,
                 environments: Default::default(),
             }),
             Some(PreToolUsePayload {
@@ -676,6 +678,7 @@ mod tests {
                     tool_name: codex_tools::ToolName::namespaced("mcp__foo", "exec_command"),
                     source: ToolCallSource::Direct,
                     payload,
+                    native_call: None,
                     environments: Default::default(),
                 },
                 json!({ "message": "rewritten" }),
@@ -738,6 +741,7 @@ mod tests {
             tool_name: codex_tools::ToolName::namespaced("filesystem", "read_file"),
             source: ToolCallSource::Direct,
             payload,
+            native_call: None,
             environments: Default::default(),
         };
         assert_eq!(
@@ -778,6 +782,7 @@ mod tests {
                 call_id: invocation.call_id.clone(),
                 payload: invocation.payload.clone(),
                 encrypted_function_args: None,
+                native_call: None,
             },
             &invocation.source,
             &invocation.step_context,

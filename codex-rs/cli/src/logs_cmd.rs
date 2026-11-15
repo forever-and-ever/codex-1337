@@ -112,6 +112,7 @@ pub async fn read_flight_recorder(args: LogsCommand) -> anyhow::Result<()> {
     let client = tokio::time::timeout(
         READ_TIMEOUT,
         RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
             client_name: "codex-logs".into(),
             client_version: env!("CARGO_PKG_VERSION").into(),

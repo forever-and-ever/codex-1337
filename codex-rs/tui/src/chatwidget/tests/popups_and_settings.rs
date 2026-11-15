@@ -116,7 +116,13 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
     let resolved_model = get_model_offline_for_tests(cfg.model.as_deref());
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
     let init = ChatWidgetInit {
-        requires_openai_auth: true,
+        account: crate::app_server_session::BootstrapAccount::Loaded(
+            crate::app_server_session::SessionAccount {
+                requires_openai_auth: true,
+                ..Default::default()
+            },
+        ),
+        backend_authority: crate::app_server_session::BackendAuthority::Reported(None),
         local_settings: crate::local_settings::LocalSettings::from(&cfg),
         config: cfg.clone(),
         frame_requester: FrameRequester::test_dummy(),
@@ -124,12 +130,8 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
         workspace_command_runner: None,
         initial_user_message: None,
         enhanced_keys_supported: false,
-        has_chatgpt_account: false,
-        has_codex_backend_auth: false,
         model_catalog: test_model_catalog(&cfg),
         is_first_run: true,
-        status_account_display: None,
-        initial_plan_type: None,
         model: Some(resolved_model.clone()),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
@@ -2493,10 +2495,18 @@ async fn apps_installed_mentions_revoke_access_and_reject_stale_account_results(
         chat.on_connector_mentions_loaded(generation, Ok(refreshed));
     }
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
 
     assert_ne!(chat.connector_scope_generation(), generation);
     assert_matches!(&chat.connectors.cache, ConnectorsCacheState::Uninitialized);
@@ -3392,6 +3402,11 @@ async fn memories_reset_confirmation_snapshot() {
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert_chatwidget_snapshot!("memories_reset_confirmation", popup);
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Choose how Codex uses"));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(chat.no_modal_or_popup_active());
 }
 
 #[tokio::test]
@@ -3487,12 +3502,14 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
     ));
     assert!(chat.model_popup_request_is_current(current_request));
     // Identical visible account fields still mark an account boundary.
-    chat.update_account_state(
-        chat.status_account_display.clone(),
-        chat.plan_type,
-        chat.has_chatgpt_account,
-        chat.has_codex_backend_auth,
-    );
+    {
+        chat.set_test_backend_auth(chat.has_codex_backend_auth());
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: chat.status_account_display().cloned(),
+            plan: chat.current_plan_type(),
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     assert!(!chat.on_models_loaded(
         current_request,
         Ok(crate::model_catalog::ModelListing {
@@ -4490,10 +4507,18 @@ async fn account_change_dismisses_the_previous_app_directory_snapshot() {
     chat.add_connectors_output();
     let before = render_bottom_popup(&chat, /*width*/ 80);
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     let after = normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80));
     assert_chatwidget_snapshot!(
         "connector_scope_invalidation",

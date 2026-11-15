@@ -187,7 +187,12 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
                     if matches!(op, Op::RealtimeConversationSpeech { .. }) {
                         break Ok::<_, color_eyre::Report>(op);
                     }
-                    app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(op)).await?;
+                    let event = if matches!(op, Op::UserTurn { .. }) {
+                        AppEvent::SubmitThreadOp { thread_id, op }
+                    } else {
+                        AppEvent::CodexOp(op)
+                    };
+                    app.handle_event(&mut tui, &mut app_server, event).await?;
                 }
             }
         }
@@ -298,7 +303,12 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
                 op = ops.recv(), if !ops.is_closed() => {
                     let op = op.expect("TUI command stream should stay open");
                     assert!(!matches!(op, Op::RealtimeConversationSpeech { .. }), "typed answer must not be spoken");
-                    app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(op)).await?;
+                    let event = if matches!(op, Op::UserTurn { .. }) {
+                        AppEvent::SubmitThreadOp { thread_id, op }
+                    } else {
+                        AppEvent::CodexOp(op)
+                    };
+                    app.handle_event(&mut tui, &mut app_server, event).await?;
                 }
             }
         }

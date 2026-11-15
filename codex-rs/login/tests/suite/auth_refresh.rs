@@ -516,11 +516,78 @@ async fn account_grant_tracks_refresh_replacement_and_logout() -> Result<()> {
         server.reset().await;
     }
     ctx.write_auth(&replacement).await?;
+
+    // Selecting C moves only the conversation pointer. A retained A job keeps
+    // its immutable source and policy; true A revocation fences it, not C.
+    let mut other = replacement.clone();
+    let other_tokens = other.tokens.as_mut().context("other account tokens")?;
+    other_tokens.account_id = Some("account-c".into());
+    other_tokens.access_token = "account-c-access".into();
+    other_tokens.refresh_token = "account-c-refresh".into();
+    other_tokens.id_token =
+        codex_login::token_data::parse_chatgpt_jwt_claims(&jwt_with_payload(json!({
+            "sub": "user-c",
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-c", "chatgpt_account_id": "account-c"
+            }
+        })))?;
+    save_auth(
+        ctx.codex_home.path(),
+        &other,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    let selector = ctx.auth_manager.for_account("user-123:account-id").await?;
+    let original_factory = selector.http_client_factory();
+    // Moving away drops A's route wrapper, but its transport still owns A's
+    // scope. Returning to A must recover that exact scope, not allocate a twin.
+    selector.select_account("user-c:account-c").await?;
+    selector.select_account("user-123:account-id").await?;
+    assert_eq!(
+        original_factory.network_policy(),
+        selector.http_client_factory().network_policy()
+    );
+    let job = selector.capture_job_source()?;
+    let (_, job_factory) = job
+        .credentials()
+        .auth_with_http_client_factory()
+        .await
+        .context("admitted A job")?;
+    let job_permit = job_factory
+        .network_policy()
+        .acquire(&server.uri().parse()?)?;
+    selector.select_account("user-c:account-c").await?;
+    job_permit.check()?;
+    let (retained, retained_factory) = job
+        .credentials()
+        .auth_with_http_client_factory()
+        .await
+        .context("A job after selecting C")?;
+    assert_eq!(retained.get_account_id().as_deref(), Some("account-id"));
+    assert_eq!(
+        job_factory.network_policy(),
+        retained_factory.network_policy()
+    );
+    let other_factory = selector.http_client_factory();
+    let other_permit = other_factory
+        .network_policy()
+        .acquire(&server.uri().parse()?)?;
+    let revoker = ctx.auth_manager.for_account("user-123:account-id").await?;
+
     let lease = ctx
         .auth_manager
         .lease_account_oauth_grant()
         .await?
         .context("restored login grant")?;
+    revoker.logout().await?;
+    assert!(matches!(
+        job_permit.check(),
+        Err(codex_http_client::NetworkPolicyDenied::Revoked)
+    ));
+    other_permit.check()?;
+    assert!(job.credentials().auth().await.is_none());
+    assert!(job.validate().is_err());
+    selector.logout().await?;
     // Logout must complete even while an IdP exchange holds the refresh lease.
     ctx.auth_manager.logout().await?;
     assert!(lease.release().current_tokens().await?.is_none());
@@ -531,6 +598,67 @@ async fn account_grant_tracks_refresh_replacement_and_logout() -> Result<()> {
             .is_none()
     );
 
+    // Managed workspaces have no personal selector. Admitted jobs still observe
+    // same-principal stored renewal and reject a replacement workspace login.
+    let mut workspace = replacement.clone();
+    let tokens = workspace.tokens.as_mut().context("workspace tokens")?;
+    tokens.id_token =
+        codex_login::token_data::parse_chatgpt_jwt_claims(&jwt_with_payload(json!({
+            "sub": "workspace-user",
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "workspace-user", "chatgpt_account_id": "workspace-id",
+                "chatgpt_plan_type": "enterprise"
+            }
+        })))?;
+    tokens.account_id = Some("workspace-id".into());
+    ctx.write_auth(&workspace).await?;
+    assert!(
+        ctx.auth_manager
+            .auth_cached()
+            .context("workspace auth")?
+            .is_workspace_account()
+    );
+    assert!(ctx.auth_manager.selected_account_id().is_none());
+    let workspace_job = ctx.auth_manager.capture_job_source()?;
+    assert_eq!(
+        workspace_job
+            .credentials()
+            .http_client_factory()
+            .network_policy(),
+        ctx.auth_manager.http_client_factory().network_policy()
+    );
+    let tokens = workspace
+        .tokens
+        .as_mut()
+        .context("renewed workspace tokens")?;
+    tokens.access_token = "workspace-renewed".into();
+    tokens.refresh_token = "workspace-renewed-refresh".into();
+    ctx.write_auth(&workspace).await?;
+    assert_eq!(
+        workspace_job
+            .credentials()
+            .auth()
+            .await
+            .context("renewed workspace job")?
+            .get_token()?,
+        "workspace-renewed"
+    );
+    let tokens = workspace
+        .tokens
+        .as_mut()
+        .context("replacement workspace tokens")?;
+    tokens.id_token =
+        codex_login::token_data::parse_chatgpt_jwt_claims(&jwt_with_payload(json!({
+            "sub": "other-workspace-user",
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "other-workspace-user", "chatgpt_account_id": "workspace-id",
+                "chatgpt_plan_type": "enterprise"
+            }
+        })))?;
+    ctx.write_auth(&workspace).await?;
+    assert!(workspace_job.credentials().auth().await.is_none());
+    assert!(workspace_job.validate().is_err());
+    ctx.auth_manager.logout().await?;
     server.verify().await;
     Ok(())
 }
@@ -1644,6 +1772,23 @@ async fn unauthorized_recovery_reloads_then_refreshes_tokens() -> Result<()> {
 
     let mut recovery = ctx.auth_manager.unauthorized_recovery();
     assert!(recovery.has_next());
+
+    std::fs::write(ctx.codex_home.path().join("auth.json"), "")?;
+    let error = recovery.next().await.expect_err("auth read should fail");
+    assert!(matches!(error, RefreshTokenError::Transient(_)));
+    assert_eq!(
+        ctx.auth_manager
+            .auth_cached()
+            .expect("read failure must preserve cached auth")
+            .get_token_data()?,
+        initial_tokens
+    );
+    // Repair the deliberately corrupted fixture directly. Account-aware save_auth
+    // refuses an unreadable document rather than discarding its saved accounts.
+    std::fs::write(
+        ctx.codex_home.path().join("auth.json"),
+        serde_json::to_vec(&disk_auth)?,
+    )?;
 
     recovery.next().await?;
 

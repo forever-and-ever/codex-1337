@@ -91,6 +91,15 @@ async fn slash_commands_without_side_flag_are_rejected_for_side_threads() {
     }
     assert!(rx.try_recv().is_err(), "expected no follow-up events");
     assert!(op_rx.try_recv().is_err(), "expected no review op");
+
+    chat.bottom_pane
+        .set_composer_text("/fork".into(), Vec::new(), Vec::new());
+    let images = vec!["https://example.com/image.png".to_string()];
+    chat.bottom_pane.set_remote_image_urls(images.clone());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(chat.bottom_pane.composer_text(), "/fork");
+    assert_eq!(chat.bottom_pane.remote_image_urls(), images);
 }
 
 #[tokio::test]
@@ -180,24 +189,42 @@ async fn slash_btw_is_rejected_before_the_session_starts() {
 }
 
 #[tokio::test]
-async fn submit_user_message_as_plain_user_turn_does_not_run_shell_commands() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn submit_plain_user_turn_preserves_the_target_and_does_not_run_shell_commands() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let target = ThreadId::new();
+    chat.thread_id = Some(target);
+    chat.codex_op_target = super::super::CodexOpTarget::AppEvent;
+
+    assert!(
+        chat.submit_plain_user_turn_to(target, "!echo hello".into())
+            .is_ok()
+    );
     chat.thread_id = Some(ThreadId::new());
-
-    chat.submit_user_message_as_plain_user_turn("!echo hello".into());
-
-    match next_submit_op(&mut op_rx) {
-        Op::UserTurn { items, .. } => assert_eq!(
-            items,
+    let mut turns = Vec::new();
+    for event in std::iter::from_fn(|| rx.try_recv().ok()) {
+        match event {
+            AppEvent::SubmitThreadOp {
+                thread_id,
+                op: AppCommand::UserTurn { items, .. },
+            } => {
+                turns.push((thread_id, items));
+            }
+            AppEvent::CodexOp(AppCommand::UserTurn { .. }) => {
+                panic!("user turns must capture their target")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        turns,
+        vec![(
+            target,
             vec![UserInput::Text {
                 text: "!echo hello".to_string(),
                 text_elements: Vec::new(),
             }]
-        ),
-        other => {
-            panic!("expected Op::UserTurn for side-conversation shell-like input, got {other:?}")
-        }
-    }
+        )]
+    );
 }
 
 #[tokio::test]
@@ -218,6 +245,7 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
                 user_message: None,
+                mode: crate::app_event::SideStartMode::Reuse,
             }) if emitted_parent_thread_id == parent_thread_id
         );
         assert!(
@@ -249,6 +277,7 @@ async fn side_aliases_request_forked_questions_while_task_running() {
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
                 user_message: Some(user_message),
+                mode: crate::app_event::SideStartMode::New,
             }) if emitted_parent_thread_id == parent_thread_id
                 && user_message
                     == UserMessage {
@@ -318,7 +347,10 @@ async fn side_context_label_shows_parent_status_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw side conversation footer");
-    assert_chatwidget_snapshot!("side_context_label_shows_parent_status", terminal.backend());
+    assert_chatwidget_snapshot!(
+        "side_context_label_shows_parent_status",
+        normalized_backend_snapshot(terminal.backend())
+    );
 }
 
 #[tokio::test]
@@ -327,7 +359,8 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     chat.show_welcome_banner = false;
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
-    chat.set_side_conversation_context_label(Some("ctrl+/ for side".to_string()));
+    let label = "ctrl+/ for side";
+    chat.set_side_conversation_context_label(Some(label.to_string()));
 
     let width = 80;
     let height = chat.desired_height(width);
@@ -335,5 +368,28 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw hidden side conversation footer");
+    let hint = terminal
+        .backend()
+        .buffer()
+        .content()
+        .windows(label.len())
+        .find(|cells| {
+            cells
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                == label
+        })
+        .expect("side shortcut");
+    let key_style = crate::key_hint::ctrl(KeyCode::Char('/')).spans()[0].style;
+    let secondary_style = crate::style::secondary_text_style();
+    let styles = [0, 4, 5, 7].map(|i| (hint[i].fg, hint[i].modifier));
+    assert_eq!(
+        styles,
+        [key_style, key_style, key_style, secondary_style].map(|style| (
+            style.fg.unwrap_or(ratatui::style::Color::Reset),
+            style.add_modifier,
+        )),
+    );
     assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
 }

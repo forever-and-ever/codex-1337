@@ -50,9 +50,11 @@ fn dynamic_status_and_output_match_persisted_presentations() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         assert_eq!(replayed.len(), 1);
         let cell = &replayed[0];
+        if label == "success" {}
         for (mode, lines) in [
             ("compact", cell.display_lines(/*width*/ 80)),
             (

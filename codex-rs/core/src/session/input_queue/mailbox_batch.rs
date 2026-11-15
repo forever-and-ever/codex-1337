@@ -220,4 +220,24 @@ impl InputQueue {
                     .is_none_or(|(_, _, updates)| !*updates.borrow())
         })
     }
+
+    pub(crate) fn can_prove_mailbox_retainable(&self) -> Option<bool> {
+        self.mailbox_pending_mails.try_lock().ok().map(|pending| {
+            let batch_ready = match &pending.batch {
+                MailboxBatch::Empty => true,
+                MailboxBatch::Holding { mail, .. } => {
+                    mail.iter().all(|mail| !mail.communication.trigger_turn)
+                }
+            };
+            batch_ready
+                && pending
+                    .ready
+                    .iter()
+                    .all(|mail| !mail.communication.trigger_turn)
+                && self
+                    .controller
+                    .as_ref()
+                    .is_none_or(|(_, _, updates)| !*updates.borrow())
+        })
+    }
 }

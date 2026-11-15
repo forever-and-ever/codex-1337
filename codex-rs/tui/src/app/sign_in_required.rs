@@ -46,6 +46,7 @@ pub(crate) enum RecoveryEvent {
         id: ThreadId,
         request: Uuid,
         prepared: Box<PreparedSession>,
+        handle: codex_app_server_client::AppServerRequestHandle,
     },
 }
 
@@ -79,12 +80,14 @@ impl App {
                     );
                     let tx = self.app_event_tx.clone();
                     let request = Uuid::new_v4();
+                    let handle = server.request_handle();
                     let task = AbortOnDropHandle::new(tokio::spawn(async move {
                         let prepared = Box::pin(plan.run()).await;
                         tx.send(AppEvent::SignInRecovery(RecoveryEvent::Completed {
                             id,
                             request,
                             prepared: Box::new(prepared),
+                            handle,
                         }));
                     }));
                     self.reconnect
@@ -97,7 +100,32 @@ impl App {
                 id,
                 request,
                 prepared,
+                handle,
             } => {
+                if !server.accepts_session_observations(&prepared.observations) {
+                    use crate::app_server_session::session_preparation::SubscriptionCustody;
+                    let target = match prepared.custody {
+                        SubscriptionCustody::Subscribed(target)
+                        | SubscriptionCustody::Uncertain(target) => Some(target),
+                        _ => None,
+                    };
+                    if let Some(target) = target {
+                        self.request_server(server,
+                            crate::app::turn_submissions::ui_requests::UiRequestScope::Connection,
+                            crate::app::turn_submissions::ui_requests::UiRequestKind::Mutation,
+                            "Release foreign sign-in recovery subscription",
+                            move |_| async move {
+                                crate::app::turn_submissions::detach::unsubscribe(&handle, Uuid::new_v4(), target).await
+                            },
+                            |app, _, result| {
+                                if let Err(error) = result {
+                                    app.chat_widget.add_error_message(format!("Foreign recovery cleanup was not confirmed: {error}. Reopen the original backend to resynchronize."));
+                                }
+                                Ok(())
+                            });
+                    }
+                    return Ok(());
+                }
                 if self
                     .reconnect
                     .sign_in_recovery
@@ -113,7 +141,7 @@ impl App {
                     observations,
                     ..
                 } = *prepared;
-                server.apply_session_observations(observations);
+                server.apply_session_observations(observations)?;
                 match result {
                     Ok(started) => {
                         let displayed = self.current_displayed_thread_id() == Some(id);

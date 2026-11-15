@@ -55,6 +55,7 @@ pub async fn read_account_quotas(
     let response: AccountQuotaReadResponse =
         tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
             let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+                required_human_approval: false,
                 endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
                 client_name: "codex-quota".into(),
                 client_version: env!("CARGO_PKG_VERSION").into(),

@@ -258,7 +258,7 @@ impl ModelClientSession {
                         stream,
                         request_telemetry,
                         attempt,
-                        Arc::clone(&self.client.state.provider),
+                        &self.client.state,
                         interceptors,
                         /*last_response_tx*/ None,
                     );

@@ -411,6 +411,70 @@ async fn reload_account_adopts_an_external_credential_change() -> Result<()> {
 }
 
 #[tokio::test]
+async fn logout_account_requires_a_successful_auth_reload() -> Result<()> {
+    let oauth_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/revoke"))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"token": "refresh-b"}),
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&oauth_server)
+        .await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-a").refresh_token("refresh-a"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let refresh_url = format!("{}/oauth/token", oauth_server.uri());
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .with_env_overrides(&[
+            ("OPENAI_API_KEY", None),
+            (REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, Some(&refresh_url)),
+        ])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+
+    let auth_file = codex_home.path().join("auth.json");
+    let unreadable = "{";
+    std::fs::write(&auth_file, unreadable)?;
+    let id = mcp.send_logout_account_request().await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(id)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32603);
+    assert_eq!(std::fs::read_to_string(&auth_file)?, unreadable);
+    assert!(
+        oauth_server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.url.path() != "/oauth/revoke"),
+    );
+
+    // Once storage is readable, logout must revoke the newly loaded account.
+    std::fs::remove_file(&auth_file)?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-b").refresh_token("refresh-b"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let id = mcp.send_logout_account_request().await?;
+    let _: LogoutAccountResponse = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(id)).await??;
+    assert!(!auth_file.exists());
+    oauth_server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn logout_account_succeeds_when_config_reload_fails() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
@@ -556,6 +620,15 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
 
+    let initial = mcp
+        .initial_account_notification
+        .as_ref()
+        .expect("initial account authority");
+    assert_eq!(
+        initial.params,
+        Some(json!({"authMode": null, "planType": null}))
+    );
+
     let set_id = mcp
         .send_chatgpt_auth_tokens_login_request(
             access_token,
@@ -593,6 +666,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
         GetAccountResponse {
             display_name: None,
             account_id: None,
+            user_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("embedded@example.com".to_string()),
                 plan_type: AccountPlanType::Pro,
@@ -678,6 +752,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
         GetAccountResponse {
             display_name: None,
             account_id: None,
+            user_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("embedded@example.com".to_string()),
                 plan_type: AccountPlanType::Pro,
@@ -1649,6 +1724,7 @@ async fn login_survives_same_owner_token_refresh(
         };
         timeout(DEFAULT_READ_TIMEOUT, started.notified()).await?;
         let expected_account = GetAccountResponse {
+            user_id: Some("device-user".to_string()),
             display_name: None,
             account_id: None,
             account: Some(Account::Chatgpt {
@@ -2395,8 +2471,17 @@ async fn get_account_no_auth() -> Result<()> {
     let account: GetAccountResponse =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(account.account, None, "expected no account");
-    assert_eq!(account.requires_openai_auth, true);
+    assert_eq!(
+        account,
+        GetAccountResponse {
+            account_id: None,
+            display_name: None,
+            account: None,
+            user_id: None,
+            requires_openai_auth: true,
+            workspace_routing: None,
+        }
+    );
     Ok(())
 }
 
@@ -2436,6 +2521,7 @@ async fn get_account_with_api_key() -> Result<()> {
     let expected = GetAccountResponse {
         display_name: None,
         account_id: None,
+        user_id: None,
         account: Some(Account::ApiKey {}),
         requires_openai_auth: true,
         workspace_routing: None,
@@ -2476,6 +2562,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
         account_id: None,
         account: None,
         requires_openai_auth: false,
+        user_id: None,
         workspace_routing: None,
     };
     assert_eq!(received, expected);
@@ -2507,6 +2594,7 @@ async fn account_reads_use_startup_config_when_config_reload_fails() -> Result<(
             display_name: None,
             account_id: None,
             account: None,
+            user_id: None,
             requires_openai_auth: false,
             workspace_routing: None,
         }
@@ -2550,6 +2638,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
         ChatGptAuthFixture::new("access-chatgpt")
             .account_id("account-123")
             .email("user@example.com")
+            .chatgpt_user_id("user-123")
             .plan_type("pro"),
         AuthCredentialsStoreMode::File,
     )?;
@@ -2574,6 +2663,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
     let expected = GetAccountResponse {
         display_name: None,
         account_id: None,
+        user_id: Some("user-123".to_string()),
         account: Some(Account::Chatgpt {
             email: Some("user@example.com".to_string()),
             plan_type: AccountPlanType::Pro,
@@ -2587,10 +2677,9 @@ async fn get_account_with_chatgpt() -> Result<()> {
 }
 
 #[tokio::test]
-async fn get_account_for_cold_resumed_thread_falls_back_to_default_scope() -> Result<()> {
-    // TUI bootstrap for a resume target reads account/read with that thread's id *before*
-    // thread/resume ever materializes the thread, so the thread is always cold here. Scoping
-    // must fall back to the default account instead of failing with thread-not-found.
+async fn get_account_for_cold_thread_rejects_default_scope_fallback() -> Result<()> {
+    // An unloaded conversation has no admitted account capture. Reject its scoped read
+    // rather than substituting the current default payer before resume.
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -2640,10 +2729,21 @@ async fn get_account_for_cold_resumed_thread_falls_back_to_default_scope() -> Re
             refresh_token: false,
         })
         .await?;
-    let for_cold_thread: GetAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(cold_request_id)).await??;
-
-    assert_eq!(for_cold_thread, unscoped);
+    assert!(
+        matches!(unscoped.account, Some(Account::Chatgpt { email: Some(email), .. }) if email == "user@example.com")
+    );
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(cold_request_id)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert!(
+        error
+            .error
+            .message
+            .starts_with("Conversation account is unavailable:")
+    );
     Ok(())
 }
 
@@ -2697,6 +2797,7 @@ async fn get_account_with_chatgpt_plan_variants_returns_plan_type(
         GetAccountResponse {
             display_name: None,
             account_id: None,
+            user_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("user@example.com".to_string()),
                 plan_type: expected_plan,
@@ -2749,6 +2850,7 @@ async fn get_account_with_chatgpt_without_email() -> Result<()> {
         GetAccountResponse {
             display_name: None,
             account_id: None,
+            user_id: None,
             account: Some(Account::Chatgpt {
                 email: None,
                 plan_type: AccountPlanType::Pro,
@@ -2835,6 +2937,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
         assert_eq!(
             received,
             GetAccountResponse {
+                user_id: None,
                 display_name: None,
                 account_id: None,
                 account: None,
@@ -2886,6 +2989,7 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
     let expected = GetAccountResponse {
         display_name: None,
         account_id: None,
+        user_id: None,
         account: Some(Account::Chatgpt {
             email: Some("user@example.com".to_string()),
             plan_type: AccountPlanType::Unknown,

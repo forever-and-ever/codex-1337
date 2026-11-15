@@ -15,8 +15,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=dd4f4e2ac7c61bb8):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=afbc8a20fbeec618
+  tools (8; hash=b13f432bb8fa2c77):
+    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=032bffc300038401
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
@@ -36,8 +36,8 @@ Settings:
 
 ## Window 2 (after request 1)
 Settings: relative to window 1
-  tools (8; hash=c610c75db01c99d4):
-    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=9a94a6c56a2a47a4
+  tools (8; hash=c6102cc72b425cc3):
+    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=e0cd74c31eee645d
 -- request 2 (request) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>

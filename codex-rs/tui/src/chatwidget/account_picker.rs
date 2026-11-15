@@ -17,7 +17,9 @@ const CLAUDE_LOGIN_PENDING_VIEW: &str = "claude-login";
 
 impl ChatWidget {
     pub(crate) fn set_status_account_display(&mut self, display: Option<StatusAccountDisplay>) {
-        self.status_account_display = display;
+        if let Some(account) = self.loaded_account_mut() {
+            account.display = display;
+        }
     }
 
     pub(crate) fn show_account_picker(
@@ -25,6 +27,9 @@ impl ChatWidget {
         thread_id: ThreadId,
         response: codex_app_server_protocol::ThreadAccountListResponse,
     ) {
+        if self.refuse_pending_account_operation() {
+            return;
+        }
         let mut openrouter_items = Vec::new();
         Self::append_openrouter_accounts(thread_id, &response, &mut openrouter_items);
         let mut items: Vec<SelectionItem> = response
@@ -228,6 +233,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn show_account_picker_loading(&mut self) {
+        if self.refuse_pending_account_operation() {
+            return;
+        }
         self.bottom_pane.show_selection_view(SelectionViewParams {
             view_id: Some(ACCOUNT_PICKER_LOADING_VIEW),
             title: Some("Accounts".into()),

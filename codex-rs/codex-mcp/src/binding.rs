@@ -1,5 +1,12 @@
 //! Immutable MCP catalog and execution handles.
 
+#[path = "model_search.rs"]
+mod model_search;
+pub use model_search::SEARCH_CONNECTOR;
+pub use model_search::SearchDiscovery;
+pub use model_search::is_model_search_tool;
+pub(crate) use model_search::same_apps_declaration;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
@@ -9,6 +16,7 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use codex_config::AppToolApproval;
+use codex_exec_server::FileSystemSandboxContext;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -23,7 +31,9 @@ use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 
 use crate::McpConfig;
+use crate::McpServerPermissions;
 use crate::binding_clients::McpBindingClients;
+use crate::binding_clients::McpResourceListing;
 use crate::client_tool_catalog::ToolCatalogSnapshot;
 use crate::connection_manager::McpConnectionSet;
 use crate::rmcp_client::ManagedClient;
@@ -41,12 +51,66 @@ pub struct McpBinding {
     calls: HashMap<(String, String), PreparedMcpCall>,
 }
 
+impl crate::McpRuntime {
+    /// Validate the issuing catalog before admitting a private search projection.
+    pub fn prepare_projected_call<'a>(
+        &'a self,
+        binding: &'a McpBinding,
+        advertised: &'a ToolInfo,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<PreparedMcpCall>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let unavailable = || advertised.unavailable_to_model_error();
+            let projected = binding
+                .tools
+                .iter()
+                .find(|tool| {
+                    tool.server_name == advertised.server_name
+                        && tool.tool == advertised.tool
+                        && tool.connector_id == advertised.connector_id
+                        && tool.callable_name == advertised.callable_name
+                        && tool.callable_namespace == advertised.callable_namespace
+                        && tool.openai_file_input_optional_fields
+                            == advertised.openai_file_input_optional_fields
+                })
+                .ok_or_else(unavailable)?;
+            let issued =
+                binding.prepare_call(&advertised.server_name, advertised.tool.name.as_ref());
+            let canonical = issued
+                .as_ref()
+                .and_then(|call| call.projection_source.as_ref())
+                .unwrap_or(projected);
+            // A dormant advertised tool has no prepared call yet. Normal preparation
+            // starts its issuing connection and validates the full live declaration.
+            let mut current = self.prepare_call(canonical).await?;
+            if !current.uses_connection_from(binding) {
+                return Err(unavailable());
+            }
+            if let Some(issued) = issued.filter(|call| call.projection_source.is_some()) {
+                let mut projection = issued.tool_info.get().clone();
+                projection
+                    .tool
+                    .meta
+                    .clone_from(&current.tool_info().tool.meta);
+                model_search::restore_invocation_context(
+                    &mut projection.tool,
+                    &issued.tool_info().tool,
+                );
+                current.tool_info = projection.into();
+                current.projection_source = issued.projection_source;
+            }
+            Ok(current)
+        })
+    }
+}
+
 impl McpBinding {
     /// Creates an empty binding for tests and callers without a materialized runtime.
     pub fn empty(config: Arc<McpConfig>) -> Self {
         Self::new(
             Arc::new(McpConnectionSet::empty(config.prefix_mcp_tool_names)),
-            Arc::new(McpBindingClients::new(HashMap::new())),
+            Arc::new(McpBindingClients::default()),
             config,
             /*plugins_available*/ false,
             Vec::new(),
@@ -128,7 +192,7 @@ impl McpBinding {
     pub async fn list_all_resources(
         &self,
         include_server: impl Fn(&str) -> bool,
-    ) -> HashMap<String, Vec<Resource>> {
+    ) -> McpResourceListing<Resource> {
         self.clients.list_all_resources(include_server).await
     }
 
@@ -137,6 +201,9 @@ impl McpBinding {
         server: &str,
         params: Option<PaginatedRequestParams>,
     ) -> Result<ListResourceTemplatesResult> {
+        if self.connections.skips_resource_template_listing(server) {
+            return Ok(ListResourceTemplatesResult::with_all_items(Vec::new()));
+        }
         if self.clients.client(server).is_some() {
             self.clients.list_resource_templates(server, params).await
         } else {
@@ -149,9 +216,11 @@ impl McpBinding {
     pub async fn list_all_resource_templates(
         &self,
         include_server: impl Fn(&str) -> bool,
-    ) -> HashMap<String, Vec<ResourceTemplate>> {
+    ) -> McpResourceListing<ResourceTemplate> {
         self.clients
-            .list_all_resource_templates(include_server)
+            .list_all_resource_templates(|server| {
+                include_server(server) && !self.connections.skips_resource_template_listing(server)
+            })
             .await
     }
 
@@ -186,12 +255,34 @@ pub struct PreparedMcpCall {
     config: Arc<McpConfig>,
     catalog_snapshot: Arc<ToolCatalogSnapshot>,
     tool_info: PreparedToolInfo,
+    projection_source: Option<ToolInfo>,
     server_name: String,
     server_metadata: McpServerMetadata,
     plugin_id: Option<String>,
     selected_plugin_server: bool,
     lease_cancellation: Option<CancellationToken>,
     lease_guard: Option<McpDispatchLeaseGuard>,
+}
+
+/// The rules for a prepared call and the folders used to interpret them.
+pub enum McpPermissionSource<'a> {
+    Environment {
+        environment_id: &'a str,
+        sandbox: &'a Arc<FileSystemSandboxContext>,
+    },
+    Thread {
+        profile: &'a PermissionProfile,
+        host_cwd: &'a AbsolutePathBuf,
+    },
+}
+
+impl<'a> McpPermissionSource<'a> {
+    pub fn profile(&self) -> &'a PermissionProfile {
+        match self {
+            Self::Environment { sandbox, .. } => &sandbox.permissions,
+            Self::Thread { profile, .. } => profile,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -247,6 +338,7 @@ impl PreparedMcpCall {
             config,
             catalog_snapshot,
             tool_info,
+            projection_source: None,
             server_name,
             server_metadata,
             plugin_id,
@@ -267,18 +359,35 @@ impl PreparedMcpCall {
         self
     }
 
+    /// Whether the server connection that issued the step's tools still owns this call.
+    pub fn uses_connection_from(&self, binding: &McpBinding) -> bool {
+        self.connections
+            .shares_server_connection(&binding.connections, &self.server_name)
+    }
+
     /// Returns the configuration and approval authority captured with this client.
     pub fn config(&self) -> &McpConfig {
         &self.config
     }
 
+    /// A hosted app can run through the local server but use thread rules, not local environment rules.
+    pub fn permission_source(&self) -> McpPermissionSource<'_> {
+        // The constructor only prepares calls with an entry in this immutable config.
+        match &self.config.server_permissions[&self.server_name] {
+            McpServerPermissions::Environment(sandbox) => McpPermissionSource::Environment {
+                environment_id: self.server_environment_id(),
+                sandbox,
+            },
+            McpServerPermissions::Thread => McpPermissionSource::Thread {
+                profile: &self.config.permission_profile,
+                host_cwd: &self.config.host_cwd,
+            },
+        }
+    }
+
     /// Returns the owner permissions validated when this immutable call was prepared.
     pub fn permission_profile(&self) -> &PermissionProfile {
-        let Some(permission_profile) = self.config.permission_profile_for_server(&self.server_name)
-        else {
-            unreachable!("prepared MCP calls retain their immutable permission authority");
-        };
-        permission_profile
+        self.permission_source().profile()
     }
 
     /// Attach policy aliases and the server-host launcher, replacing stale authority.

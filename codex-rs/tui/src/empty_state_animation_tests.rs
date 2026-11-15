@@ -21,7 +21,7 @@ fn first_screen_respects_available_space_without_a_replay_hitbox() {
         animation.replaying = true;
         animation.last_frame = Some(Instant::now());
         assert_eq!(
-            animation.render_first_screen(free, &mut buffer, Some(ComposerState::Empty)),
+            animation.render_first_screen(screen, free, &mut buffer, Some(ComposerState::Empty)),
             None
         );
         assert_eq!(animation.stage, None);

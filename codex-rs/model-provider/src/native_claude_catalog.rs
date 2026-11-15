@@ -221,7 +221,6 @@ fn project(native: NativeModel) -> Result<Option<ModelInfo>, ApiError> {
     model.max_context_window = model.context_window;
     model.visibility = ModelVisibility::List;
     model.priority = 0;
-    model.used_fallback_model_metadata = false;
     model.supports_reasoning_summary_parameter = false;
     model.supported_reasoning_levels = efforts
         .into_iter()
@@ -242,7 +241,10 @@ fn project(native: NativeModel) -> Result<Option<ModelInfo>, ApiError> {
         model.input_modalities.push(InputModality::Image);
     }
     model.anthropic = Some(native_capabilities);
-    Ok(Some(crate::claude_catalog::normalize_model_info(model)))
+    Ok(Some(crate::claude_catalog::normalize_model_info(
+        model,
+        codex_models_manager::ModelOrigin::Provider,
+    )))
 }
 
 fn invalid(message: &str) -> ApiError {

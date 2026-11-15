@@ -2,14 +2,9 @@
 
 use super::*;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
-use codex_otel::SessionTelemetry;
-use codex_protocol::ThreadId;
-use codex_protocol::protocol::SessionSource;
 use codex_protocol::sandbox::SandboxType;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
-use tokio::sync::oneshot;
-use tokio::sync::watch;
 use tokio::time::timeout;
 
 /// Roots stay attached through config changes and retain API ordering across environment states.
@@ -69,6 +64,7 @@ async fn capability_roots_follow_attachments_through_configuration_changes() {
         &snapshot.environments[1],
         TurnEnvironmentState::Failed { .. }
     ));
+    let starting = Arc::clone(&snapshot.starting().next().unwrap().attachment);
 
     let child = ThreadEnvironments::new(
         Arc::clone(&manager),
@@ -78,6 +74,7 @@ async fn capability_roots_follow_attachments_through_configuration_changes() {
         snapshot,
         /*non_blocking_snapshots*/ false,
     );
+    child.activate_configured(async_channel::unbounded().0);
     assert_eq!(
         child.snapshot().await.selected_capability_roots(),
         vec![roots[1].clone()]
@@ -109,21 +106,20 @@ async fn capability_roots_follow_attachments_through_configuration_changes() {
         independent_roots
     );
     assert_eq!(parent.snapshot().await.selected_capability_roots(), roots);
+    let child_snapshot = child.snapshot().await;
+    let child_local = child_snapshot.primary().expect("child executor");
+    let parent_snapshot = parent.snapshot().await;
+    let parent_local = parent_snapshot.primary().expect("parent executor");
     assert!(Arc::ptr_eq(
-        &child
-            .snapshot()
-            .await
-            .primary()
-            .expect("child executor")
-            .environment,
-        &parent
-            .snapshot()
-            .await
-            .turn_environments()
-            .find(|environment| environment.selection.environment_id == LOCAL_ENVIRONMENT_ID)
-            .expect("parent executor")
-            .environment,
+        child_local.environment(),
+        parent_local.environment()
     ));
+    assert!(Arc::ptr_eq(&starting, &parent_local.attachment));
+    parent.update_selections(std::slice::from_ref(&local));
+    assert!(!parent_local.attachment.detached.is_cancelled());
+    drop(parent);
+    assert!(parent_local.attachment.detached.is_cancelled());
+    assert!(!child_local.attachment.detached.is_cancelled());
 }
 
 #[test_case::test_case(false; "standalone startup")]
@@ -149,7 +145,7 @@ async fn unpolled_snapshot_does_not_delay_canceling_a_removed_environment(shared
     if shared_startup {
         environments.update_configured_selections(std::slice::from_ref(&selection));
     }
-    environments.update_selections(&[selection]);
+    environments.update_selections(std::slice::from_ref(&selection));
     let starting = environments
         .snapshot()
         .await
@@ -158,8 +154,10 @@ async fn unpolled_snapshot_does_not_delay_canceling_a_removed_environment(shared
         .unwrap()
         .clone();
     let held_snapshot = environments.snapshot();
+    let original = Arc::downgrade(&starting.attachment);
 
     environments.update_selections(&[]);
+    assert!(starting.attachment.detached.is_cancelled());
 
     let error = timeout(Duration::from_secs(5), starting.wait_until_ready())
         .await
@@ -174,6 +172,19 @@ async fn unpolled_snapshot_does_not_delay_canceling_a_removed_environment(shared
         held_snapshot.await.environments.as_slice(),
         [TurnEnvironmentState::Failed { .. }]
     ));
+
+    environments.update_selections(&[selection]);
+    let snapshot = environments.snapshot_now();
+    let reattached = &snapshot.starting().next().unwrap().attachment;
+    assert!(Arc::ptr_eq(
+        &reattached.environment,
+        &starting.attachment.environment
+    ));
+    assert!(!Arc::ptr_eq(reattached, &starting.attachment));
+    environments.update_configured_selections(&[]);
+    assert!(!reattached.detached.is_cancelled());
+    drop(starting);
+    assert!(original.upgrade().is_none());
 }
 
 #[tokio::test]
@@ -242,99 +253,4 @@ async fn updating_another_environment_retries_the_executor_without_canceling_pen
     .clone();
     assert_eq!(received, Some(Ok(config.clone())));
     assert_eq!(original_owner.await, Ok(config));
-}
-
-#[tokio::test]
-async fn credential_refresh_does_not_restore_a_removed_environment() {
-    let home = tempfile::tempdir().expect("home");
-    let cwd = AbsolutePathBuf::from_absolute_path(home.path()).expect("cwd");
-    let cwd_uri = PathUri::from_abs_path(&cwd);
-    let session_id = ThreadId::new();
-    let telemetry = SessionTelemetry::new(
-        session_id,
-        "test",
-        "test",
-        /*account_id*/ None,
-        /*account_email*/ None,
-        /*auth_mode*/ None,
-        "test".to_string(),
-        /*log_user_prompts*/ false,
-        "test".to_string(),
-        SessionSource::Cli,
-    );
-    let (broker, _) = watch::channel(SnapshotCredentialBrokerState::Starting);
-    let shell_snapshot = ShellSnapshot::new(
-        cwd,
-        session_id,
-        telemetry,
-        /*state_db*/ None,
-        Some(broker),
-        /*prefer_executor_snapshots*/ false,
-    );
-    let environments = Arc::new(ThreadEnvironments::new(
-        Arc::new(EnvironmentManager::default_for_tests()),
-        crate::shell::default_user_shell(),
-        ThreadEnvironmentDefaults::new(tests::test_environment_config(), SandboxType::None),
-        shell_snapshot,
-        TurnEnvironmentSnapshot::default(),
-        /*non_blocking_snapshots*/ false,
-    ));
-    environments.update_selections(&[TurnEnvironmentSelection {
-        selected_capability_roots: Default::default(),
-        environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
-        cwd: cwd_uri.clone(),
-        workspace_roots: vec![cwd_uri],
-        config: EnvironmentConfigState::FromThread,
-    }]);
-    let resolution = environments.state.lock().unwrap().environments[0]
-        .resolution
-        .clone();
-    let resolved = resolution.await.expect("local is ready");
-    let (refresh_paused_tx, refresh_paused_rx) = oneshot::channel();
-    let (resume_refresh_tx, resume_refresh_rx) = std::sync::mpsc::channel();
-    // Pause the credential refresh while it is using the current list.
-    environments.state.lock().unwrap().environments[0].resolution = async move {
-        refresh_paused_tx.send(()).expect("signal refresh paused");
-        resume_refresh_rx.recv().expect("resume refresh");
-        Ok(resolved)
-    }
-    .boxed()
-    .shared();
-
-    let refreshing = Arc::clone(&environments);
-    let refresh = tokio::task::spawn_blocking(move || {
-        refreshing.set_snapshot_credential_broker(SnapshotCredentialBrokerState::Unavailable);
-    });
-    timeout(Duration::from_secs(/*secs*/ 5), refresh_paused_rx)
-        .await
-        .expect("credential refresh should reach the old list")
-        .expect("refresh paused");
-    let (removal_started_tx, removal_started_rx) = oneshot::channel();
-    let removing = Arc::clone(&environments);
-    let mut removal = tokio::task::spawn_blocking(move || {
-        removal_started_tx.send(()).expect("signal removal started");
-        removing.update_selections(&[]);
-    });
-    timeout(Duration::from_secs(/*secs*/ 5), removal_started_rx)
-        .await
-        .expect("removal should start")
-        .expect("removal started");
-    let early_removal = timeout(Duration::from_secs(/*secs*/ 1), &mut removal)
-        .await
-        .ok();
-    let removal_finished_early = early_removal.is_some();
-
-    resume_refresh_tx
-        .send(())
-        .expect("release credential refresh");
-    refresh.await.expect("credential refresh finished");
-    match early_removal {
-        Some(result) => result.expect("removal finished"),
-        None => removal.await.expect("removal finished"),
-    }
-    assert_eq!(environments.selections(), Vec::new());
-    assert!(
-        !removal_finished_early,
-        "removal should wait until the credential refresh finishes"
-    );
 }

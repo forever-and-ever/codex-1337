@@ -8,7 +8,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::function_call_output_content_items_to_text;
-use codex_utils_audio::estimate_audio_token_count;
+use codex_utils_audio::estimate_tool_audio_tokens;
 use codex_utils_output_truncation::approx_token_count;
 
 use crate::tools::context::FunctionToolOutput;
@@ -78,8 +78,8 @@ impl ToolOutput for CodeModeToolOutput {
                 .iter()
                 .map(|item| match item {
                     FunctionCallOutputContentItem::InputText { text } => approx_token_count(text),
-                    FunctionCallOutputContentItem::InputAudio { audio_url } => {
-                        estimate_audio_token_count(audio_url)
+                    FunctionCallOutputContentItem::InputAudio { audio } => {
+                        estimate_tool_audio_tokens(audio)
                     }
                     FunctionCallOutputContentItem::InputImage { .. }
                     | FunctionCallOutputContentItem::EncryptedContent { .. } => 0,

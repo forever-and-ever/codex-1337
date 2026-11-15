@@ -93,7 +93,7 @@ fn build_session_telemetry(
         &config.model_provider,
         !is_native_anthropic && provider.codex_api_key_env_enabled(),
     );
-    SessionTelemetry::new(
+    let mut session_telemetry = SessionTelemetry::new(
         thread_id,
         model,
         model,
@@ -105,10 +105,18 @@ fn build_session_telemetry(
         user_agent(),
         source,
     )
-    .with_auth_env(auth_env_telemetry.to_otel_metadata())
+    .with_auth_env(auth_env_telemetry.to_otel_metadata());
+    if !config.otel.log_sse_deltas {
+        session_telemetry = session_telemetry.without_sse_delta_logs();
+    }
+    session_telemetry
 }
 
 impl MemoryStartupContext {
+    pub(crate) fn item_id_generator(&self) -> &codex_protocol::ItemIdGenerator {
+        self.thread.item_id_generator()
+    }
+
     pub(crate) fn new(
         thread_manager: Arc<ThreadManager>,
         provider: CapturedProvider,
@@ -245,10 +253,10 @@ impl MemoryStartupContext {
         let session_id = SessionId::from(self.thread_id);
         let session_id_string = session_id.to_string();
         let model_client = ModelClient::new(
-            None,
+            Arc::clone(self.provider.provider()),
             AgentIdentityAuthPolicy::JwtOnly,
             self.thread_id,
-            config.model_provider.clone(),
+            Arc::clone(self.item_id_generator()),
             session_source.clone(),
             config_snapshot.originator,
             config.model_verbosity,

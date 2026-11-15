@@ -22,6 +22,8 @@ pub use accounts::admit_auth;
 pub use api_key::is_fedramp_api_key;
 pub use auth_headers::AuthHeaders;
 pub use change_state::AuthChangeState;
+pub use change_state::AuthOwner;
+pub use change_state::RequestAuthChange;
 pub use error::RefreshTokenFailedError;
 pub use error::RefreshTokenFailedReason;
 pub use manager::*;

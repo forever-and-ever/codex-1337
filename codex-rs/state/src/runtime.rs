@@ -278,6 +278,12 @@ impl StateRuntime {
         &self.thread_queue
     }
 
+    /// Startup failure to report after tracing is installed and before destructive cleanup.
+    pub fn diagnostic_logs_error(&self) -> Option<&str> {
+        // TELOS(removed-stacks): the flight recorder never opens a diagnostic SQLite sink.
+        None
+    }
+
     /// Close all SQLite pools and wait for outstanding pool workers to exit.
     pub async fn close(&self) {
         self.thread_queue.close().await;

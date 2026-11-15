@@ -651,6 +651,11 @@ impl StreamController {
         self.core.has_tail()
     }
 
+    /// Include the unterminated line when handing an in-flight answer to another view.
+    pub(crate) fn source_snapshot(&self) -> String {
+        self.core.source_snapshot()
+    }
+
     /// Completion must repair emitted rows when reference definitions can change earlier blocks.
     pub(crate) fn needs_scrollback_reflow(&self) -> bool {
         let Some(core) = self.core.inline() else {
@@ -664,11 +669,7 @@ impl StreamController {
         {
             return false;
         }
-        let source = format!(
-            "{}{}",
-            core.state.collector.committed_source(),
-            core.state.collector.pending_source()
-        );
+        let source = self.source_snapshot();
         pulldown_cmark::Parser::new(&source)
             .reference_definitions()
             .iter()

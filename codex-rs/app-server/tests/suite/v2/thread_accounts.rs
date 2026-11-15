@@ -200,6 +200,7 @@ default_claude_account = {}
             account,
             GetAccountResponse {
                 account_id: Some(id.clone()),
+                user_id: None,
                 account: Some(Account::ClaudeSubscription {
                     email: Some(email.to_owned())
                 }),
@@ -498,6 +499,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             GetAccountResponse {
                 account_id,
                 display_name: None,
+                user_id: Some(id.to_string()),
                 account: Some(Account::Chatgpt {
                     email: Some(format!("{id}@example.com")),
                     plan_type: AccountPlanType::Pro,
@@ -742,6 +744,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             GetAccountResponse {
                 display_name: None,
                 account_id: Some(expected.to_string()),
+                user_id: Some(id.to_string()),
                 account: Some(Account::Chatgpt {
                     email: Some(format!("{id}@example.com")),
                     plan_type: AccountPlanType::Pro,

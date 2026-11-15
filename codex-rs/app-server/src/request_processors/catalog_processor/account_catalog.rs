@@ -7,8 +7,6 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ModelListParams;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
-use codex_login::AuthManager;
-use codex_model_provider_info::ModelProviderAdapter;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::ThreadId;
 use std::sync::Arc;
@@ -16,7 +14,7 @@ use std::sync::Arc;
 pub(super) struct AccountCatalog {
     pub(super) config: Arc<Config>,
     pub(super) models_manager: SharedModelsManager,
-    pub(super) auth_manager: Arc<AuthManager>,
+    pub(super) provider: codex_model_provider::SharedModelProvider,
 }
 
 impl CatalogRequestProcessor {
@@ -24,69 +22,93 @@ impl CatalogRequestProcessor {
         &self,
         params: &ModelListParams,
     ) -> Result<AccountCatalog, JSONRPCErrorError> {
-        let overrides = ConfigOverrides {
-            model_provider: params.model_provider.clone(),
-            ..Default::default()
-        };
-        let config = Arc::new(
-            match params.model_provider.as_ref() {
-                // The typed provider-validation loader rejects forbidden explicit routes before refresh.
-                Some(_) => {
-                    self.config_manager
-                        .load_for_resume(None, None, overrides, None)
-                        .await
-                }
-                // A global picker has no retained route: current managed policy selects its provider.
-                None => {
-                    self.config_manager
-                        .load_with_overrides(None, overrides)
-                        .await
-                }
-            }
-            .map_err(|err| config_load_error(&err))?,
-        );
         let thread = match params.thread_id.as_deref() {
             Some(id) => {
                 let id = ThreadId::from_string(id)
                     .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
-                self.thread_manager.get_thread(id).await.ok()
+                Some(self.thread_manager.get_thread(id).await.map_err(|error| {
+                    invalid_request(format!("Conversation catalog is unavailable: {error}"))
+                })?)
             }
             None => None,
         };
-        let auth_manager = match &thread {
-            Some(thread) => thread.auth_manager(),
-            None => self.thread_manager.auth_manager(),
+        let config = match (params.model_provider.as_ref(), thread.as_ref()) {
+            (None, Some(thread)) => thread.config().await,
+            (None, None) => Box::pin(self.model_catalog.global_config())
+                .await
+                .map_err(|error| config_load_error(&error))?,
+            (provider, _) => Arc::new(
+                self.config_manager
+                    .load_for_resume(
+                        None,
+                        None,
+                        ConfigOverrides {
+                            model_provider: provider.cloned(),
+                            ..Default::default()
+                        },
+                        None,
+                    )
+                    .await
+                    .map_err(|error| config_load_error(&error))?,
+            ),
         };
-        let models_manager = if let Some(manager) =
-            super::super::turn_processor::openrouter::catalog_for_list(&config)?
-        {
-            manager
-        } else if let Some(thread) = thread {
-            thread
+        let (models_manager, provider) = if let Some(thread) = thread {
+            let capture = thread
+                .capture_provider()
+                .await
+                .map_err(|error| invalid_request(error.to_string()))?;
+            let models_manager = capture
                 .models_manager(&config)
+                .map_err(|error| invalid_request(error.to_string()))?;
+            (models_manager, Arc::clone(capture.provider()))
+        } else if params.model_provider.is_none()
+            && config.model_provider.adapter
+                != codex_model_provider_info::ModelProviderAdapter::OpenRouter
+        {
+            let source = self
+                .thread_manager
+                .auth_manager()
+                .capture_auxiliary_source()
+                .map_err(|error| invalid_request(error.to_string()))?;
+            self.model_catalog
+                .admitted(Arc::clone(&config), Arc::new(source))
                 .await
-                .map_err(invalid_request)?
-        } else if config.model_provider.adapter == ModelProviderAdapter::OpenaiCompatible {
-            let (cached_config, cached_manager) = self
-                .model_catalog
-                .current()
-                .await
-                .map_err(|err| config_load_error(&err))?;
-            if config.model_provider_id == cached_config.model_provider_id
-                && config.model_provider == cached_config.model_provider
-                && config.model_catalog == cached_config.model_catalog
-            {
-                cached_manager
-            } else {
-                codex_core::build_models_manager(&config, Arc::clone(&auth_manager))
-            }
+                .map_err(|error| invalid_request(error.to_string()))?
         } else {
-            codex_core::build_models_manager(&config, Arc::clone(&auth_manager))
+            let source = self
+                .thread_manager
+                .auth_manager()
+                .capture_auxiliary_source()
+                .map_err(|error| invalid_request(error.to_string()))?;
+            source
+                .validate()
+                .map_err(|error| invalid_request(error.to_string()))?;
+            let credentials = source.credentials();
+            let runtime = self
+                .thread_manager
+                .runtime_auth_for_config(&config)
+                .map_err(|error| invalid_request(error.to_string()))?
+                .map(|(runtime, mode)| (runtime.for_credentials(Arc::clone(&credentials)), mode));
+            let provider = codex_model_provider::ProviderAuthContext {
+                credentials: Arc::clone(&credentials),
+                runtime_auth: runtime.clone(),
+            }
+            .model_provider(config.model_provider.clone());
+            let models_manager =
+                match super::super::turn_processor::openrouter::catalog_for_list(&config)? {
+                    Some(manager) => manager,
+                    None => codex_core::build_models_manager(
+                        &config,
+                        credentials,
+                        runtime.map(|(manager, _)| manager),
+                    ),
+                };
+            (models_manager, provider)
         };
         Ok(AccountCatalog {
             config,
             models_manager,
-            auth_manager,
+            provider,
         })
     }
 }

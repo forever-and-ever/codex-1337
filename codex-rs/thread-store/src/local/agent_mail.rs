@@ -19,7 +19,6 @@ use codex_state::AgentMailState;
 
 use super::LocalThreadStore;
 use super::rollout_lineage::RolloutLineage;
-use super::rollout_lineage::RolloutLineageSegment;
 use super::thread_rollout_resolver;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
@@ -54,16 +53,10 @@ impl LocalThreadStore {
         if meta.meta.id != thread_id {
             return Err(mail_history_error("rollout belongs to another thread"));
         }
-        let lineage = if meta.meta.history_mode == ThreadHistoryMode::Paginated {
-            self.resolve_rollout_lineage(thread_id, Some(path)).await?
-        } else {
-            RolloutLineage {
-                segments: vec![RolloutLineageSegment {
-                    rollout_id: thread_id,
-                    rollout_path: path,
-                    start_ordinal: 1,
-                    end: None,
-                }],
+        let lineage = match meta.meta.history_mode {
+            ThreadHistoryMode::Legacy => RolloutLineage::legacy(thread_id, path),
+            ThreadHistoryMode::Paginated => {
+                self.resolve_rollout_lineage(thread_id, Some(path)).await?
             }
         };
         Self::find_accepted_agent_mail_from_lineage(lineage, ids).await

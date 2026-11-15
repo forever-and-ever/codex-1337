@@ -1,0 +1,120 @@
+---
+source: core/tests/suite/scenarios_incremental_tools.rs
+expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+---
+Scenario: Regular Responses retains its full-current-catalog path across MCP removal and restoration. Genuine catalog changes may rebuild the request prefix; unchanged requests retain the same declarations, and unsupported incremental removal notices are never emitted.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-5.5"
+  parallel_tool_calls: true
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"effort":"medium"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+  tools (15; hash=8bd20f500b270a87):
+    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
+    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=383228a84558a0ce
+    - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=bf80c8a46f862d10
+    - function/list_mcp_resources: Lists resources provided by MCP servers. Resources allow servers to share data that provides cont...; args=[cursor, server]; hash=6792edaff13561bd
+    - function/list_mcp_resource_templates: Lists resource templates provided by MCP servers. Parameterized resource templates allow servers ...; args=[cursor, server]; hash=60f17c90ef7a4ebb
+    - function/read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.; args=[server, uri]; hash=24246896b39008ae
+    - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=a9d43b5bf9e672b5
+    - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
+    - custom/apply_patch: The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the pat...; hash=dea9f12b0111a4ba
+    - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[path]; hash=1908de9c0be7118a
+    - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+      - function/close_agent
+      - function/resume_agent
+      - function/send_input
+      - function/spawn_agent
+      - function/wait_agent
+    - namespace/mcp__echo_service: Echo service instructions.; hash=a5144e5d70d01799
+      - function/cwd
+      - function/echo
+    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - web_search; hash=f103e327c6870a46
+-- request 1 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
+    Begin with the echo service.
+
+## Window 2 (after request 1)
+Settings: relative to window 1
+  tools (15; hash=caa0f95971769024):
+    ~ namespace/mcp__echo_service: Echo service instructions.; hash=cd4faea1ab398734
+      - function/echo
+-- request 2 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
+    Begin with the echo service.
+04:message/user:
+    Continue after disabling the cwd tool.
+-- request 3 (turn) --
+05:message/user:
+    Continue with the remaining echo tool.
+
+## Window 3 (after request 3)
+Settings: relative to window 2
+  tools (11; hash=d6cb4f77eb8a1482):
+    - removed function/list_mcp_resources
+    - removed function/list_mcp_resource_templates
+    - removed function/read_mcp_resource
+    - removed namespace/mcp__echo_service
+-- request 4 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
+    Begin with the echo service.
+04:message/user:
+    Continue after disabling the cwd tool.
+05:message/user:
+    Continue with the remaining echo tool.
+06:message/user:
+    Continue after removing the echo service.
+-- request 5 (turn) --
+07:message/user:
+    Continue without the echo service.
+
+## Window 4 (after request 5)
+Settings: same as window 1
+-- request 6 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
+    Begin with the echo service.
+04:message/user:
+    Continue after disabling the cwd tool.
+05:message/user:
+    Continue with the remaining echo tool.
+06:message/user:
+    Continue after removing the echo service.
+07:message/user:
+    Continue without the echo service.
+08:message/user:
+    Continue with the restored echo service.
+-- request 7 (turn) --
+09:message/user:
+    Continue with the same restored tools.

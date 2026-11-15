@@ -136,7 +136,9 @@ fn print_callback(
                 max_tokens: None,
             }
         };
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(item));
+        let _ = state
+            .event_tx
+            .blocking_send(RuntimeEvent::ContentItem(item));
     }
 }
 

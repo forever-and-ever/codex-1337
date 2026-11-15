@@ -285,6 +285,8 @@ async fn token_budget_guidance_precedes_standalone_context_window(
             .expect("write token-budget guidance configuration");
         })
         .with_config(move |config| {
+            config.features.enable(Feature::DeferredToolWorldState)
+                .expect("test opts into deferred namespace World State");
             config.model_provider.base_url = Some(backend_url);
             config.update_plan_enabled = true;
             config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
@@ -298,6 +300,7 @@ async fn token_budget_guidance_precedes_standalone_context_window(
     assert!(request.has_content_kinds(&[
         "token_budget.context_window_guidance",
         "permissions.instructions",
+        "tools.deferred_namespaces",
     ]));
     assert!(request.has_content_kinds(&["token_budget.context_window"; 3]));
     let developer_texts = request.message_input_texts("developer");

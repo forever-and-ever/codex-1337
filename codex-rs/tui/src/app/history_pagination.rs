@@ -70,8 +70,11 @@ impl App {
         if !app_server.is_older_history_page_pending(thread_id, cursor) {
             return Ok(());
         }
-        if self.chat_widget.thread_id() != Some(thread_id)
-            || (tui.is_owned_screen() && !self.scrollback_has_older_history)
+        // The widget can already belong to the destination while the transcript still replays.
+        let parked = self.chat_widget.thread_id() != Some(thread_id);
+        if self.awaiting_side_replay(tui)
+            || (parked && !self.side_companions.contains_key(&thread_id))
+            || (!parked && tui.is_owned_screen() && !self.scrollback_has_older_history)
         {
             app_server.cancel_older_history_page(thread_id, cursor);
             return Ok(());
@@ -117,6 +120,31 @@ impl App {
         );
         if let Some(clocks) = app_server.user_prompt_clocks(thread_id) {
             clocks.stamp(&mut cells);
+        }
+        if parked && self.side_companions.contains_key(&thread_id) {
+            let index = history_prefix_len(&self.side_companions[&thread_id].cells);
+            let inserted = index..index + cells.len();
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice::Companion {
+                    thread_id,
+                    range: index..index,
+                    cells,
+                },
+            );
+            let pane = self
+                .side_companions
+                .get_mut(&thread_id)
+                .expect("parked transcript retained");
+            pane.view.history_loaded(&pane.cells, inserted);
+            pane.view.history = if app_server.has_older_history(thread_id) {
+                TranscriptHistoryState::Partial
+            } else {
+                TranscriptHistoryState::Complete
+            };
+            merge_older_turns(&mut store.lock().await.turns, turns);
+            tui.frame_requester().schedule_frame();
+            return Ok(());
         }
         let inserted = self.prepend_older_transcript_cells(cells);
         self.transcript_view
@@ -172,12 +200,37 @@ impl App {
             visibility,
             Some(&self.config),
             &|thread| self.chat_widget.collab_agent_metadata(thread),
+            if self.app_server_target.uses_remote_workspace() {
+                history_cell::ImagePathOrigin::Remote
+            } else {
+                history_cell::ImagePathOrigin::Local
+            },
         );
         let persisted_user_cells = user_items
             .into_iter()
             .zip(projected_user_cells)
             .map(|((item_id, _), cell)| (item_id, cell))
             .collect();
+        if self.chat_widget.thread_id() != Some(thread_id)
+            && let Some(pane) = self.side_companions.get(&thread_id)
+        {
+            let indices =
+                hidden_transcript_indices(&pane.cells, persisted_user_cells, hidden_item_ids);
+            for index in indices {
+                self.commit_transcript_splice(
+                    tui,
+                    TranscriptSplice::Companion {
+                        thread_id,
+                        range: index..index + 1,
+                        cells: Vec::new(),
+                    },
+                );
+            }
+            if let Some(pane) = self.side_companions.get_mut(&thread_id) {
+                pane.view.restart_search();
+            }
+            return;
+        }
         let indices = hidden_transcript_indices(
             &self.transcript_cells,
             persisted_user_cells,
@@ -210,7 +263,14 @@ impl App {
             }
         }
         for index in indices {
-            self.transcript_cells.remove(index);
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice::Members {
+                    range: index..index + 1,
+                    cells: Vec::new(),
+                    retained: Vec::new(),
+                },
+            );
         }
         self.code_mode_transcript.retain(&self.transcript_cells);
         self.native_history.retain(&self.transcript_cells);
@@ -279,9 +339,9 @@ impl App {
             }
         }
         let mut cells = Vec::new();
-        for (items, completed_turn) in completion::group_turn_items(items, turns) {
+        for (range, completed_turn) in completion::group_turn_items(&items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.
-            for visible in items.split(|item| hidden_item_ids.contains(item.id())) {
+            for visible in items[range].split(|item| hidden_item_ids.contains(item.id())) {
                 let projected = thread_items_to_transcript_cells(
                     Some(thread_id),
                     cwd,
@@ -289,6 +349,11 @@ impl App {
                     visibility,
                     Some(&self.config),
                     &|thread| self.chat_widget.collab_agent_metadata(thread),
+                    if self.app_server_target.uses_remote_workspace() {
+                        history_cell::ImagePathOrigin::Remote
+                    } else {
+                        history_cell::ImagePathOrigin::Local
+                    },
                 );
                 for cell in projected {
                     if cell.as_any().is::<history_cell::CodeModeWaitCell>()
@@ -304,6 +369,12 @@ impl App {
                 }
             }
             if let Some(turn) = completed_turn {
+                if turn.status == TurnStatus::Interrupted
+                    && !self.side_threads.contains_key(&thread_id)
+                {
+                    cells.push(Arc::new(history_cell::new_interruption_notice()));
+                }
+
                 if let Some(failure) = history_cell::FailedTurnCell::from_turn(turn) {
                     cells.push(Arc::new(failure));
                 } else if turn.status == TurnStatus::Completed
@@ -345,10 +416,7 @@ impl App {
         let index = if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
             overlay.prepend(cells.clone())
         } else {
-            self.transcript_cells
-                .iter()
-                .rposition(|cell| is_session_history_prefix_cell(cell.as_ref()))
-                .map_or(/*default*/ 0, |index| index.saturating_add(/*rhs*/ 1))
+            history_prefix_len(&self.transcript_cells)
         };
         let inserted = index..index + cells.len();
         self.transcript_cells.splice(index..index, cells);
@@ -375,7 +443,7 @@ impl App {
                     .complete_select_beginning(&self.transcript_cells);
             } else {
                 self.transcript_view
-                    .jump_to_entry(&self.transcript_cells, /*index*/ 0);
+                    .jump_to_beginning(&self.transcript_cells);
             }
         }
         if self.scrollback_has_older_history
@@ -467,6 +535,13 @@ fn hidden_review_item_ids(turns: &[Turn]) -> HashSet<&str> {
     hidden
 }
 
+fn history_prefix_len(cells: &[Arc<dyn HistoryCell>]) -> usize {
+    cells
+        .iter()
+        .rposition(|cell| is_session_history_prefix_cell(cell.as_ref()))
+        .map_or(/*default*/ 0, |index| index + 1)
+}
+
 /// Match repeated user messages from newest to oldest so identical visible prompts stay distinct.
 fn hidden_transcript_indices(
     cells: &[Arc<dyn HistoryCell>],
@@ -512,6 +587,9 @@ fn merge_older_turns(current_turns: &mut Vec<Turn>, mut older_turns: Vec<Turn>) 
             .into_iter()
             .filter(|item| !current.items.iter().any(|known| known.id() == item.id()))
             .collect::<Vec<_>>();
+        if current.items_view == codex_app_server_protocol::TurnItemsView::NotLoaded {
+            current.items_view = turn.items_view;
+        }
         current.items.splice(0..0, items);
         false
     });

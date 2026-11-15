@@ -40,6 +40,17 @@ pub(super) fn truncated_path_variants(path: &str) -> Vec<String> {
         .collect()
 }
 
+/// Keep the running indicator stable in snapshots of selection and layout.
+pub(crate) fn normalize_working_snapshot(text: String) -> String {
+    let text = normalize_snapshot_paths(text)
+        .replace("◦ Working", "• Working")
+        .replace("◦ Wor…", "• Wor…");
+    regex_lite::Regex::new(r"• Working \(\d+s")
+        .expect("valid working timer pattern")
+        .replace_all(&text, "• Working (0s")
+        .into_owned()
+}
+
 pub(crate) fn normalize_snapshot_paths(text: impl Into<String>) -> String {
     let mut text = text.into();
 
@@ -208,6 +219,38 @@ pub(super) async fn make_chatwidget_manual(
     .await
 }
 
+impl ChatWidget {
+    pub(crate) fn test_account_mut(&mut self) -> &mut crate::app_server_session::SessionAccount {
+        match &mut self.account {
+            crate::app_server_session::BootstrapAccount::Loaded(account) => account,
+            crate::app_server_session::BootstrapAccount::AwaitingResume => {
+                panic!("test requires a loaded account")
+            }
+        }
+    }
+
+    pub(crate) fn set_test_chatgpt_account(&mut self, authenticated: bool) {
+        let account = self.test_account_mut();
+        if authenticated {
+            if !account.has_chatgpt_account() {
+                account.display = Some(StatusAccountDisplay::ChatGpt {
+                    email: None,
+                    plan: None,
+                    workspace: None,
+                });
+            }
+        } else {
+            account.display = None;
+        }
+    }
+
+    pub(crate) fn set_test_backend_auth(&mut self, authenticated: bool) {
+        self.backend_authority = crate::app_server_session::BackendAuthority::Reported(
+            authenticated.then_some(codex_app_server_protocol::AuthMode::Headers),
+        );
+    }
+}
+
 pub(super) async fn make_chatwidget_manual_with_auth(
     model_override: Option<&str>,
     has_chatgpt_account: bool,
@@ -231,7 +274,20 @@ pub(super) async fn make_chatwidget_manual_with_auth(
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
     let model_catalog = test_model_catalog(&cfg);
     let common = ChatWidgetInit {
-        requires_openai_auth: cfg.model_provider.requires_openai_auth,
+        account: crate::app_server_session::BootstrapAccount::Loaded(
+            crate::app_server_session::SessionAccount {
+                requires_openai_auth: cfg.model_provider.requires_openai_auth,
+                display: has_chatgpt_account.then(|| StatusAccountDisplay::ChatGpt {
+                    email: None,
+                    plan: None,
+                    workspace: None,
+                }),
+                plan: None,
+            },
+        ),
+        backend_authority: crate::app_server_session::BackendAuthority::Reported(
+            has_codex_backend_auth.then_some(codex_app_server_protocol::AuthMode::Headers),
+        ),
         local_settings: crate::local_settings::LocalSettings::from(&cfg),
         config: cfg,
         frame_requester,
@@ -239,12 +295,8 @@ pub(super) async fn make_chatwidget_manual_with_auth(
         workspace_command_runner: None,
         initial_user_message: None,
         enhanced_keys_supported: false,
-        has_chatgpt_account,
-        has_codex_backend_auth,
         model_catalog,
         is_first_run: true,
-        status_account_display: None,
-        initial_plan_type: None,
         model: Some(resolved_model.clone()),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
@@ -300,8 +352,8 @@ pub(super) fn assert_no_submit_op(op_rx: &mut tokio::sync::mpsc::UnboundedReceiv
 }
 
 pub(crate) fn set_chatgpt_auth(chat: &mut ChatWidget) {
-    chat.has_chatgpt_account = true;
-    chat.has_codex_backend_auth = true;
+    chat.set_test_chatgpt_account(true);
+    chat.set_test_backend_auth(true);
     chat.model_catalog = test_model_catalog(&chat.config);
 }
 
@@ -465,7 +517,10 @@ pub(super) fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> 
 }
 
 pub(super) fn status_line_text(chat: &ChatWidget) -> Option<String> {
-    chat.status_line_text()
+    chat.bottom_pane
+        .status_line_content()
+        .cloned()
+        .map(|content| content.into_hyperlink_line().line.to_string())
 }
 
 pub(super) fn make_token_info(total_tokens: i64, context_window: i64) -> TokenUsageInfo {
@@ -916,6 +971,7 @@ pub(super) fn replay_agent_message(
 ) {
     chat.replay_thread_item(
         AppServerThreadItemPayload::AgentMessage {
+            moderation: None,
             id: item_id.to_string(),
             text: text.into(),
             phase: Some(MessagePhase::FinalAnswer),
@@ -1072,6 +1128,7 @@ pub(super) fn complete_assistant_message(
             chat.thread_id.map(|id| id.to_string()).unwrap_or_default(),
             "turn-1".to_string(),
             AppServerThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: item_id.to_string(),
                 text: text.to_string(),
                 phase,
@@ -1088,6 +1145,7 @@ pub(super) fn complete_assistant_message(
 
 pub(super) fn pending_steer(text: &str) -> PendingSteer {
     PendingSteer {
+        admission: super::super::user_messages::SteerAdmission::Pending,
         client_id: format!("pending-{text}"),
         items: vec![UserInput::Text {
             text: text.to_string(),

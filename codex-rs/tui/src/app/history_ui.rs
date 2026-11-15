@@ -460,6 +460,26 @@ impl App {
         self.clear_ui_header_lines_with_version(width, CODEX_DISPLAY_VERSION)
     }
 
+    pub(super) fn start_cleared_display(&mut self, tui: &mut tui::Tui) {
+        self.reset_terminal_display_state();
+        let retained: Vec<_> = self
+            .transcript_cells
+            .iter()
+            .filter(|cell| !cell.as_any().is::<history_cell::ClearScreenHeader>())
+            .cloned()
+            .collect();
+        self.commit_transcript_splice(
+            tui,
+            TranscriptSplice::Members {
+                range: 0..self.transcript_cells.len(),
+                cells: retained.clone(),
+                retained,
+            },
+        );
+        let header = history_cell::ClearScreenHeader(self.clear_ui_header_cell(CODEX_CLI_VERSION));
+        self.insert_history_cell(tui, Box::new(header));
+    }
+
     pub(super) fn queue_clear_ui_header(&mut self, tui: &mut tui::Tui) {
         if tui.is_owned_screen() {
             if !self.transcript_cells.iter().any(|cell| {
@@ -531,9 +551,13 @@ impl App {
     }
 
     pub(super) fn reset_transcript_state_after_clear(&mut self) {
-        self.overlay = None;
         self.transcript_cells.clear();
         self.code_mode_transcript = Default::default();
+        self.reset_terminal_display_state();
+    }
+
+    fn reset_terminal_display_state(&mut self) {
+        self.overlay = None;
         self.turn_tips.dismiss();
         self.chat_widget.warning_display_state.dismissed.clear();
         self.chat_widget.warning_display_state.transcript = Arc::default();

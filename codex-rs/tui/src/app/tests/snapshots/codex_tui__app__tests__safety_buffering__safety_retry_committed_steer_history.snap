@@ -1,7 +1,7 @@
 ---
 source: tui/src/app/tests/safety_buffering.rs
-assertion_line: 1148
+assertion_line: 1411
 expression: rendered_retry
 ---
 › Handle the safety-buffered request
-  Keep the accepted steer⚠ Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`.• Injection · model_instructions• Injection · codex_internal_context source="goal"• done  Worked for [duration] • [completion time]
+  Keep the accepted steer⚠ Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`.• done  Worked for [duration] • [completion time]

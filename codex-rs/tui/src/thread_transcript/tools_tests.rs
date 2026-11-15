@@ -72,6 +72,7 @@ fn completed_tools_keep_compact_and_detailed_presentations() {
         RawReasoningVisibility::Hidden,
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(cells.len(), 2);
     let rendered = ["Command", "MCP"]
@@ -130,6 +131,7 @@ fn incomplete_tool_payloads_preserve_last_known_status_and_output() {
         RawReasoningVisibility::Hidden,
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     )
     .into_iter()
     .flat_map(|cell| cell.display_lines(/*width*/ 80))
@@ -231,6 +233,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         assert_eq!(cells.len(), 3);
         for cell in [&cells[0], &cells[2]] {
@@ -324,6 +327,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         assert_eq!(cells.len(), usize::from(visible));
         for cell in cells {
@@ -391,6 +395,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
                 RawReasoningVisibility::Hidden,
                 None,
                 &|_| Default::default(),
+                crate::history_cell::ImagePathOrigin::Local,
             );
             assert_eq!(replay.len(), 1);
             assert_eq!(live.display_lines(120), replay[0].display_lines(120));
@@ -413,6 +418,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
                 RawReasoningVisibility::Hidden,
                 None,
                 &|_| Default::default(),
+                crate::history_cell::ImagePathOrigin::Local,
             );
             assert_eq!(unavailable.len(), 1);
             assert_eq!(unavailable[0].tool_call_ids(), vec!["agent-call"]);
@@ -470,6 +476,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
             RawReasoningVisibility::Hidden,
             None,
             &|_| Default::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         assert_eq!(replay.len(), 2);
         assert_eq!(replay[0].outer_call_id(), Some("resume-p"));

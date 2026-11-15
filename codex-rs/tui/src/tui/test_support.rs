@@ -9,6 +9,18 @@ use super::Tui;
 use super::terminal_stderr::TerminalStderrGuard;
 use crate::custom_terminal::Terminal;
 
+pub(crate) fn record_frame_requests(
+    tui: &mut Tui,
+) -> tokio::sync::mpsc::UnboundedReceiver<super::frame_requester::FrameRequest> {
+    let (requester, requests) = super::FrameRequester::test_channel();
+    tui.frame_requester = requester;
+    requests
+}
+
+pub(crate) fn draw_requests(tui: &Tui) -> tokio::sync::broadcast::Receiver<()> {
+    tui.draw_tx.subscribe()
+}
+
 pub(crate) fn make_test_tui() -> io::Result<Tui> {
     let backend = CrosstermBackend::new(stdout());
     let terminal = Terminal::with_screen_size_and_cursor_position_for_test(

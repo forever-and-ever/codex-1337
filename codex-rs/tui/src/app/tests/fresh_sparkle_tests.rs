@@ -208,11 +208,12 @@ async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() 
         app.local_settings.tui.disable_paste_burst = Some(true);
         let mut server = start_config_write_test_app_server(&app).await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.replace_chat_widget_with_app_server_thread(
+        app.replace_chat_widget_with_account(
             &mut tui,
             started("gpt-5.5"),
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
+            Some(crate::app_server_session::SessionAccount::default()),
         )
         .await?;
         assert!(!visible(&app.chat_widget));
@@ -391,11 +392,12 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let thread = started("gpt-5.5");
         let original_id = thread.session.thread_id;
-        app.replace_chat_widget_with_app_server_thread(
+        app.replace_chat_widget_with_account(
             &mut tui,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
+            Some(crate::app_server_session::SessionAccount::default()),
         )
         .await?;
         assert!(!visible(&app.chat_widget));
@@ -450,11 +452,12 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
                 );
             }
             "old_task" => {
-                app.replace_chat_widget_with_app_server_thread(
+                app.replace_chat_widget_with_account(
                     &mut tui,
                     started("gpt-5.5"),
                     ThreadAttachPresentation::Fresh,
                     /*initial_user_message*/ None,
+                    Some(crate::app_server_session::SessionAccount::default()),
                 )
                 .await?;
                 app.chat_widget.set_model("gpt-6-astra");
@@ -500,11 +503,13 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
         let mut server = start_config_write_test_app_server(&app).await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let thread = server.start_thread(&app.config).await?;
-        app.replace_chat_widget_with_app_server_thread(
+        let account = server.read_thread_account(&thread.session).await?;
+        app.replace_chat_widget_with_account(
             &mut tui,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
+            Some(account),
         )
         .await?;
         if switches_away {
@@ -601,11 +606,13 @@ fn astra_picker_xhigh_applies_on_a_bounded_stack() -> Result<()> {
                 let mut server = Box::pin(start_config_write_test_app_server(&app)).await?;
                 let mut tui = crate::tui::test_support::make_test_tui()?;
                 let thread = server.start_thread(&app.config).await?;
-                Box::pin(app.replace_chat_widget_with_app_server_thread(
+                let account = server.read_thread_account(&thread.session).await?;
+                Box::pin(app.replace_chat_widget_with_account(
                     &mut tui,
                     thread,
                     ThreadAttachPresentation::Fresh,
                     /*initial_user_message*/ None,
+                    Some(account),
                 ))
                 .await?;
 
@@ -671,11 +678,13 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
     for scenario in ["untouched", "typed then erased"] {
         let thread = server.start_thread(&app.config).await?;
         assert_eq!(thread.session.model, "gpt-5.5");
-        app.replace_chat_widget_with_app_server_thread(
+        let account = server.read_thread_account(&thread.session).await?;
+        app.replace_chat_widget_with_account(
             &mut tui,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
+            Some(account),
         )
         .await?;
         assert!(!visible(&app.chat_widget));

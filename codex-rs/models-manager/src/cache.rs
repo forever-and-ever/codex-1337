@@ -25,6 +25,11 @@ use tracing::info;
 /// Cache failures are non-fatal. The models manager logs them and falls back to the configured
 /// models endpoint.
 pub trait ModelsCache: fmt::Debug + Send + Sync {
+    /// Rebind a filesystem cache to a provider's canonical filename; other backends retain their configured scope.
+    fn for_file_name(&self, _file_name: &str) -> Option<Arc<dyn ModelsCache>> {
+        None
+    }
+
     /// Return a separate cache partition, or `None` to disable storage for this originator.
     /// Implementations must isolate loads, writes, and TTL renewal from the default catalog.
     fn for_originator(&self, _originator: ModelCatalogOriginator) -> Option<Arc<dyn ModelsCache>> {
@@ -149,6 +154,13 @@ impl FileModelsCache {
 }
 
 impl ModelsCache for FileModelsCache {
+    fn for_file_name(&self, file_name: &str) -> Option<Arc<dyn ModelsCache>> {
+        Some(Arc::new(Self::new(
+            self.cache_path.with_file_name(file_name),
+            self.cache_ttl,
+        )))
+    }
+
     fn for_originator(&self, originator: ModelCatalogOriginator) -> Option<Arc<dyn ModelsCache>> {
         Some(Arc::new(Self::new(
             self.cache_path

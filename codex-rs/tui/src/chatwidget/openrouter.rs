@@ -543,6 +543,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn openrouter_account_label(&self) -> Option<String> {
+        self.loaded_account()?;
         if !self.on_openrouter() {
             return None;
         }

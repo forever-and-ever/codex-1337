@@ -25,13 +25,11 @@ use super::DetachScope;
 use super::DraftDisposition;
 use super::DraftOrigin;
 use super::Duration;
-use super::EnvironmentManager;
 use super::ExitReason;
 use super::Feature;
 use super::HooksListEntry;
 use super::Instant;
 use super::LaneState;
-use super::LoaderOverrides;
 use super::LocalDraftRecovery;
 use super::Mutex;
 use super::NavigationPreview;
@@ -55,7 +53,6 @@ use super::ServerCompletion;
 use super::ServerOperation;
 use super::SessionTarget;
 use super::SideThreadState;
-use super::StateDbHandle;
 use super::SubmissionDraft;
 use super::SubmissionLane;
 use super::SubmissionOutcome;
@@ -149,14 +146,9 @@ enum NavigationIntent {
 }
 
 struct PickerPreparation {
-    backend_id: crate::backend_id::BackendId,
-    remote_cwd: Option<PathBuf>,
     config: Config,
-    target: AppServerTarget,
     cli_kv_overrides: Vec<(String, TomlValue)>,
-    loader_overrides: LoaderOverrides,
-    state_db: Option<StateDbHandle>,
-    environment_manager: Arc<EnvironmentManager>,
+    session: AppServerSession,
 }
 
 pub(crate) struct NavigationCompletion {
@@ -538,21 +530,15 @@ impl App {
         );
         // Config is captured only after earlier connection mutations have settled.
         let preparation = Box::new(PickerPreparation {
-            backend_id: server.backend_id(),
-            remote_cwd: server.remote_cwd_override().map(Path::to_path_buf),
             config: self.config.clone(),
-            target: self.app_server_target.clone(),
             cli_kv_overrides: self.cli_kv_overrides.clone(),
-            loader_overrides: self.loader_overrides.clone(),
-            state_db: self.state_db.clone(),
-            environment_manager: Arc::clone(&self.environment_manager),
+            session: server.request_view(),
         });
         let cwd = match server.thread_params_mode() {
             crate::app_server_session::ThreadParamsMode::Embedded => {
                 preparation.config.cwd.to_path_buf()
             }
-            crate::app_server_session::ThreadParamsMode::Remote
-            | crate::app_server_session::ThreadParamsMode::Cloud => server
+            crate::app_server_session::ThreadParamsMode::Remote => server
                 .remote_cwd_override()
                 .unwrap_or(Path::new("."))
                 .to_path_buf(),
@@ -690,8 +676,10 @@ impl App {
             }
 
             NavigationReceipt::Selected(receipt) => {
-                self.finish_selection_operation(tui, server, operation, matching, receipt)
-                    .await?;
+                Box::pin(
+                    self.finish_selection_operation(tui, server, operation, matching, receipt),
+                )
+                .await?;
             }
             NavigationReceipt::PickerDefaults(Ok(defaults)) if matching => {
                 let NavigationIntent::PickerDefaults(mut preparation) =
@@ -729,7 +717,7 @@ impl App {
                 self.drive_server_operations(server);
                 self.refresh_submission_preview();
                 let selection = Box::pin(
-                    crate::resume_picker::run_resume_picker_from_existing_session_with_app_server(
+                    crate::resume_picker::run_resume_picker_from_existing_session_with_app_servers(
                         crate::uses_remote_workspace_or_environment(
                             &self.app_server_target,
                             &self.environment_manager,
@@ -739,8 +727,10 @@ impl App {
                         &self.local_settings,
                         false,
                         false,
-                        picker,
-                        server.request_handle(),
+                        crate::resume_picker::ResumePickerAppServers::new(
+                            vec![picker],
+                            server.backend_id(),
+                        ),
                         self.primary_thread_id
                             .or(self.current_displayed_thread_id()),
                     ),
@@ -812,22 +802,9 @@ impl App {
         );
         operation.intent = NavigationIntent::PickerStarting;
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let result = Box::pin(
-                std::panic::AssertUnwindSafe(crate::start_app_server_for_picker(
-                    preparation.backend_id,
-                    &preparation.config,
-                    &preparation.target,
-                    preparation.cli_kv_overrides,
-                    preparation.loader_overrides,
-                    preparation.state_db,
-                    preparation.environment_manager,
-                ))
-                .catch_unwind(),
-            )
-            .await
-            .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
-            .and_then(|result| result.map_err(|error| error.to_string()))
-            .map(|session| session.with_remote_cwd_override(preparation.remote_cwd));
+            // Inventory belongs to the captured backend. A request-only view
+            // keeps the live event receiver and transport owner in the scheduler.
+            let result = Ok(preparation.session);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
                 NavigationCompletion {
                     id,

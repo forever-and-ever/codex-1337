@@ -158,6 +158,7 @@ pub struct TestAppServer {
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     pending_messages: VecDeque<JSONRPCMessage>,
+    pub initial_account_notification: Option<JSONRPCNotification>,
     auto_env: Option<TestEnv>,
     json_logs: JsonLogCapture,
     // Fields drop in declaration order. Tear down the delayed child before
@@ -169,7 +170,14 @@ pub struct TestAppServer {
 }
 
 pub const DEFAULT_CLIENT_NAME: &str = "codex-app-server-tests";
-pub const DISABLE_PLUGIN_STARTUP_TASKS_ARG: &str = "--disable-plugin-startup-tasks-for-tests";
+const DISABLE_PLUGIN_STARTUP_TASKS_ARG: &str = "--disable-plugin-startup-tasks-for-tests";
+pub const DEFAULT_APP_SERVER_TEST_ARGS: [&str; 5] = [
+    DISABLE_PLUGIN_STARTUP_TASKS_ARG,
+    "-c",
+    "features.tool_suggest=false",
+    "-c",
+    "features.recommended_plugins=false",
+];
 const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG";
 #[cfg(windows)]
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
@@ -185,7 +193,7 @@ impl TestAppServer {
             environment: TestAppServerEnvironment::Auto,
             program: None,
             env_overrides: Vec::new(),
-            args: vec![DISABLE_PLUGIN_STARTUP_TASKS_ARG.to_string()],
+            args: DEFAULT_APP_SERVER_TEST_ARGS.map(str::to_owned).into(),
             exec_server_delay: None,
             mock_chatgpt_backend: false,
         }
@@ -348,6 +356,7 @@ impl TestAppServer {
             stdin: Some(stdin),
             stdout,
             pending_messages: VecDeque::new(),
+            initial_account_notification: None,
             auto_env: None,
             json_logs,
             _delayed_exec_server: None,
@@ -403,6 +412,11 @@ impl TestAppServer {
         &mut self,
         params: InitializeParams,
     ) -> anyhow::Result<JSONRPCMessage> {
+        let account_updates_enabled = !params
+            .capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.opt_out_notification_methods.as_ref())
+            .is_some_and(|methods| methods.iter().any(|method| method == "account/updated"));
         let params = Some(serde_json::to_value(params)?);
         let request_id = self.send_request("initialize", params).await?;
         let message = self.read_jsonrpc_message().await?;
@@ -419,6 +433,14 @@ impl TestAppServer {
                 // Send notifications/initialized to ack the response.
                 self.send_notification(ClientNotification::Initialized)
                     .await?;
+                self.initial_account_notification = if account_updates_enabled {
+                    Some(
+                        self.read_stream_until_notification_message("account/updated")
+                            .await?,
+                    )
+                } else {
+                    None
+                };
 
                 Ok(JSONRPCMessage::Response(response))
             }
@@ -1653,7 +1675,7 @@ impl TestAppServer {
         .await
     }
 
-    async fn send_jsonrpc_message(&mut self, message: JSONRPCMessage) -> anyhow::Result<()> {
+    pub async fn send_jsonrpc_message(&mut self, message: JSONRPCMessage) -> anyhow::Result<()> {
         eprintln!("writing message to stdin: {message:?}");
         let Some(stdin) = self.stdin.as_mut() else {
             anyhow::bail!("mcp stdin closed");
@@ -1971,7 +1993,8 @@ impl TestAppServerBuilder {
 
     /// Builds a server and completes its standard initialization handshake.
     pub async fn build_initialized(self) -> anyhow::Result<TestAppServer> {
-        self.build_initialized_with_timeout(DEFAULT_REQUEST_TIMEOUT)
+        // The first handshake includes cold subprocess startup on the CI runner.
+        self.build_initialized_with_timeout(Duration::from_secs(60))
             .await
     }
 

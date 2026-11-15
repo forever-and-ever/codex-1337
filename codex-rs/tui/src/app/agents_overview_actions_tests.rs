@@ -29,12 +29,21 @@ async fn pin_action_updates_shared_section_state() -> Result<()> {
             AppEvent::ToggleAgentsOverviewPin { thread_id, pinned },
         ))
         .await?;
-        assert!(app.agents_overview.pending_pin_change.is_some());
-        let completed = rx.recv().await.expect("pin request completes");
-        assert!(matches!(
-            &completed,
-            AppEvent::AgentsOverviewPinToggled { .. }
-        ));
+        let pending = app
+            .agents_overview
+            .pending_pin_change
+            .expect("pin request started");
+        let completed = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let event = rx.recv().await.expect("pin request completes");
+                if let AppEvent::AgentsOverviewPinToggled { request_id, .. } = &event
+                    && *request_id == pending
+                {
+                    return event;
+                }
+            }
+        })
+        .await?;
         app.agents_overview
             .refresh_notifications
             .insert(thread_id, Vec::new());
@@ -48,7 +57,7 @@ async fn pin_action_updates_shared_section_state() -> Result<()> {
         assert_eq!(
             threads
                 .iter()
-                .any(|thread| thread.id == started.session.thread_id.to_string()),
+                .any(|(thread, _)| thread.id == started.session.thread_id.to_string()),
             pinned
         );
     }
@@ -128,9 +137,11 @@ async fn lifecycle_shortcuts_target_filtered_task_in_any_state() {
         );
         view.handle_key_event(KeyCode::Esc.into());
         view.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
-        for character in "Target".chars() {
-            view.handle_key_event(KeyCode::Char(character).into());
-        }
+        view.handle_paste("Target".into());
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AppEvent::SearchAgentsOverview(..))
+        ));
         for (key, expected) in [
             (5, AgentsOverviewAction::Archive),
             (6, AgentsOverviewAction::Delete),
@@ -484,7 +495,7 @@ async fn hiding_tasks_keeps_selection_adjacent_in_display_order() -> Result<()> 
             );
             let order = match grouping {
                 AgentsOverviewGrouping::Project => [3, 2, 1, 4],
-                AgentsOverviewGrouping::Status => [3, 1, 4, 2],
+                AgentsOverviewGrouping::Status => [3, 2, 1, 4],
                 AgentsOverviewGrouping::Model => [3, 4, 2, 1],
             };
             let expected = order
@@ -659,7 +670,8 @@ async fn hidden_task_stays_hidden_through_activity_and_seed_until_explicit_resum
         &app_server,
         request_id,
         Ok(AgentsOverviewThreadRefresh {
-            threads: HashMap::from([(id, Some(thread.clone()))]),
+            cleared_unread: Vec::new(),
+            threads: HashMap::from([(id, Some((thread.clone(), false, None)))]),
             last_messages: HashMap::new(),
             recent_seed_complete: true,
             discovery: None,
@@ -945,7 +957,11 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
             &app_server,
             request_id,
             Ok(AgentsOverviewThreadRefresh {
-                threads: stale_threads,
+                cleared_unread: Vec::new(),
+                threads: stale_threads
+                    .into_iter()
+                    .map(|(id, thread)| (id, thread.map(|thread| (thread, false, None))))
+                    .collect(),
                 last_messages: HashMap::new(),
                 recent_seed_complete: true,
                 discovery: None,
@@ -1049,6 +1065,7 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
             .send(AppEvent::AgentsOverviewThreadsLoaded {
                 request_id,
                 result: Ok(AgentsOverviewThreadRefresh {
+                    cleared_unread: Vec::new(),
                     threads: HashMap::new(),
                     last_messages: HashMap::new(),
                     recent_seed_complete: true,
@@ -1123,6 +1140,12 @@ async fn fork_shortcut_respects_metadata_editing() {
     for editor in ['r', 'f'] {
         view.handle_key_event(KeyEvent::new(KeyCode::Char(editor), KeyModifiers::CONTROL));
         view.handle_key_event(KeyCode::Char('f').into());
+        if editor == 'f' {
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(AppEvent::SearchAgentsOverview(..))
+            ));
+        }
         assert!(rx.try_recv().is_err());
         view.handle_key_event(KeyCode::Esc.into());
     }

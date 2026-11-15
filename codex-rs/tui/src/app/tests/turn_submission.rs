@@ -32,7 +32,11 @@ async fn turn_start_failure_is_shown_without_exiting() -> Result<()> {
     }
 
     let control = app
-        .handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(op))
+        .handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::SubmitThreadOp { thread_id, op },
+        )
         .await?;
 
     assert!(matches!(control, AppRunControl::Continue));
@@ -65,6 +69,7 @@ async fn turn_start_failure_is_shown_without_exiting() -> Result<()> {
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
             thread_id: thread_id.to_string(),
             turn_id: "questions-turn".into(),
+            content_token_count: None,
             completed_at_ms: 0,
             item: serde_json::from_value(serde_json::json!({
                 "type": "agentMessage",
@@ -279,7 +284,10 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
     app.maybe_prompt_resume_paused_goal_after_resume(&mut app_server, thread_id)
         .await;
     for event in [
-        AppEvent::CodexOp(queued_turn),
+        AppEvent::SubmitThreadOp {
+            thread_id,
+            op: queued_turn,
+        },
         AppEvent::CodexOp(crate::app_command::AppCommand::ExecApproval {
             id: "queued-approval".to_string(),
             turn_id: None,
@@ -300,6 +308,7 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
         AppEvent::StartSide {
             parent_thread_id: thread_id,
             user_message: Some("Do not fork this stopped thread".into()),
+            mode: crate::app_event::SideStartMode::Reuse,
         },
         AppEvent::ForkCurrentSession { name: None },
         AppEvent::OpenAgentPicker,
@@ -469,7 +478,11 @@ async fn unsupported_legacy_permissions_are_shown_without_exiting() -> Result<()
     }
 
     let control = app
-        .handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(op))
+        .handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::SubmitThreadOp { thread_id, op },
+        )
         .await?;
 
     assert!(matches!(control, AppRunControl::Continue));

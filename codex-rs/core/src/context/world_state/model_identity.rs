@@ -8,7 +8,10 @@ use super::WorldStateUpdate;
 use crate::context::ModelInstructions;
 use serde_json::Value;
 
-pub(crate) struct ModelIdentityState(pub(crate) String);
+pub(crate) struct ModelIdentityState {
+    pub(crate) model: String,
+    pub(crate) suppress_model_change_announcements: bool,
+}
 
 impl WorldStateSection for ModelIdentityState {
     const ID: &'static str = "model_identity";
@@ -23,14 +26,15 @@ impl WorldStateSection for ModelIdentityState {
         &self,
         previous: PreviousSectionState<'_, Self::Snapshot>,
     ) -> SectionTransition<Self::Snapshot> {
-        let changed = matches!(previous, PreviousSectionState::Known(model) if model != &self.0);
+        let changed = !self.suppress_model_change_announcements
+            && matches!(previous, PreviousSectionState::Known(model) if model != &self.model);
         let updates = WorldStateUpdate::optional_standalone_boxed_fragment(changed.then(|| {
             Box::new(ModelInstructions {
-                model: Some(self.0.clone()),
+                model: Some(self.model.clone()),
                 instructions: None,
             }) as _
         }));
-        (Some(self.0.clone()), updates)
+        (Some(self.model.clone()), updates)
     }
 }
 
@@ -40,7 +44,7 @@ pub(super) fn previous_snapshot<'a>(
     snapshot: &'a WorldStateSnapshot,
     id: &str,
 ) -> Option<&'a Value> {
-    snapshot.sections.get(id).or_else(|| {
+    snapshot.section(id).or_else(|| {
         if id != ModelIdentityState::ID {
             return None;
         }

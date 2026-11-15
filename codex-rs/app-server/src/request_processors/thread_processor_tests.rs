@@ -530,11 +530,14 @@ mod thread_processor_behavior_tests {
             ThreadId::from_string("00000000-0000-0000-0000-000000000123").expect("valid thread");
         let stored_thread = StoredThread {
             theme: None,
+            creator_user_id: None,
+            creator_account_id: None,
             originator: None,
             thread_id,
             extra_config: None,
             rollout_path: Some(PathBuf::from("/tmp/thread.jsonl")),
             forked_from_id: None,
+            attached_to_thread_id: None,
             parent_thread_id: None,
             preview: "preview".to_string(),
             name: None,
@@ -807,13 +810,13 @@ mod thread_processor_behavior_tests {
         reasoning_effort: Option<ReasoningEffort>,
     ) -> Result<ThreadMetadata> {
         let thread_id = ThreadId::from_string("3f941c35-29b3-493b-b0a4-e25800d9aeb0")?;
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             PathBuf::from("/tmp/rollout.jsonl"),
             Utc::now(),
             codex_protocol::protocol::SessionSource::default(),
-        );
-        builder.model_provider = Some("mock_provider".to_string());
+        )
+        .with_model_provider(Some("mock_provider".to_string()));
         let mut metadata = builder.build("mock_provider");
         metadata.model = model.map(ToString::to_string);
         metadata.reasoning_effort = reasoning_effort;
@@ -854,10 +857,7 @@ mod thread_processor_behavior_tests {
             typesafe_overrides.model,
             Some("gpt-5.1-codex-max".to_string())
         );
-        assert_eq!(
-            typesafe_overrides.model_provider,
-            Some("mock_provider".to_string())
-        );
+        assert_eq!(typesafe_overrides.model_provider, None);
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -888,10 +888,7 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, Some("gpt-5.2-codex".to_string()));
-        assert_eq!(
-            typesafe_overrides.model_provider,
-            Some("mock_provider".to_string())
-        );
+        assert_eq!(typesafe_overrides.model_provider, None);
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -903,7 +900,8 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_preserves_provider_when_model_overridden() -> Result<()> {
+    fn merge_persisted_resume_metadata_does_not_invent_provider_override_when_model_overridden()
+    -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model".to_string(),
             serde_json::Value::String("gpt-5.2-codex".to_string()),
@@ -919,10 +917,7 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(
-            typesafe_overrides.model_provider,
-            Some("mock_provider".to_string())
-        );
+        assert_eq!(typesafe_overrides.model_provider, None);
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -957,7 +952,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_preserves_provider_when_reasoning_effort_overridden()
+    fn merge_persisted_resume_metadata_does_not_invent_provider_override_when_effort_overridden()
     -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model_reasoning_effort".to_string(),
@@ -974,10 +969,7 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(
-            typesafe_overrides.model_provider,
-            Some("mock_provider".to_string())
-        );
+        assert_eq!(typesafe_overrides.model_provider, None);
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -1002,10 +994,7 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(
-            typesafe_overrides.model_provider,
-            Some("mock_provider".to_string())
-        );
+        assert_eq!(typesafe_overrides.model_provider, None);
         assert_eq!(request_overrides, None);
         Ok(())
     }

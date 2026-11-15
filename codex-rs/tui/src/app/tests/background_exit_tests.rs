@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn external_writer_view_quits_with_escape_ctrl_c_or_q() -> Result<()> {
+async fn external_writer_view_quits_with_ctrl_c_or_q() -> Result<()> {
     let (mut app, mut events, _operations) = make_test_app_with_channels().await;
     app.chat_widget.show_external_writer_thread();
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
@@ -27,7 +27,6 @@ async fn external_writer_view_quits_with_escape_ctrl_c_or_q() -> Result<()> {
     );
 
     for key in [
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
     ] {
@@ -37,6 +36,119 @@ async fn external_writer_view_quits_with_escape_ctrl_c_or_q() -> Result<()> {
             Ok(AppEvent::Exit(ExitMode::Immediate))
         ));
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn embedded_quit_confirms_stopping_a_running_side_conversation() -> Result<()> {
+    use core_test_support::responses;
+    use core_test_support::streaming_sse::StreamingSseChunk;
+    use core_test_support::streaming_sse::start_streaming_sse_server;
+
+    let (release, gate) = tokio::sync::oneshot::channel();
+    let (model, _) = start_streaming_sse_server(vec![vec![
+        StreamingSseChunk {
+            gate: None,
+            body: responses::sse(vec![
+                responses::ev_response_created("running-response"),
+                responses::ev_message_item_added("running-message", "Working"),
+            ]),
+        },
+        StreamingSseChunk {
+            gate: Some(gate),
+            body: responses::sse(vec![
+                responses::ev_assistant_message("running-message", "Finished"),
+                responses::ev_completed("running-response"),
+            ]),
+        },
+    ]])
+    .await;
+    let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
+    app_test_support::MockResponsesConfig::new(model.uri()).write(&app.config.codex_home)?;
+    app.config = app
+        .rebuild_config_for_cwd(app.config.cwd.to_path_buf())
+        .await?;
+    let (mut server, mut tui) = prepare_background_exit_test(&app, &mut events, &mut ops).await?;
+    let started = server.start_thread(&app.config).await?;
+    let id = started.session.thread_id;
+    let request_id = server.next_request_id();
+    let running: codex_app_server_protocol::TurnStartResponse = server
+        .request_handle()
+        .request_typed(codex_app_server_protocol::ClientRequest::TurnStart {
+            request_id,
+            params: codex_app_server_protocol::TurnStartParams {
+                thread_id: id.to_string(),
+                input: vec![codex_app_server_protocol::UserInput::Text {
+                    text: "Keep running until stopped.".into(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = server.next_event().await.expect("live side turn");
+            if matches!(&event.event, codex_app_server_client::AppServerEvent::ServerNotification(notification)
+                if matches!(notification.as_ref(), ServerNotification::ItemStarted(item) if item.item.payload.id() == "running-message"))
+            { break; }
+        }
+    }).await?;
+    assert_eq!(running.turn.status, TurnStatus::InProgress);
+    app.side_threads
+        .insert(id, SideThreadState::new(ThreadId::new()));
+    app.thread_event_channels.insert(
+        id,
+        ThreadEventChannel::new_with_session(
+            THREAD_EVENT_CHANNEL_CAPACITY,
+            started.session,
+            vec![running.turn],
+        ),
+    );
+    assert_matches!(
+        app.handle_event(&mut tui, &mut server, AppEvent::Exit(ExitMode::Immediate))
+            .await?,
+        AppRunControl::Continue
+    );
+    insta::assert_snapshot!(
+        "embedded_exit_running_sessions",
+        render_bottom_popup(&app.chat_widget, /*width*/ 90)
+    );
+    app.chat_widget.handle_key_event(KeyCode::Down.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let stop = events.try_recv()?;
+    assert_matches!(&stop, AppEvent::Exit(ExitMode::ConfirmedStop));
+    assert_matches!(
+        app.handle_event(&mut tui, &mut server, stop).await?,
+        AppRunControl::Continue
+    );
+    assert!(
+        app.thread_event_channels.contains_key(&id),
+        "Stop admission is not a cleanup ACK"
+    );
+    let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let outcome = tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server,
+                        completion.expect("owned Stop cleanup receipt"))).await?
+                }
+                event = events.recv() => {
+                    Box::pin(app.handle_event(&mut tui, &mut server,
+                        event.expect("owned Stop exit continuation"))).await?
+                }
+            };
+            if matches!(outcome, AppRunControl::Exit(_)) {
+                break Ok::<_, color_eyre::Report>(outcome);
+            }
+        }
+    })
+    .await??;
+    assert_matches!(outcome, AppRunControl::Exit(ExitReason::UserRequested));
+    assert!(!app.thread_event_channels.contains_key(&id));
+    let _ = release.send(());
+    server.shutdown().await?;
+    model.shutdown().await;
     Ok(())
 }
 
@@ -157,8 +269,6 @@ async fn external_writer_view_respects_remapped_left() -> Result<()> {
         app.app_server_target = AppServerTarget::Remote {
             endpoint: crate::resolve_remote_addr("ws://127.0.0.1:4500")?,
         };
-        app.chat_widget
-            .set_command_center_enabled(app.app_server_target.supports_command_center());
         app.chat_widget.apply_keymap_update(config.clone(), &keymap);
         app.keymap = keymap.clone();
         if vim {
@@ -741,8 +851,6 @@ async fn daemon_ctrl_c_clears_paste_burst_without_interrupting() -> Result<()> {
 async fn daemon_ctrl_c_during_mcp_startup_does_not_show_background_exit_menu() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     let thread_id = prepare_local_daemon_thread(&mut app)?;
-    app.chat_widget
-        .set_mcp_startup_expected_servers(["slow".to_string()]);
     app.chat_widget.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
             thread_id: Some(thread_id.to_string()),

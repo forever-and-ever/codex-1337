@@ -54,13 +54,46 @@ fn exec_override_preserves_runtime_sections() {
         ),
         output_schema: None,
     };
+    let entries_for = |enabled: &[ToolDefinition], undeclared: &[UndeclaredTool]| {
+        build_exec_tool_description_and_definitions_for(
+            ToolDialect::Responses,
+            enabled,
+            undeclared,
+            &BTreeMap::new(),
+            600_000,
+            true,
+            MEDIA,
+            DeferredToolDiscovery::Catalog,
+            true,
+            None,
+        )
+        .1
+    };
+    let initial = entries_for(&[], &[UndeclaredTool(tool.clone())]);
+    let mut changed = tool.clone();
+    changed.summary = "Changed purpose.".into();
+    let updated = entries_for(&[], &[UndeclaredTool(changed.clone())]);
+    assert_eq!(initial[0].key, updated[0].key);
+    assert_ne!(initial[0].description, updated[0].description);
+    assert!(
+        entries_for(&[], &[]).is_empty(),
+        "removed inventory keys must disappear"
+    );
+    let eager = entries_for(&[changed], &[]);
+    assert!(
+        eager
+            .iter()
+            .any(|entry| entry.key == "Tool: tools.sample__echo")
+    );
+    assert_eq!(initial[0].key, eager[0].key);
+    assert_ne!(initial[0].description, eager[0].description);
     for dialect in [
         ToolDialect::Responses,
         ToolDialect::Anthropic,
         ToolDialect::Other,
     ] {
         for description_override in ["", " \n\t "] {
-            let description = build_exec_tool_description_for(
+            let (description, entries) = build_exec_tool_description_and_definitions_for(
                 dialect,
                 &[],
                 &[UndeclaredTool(tool.clone())],
@@ -69,6 +102,7 @@ fn exec_override_preserves_runtime_sections() {
                 true,
                 MEDIA,
                 DeferredToolDiscovery::Catalog,
+                true,
                 Some(&CodeModeToolMessages {
                     exec: Some(ToolMessage {
                         description: Some(description_override.into()),
@@ -79,6 +113,9 @@ fn exec_override_preserves_runtime_sections() {
                     ..Default::default()
                 }),
             );
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].key, "Tool: tools.sample__echo");
+            assert!(description.contains(&entries[0].description));
             assert!(description.contains("tools.sample__echo"));
             assert!(description.contains("Echo a value."));
             assert!(

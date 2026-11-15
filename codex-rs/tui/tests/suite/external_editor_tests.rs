@@ -47,7 +47,8 @@ fn external_editors_keep_the_screen_and_return_the_draft() -> Result<()> {
         }
         ensure!(
             editor.with_extension("sh.ready").exists(),
-            "editor did not start"
+            "editor did not start (output={editor_output:?}); screen:\n{}",
+            terminal.screen_contents()
         );
 
         let mut visible = None;

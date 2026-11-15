@@ -12,3 +12,4 @@ expression: "normalize_snapshot_paths(format!(\"{}\\n{}\",\nlines_to_single_stri
 ────────────────────────────────────────────────────────────────────────────────
   Viewing sub-agent — direct input is disabled · Esc main · Ctrl+C interrupt
   GPT-6.1-Sol default · /tmp/project
+  ? for shortcuts

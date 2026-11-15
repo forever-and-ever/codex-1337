@@ -49,8 +49,17 @@ pub(super) fn configure_reserve_catalog(app: &mut App) {
         app.config.clone(),
         /*initial_user_message*/ None,
     );
-    init.has_chatgpt_account = true;
-    init.has_codex_backend_auth = true;
+    init.backend_authority = crate::app_server_session::BackendAuthority::Reported(Some(
+        codex_app_server_protocol::AuthMode::Chatgpt,
+    ));
+    init.account = crate::app_server_session::BootstrapAccount::Loaded(
+        crate::app_server_session::SessionAccount::from(
+            serde_json::from_value::<codex_app_server_protocol::GetAccountResponse>(serde_json::json!({
+                "account": {"type": "chatgpt", "email": "reserve@example.com", "planType": "pro"},
+                "requiresOpenaiAuth": true
+            })).expect("ChatGPT reserve payer fixture")
+        )
+    );
     app.replace_chat_widget(ChatWidget::new_with_app_event(init));
     app.chat_widget
         .handle_thread_session(app.primary_session_configured.clone().unwrap());
@@ -77,8 +86,17 @@ async fn luna_reserve_recovery_survives_task_reconstruction() -> Result<()> {
         app.config.clone(),
         /*initial_user_message*/ None,
     );
-    init.has_chatgpt_account = true;
-    init.has_codex_backend_auth = true;
+    init.backend_authority = crate::app_server_session::BackendAuthority::Reported(Some(
+        codex_app_server_protocol::AuthMode::Chatgpt,
+    ));
+    init.account = crate::app_server_session::BootstrapAccount::Loaded(
+        crate::app_server_session::SessionAccount::from(
+            serde_json::from_value::<codex_app_server_protocol::GetAccountResponse>(serde_json::json!({
+                "account": {"type": "chatgpt", "email": "reserve@example.com", "planType": "pro"},
+                "requiresOpenaiAuth": true
+            })).expect("ChatGPT reserve payer fixture")
+        )
+    );
     // No in-memory transition state is inherited: resume must recover the persisted target.
     app.replace_chat_widget(ChatWidget::new_with_app_event(init));
     app.chat_widget.handle_thread_session(resumed);
@@ -135,7 +153,13 @@ async fn luna_reserve_entry_dispatches_an_already_queued_turn_with_accepted_sett
         app.chat_widget
             .handle_key_event(KeyEvent::from(KeyCode::Enter));
         let pending = std::iter::from_fn(|| events.try_recv().ok())
-            .find(|event| matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
+            .find(|event| {
+                matches!(
+                    event,
+                    AppEvent::SubmitThreadOp { thread_id, op: AppCommand::UserTurn { .. } }
+                        if Some(*thread_id) == app.active_thread_id
+                )
+            })
             .expect("queued turn before the usage response");
         requests.lock().unwrap().clear();
         let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -226,7 +250,13 @@ async fn luna_reserve_recovery_restores_task_and_pending_turn_after_fresh_backen
             .handle_key_event(KeyEvent::from(KeyCode::Enter));
         let mut pending = std::iter::from_fn(|| events.try_recv().ok())
             .find_map(|event| match event {
-                AppEvent::CodexOp(op @ AppCommand::UserTurn { .. }) => Some(op),
+                AppEvent::SubmitThreadOp {
+                    thread_id,
+                    op: op @ AppCommand::UserTurn { .. },
+                } => {
+                    assert_eq!(Some(thread_id), app.active_thread_id);
+                    Some(op)
+                }
                 _ => None,
             })
             .expect("queued user turn");
@@ -291,7 +321,9 @@ async fn luna_reserve_recovery_restores_task_and_pending_turn_after_fresh_backen
         assert!(
             !queued.iter().any(|event| matches!(
                 event,
-                AppEvent::CodexOp(_) | AppEvent::PersistModelSelection { .. }
+                AppEvent::CodexOp(_)
+                    | AppEvent::SubmitThreadOp { .. }
+                    | AppEvent::PersistModelSelection { .. }
             )),
             "recovery must not replay a turn or change global defaults"
         );

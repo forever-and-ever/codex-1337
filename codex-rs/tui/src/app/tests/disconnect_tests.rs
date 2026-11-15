@@ -17,6 +17,12 @@ use serde_json::json;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
+pub(super) fn normalize_reconnect_status(popup: &str) -> String {
+    let status =
+        regex_lite::Regex::new(r"(?m)^([ ]*)[•◦] (Reconnecting to server…|Reconnect failed — check the endpoint, then relaunch) \([\dhms ]+\)").unwrap();
+    normalize_snapshot_paths(status.replace(popup, "${1}• ${2} (<elapsed>)").into_owned())
+}
+
 #[tokio::test]
 async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()> {
     let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
@@ -25,6 +31,11 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
     app.primary_thread_id = Some(id);
     app.chat_widget
         .handle_thread_session(test_thread_session(id, app.config.cwd.to_path_buf()));
+    app.ensure_thread_channel(id)
+        .store
+        .lock()
+        .await
+        .set_active_turn_id("finished".into());
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
     app.app_server_target = AppServerTarget::Remote {
@@ -32,8 +43,21 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
     };
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
+        let mut steered_message = None;
         serve_reconnect_requests(tokio_tungstenite::accept_async(stream).await?, |request| {
+            let params = request.params.unwrap();
+            let message_id = params["clientUserMessageId"]
+                .as_str()
+                .expect("submission ID");
+            if request.method == "turn/steer" {
+                assert_eq!(params["expectedTurnId"], "finished");
+                steered_message = Some(message_id.to_owned());
+                return std::future::ready(Some(
+                    json!({"error": {"code": -32600, "message": "no active turn to steer"}}),
+                ));
+            }
             assert_eq!(request.method, "turn/start");
+            assert_eq!(steered_message.as_deref(), Some(message_id));
             std::future::ready(None)
         })
         .await
@@ -68,8 +92,12 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
         ..Default::default()
     });
     assert!(matches!(
-        app.handle_event(&mut tui, &mut session, AppEvent::CodexOp(op))
-            .await?,
+        app.handle_event(
+            &mut tui,
+            &mut session,
+            AppEvent::SubmitThreadOp { thread_id: id, op }
+        )
+        .await?,
         AppRunControl::Continue
     ));
     app.settle_turn_submissions(&mut session).await?;
@@ -130,7 +158,7 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
                     .expect("the optimistic user message remains in the transcript")
                     .display_lines(/*width*/ 80)
             ),
-            render_bottom_popup(&app.chat_widget, /*width*/ 80)
+            normalize_reconnect_status(&render_bottom_popup(&app.chat_widget, /*width*/ 80))
         )
     );
     let displayed_history = app
@@ -185,7 +213,9 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
     assert!(
         !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
             event,
-            AppEvent::CodexOp(_) | AppEvent::Queue(QueueEvent::Remove { .. })
+            AppEvent::CodexOp(_)
+                | AppEvent::SubmitThreadOp { .. }
+                | AppEvent::Queue(QueueEvent::Remove { .. })
         ))
     );
     assert!(!app.chat_widget.has_queued_follow_up_messages());
@@ -233,7 +263,10 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
         ));
     }
     session.shutdown().await?;
-    assert_eq!(server.await??, vec!["initialize", "turn/start"]);
+    assert_eq!(
+        server.await??,
+        vec!["initialize", "turn/steer", "turn/start"]
+    );
     Ok(())
 }
 
@@ -456,7 +489,10 @@ where
             "account/read" => {
                 Some(json!({"result": {"account": null, "requiresOpenaiAuth": false}}))
             }
-            "model/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
+            "model/list" => Some(json!({"result": {
+                "data": [], "nextCursor": null,
+                "modelProvider": request.params.as_ref().and_then(|params| params.get("modelProvider")).cloned()
+            }})),
             "collaborationMode/list" => Some(json!({"result": {"data": []}})),
             "configRequirements/read" => Some(json!({"result": {"requirements": null}})),
             // Layered folder-consent reads belong to the fixture; never mask its trust response.
@@ -530,10 +566,16 @@ async fn lost_initial_thread_reply_keeps_startup_draft_offline() -> Result<()> {
             )
             .await;
         }
+        let backend_id = session.backend_id();
+        let startup_handle = session.request_handle();
         app.handle_event(
             &mut tui,
             &mut session,
-            AppEvent::StartupThreadStarted { result },
+            AppEvent::StartupThreadStarted {
+                backend_id,
+                request_handle: startup_handle,
+                result,
+            },
         )
         .await?;
         assert!(app.reconnect.offline);
@@ -645,14 +687,9 @@ async fn rejected_initial_thread_start_reconnects_and_submits_prompt_once() -> R
             TuiEvent::Paste("startup draft".into()),
         )
         .await?;
-        let reconnect_status =
-            regex_lite::Regex::new(r"(?m)^([ \t]*)[•◦] (Reconnecting to server… )\([\dhms ]+\)")?;
         assert_snapshot!(
             "rejected_startup_reconnecting",
-            reconnect_status.replace(
-                &render_bottom_popup(&app.chat_widget, /*width*/ 80),
-                "${1}• ${2}(<elapsed>)",
-            )
+            normalize_reconnect_status(&render_bottom_popup(&app.chat_widget, /*width*/ 80))
         );
 
         let mut launch_choices = crate::app_server_session::StartupLaunchChoices::default();
@@ -709,7 +746,13 @@ async fn rejected_initial_thread_start_reconnects_and_submits_prompt_once() -> R
         }
         let submitted = std::iter::from_fn(|| events.try_recv().ok())
             .filter_map(|event| match event {
-                AppEvent::CodexOp(Op::UserTurn { items, .. }) => Some(items),
+                AppEvent::SubmitThreadOp {
+                    thread_id,
+                    op: Op::UserTurn { items, .. },
+                } => {
+                    assert_eq!(Some(thread_id), app.active_thread_id);
+                    Some(items)
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();

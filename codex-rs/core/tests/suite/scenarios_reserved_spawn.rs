@@ -2,6 +2,7 @@
 
 use super::super::agent_control::TestAgentControl;
 use super::super::agents_md::RecordingThreadInstructionsProvider;
+use super::super::rollout_budget::HostAccounting;
 use super::*;
 use anyhow::Context;
 use codex_analytics::AnalyticsEventsClient;
@@ -14,6 +15,7 @@ use codex_core::SpawnAgentForkMode;
 use codex_core::StartIfIdleSubmission;
 use codex_core::ThreadCreateRequest;
 use codex_core::ThreadSpawnError;
+use codex_core::TurnStartOptions;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::Instructions;
 use codex_extension_api::ThreadInstructionsProvider;
@@ -24,7 +26,6 @@ use codex_http_client::NetworkPolicy;
 use codex_http_client::NetworkPolicyController;
 use codex_protocol::ThreadId;
 use codex_protocol::dynamic_tools::DynamicToolCallRequest;
-use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::input_text;
 use codex_protocol::protocol::ThreadHistoryMode;
@@ -115,7 +116,7 @@ async fn host_spawn_invocation(
     server: &MockServer,
     parent: &Arc<CodexThread>,
     call_id: &str,
-    message: &str,
+    input: TurnInputRequest,
 ) -> Result<DynamicToolCallRequest> {
     responses::mount_sse_once(
         server,
@@ -125,9 +126,7 @@ async fn host_spawn_invocation(
         ]),
     )
     .await;
-    parent
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![text(message)]))
-        .await?;
+    parent.start_or_steer_turn(input).await?;
     Ok(wait_for_event_match(parent, |event| match event {
         EventMsg::DynamicToolCallRequest(call) => Some(call.clone()),
         _ => None,
@@ -191,17 +190,32 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     fork_history: bool,
 ) -> Result<()> {
     const PR: &str = "openai/codex#123";
+    const INITIAL_RULE: &str = "Initial rules.";
     const UPDATED_RULE: &str = "Updated shared worker instructions.";
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
     let network_controller = NetworkPolicyController::default();
     let network_policy = network_controller.policy();
     assert!(network_controller.publish(network_policy.revision(), DestinationPolicy::Unrestricted));
-    let provider =
-        Arc::new(RecordingThreadInstructionsProvider::with_text("Initial rules.").shared());
+    let provider = Arc::new(RecordingThreadInstructionsProvider::with_text(INITIAL_RULE).shared());
     let (test, parent, controller) = host_spawn_fixture(
         &server,
-        test_codex(),
+        test_codex()
+            .with_extensions({
+                let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+                extensions.thread_lifecycle_contributor(Arc::new(
+                    super::super::agent_control::HostRuntime,
+                ));
+                Arc::new(extensions.build())
+            })
+            .with_config(|config| {
+                config.allow_persistent_dynamic_tool_updates = true;
+                config.service_tier = Some("flex".into());
+                config
+                    .features
+                    .enable(Feature::FastMode)
+                    .expect("test config should allow fast mode");
+            }),
         network_policy.clone(),
         PromptCacheKey::SessionDerived,
         Some(provider.clone()),
@@ -209,8 +223,17 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     .await?;
     let root_id = test.session_configured.thread_id;
     let captured = parent.config_snapshot().await;
-    let invocation =
-        host_spawn_invocation(&server, &parent, "spawn-worker", "Start the worker.").await?;
+    let parent_message = "Start the worker.";
+    let invocation = host_spawn_invocation(
+        &server,
+        &parent,
+        "spawn-worker",
+        TurnInputRequest::user_input(vec![text(parent_message)]).on_start(TurnStartOptions {
+            service_tier: Some("priority".into()),
+            ..Default::default()
+        }),
+    )
+    .await?;
     let context = parent.tool_invocation(&invocation.turn_id, &invocation.call_id)?;
     test.thread_store
         .add_thread_attachment(AddThreadAttachmentParams {
@@ -229,20 +252,30 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
         },
     )
     .await?;
+    provider.set_instructions(Some(Instructions {
+        text: UPDATED_RULE.into(),
+        source: None,
+    }));
+    // Tool inheritance reads the current catalog while invocation settings remain captured.
+    assert_eq!(parent.prepare_child(&context).await?.dynamic_tools.len(), 1);
+    parent.replace_dynamic_tools(Vec::new()).await?;
+    let prepared = parent.prepare_child(&context).await?;
+    assert!(prepared.dynamic_tools.is_empty());
+    assert_eq!(prepared.disabled_plugin_ids, captured.disabled_plugin_ids);
+    assert_eq!(prepared.thread_instructions.as_deref(), Some(INITIAL_RULE));
+    assert_eq!(
+        prepared.resolved_permission_profile,
+        PermissionProfile::read_only()
+    );
     let child_id = ThreadId::new();
     let request = || create_request("worker", fork_history);
+    let accounting = Arc::new(HostAccounting::default());
     let reservation = || HostThreadSpawnReservation {
         thread_id: child_id,
         control: controller.clone(),
+        turn_admission: None,
+        usage_accounting: Some(accounting.clone()),
     };
-    // A detached snapshot cannot carry the source's live application policy.
-    assert!(matches!(
-        parent
-            .prepare_child(&context, request())
-            .await,
-        Err(ThreadSpawnError::Backend(error))
-            if error.to_string().contains("host-managed application authority")
-    ));
     let mut mismatched = reservation();
     mismatched.control = Arc::new(TestAgentControl::new(ThreadId::new()));
     assert!(matches!(
@@ -251,13 +284,10 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     ));
     assert!(test.thread_manager.get_thread(child_id).await.is_err());
 
-    provider.set_instructions(Some(Instructions {
-        text: UPDATED_RULE.into(),
-        source: None,
-    }));
     let spawned = parent
         .create_child(&context, request(), reservation())
         .await?;
+    assert_eq!(spawned.config.service_tier.as_deref(), Some("flex"));
     assert_eq!(spawned.config.approval_policy, captured.approval_policy);
     assert_eq!(spawned.config.environments, captured.environments);
     assert_eq!(
@@ -267,7 +297,7 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     let worker = test.thread_manager.get_thread(child_id).await?;
     // A handle cannot be used through a different source runtime.
     assert!(matches!(
-        worker.prepare_child(&context, request()).await,
+        worker.prepare_child(&context).await,
         Err(ThreadSpawnError::Backend(error))
             if error.to_string().contains("tool invocation belongs to a different runtime")
     ));
@@ -281,13 +311,36 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     );
     // Once creation returns, ending the spawning invocation leaves the idle child available.
     finish_spawn_tool(&server, &parent, &invocation).await?;
-    let child_request =
-        responses::mount_sse_once(&server, responses::sse_completed("worker-done")).await;
-    start_first_turn(&worker, "Report your status.").await?;
-    assert!(
-        child_request
-            .single_request()
-            .body_contains_text(UPDATED_RULE)
+    let child_request = responses::mount_sse_once(
+        &server,
+        sse(vec![ev_completed_with_tokens(
+            "worker-done",
+            /*total_tokens*/ 42,
+        )]),
+    )
+    .await;
+    let submission = worker
+        .start_turn_if_idle(TurnInputRequest::user_input(vec![text(
+            "Report your status.",
+        )]))
+        .await?;
+    let StartIfIdleSubmission::Started { turn_id, .. } = submission else {
+        panic!("expected the new child to be idle, got {submission:?}");
+    };
+    wait_for_successful_turn(&worker).await;
+    assert!(matches!(
+        accounting.reports.lock().expect("usage reports").as_slice(),
+        [report] if report.thread_id == child_id
+            && report.turn_id == turn_id
+            && report.usage.total_tokens == 42
+    ));
+    let child_request = child_request.single_request();
+    assert_eq!(child_request.body_json()["service_tier"], "flex");
+    assert!(child_request.body_contains_text(UPDATED_RULE));
+    assert!(!child_request.body_contains_text("only as direct tool calls"));
+    assert_eq!(
+        child_request.body_contains_text(parent_message),
+        fork_history
     );
     let page = test
         .thread_store
@@ -309,10 +362,10 @@ async fn same_manager_creation_preserves_live_bindings_and_attachments(
     Ok(())
 }
 
-#[test_case::test_case(false, "inherited instruction providers"; "thread instructions")]
-#[test_case::test_case(true, "EMA-authenticated MCP servers"; "enterprise MCP")]
+#[test_case::test_case(false; "thread instructions")]
+#[test_case::test_case(true; "enterprise MCP")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prepare_child_rejects_live_bindings(ema_enabled: bool, expected: &str) -> Result<()> {
+async fn prepare_child_exports_live_bindings(ema_enabled: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
     let home = Arc::new(TempDir::new()?);
@@ -335,17 +388,28 @@ mcp_servers.enterprise = {{ url = "https://mcp.example/mcp", auth = "ema_auth", 
         }),
     )
     .await?;
-    let call = host_spawn_invocation(&server, &parent, "prepare-worker", "Start a worker.").await?;
+    let call = host_spawn_invocation(
+        &server,
+        &parent,
+        "prepare-worker",
+        TurnInputRequest::user_input(vec![text("Start a worker.")]),
+    )
+    .await?;
     let context = parent.tool_invocation(&call.turn_id, &call.call_id)?;
     let request = || create_request("worker", /*fork_history*/ false);
-    let Err(ThreadSpawnError::Backend(error)) = parent.prepare_child(&context, request()).await
-    else {
-        anyhow::bail!("expected detached preparation to reject {expected}");
-    };
-    assert!(matches!(
-        error.details(),
-        CodexErrorDetails::InvalidRequest(message) if message.contains(expected)
+    let prepared = parent.prepare_child(&context).await?;
+    assert_eq!(
+        prepared.thread_instructions.as_deref(),
+        (!ema_enabled).then_some("Shared rules")
+    );
+    assert_eq!(prepared.dynamic_tools.len(), 1);
+    assert!(matches!(&prepared.dynamic_tools[0],
+        DynamicToolSpec::Function(tool) if tool.name == "host_spawn"
     ));
+    assert_eq!(
+        prepared.resolved_permission_profile,
+        PermissionProfile::read_only()
+    );
     let child_id = ThreadId::new();
     parent
         .create_child(
@@ -354,6 +418,8 @@ mcp_servers.enterprise = {{ url = "https://mcp.example/mcp", auth = "ema_auth", 
             HostThreadSpawnReservation {
                 thread_id: child_id,
                 control: controller,
+                turn_admission: None,
+                usage_accounting: None,
             },
         )
         .await?;
@@ -382,7 +448,12 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
     let server = start_mock_server().await;
     let (source, parent, source_control) = host_spawn_fixture(
         &server,
-        test_codex(),
+        test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config({
+                let backend = server.uri();
+                move |config| config.chatgpt_base_url = backend
+            }),
         NetworkPolicy::unmanaged(),
         cache_key.map_or(PromptCacheKey::Omit, |key| {
             PromptCacheKey::Custom(key.into())
@@ -393,20 +464,25 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
     let root_id = source.session_configured.thread_id;
     let session_id = source.session_configured.session_id;
     parent
-        .set_app_server_client_info(
-            Some("source-client".into()),
-            Some("1.0".into()),
-            /*mcp_elicitations_auto_deny*/ false,
-        )
+        .set_app_server_client_info(Some("source-client".into()), Some("1.0".into()))
         .await?;
     let captured = parent.config_snapshot().await;
     responses::mount_sse_once(&server, sse(vec![ev_completed("remembered")])).await;
     source.submit_text_turn(EARLIER_INPUT).await?;
-    let invocation = host_spawn_invocation(&server, &parent, "prepare-worker", SPAWN_INPUT).await?;
+    let invocation = host_spawn_invocation(
+        &server,
+        &parent,
+        "prepare-worker",
+        TurnInputRequest::user_input(vec![text(SPAWN_INPUT)]),
+    )
+    .await?;
     let context = parent.tool_invocation(&invocation.turn_id, &invocation.call_id)?;
-    let prepared = parent
-        .prepare_child(&context, create_request("remote_worker", fork_history))
-        .await?;
+    let prepared = codex_core::test_support::prepare_transported_child(
+        &parent,
+        &context,
+        create_request("remote_worker", fork_history),
+    )
+    .await?;
     let child_path = prepared.agent_path().clone();
     assert_eq!(child_path.as_str(), "/root/remote_worker");
     let agents_md = source.workspace_path_uri("AGENTS.md")?;
@@ -464,15 +540,17 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
     let destination_control = Arc::new(TestAgentControl::new(root_id));
     let child_request =
         responses::mount_sse_once(&server, responses::sse_completed("remote-done")).await;
-    let spawned = manager
-        .create_prepared_child(
-            prepared,
-            HostThreadSpawnReservation {
-                thread_id: child_id,
-                control: destination_control,
-            },
-        )
-        .await?;
+    let spawned = codex_core::test_support::start_transported_child(
+        manager,
+        prepared,
+        HostThreadSpawnReservation {
+            thread_id: child_id,
+            control: destination_control,
+            turn_admission: None,
+            usage_accounting: None,
+        },
+    )
+    .await?;
     assert_eq!(
         (
             spawned.agent.thread_id,
@@ -490,7 +568,7 @@ async fn prepared_spawn_starts_on_an_independent_destination_after_parent_shutdo
     );
     let worker = manager.get_thread(child_id).await?;
     start_first_turn(&worker, TASK).await?;
-    analytics.flush().await;
+    codex_core::test_support::flush_thread_analytics(&worker).await;
     let events = responses::received_analytics_events(&server, "codex_thread_initialized").await;
     let child_starts: Vec<_> = events
         .iter()
@@ -613,8 +691,13 @@ async fn cancelled_creation_cleans_registered_child() -> Result<()> {
         /*thread_instructions_provider*/ None,
     )
     .await?;
-    let invocation =
-        host_spawn_invocation(&server, &parent, "cancel-spawn", "Start a worker.").await?;
+    let invocation = host_spawn_invocation(
+        &server,
+        &parent,
+        "cancel-spawn",
+        TurnInputRequest::user_input(vec![text("Start a worker.")]),
+    )
+    .await?;
     let context = parent.tool_invocation(&invocation.turn_id, &invocation.call_id)?;
     let spawn = tokio::spawn({
         let parent = Arc::clone(&parent);
@@ -626,6 +709,8 @@ async fn cancelled_creation_cleans_registered_child() -> Result<()> {
                     HostThreadSpawnReservation {
                         thread_id: child_id,
                         control: controller,
+                        turn_admission: None,
+                        usage_accounting: None,
                     },
                 )
                 .await

@@ -14,6 +14,7 @@ fn completed_turn(duration_ms: Option<i64>, completed_at: Option<i64>) -> AppSer
         completed_at,
         items: vec![ThreadItem::untimed(
             AppServerThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "answer-1".to_string(),
                 text: "The change is ready.".to_string(),
                 phase: Some(MessagePhase::FinalAnswer),
@@ -103,16 +104,32 @@ async fn completion_follows_plain_and_streamed_tool_answers() {
                 )),
                 /*replay_kind*/ None,
             );
+            let mut started_answer = answer.clone();
+            if let AppServerThreadItemPayload::AgentMessage { text, .. } =
+                &mut started_answer.payload
+            {
+                text.clear();
+            }
             chat.handle_server_notification(
                 ServerNotification::ItemStarted(ItemStartedNotification {
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-1".to_string(),
-                    item: answer.clone(),
+                    item: started_answer,
                     started_at_ms,
                 }),
                 /*replay_kind*/ None,
             );
-            handle_agent_message_delta(&mut chat, "The change is ready.\n");
+            chat.handle_server_notification(
+                ServerNotification::AgentMessageDelta(
+                    codex_app_server_protocol::AgentMessageDeltaNotification {
+                        thread_id: "thread-1".into(),
+                        turn_id: "turn-1".into(),
+                        item_id: answer.id().to_owned(),
+                        delta: "The change is ready.\n".into(),
+                    },
+                ),
+                /*replay_kind*/ None,
+            );
             chat.run_commit_tick();
         }
         // Completion-only messages use their completion clock; streams retain their start clock.
@@ -122,6 +139,7 @@ async fn completion_follows_plain_and_streamed_tool_answers() {
                 turn_id: "turn-1".to_string(),
                 item: answer,
                 completed_at_ms: started_at_ms + 1_000,
+                content_token_count: None,
             }),
             /*replay_kind*/ None,
         );

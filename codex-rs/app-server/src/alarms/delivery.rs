@@ -59,7 +59,9 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
             ?reason,
             "alarm was not submitted; discarding"
         ),
-        TurnInputSubmission::Started { .. } | TurnInputSubmission::Steered { .. } => {}
+        TurnInputSubmission::Accepted
+        | TurnInputSubmission::Started { .. }
+        | TurnInputSubmission::Steered { .. } => {}
     }
     store
         .db

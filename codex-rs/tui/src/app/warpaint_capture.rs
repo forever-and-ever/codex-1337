@@ -389,6 +389,7 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
                 text: ANSWER.to_string(),
                 phase: None,
                 memory_citation: None,
+                moderation: None,
                 delivery: None,
                 questions: None,
             },

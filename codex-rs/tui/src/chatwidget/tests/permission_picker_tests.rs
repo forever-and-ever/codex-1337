@@ -36,7 +36,11 @@ async fn clipped_full_access_confirmation_discloses_hidden_warning_text() {
                     .to_owned()
             })
             .collect::<Vec<_>>();
-        assert!(rows.iter().any(|row| row.contains("Yes, continue anyway")));
+        assert!(
+            rows.iter().any(|row| row.contains("Yes, continue anyway")),
+            "{}",
+            rows.join("\n")
+        );
         assert!(rows.iter().any(|row| row.contains("[…")));
         assert_eq!(rows.last().unwrap().trim(), "enter select · esc back");
         snapshots.push(format!(

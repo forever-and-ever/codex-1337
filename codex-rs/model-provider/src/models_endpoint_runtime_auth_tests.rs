@@ -110,9 +110,10 @@ async fn model_requests_keep_the_selected_project_while_reusing_one_runtime() {
             .await;
         let credentials = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("key-a"));
         let runtime = runtime_manager(&server, Arc::clone(&credentials));
+        let capture = Arc::new(credentials.capture_auxiliary_source().unwrap());
         let context = crate::ProviderAuthContext {
             runtime_auth: Some((Arc::clone(&runtime), mode)),
-            credentials: Arc::clone(&credentials),
+            credentials: capture.credentials(),
         };
         let projects = [
             Some("project-a"),
@@ -129,13 +130,31 @@ async fn model_requests_keep_the_selected_project_while_reusing_one_runtime() {
                 headers.insert("openai-project".into(), project.into());
             }
             info.http_headers = Some(headers);
-            let auth = context
+            let provider = context
                 .model_provider(info.clone())
-                .api_auth()
-                .await
+                .with_credential_guard(capture.clone())
                 .unwrap();
+            let request = crate::resolve_request(
+                provider.as_ref().as_ref(),
+                /*scope*/ None,
+                /*routing*/ None,
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+            )
+            .await
+            .unwrap();
+            assert_eq!(request.runtime_id.as_deref(), Some("runtime-a"));
+            assert_eq!(
+                request
+                    .api_provider
+                    .headers
+                    .get("openai-project")
+                    .map(|value| value.to_str().unwrap()),
+                project,
+            );
             assert!(
-                auth.to_auth_headers()
+                request
+                    .api_auth
+                    .to_auth_headers()
                     .unwrap()
                     .contains_key("authorization")
             );
@@ -188,6 +207,88 @@ async fn model_requests_keep_the_selected_project_while_reusing_one_runtime() {
             }
         }
         server.verify().await;
+    }
+}
+
+#[tokio::test]
+async fn runtime_registration_environment_matches_inference_and_catalog() {
+    for mode in [RuntimeAuthMode::DualHeader, RuntimeAuthMode::AssertionOnly] {
+        for (registration_base, destination, matching_destination) in [
+            (
+                "https://chatgpt.com",
+                Some("https://api.openai-staging.com/v1"),
+                "https://eu.api.openai.com/v1",
+            ),
+            (
+                "https://chatgpt-staging.com",
+                Some("https://api.openai.com/v1"),
+                "https://api.openai-staging.com/v1",
+            ),
+            (
+                "https://chatgpt-staging.com",
+                None,
+                "https://chatgpt-staging.com/backend-api/codex",
+            ),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            // Keep external network access disabled even if destination validation regresses.
+            let controller = codex_http_client::NetworkPolicyController::default();
+            let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+                .with_network_policy(controller.policy());
+            let credentials = AuthManager::from_api_key(
+                "ambient-key",
+                codex_login::AuthRuntimeConfig {
+                    codex_home: home.path().to_path_buf(),
+                    auth_route_config: codex_login::AuthRouteConfig::from_http_client_factory(
+                        factory.clone(),
+                    ),
+                },
+            );
+            let runtime = Arc::new(RuntimeAuthManager::for_chatgpt(
+                Arc::clone(&credentials),
+                "00000000-0000-0000-0000-000000000000".into(),
+                registration_base.into(),
+                RuntimeRegistrationMetadata {
+                    harness: None,
+                    harness_version: None,
+                    role: RuntimeRole::Orchestrator,
+                },
+            ));
+            crate::validate_runtime_environment(&runtime, Some(matching_destination)).unwrap();
+            let info = ModelProviderInfo {
+                experimental_bearer_token: Some("provider-key".into()),
+                env_http_headers: None,
+                ..ModelProviderInfo::create_openai_provider(destination.map(str::to_owned))
+            };
+            let provider = crate::provider::create_model_provider_with_runtime(
+                info.clone(),
+                Some(Arc::clone(&credentials)),
+                Some((Arc::clone(&runtime), mode)),
+            );
+            let error = provider.request_auth(/*scope*/ None).await.err().unwrap();
+            assert!(matches!(
+                error.details(),
+                codex_protocol::error::CodexErrorDetails::InvalidRequest(_)
+            ));
+
+            let mut catalog_info = info;
+            if let Some(destination) = destination {
+                catalog_info.base_url = Some(matching_destination.into());
+                catalog_info.model_catalog_url = Some(format!("{destination}/models").into());
+            }
+            let catalog = OpenAiModelsEndpoint::new(
+                catalog_info,
+                Some(credentials),
+                /*gateway_auth_manager*/ None,
+                /*anthropic_auth_context*/ None,
+            )
+            .with_runtime_auth(Some((runtime, mode)));
+            let error = catalog.list_models("0.0.0", factory).await.unwrap_err();
+            assert!(matches!(
+                error.details(),
+                codex_protocol::error::CodexErrorDetails::InvalidRequest(_)
+            ));
+        }
     }
 }
 
@@ -309,6 +410,134 @@ async fn catalog_timeout_keeps_registration_alive_for_the_next_request() {
         1
     );
     server.verify().await;
+
+    // A request snapshot never re-reads its source on ordinary resolution, but
+    // a rejected grant must renew through that same source, not the UI owner.
+    struct RenewingSource {
+        current: std::sync::RwLock<CodexAuth>,
+        renewed: CodexAuth,
+        reads: std::sync::atomic::AtomicUsize,
+        refreshes: std::sync::atomic::AtomicUsize,
+    }
+    impl codex_login::ExternalAuth for RenewingSource {
+        fn resolve(&self) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            Box::pin(async move {
+                self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(self.current.read().unwrap().clone())
+            })
+        }
+        fn refresh(
+            &self,
+            _: codex_login::ExternalAuthRefreshContext,
+        ) -> codex_login::ExternalAuthFuture<'_, CodexAuth> {
+            Box::pin(async move {
+                self.refreshes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                *self.current.write().unwrap() = self.renewed.clone();
+                Ok(self.renewed.clone())
+            })
+        }
+    }
+    for change_principal in [false, true] {
+        let server = MockServer::start().await;
+        let token = |user: &str, nonce: &str| {
+            format!(
+                "e30.{}.signature",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                    json!({
+                        "session_id": "session-a",
+                        "nonce": nonce,
+                        "https://api.openai.com/auth": {
+                            "user_id": user, "chatgpt_account_id": "account-a",
+                        },
+                    })
+                    .to_string()
+                ),
+            )
+        };
+        let stale = token("user-a", "stale");
+        let renewed = token(
+            if change_principal { "user-b" } else { "user-a" },
+            "renewed",
+        );
+        let source = Arc::new(RenewingSource {
+            current: std::sync::RwLock::new(
+                CodexAuth::from_external_chatgpt_tokens(&stale, "account-a", None).unwrap(),
+            ),
+            renewed: CodexAuth::from_external_chatgpt_tokens(&renewed, "account-a", None).unwrap(),
+            reads: std::sync::atomic::AtomicUsize::new(0),
+            refreshes: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let credentials = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("unused"));
+        credentials.set_external_auth(source.clone()).await.unwrap();
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .and(wiremock::matchers::body_partial_json(
+                json!({"actor_auth":{"credential":stale}}),
+            ))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .and(wiremock::matchers::body_partial_json(
+                json!({"actor_auth":{"credential":renewed}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "runtime_agent_instance_id": "runtime-renewed",
+                "agent_host_id": "host-a",
+                "actor": {"kind":"chatgpt", "user_id":"user-a", "account_id":"account-a"},
+            })))
+            .expect(if change_principal { 0 } else { 1 })
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(wiremock::matchers::header(
+                "authorization",
+                format!("Bearer {renewed}"),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models":[]})))
+            .expect(if change_principal { 0 } else { 1 })
+            .mount(&server)
+            .await;
+        let runtime = runtime_manager(&server, Arc::clone(&credentials));
+        let mut info = ModelProviderInfo::create_openai_provider(Some(server.uri()));
+        info.env_http_headers = None;
+        let endpoint = OpenAiModelsEndpoint::new(info, Some(credentials), None, None)
+            .with_runtime_auth(Some((runtime, RuntimeAuthMode::DualHeader)));
+        let result = endpoint
+            .list_models(
+                "test",
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+            )
+            .await;
+        if change_principal {
+            let error = result.unwrap_err();
+            assert!(
+                matches!(
+                    error.details(),
+                    codex_protocol::error::CodexErrorDetails::RefreshTokenFailed(_)
+                ),
+                "{error}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("captured credential principal changed"),
+                "{error}"
+            );
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(
+            source.refreshes.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(source.reads.load(std::sync::atomic::Ordering::SeqCst), 3);
+        server.verify().await;
+    }
 }
 
 #[tokio::test]

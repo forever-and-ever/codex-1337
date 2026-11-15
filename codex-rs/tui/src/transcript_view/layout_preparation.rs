@@ -446,6 +446,7 @@ impl TranscriptView {
             let output_tokens = output_tokens.subset(&token_ids);
             let expanded_parts = expanded_parts.scoped(feed.fold_scope(index));
             let render = move |invocations: &invocation::Invocations| {
+                crate::history_cell::prepare_links(cell.as_ref());
                 if cell
                     .as_any()
                     .is::<crate::rendered_selection::RenderedSurface>()

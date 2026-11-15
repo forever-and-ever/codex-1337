@@ -29,7 +29,8 @@ impl TurnRequestProcessor {
             .await
             .map_err(|error| internal_error(error.to_string()))?;
         let accounts = self
-            .auth_manager
+            .thread_manager
+            .auth_manager()
             .saved_accounts()
             .map_err(|error| internal_error(error.to_string()))?
             .into_iter()
@@ -82,7 +83,8 @@ impl TurnRequestProcessor {
                 selected_account_id: if is_chatgpt {
                     thread.auth_manager().selected_account_id()
                 } else {
-                    self.auth_manager
+                    self.thread_manager
+                        .auth_manager()
                         .active_account_id()
                         .map_err(|error| internal_error(error.to_string()))?
                 },
@@ -180,7 +182,8 @@ impl TurnRequestProcessor {
             .cloned()
             .unwrap_or(params.account_id);
         if !self
-            .auth_manager
+            .thread_manager
+            .auth_manager()
             .saved_accounts()
             .map_err(|error| internal_error(error.to_string()))?
             .iter()
@@ -195,7 +198,8 @@ impl TurnRequestProcessor {
         }
         // The active login, not configuration, records the choice for new conversations.
         let default_saved = self
-            .auth_manager
+            .thread_manager
+            .auth_manager()
             .activate_account(&id)
             .await
             .map_err(|error| tracing::warn!(%error, "could not activate account"))
@@ -241,7 +245,8 @@ impl TurnRequestProcessor {
             }
             AccountProvider::Openai => {
                 if !self
-                    .auth_manager
+                    .thread_manager
+                    .auth_manager()
                     .saved_accounts()
                     .map_err(|error| internal_error(error.to_string()))?
                     .iter()

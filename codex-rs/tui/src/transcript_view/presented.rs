@@ -177,7 +177,7 @@ impl TranscriptView {
         &mut self,
         event: crossterm::event::MouseEvent,
         cells: &[Arc<dyn HistoryCell>],
-        mode: input::MouseMode,
+        mode: input::MouseMode<'_>,
     ) -> Option<ViewAction> {
         if self.cache.frames.is_none() {
             return self.handle_presented_mouse(event, cells, mode);

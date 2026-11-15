@@ -24,6 +24,7 @@ use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnItemsView;
+use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
@@ -36,6 +37,8 @@ pub(crate) const HISTORY_ITEM_SCAN_LIMIT: usize = 4 * HISTORY_ITEM_PAGE_LIMIT as
 pub(crate) enum HistoryHydrationScope<'a> {
     Initial,
     Complete,
+    /// Include older turns that have no items.
+    FullTranscript,
     ThroughTurn(&'a str),
 }
 
@@ -68,7 +71,7 @@ impl HistoryLoadBudget {
         let rows = local_settings
             .and_then(|settings| resize_reflow_max_rows(settings.terminal_resize_reflow()));
         let items = match (scope, config, rows) {
-            (HistoryHydrationScope::Complete, _, _)
+            (HistoryHydrationScope::Complete | HistoryHydrationScope::FullTranscript, _, _)
             | (HistoryHydrationScope::ThroughTurn(_), _, _)
             | (HistoryHydrationScope::Initial, Some(_), None) => None,
             (HistoryHydrationScope::Initial, Some(_), Some(max_rows)) => {
@@ -112,6 +115,7 @@ pub(crate) fn thread_items_page_params(
         cursor: cursor.map(ThreadItemsListCursor::Opaque),
         limit: Some(limit),
         sort_direction: Some(SortDirection::Desc),
+        defer_output: None,
     }
 }
 
@@ -197,6 +201,21 @@ fn merge_turn_page(
     admitted
 }
 
+// Turn metadata can extend before the loaded item window. Inside the window an empty
+// interrupted turn is genuinely itemless and its notice is ready to replay.
+fn mark_loaded_interruptions(turns: &mut [Turn], older_cursor: Option<&str>) {
+    let mut in_window = older_cursor.is_none();
+    for turn in turns {
+        in_window |= !turn.items.is_empty();
+        if in_window
+            && turn.status == TurnStatus::Interrupted
+            && turn.items_view == TurnItemsView::NotLoaded
+        {
+            turn.items_view = TurnItemsView::Summary;
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ThreadHistoryPagination {
     pub(super) history_mode: ThreadHistoryMode,
@@ -260,6 +279,12 @@ impl AppServerSession {
         Some(cursor)
     }
 
+    pub(crate) fn has_pending_older_history_page(&self, thread_id: ThreadId) -> bool {
+        self.history_pagination
+            .get(&thread_id)
+            .is_some_and(|page| page.loading_older)
+    }
+
     /// Match a completion to the page still pending for this thread, before interpreting its result.
     pub(crate) fn is_older_history_page_pending(
         &self,
@@ -306,6 +331,7 @@ impl AppServerSession {
             }
             _ => return Err(eyre!("history response does not match its cursor domain")),
         };
+        mark_loaded_interruptions(turns, state.next_item_cursor.as_deref());
         state.loading_older = false;
         self.history_pagination.insert(thread_id, state);
         Ok(admitted)
@@ -360,6 +386,11 @@ impl AppServerSession {
         local_settings: Option<&crate::local_settings::LocalSettings>,
         scope: HistoryHydrationScope<'_>,
     ) -> Result<()> {
+        let image_origin = if self.uses_remote_workspace() {
+            crate::history_cell::ImagePathOrigin::Remote
+        } else {
+            crate::history_cell::ImagePathOrigin::Local
+        };
         let (result, update) = preparation::prepare_initial_thread_history(
             super::session_preparation::RequestPolicy::Unbounded,
             &self.request_handle(),
@@ -369,6 +400,7 @@ impl AppServerSession {
             config,
             local_settings,
             scope,
+            image_origin,
         )
         .await;
         self.apply_history_preparation(update);
@@ -384,6 +416,7 @@ fn rendered_history_rows(
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
     rendered_rows: usize,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> usize {
     let visibility = if config.show_raw_agent_reasoning {
         RawReasoningVisibility::Visible
@@ -402,6 +435,7 @@ fn rendered_history_rows(
         visibility,
         Some(config),
         &|_| crate::multi_agents::AgentMetadata::default(),
+        image_origin,
     )
     .into_iter()
     .fold(rendered_rows, |rows, cell| {

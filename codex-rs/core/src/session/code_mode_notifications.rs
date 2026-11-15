@@ -47,10 +47,7 @@ impl Session {
             vec![TurnInput::ResponseItem(item)]
         };
         self.input_queue
-            .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
-                active.turn_state.as_ref(),
-                pending,
-            )
+            .extend_pending_input_and_notify_for_turn_state(active.turn_state.as_ref(), pending)
             .await;
         lease.accepted();
         Ok(())

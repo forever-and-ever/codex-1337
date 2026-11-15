@@ -2,6 +2,7 @@ use anyhow::Result;
 use codex_config::Constrained;
 use codex_core::EnvironmentConfig;
 use codex_core::TurnInputRequest;
+use codex_core::TurnStartOptions;
 use codex_core::config::Config;
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_extension_api::ExtensionFuture;
@@ -245,9 +246,17 @@ fn format_labeled_requests_snapshot(
     )
 }
 
-fn enable_deferred_tool_world_state_without_agents(config: &mut Config) {
+fn configure_deferred_tool_world_state_without_agents(config: &mut Config) {
+    config
+        .features
+        .enable(Feature::DeferredToolWorldState)
+        .expect("enable deferred namespace world state");
     config.update_plan_enabled = true;
     config.agents_enabled = false;
+}
+
+fn enable_deferred_tool_world_state_without_agents(config: &mut Config) {
+    configure_deferred_tool_world_state_without_agents(config);
     config
         .features
         .enable(Feature::DeferredToolWorldState)
@@ -974,7 +983,13 @@ async fn elevated_apps_catalog_limit_requires_host_owned_registration() -> Resul
             .await;
 
         let mut builder = search_capable_apps_builder(apps_server.chatgpt_base_url.clone())
-            .with_home(Arc::clone(&codex_home));
+            .with_home(Arc::clone(&codex_home))
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::DeferredToolWorldState)
+                    .expect("enable deferred namespace world state");
+            });
         if let Some(id) = extension_id {
             let mut extensions = ExtensionRegistryBuilder::new();
             extensions.mcp_server_contributor(Arc::new(AppsMcpServerContributor {
@@ -1008,20 +1023,18 @@ async fn elevated_apps_catalog_limit_requires_host_owned_registration() -> Resul
         .await;
         test.submit_turn("inspect the large Apps tool catalog")
             .await?;
-        let body = response.single_request().body_json();
-        let description = body["tools"]
-            .as_array()
-            .and_then(|tools| {
-                tools.iter().find_map(|tool| {
-                    (tool.get("type").and_then(Value::as_str) == Some("tool_search"))
-                        .then(|| tool.get("description").and_then(Value::as_str))
-                        .flatten()
-                })
-            })
-            .expect("large Apps catalogs should remain discoverable through tool_search");
+        let request = response.single_request();
         assert!(
-            description.contains("Calendar"),
-            "the accepted Apps catalog should remain model-discoverable: {description}"
+            request.body_json()["tools"]
+                .as_array()
+                .is_some_and(|tools| { tools.iter().any(|tool| tool["type"] == "tool_search") }),
+            "large Apps catalogs should remain discoverable through tool_search"
+        );
+        assert!(
+            tools_state_sections(&request)
+                .iter()
+                .any(|text| text.contains("mcp__codex_apps__calendar")),
+            "the accepted Apps catalog should remain model-discoverable in world state"
         );
         test.codex.shutdown_and_wait().await?;
     }
@@ -1096,45 +1109,103 @@ async fn code_mode_only_exposes_direct_model_only_mcp_namespaces() -> Result<()>
     Ok(())
 }
 
+#[test_case::test_case(false; "responses")]
+#[test_case::test_case(true; "responses_lite")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deferred_tool_world_state_is_disabled_by_default() -> Result<()> {
+async fn code_mode_refreshes_direct_tool_routing_between_turns(
+    use_responses_lite: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let apps_server = AppsTestServer::mount_searchable(&server).await?;
-    let response = responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-1"),
-        ]),
-    )
-    .await;
+    let apps = AppsTestServer::mount_searchable(&server).await?;
+    let calendar = vec![SEARCH_CALENDAR_NAMESPACE.to_owned()];
+    let cases = [
+        (None, false),
+        (Some(calendar.clone()), true),
+        (Some(Vec::new()), false),
+        (Some(calendar), true),
+        (None, false),
+    ];
+    let responses = mount_sse_sequence(&server, completed_response_sequence(cases.len())).await;
+    let test = search_capable_apps_builder(apps.chatgpt_base_url)
+        .with_model_info_override("gpt-5.5", move |model| {
+            model.use_responses_lite = use_responses_lite
+        })
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::CodeModeOnly)
+                .expect("enable code mode only");
+            config
+                .features
+                .enable(Feature::IncrementalTools)
+                .expect("enable incremental tools");
+        })
+        .build(&server)
+        .await?;
 
-    let mut builder = search_capable_apps_builder(apps_server.chatgpt_base_url.clone());
-    let test = builder.build(&server).await?;
-    test.submit_turn("inspect deferred MCP tools").await?;
-
-    let request = response.single_request();
-    assert!(
-        request
-            .message_input_texts("developer")
-            .into_iter()
-            .all(|text| !text.contains("<tools>")),
-        "deferred tool world state should not be injected unless its feature is enabled"
-    );
-    assert!(
-        request.body_json()["tools"]
-            .as_array()
-            .is_some_and(|tools| {
-                tools
+    let mut previous_input = Vec::new();
+    for (index, (direct_only_tool_namespaces, expect_direct)) in cases.into_iter().enumerate() {
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "inspect calendar tools".into(),
+                    text_elements: Vec::new(),
+                }])
+                .on_start(TurnStartOptions {
+                    direct_only_tool_namespaces,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = responses.requests();
+        assert_eq!(requests.len(), index + 1);
+        let body = requests[index].body_json();
+        let declares_calendar = |item: &Value| {
+            namespace_child_tool(item, SEARCH_CALENDAR_NAMESPACE, SEARCH_CALENDAR_CREATE_TOOL)
+                .is_some()
+        };
+        if use_responses_lite {
+            let input = body["input"].as_array().expect("Responses Lite input");
+            assert!(
+                input.starts_with(&previous_input),
+                "history changed on turn {index}"
+            );
+            let appended = &input[previous_input.len()..];
+            assert_eq!(
+                appended
                     .iter()
-                    .any(|tool| tool.get("type").and_then(Value::as_str) == Some("tool_search"))
-            }),
-        "disabling tool world state must not disable deferred tool discovery"
-    );
-
+                    .filter(|item| item["type"] == "additional_tools")
+                    .any(declares_calendar),
+                expect_direct,
+                "calendar declaration on turn {index}",
+            );
+            if index > 0 && !expect_direct {
+                let removed = format!("- {SEARCH_CALENDAR_NAMESPACE}");
+                assert!(
+                    appended.iter().any(|item| {
+                        item["role"] == "developer"
+                            && item["content"][0]["text"]
+                                .as_str()
+                                .is_some_and(|text| text.lines().any(|line| line == removed))
+                    }),
+                    "missing calendar removal on turn {index}"
+                );
+            }
+            previous_input.clone_from(input);
+        } else {
+            assert_eq!(
+                declares_calendar(&body),
+                expect_direct,
+                "calendar exposure on turn {index}"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1155,7 +1226,7 @@ async fn deferred_tool_world_state_tracks_initial_unchanged_and_removed_namespac
     let apps_server = AppsTestServer::mount_searchable(&server).await?;
     let response = mount_sse_sequence(&server, completed_response_sequence(/*count*/ 3)).await;
     let mut builder = search_capable_apps_builder(apps_server.chatgpt_base_url.clone())
-        .with_config(enable_deferred_tool_world_state_without_agents);
+        .with_config(configure_deferred_tool_world_state_without_agents);
     let test = builder.build_with_auto_env(&server).await?;
     wait_for_mcp_server(&test.codex, CODEX_APPS_MCP_SERVER_NAME).await?;
 

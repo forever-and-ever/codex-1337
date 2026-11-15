@@ -7,7 +7,6 @@ use crate::TurnStartOptions;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::AgentPath;
-use codex_protocol::ResponseItemId;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -97,7 +96,7 @@ impl LocalAgentControl {
             .ok_or_else(|| {
                 CodexErr::InvalidRequest("agent family root is not registered".into())
             })?;
-        let id = ResponseItemId::new("amsg_mail");
+        let id = (thread.session.item_id_generator)("amsg_mail");
         let origin = context.durable_origin(id.as_str());
         communication.id = None;
         let payload = serde_json::to_string(&communication).map_err(|error| {

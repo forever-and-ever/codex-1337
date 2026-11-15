@@ -55,7 +55,10 @@ pub(in crate::app) enum ServerOperation {
 #[derive(Clone)]
 pub(in crate::app) enum ThreadMutation {
     Compact,
-    Rename(api::ThreadSetNameParams),
+    Rename(
+        api::ThreadSetNameParams,
+        crate::app_server_session::ManualThreadName,
+    ),
     Review(api::ReviewTarget),
     CleanBackgroundTerminals,
     DisarmAlarm(String),
@@ -155,7 +158,7 @@ impl ServerOperation {
             Self::Control(ControlOperation::StopAndExit { .. }) => "Stopping task before exit",
             Self::Mutation(mutation) => match mutation {
                 ThreadMutation::Compact => "Starting compaction",
-                ThreadMutation::Rename(_) => "Renaming conversation",
+                ThreadMutation::Rename(..) => "Renaming conversation",
                 ThreadMutation::Review(_) => "Starting review",
                 ThreadMutation::CleanBackgroundTerminals => "Cleaning background terminals",
                 ThreadMutation::DisarmAlarm(_) => "Disarming alarm",
@@ -312,10 +315,9 @@ pub(super) async fn send(
                     .await?;
                 Ok(OperationReceipt::Compacted)
             }
-            ThreadMutation::Rename(params) => {
+            ThreadMutation::Rename(params, writer) => {
                 let name = params.name.clone();
-                let response: api::ThreadSetNameResponse =
-                    handle.thread_set_name(request_id, params).await?;
+                let response = writer.save(request_id, params).await?;
                 Ok(OperationReceipt::Renamed(
                     response.thread_name.unwrap_or(name),
                 ))
@@ -584,7 +586,7 @@ impl App {
             return;
         }
         if let Some(thread_id) = thread_id
-            && let ServerOperation::Mutation(ThreadMutation::Rename(params)) = operation
+            && let ServerOperation::Mutation(ThreadMutation::Rename(params, _)) = operation
             && let SubmissionFailure::Rejected(error) = failure
             && self.confirm_thread_name_conflict(
                 error,
@@ -608,7 +610,7 @@ impl App {
             ),
         };
         if let Some(thread_id) = thread_id
-            && let ServerOperation::Mutation(ThreadMutation::Rename(params)) = operation
+            && let ServerOperation::Mutation(ThreadMutation::Rename(params, _)) = operation
             && self.agents_overview.rendered_full_screen
         {
             if let Ok(mut state) = self.agents_overview.view_state.lock() {

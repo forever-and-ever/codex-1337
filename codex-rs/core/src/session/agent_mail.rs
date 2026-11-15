@@ -64,7 +64,7 @@ impl MailPublications {
         {
             return None;
         }
-        let delivery = MessageDelivery::publish(sender, id.clone(), observers);
+        let delivery = MessageDelivery::publish_durable(sender, id.clone(), observers);
         // Shutdown may close ownership while an observer captures its attachment.
         let replaced = {
             let mut publications = self.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -538,6 +538,9 @@ impl Session {
                             "accepted agent-mail admission panicked; inbox retained".into(),
                         ))
                     });
+                    if let Err(error) = &result {
+                        session.fence_agent_mail(&id, error.to_string());
+                    }
                     session.agent_mail.received.lock().await.remove(&id);
                     drop(boundary);
                     if result.is_ok() {

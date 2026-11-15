@@ -119,6 +119,14 @@ impl ChatWidget {
                 self.on_thread_settings_updated(notification);
             }
             ServerNotification::TurnStarted(notification) => {
+                self.turn_lifecycle.has_turn_history = true;
+                if self
+                    .bottom_pane
+                    .dismiss_view_by_id(safety_recourse::VIEW_ID)
+                    && self.bottom_pane.no_modal_or_popup_active()
+                {
+                    self.on_modal_or_popup_closed();
+                }
                 self.safety_recourse = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
@@ -139,6 +147,10 @@ impl ChatWidget {
                         self.on_replayed_task_started(notification.turn.started_at);
                     } else {
                         self.on_task_started();
+                        if self.turn_lifecycle.admitted_turn_id == self.turn_lifecycle.last_turn_id
+                        {
+                            self.turn_lifecycle.admitted_turn_id = None;
+                        }
                     }
                 }
             }
@@ -164,6 +176,8 @@ impl ChatWidget {
                             &notification.item_id,
                         ))
                 {
+                    self.transcript.active_streamed_agent_message =
+                        Some((notification.turn_id, notification.item_id.clone()));
                     self.transcript.streaming_agent_item = Some(notification.item_id);
                     self.on_agent_message_delta(notification.delta);
                 }
@@ -249,10 +263,19 @@ impl ChatWidget {
             ServerNotification::Error(notification) => {
                 if notification.will_retry {
                     if !from_replay {
-                        self.on_stream_error(
-                            notification.error.message,
-                            notification.error.additional_details,
-                        );
+                        let error = notification.error;
+                        let message =
+                            if let Some(AppServerCodexErrorInfo::ResponseStreamDisconnected {
+                                http_status_code: Some(429),
+                            }) = error.codex_error_info
+                                && let Some(attempt) =
+                                    error.message.strip_prefix("Reconnecting... ")
+                            {
+                                format!("Server is busy, reconnecting {attempt}")
+                            } else {
+                                error.message
+                            };
+                        self.on_stream_error(message, error.additional_details);
                     }
                 } else if from_replay || !safety_recourse::defer_error(self, &notification) {
                     self.last_non_retry_error = Some((
@@ -433,6 +456,7 @@ impl ChatWidget {
             | ServerNotification::ThreadStarted(_)
             | ServerNotification::ThreadStatusChanged(_)
             | ServerNotification::ThreadReadStateChanged(_)
+            | ServerNotification::ThreadSectionChanged(_)
             | ServerNotification::ThreadReverted(_)
             | ServerNotification::ThreadPredictionUpdated(_)
             | ServerNotification::ThreadArchived(_)
@@ -492,6 +516,13 @@ impl ChatWidget {
         notification: TurnCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if replay_kind.is_none()
+            && notification.turn.status != TurnStatus::InProgress
+            && self.turn_lifecycle.admitted_turn_id.as_deref()
+                == Some(notification.turn.id.as_str())
+        {
+            self.turn_lifecycle.admitted_turn_id = None;
+        }
         // User-message dedupe only suppresses the app-server echo of a prompt
         // this TUI already rendered locally. Once that turn ends, another
         // client can submit the same text and it still needs its own user cell.
@@ -503,33 +534,16 @@ impl ChatWidget {
         self.thread_usage.replaying_turn_completion = replay_kind.is_some();
         match notification.turn.status {
             TurnStatus::Completed => {
-                let last_agent_message =
-                    notification
-                        .turn
-                        .item_payloads()
-                        .rev()
-                        .find_map(|item| match item {
-                            ThreadItemPayload::AgentMessage {
-                                id,
-                                text,
-                                phase: Some(MessagePhase::FinalAnswer) | None,
-                                ..
-                            } if !self
-                                .is_realtime_delegated_reasoning_turn(&notification.turn.id)
-                                || !realtime::is_private_realtime_agent_item(item) =>
-                            {
-                                Some((item.clone(), id.clone(), text.clone()))
-                            }
-                            _ => None,
-                        });
-                if let Some((item, id, _)) = &last_agent_message
-                    && self
-                        .transcript
-                        .last_completed_agent_message
-                        .as_ref()
-                        .is_none_or(|message| {
-                            message.turn_id != notification.turn.id || &message.item_id != id
-                        })
+                let last_agent_message = final_agent_message(
+                    &notification.turn,
+                    self.is_realtime_delegated_reasoning_turn(&notification.turn.id),
+                );
+                if let Some((item, _)) = last_agent_message
+                    && needs_agent_message(
+                        self.transcript.last_completed_agent_message.as_ref(),
+                        &notification.turn.id,
+                        item,
+                    )
                 {
                     self.handle_thread_item(
                         codex_app_server_protocol::ThreadItem::untimed(item.clone()),
@@ -539,7 +553,7 @@ impl ChatWidget {
                     );
                 }
                 if replay_kind.is_none()
-                    && let Some((item, _, _)) = &last_agent_message
+                    && let Some((item, _)) = last_agent_message
                 {
                     self.speak_completed_realtime_delegation(&notification.turn.id, item);
                 }
@@ -547,7 +561,7 @@ impl ChatWidget {
                 self.record_final_response(&notification.turn);
                 let completion = self.completion_cell(&notification.turn, replay_kind);
                 self.on_task_complete(
-                    last_agent_message.map(|(_, _, text)| text),
+                    last_agent_message.map(|(_, text)| text.to_owned()),
                     completion,
                     replay_kind.is_some(),
                 );
@@ -562,7 +576,7 @@ impl ChatWidget {
                 } else {
                     TurnAbortReason::Interrupted
                 };
-                self.on_interrupted_turn(reason);
+                self.on_interrupted_server_turn(reason, &notification.turn.id);
             }
             TurnStatus::Failed
                 if replay_kind.is_some()
@@ -642,29 +656,56 @@ impl ChatWidget {
             ThreadItemPayload::Plan { id, .. } => {
                 self.transcript.streaming_plan_item = Some(id);
             }
-            ThreadItemPayload::AgentMessage { id, .. } => {
+            ThreadItemPayload::AgentMessage {
+                id,
+                text,
+                questions,
+                ..
+            } => {
                 self.transcript.streaming_agent_item = Some(id.clone());
                 self.transcript.agent_timestamp =
                     history_cell::HistoryTimestamp::from_millis(notification.started_at_ms);
-                if replay_kind.is_none() {
-                    self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
+                let delegated = replay_kind.is_none()
+                    && self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
+                if !delegated
+                    && !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
+                    && questions.is_none()
+                    && !text.is_empty()
+                {
+                    let key = (notification.turn_id, id);
+                    let flushed = self
+                        .transcript
+                        .last_flushed_agent_message
+                        .as_ref()
+                        .is_some_and(|flushed| {
+                            flushed.turn_id == key.0 && flushed.item_id == key.1
+                        });
+                    if self.transcript.active_streamed_agent_message.as_ref() != Some(&key)
+                        && !flushed
+                    {
+                        self.transcript.active_streamed_agent_message = Some(key);
+                        self.on_agent_message_delta(text);
+                    }
                 }
             }
-            ThreadItemPayload::Reasoning { id, .. } => {
+            ThreadItemPayload::Reasoning {
+                id,
+                summary,
+                content,
+            } => {
                 if replay_kind.is_none()
                     && !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
                 {
                     // A later voice handoff can steer this turn without making an
                     // already-started typed reasoning item private.
-                    self.realtime_conversation
-                        .agent_items
-                        .entry((notification.turn_id.clone(), id.clone()))
-                        .or_insert(realtime::RealtimeAgentItemOrigin::Typed);
+                    self.remember_typed_reasoning_item(notification.turn_id.clone(), &id);
                 }
                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages))
                     && !self.is_realtime_delegated_reasoning_item(&notification.turn_id, &id)
+                    && self.status_state.reasoning_item_id.as_ref() != Some(&id)
                 {
                     self.on_reasoning_item_started(id);
+                    self.replace_reasoning_parts(summary, content);
                 }
             }
             ThreadItemPayload::ContextCompaction { id }
@@ -683,7 +724,8 @@ impl ChatWidget {
                 self.on_context_compaction_started(id, elapsed);
             }
             item @ ThreadItemPayload::CommandExecution { .. } => {
-                self.on_command_execution_started(item)
+                // Buffered notifications were received from this thread's live subscription.
+                self.on_command_execution_started(item, ThreadItemRenderSource::Live)
             }
             ThreadItemPayload::FileChange { id, changes, .. } => {
                 self.on_patch_apply_begin(id, file_update_changes_to_display(changes));
@@ -768,4 +810,29 @@ impl ChatWidget {
             replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
         );
     }
+}
+
+/// Select the final reply that can be displayed when streaming events were missed.
+pub(crate) fn final_agent_message(
+    turn: &Turn,
+    realtime_delegated: bool,
+) -> Option<(&ThreadItemPayload, &str)> {
+    turn.item_payloads().rev().find_map(|item| match item {
+        ThreadItemPayload::AgentMessage {
+            text,
+            phase: Some(MessagePhase::FinalAnswer) | None,
+            ..
+        } if !realtime_delegated || !realtime::is_private_realtime_agent_item(item) => {
+            Some((item, text.as_str()))
+        }
+        _ => None,
+    })
+}
+
+pub(crate) fn needs_agent_message(
+    last: Option<&super::transcript::CompletedAgentMessage>,
+    turn: &str,
+    item: &ThreadItemPayload,
+) -> bool {
+    last.is_none_or(|message| message.turn_id != turn || message.item_id != item.id())
 }

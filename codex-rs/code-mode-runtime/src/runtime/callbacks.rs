@@ -1,4 +1,4 @@
-use codex_code_mode_protocol::FunctionCallOutputContentItem;
+use crate::session_runtime::OutputItem;
 use std::sync::Arc;
 
 use super::PendingToolCall;
@@ -8,6 +8,7 @@ use super::native_result::serialize_text;
 use super::timers;
 use super::value::json_to_v8;
 use super::value::normalize_output_audio;
+use super::value::normalize_output_content;
 use super::value::normalize_output_image;
 use super::value::throw_type_error;
 use super::value::v8_value_to_json;
@@ -76,7 +77,7 @@ pub(super) fn tool_callback(
             native_execution,
         },
     );
-    let _ = event_tx.send(RuntimeEvent::ToolCall {
+    let _ = event_tx.blocking_send(RuntimeEvent::ToolCall {
         id,
         name: tool_name,
         kind: tool_kind,
@@ -102,6 +103,7 @@ pub(super) fn text_callback(
             return;
         }
     };
+    // TELOS(recoverable-output): preserve section groups and emission caps until Core budgets them.
     let max_tokens = options.max_tokens;
     let mut sections =
         match super::native_result::serialize_text_sections(scope, value, options.metadata) {
@@ -115,19 +117,32 @@ pub(super) fn text_callback(
         && state.exit_requested.is_none()
     {
         let item = if sections.len() == 1 {
-            FunctionCallOutputContentItem::InputText {
+            OutputItem::InputText {
                 text: sections.remove(0),
                 max_tokens,
             }
         } else {
-            FunctionCallOutputContentItem::InputTextBatch {
+            OutputItem::InputTextBatch {
                 sections,
                 max_tokens,
             }
         };
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(item));
+        let _ = state
+            .event_tx
+            .blocking_send(RuntimeEvent::ContentItem(item));
     }
     retval.set(v8::undefined(scope).into());
+}
+
+pub(super) fn content_block_callback(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments,
+    _retval: v8::ReturnValue<v8::Value>,
+) {
+    match normalize_output_content(scope, args.get(0)) {
+        Ok(item) => emit_output_item(scope, item),
+        Err(message) => throw_type_error(scope, &message),
+    }
 }
 
 pub(super) fn audio_callback(
@@ -144,11 +159,7 @@ pub(super) fn audio_callback(
         Ok(audio_item) => audio_item,
         Err(()) => return,
     };
-    if let Some(state) = scope.get_slot::<RuntimeState>()
-        && state.exit_requested.is_none()
-    {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(audio_item));
-    }
+    emit_output_item(scope, audio_item);
     retval.set(v8::undefined(scope).into());
 }
 
@@ -162,29 +173,23 @@ pub(super) fn image_callback(
     } else {
         args.get(0)
     };
-    let detail_override = if args.length() < 2 {
-        None
-    } else {
-        let detail = args.get(1);
-        if detail.is_string() {
-            Some(detail.to_rust_string_lossy(scope))
-        } else if detail.is_null() || detail.is_undefined() {
-            None
-        } else {
-            throw_type_error(scope, "image detail must be a string when provided");
-            return;
-        }
-    };
+    let detail_override = (args.length() > 1).then(|| args.get(1));
     let image_item = match normalize_output_image(scope, value, detail_override) {
         Ok(image_item) => image_item,
         Err(()) => return,
     };
+    emit_output_item(scope, image_item);
+    retval.set(v8::undefined(scope).into());
+}
+
+fn emit_output_item(scope: &v8::PinScope<'_, '_>, item: OutputItem) {
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
+        let _ = state
+            .event_tx
+            .blocking_send(RuntimeEvent::ContentItem(item));
     }
-    retval.set(v8::undefined(scope).into());
 }
 
 pub(super) fn generated_image_callback(
@@ -211,14 +216,17 @@ pub(super) fn generated_image_callback(
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
+        let _ = state
+            .event_tx
+            .blocking_send(RuntimeEvent::ContentItem(image_item));
         if let Some(text) = output_hint {
-            let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-                FunctionCallOutputContentItem::InputText {
-                    text,
-                    max_tokens: None,
-                },
-            ));
+            let _ =
+                state
+                    .event_tx
+                    .blocking_send(RuntimeEvent::ContentItem(OutputItem::InputText {
+                        text,
+                        max_tokens: None,
+                    }));
         }
     }
     retval.set(v8::undefined(scope).into());
@@ -344,7 +352,7 @@ pub(super) fn notify_callback(
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::Notify {
+        let _ = state.event_tx.blocking_send(RuntimeEvent::Notify {
             call_id: state.tool_call_id.clone(),
             text,
         });
@@ -390,7 +398,7 @@ pub(super) fn yield_control_callback(
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::YieldRequested);
+        let _ = state.event_tx.blocking_send(RuntimeEvent::YieldRequested);
     }
 }
 

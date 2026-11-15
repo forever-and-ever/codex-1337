@@ -24,7 +24,7 @@ impl AppServerSession {
             )
             .run()
             .await;
-        self.apply_session_observations(prepared.observations);
+        self.apply_session_observations(prepared.observations)?;
         prepared.result
     }
 
@@ -81,7 +81,7 @@ impl AppServerSession {
             )
             .run()
             .await;
-        self.apply_session_observations(prepared.observations);
+        self.apply_session_observations(prepared.observations)?;
         prepared.result
     }
 }

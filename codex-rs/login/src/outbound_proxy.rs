@@ -37,8 +37,11 @@ impl AuthRouteConfig {
     }
 
     /// Personal accounts have no cloud-managed policy. Share the live machine
-    /// restrictions, but revoke only this conversation's credentials on selection.
-    pub(crate) fn for_personal_account(&self) -> std::io::Result<Self> {
+    /// restrictions, but revoke only the selected account's credentials.
+    pub(crate) fn for_personal_account(
+        &self,
+        retained: Option<NetworkPolicy>,
+    ) -> std::io::Result<Self> {
         let factory = match &self.local_bootstrap_factory {
             Some(factory) => factory.clone(),
             None if !self.http_client_factory.network_policy().is_managed() => {
@@ -50,11 +53,14 @@ impl AuthRouteConfig {
                 ));
             }
         };
-        let policy = factory
-            .network_policy()
-            .clone()
-            .independent_account_scope()
-            .map_err(std::io::Error::other)?;
+        let policy = match retained {
+            Some(policy) => policy,
+            None => factory
+                .network_policy()
+                .clone()
+                .independent_account_scope()
+                .map_err(std::io::Error::other)?,
+        };
         Ok(Self {
             application_network_policy: policy.clone(),
             http_client_factory: factory.clone().with_network_policy(policy),

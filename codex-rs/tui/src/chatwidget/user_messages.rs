@@ -65,6 +65,7 @@ pub(super) enum ShellEscapePolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum UserMessageSource {
     Prompt,
+    SafetyRecourse,
     QuestionAnswer,
 }
 
@@ -85,10 +86,22 @@ pub(super) struct QueuedUserMessage {
     pub(super) delivery: MessageDelivery,
     pub(super) pending_pastes: Vec<(String, String)>,
     pub(super) source: UserMessageSource,
+    #[serde(
+        default,
+        skip_serializing_if = "super::submission_dispatch::UserTurnDispatch::is_frontend"
+    )]
+    pub(super) dispatch: super::submission_dispatch::UserTurnDispatch,
     pub(super) history_record: UserMessageHistoryRecord,
 }
 
 impl QueuedUserMessage {
+    pub(super) fn unconfirmed_user_message_id(&self) -> Option<&str> {
+        match &self.delivery {
+            MessageDelivery::Unconfirmed(id) => id.as_deref(),
+            MessageDelivery::Unsent => None,
+        }
+    }
+
     pub(super) fn new(user_message: UserMessage, action: QueuedInputAction) -> Self {
         Self {
             user_message,
@@ -97,6 +110,7 @@ impl QueuedUserMessage {
             delivery: MessageDelivery::Unsent,
             pending_pastes: Vec::new(),
             source: UserMessageSource::Prompt,
+            dispatch: Default::default(),
             history_record: UserMessageHistoryRecord::UserMessageText,
         }
     }
@@ -151,6 +165,7 @@ impl ThreadComposerState {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ThreadInputState {
+    pub(crate) provider_error: Option<codex_app_server_protocol::ModelProviderError>,
     pub(crate) questions: Option<crate::bottom_pane::QuestionState>,
     pub(crate) pending_thread_settings:
         Option<codex_app_server_protocol::ThreadSettingsUpdatedNotification>,
@@ -201,11 +216,34 @@ impl From<&str> for UserMessage {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) enum SteerAdmission {
+    #[default]
+    Pending,
+    Deferred(String),
+    Published(String),
+}
+
+impl SteerAdmission {
+    pub(super) fn turn_id(&self) -> Option<&str> {
+        match self {
+            Self::Pending => None,
+            Self::Deferred(id) | Self::Published(id) => Some(id),
+        }
+    }
+
+    pub(super) fn was_published(&self) -> bool {
+        matches!(self, Self::Published(_))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PendingSteer {
     pub(crate) client_id: String,
     pub(super) items: Vec<UserInput>,
+    #[serde(default)]
+    pub(super) admission: SteerAdmission,
     pub(super) user_message: UserMessage,
     pub(super) history_record: UserMessageHistoryRecord,
     pub(super) source: UserMessageSource,
@@ -240,6 +278,7 @@ impl PendingSteer {
         ]);
         Self {
             client_id: self.client_id.clone(),
+            admission: self.admission.clone(),
             compare_key: ChatWidget::pending_steer_compare_key_from_items(&items),
             items,
             user_message,
@@ -901,6 +940,23 @@ impl ChatWidget {
 }
 
 impl ThreadInputState {
+    #[cfg(test)]
+    pub(crate) fn reconcile_confirmed_messages(&mut self, confirmed_ids: &[String]) {
+        if self
+            .input_queue
+            .pending_steer
+            .client_id()
+            .is_some_and(|id| confirmed_ids.iter().any(|confirmed| confirmed == id))
+        {
+            self.input_queue.pending_steer.set(None);
+        }
+        self.input_queue.queued_user_messages.retain(|message| {
+            !message
+                .unconfirmed_user_message_id()
+                .is_some_and(|id| confirmed_ids.iter().any(|confirmed| confirmed == id))
+        });
+    }
+
     pub(crate) fn has_unconfirmed_messages(&self) -> bool {
         self.input_queue.has_unconfirmed_messages()
     }

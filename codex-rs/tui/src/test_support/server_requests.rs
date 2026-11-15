@@ -62,11 +62,6 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
-use codex_app_server_protocol::ThreadLoadedListParams;
-use codex_app_server_protocol::ThreadLoadedListResponse;
-use codex_app_server_protocol::ThreadNameMode;
-use codex_app_server_protocol::ThreadSetNameParams;
-use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_app_server_protocol::ThreadSettingsUpdateResponse;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -107,42 +102,8 @@ impl AppServerSession {
             .run(),
         )
         .await;
-        self.apply_session_observations(prepared.observations);
+        self.apply_session_observations(prepared.observations)?;
         prepared.result
-    }
-
-    pub(crate) async fn fork_side_thread(
-        &mut self,
-        local_settings: &LocalSettings,
-        config: Config,
-        thread_id: ThreadId,
-        selected_profile: Option<&PermissionProfileSelection>,
-    ) -> Result<AppServerStartedThread> {
-        let prepared = Box::pin(
-            self.prepare_side_thread(
-                RequestPolicy::Unbounded,
-                local_settings,
-                config,
-                thread_id,
-                selected_profile,
-                Vec::new(),
-            )
-            .run(),
-        )
-        .await;
-        self.apply_session_observations(prepared.observations);
-        prepared.result
-    }
-
-    pub(crate) async fn thread_loaded_list(
-        &mut self,
-        params: ThreadLoadedListParams,
-    ) -> Result<ThreadLoadedListResponse> {
-        let request_id = RequestId::String(uuid::Uuid::new_v4().to_string());
-        self.request_handle()
-            .thread_loaded_list(request_id, params)
-            .await
-            .wrap_err("failed to list loaded threads from app server")
     }
 
     pub(crate) async fn thread_settings_update(
@@ -224,40 +185,6 @@ impl AppServerSession {
         thread_id: ThreadId,
     ) -> std::result::Result<(), TypedRequestError> {
         self.turn_interrupt(thread_id, String::new()).await
-    }
-
-    pub(crate) async fn thread_set_name(
-        &mut self,
-        thread_id: ThreadId,
-        name: String,
-    ) -> Result<String> {
-        self.thread_allocate_name(ThreadSetNameParams {
-            thread_id: thread_id.to_string(),
-            name,
-            naming_mode: Some(ThreadNameMode::Explicit),
-            conflict_thread_ids: None,
-        })
-        .await
-    }
-
-    pub(crate) async fn thread_allocate_name(
-        &mut self,
-        params: ThreadSetNameParams,
-    ) -> Result<String> {
-        let generated = params.naming_mode == Some(ThreadNameMode::Generated);
-        let requested_name = params.name.clone();
-        let request_id = RequestId::String(uuid::Uuid::new_v4().to_string());
-        let response: ThreadSetNameResponse = self
-            .request_handle()
-            .thread_allocate_name(request_id, params)
-            .await?;
-        match response.thread_name {
-            Some(name) => Ok(name),
-            None if generated => Err(color_eyre::eyre::eyre!(
-                "The connected server does not return allocated names. Upgrade the server to enable automatic titles."
-            )),
-            None => Ok(requested_name),
-        }
     }
 
     pub(crate) async fn thread_turns_page(

@@ -53,11 +53,14 @@ pub(crate) fn normalize(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
     models
         .into_iter()
         .filter(|model| model.slug.starts_with("claude-"))
-        .map(normalize_model_info)
+        .map(|model| normalize_model_info(model, codex_models_manager::ModelOrigin::Provider))
         .collect()
 }
 
-pub(crate) fn normalize_model_info(mut model: ModelInfo) -> ModelInfo {
+pub(crate) fn normalize_model_info(
+    mut model: ModelInfo,
+    origin: codex_models_manager::ModelOrigin,
+) -> ModelInfo {
     // Keep the established Code Mode surface while projecting native client tools.
     model.tool_mode = Some(ToolMode::CodeModeOnly);
     model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
@@ -84,7 +87,7 @@ pub(crate) fn normalize_model_info(mut model: ModelInfo) -> ModelInfo {
         root: Some(ROOT_AGENT_ROLE.to_string()),
         subagent: Some(SUBAGENT_ROLE.to_string()),
     });
-    if model.used_fallback_model_metadata {
+    if origin == codex_models_manager::ModelOrigin::Synthetic {
         // Missing metadata cannot establish a larger model's context entitlement.
         model.context_window = Some(200_000);
         model.max_context_window = Some(200_000);

@@ -76,7 +76,14 @@ impl App {
                 defaults,
             );
         }
-        self.apply_runtime_policy_overrides(&mut config, RuntimePolicyOverrideScope::ExplicitOnly)?;
+        let reviewer = config.approvals_reviewer;
+        if let Err(error) = self.apply_runtime_policy_overrides_with_reviewer(
+            &mut config,
+            RuntimePolicyOverrideScope::ExplicitOnly,
+            reviewer,
+        ) {
+            return Err(error);
+        }
         if let Some(defaults) = defaults.as_ref() {
             overlay_new_session_defaults(
                 &mut config,
@@ -85,6 +92,12 @@ impl App {
                 &self.harness_overrides,
             );
         }
+        apply_managed_new_thread_defaults(
+            &mut config,
+            app_server.managed_new_thread_defaults(),
+            &self.cli_kv_overrides,
+            &self.harness_overrides,
+        );
         Ok((config, local_settings))
     }
 }

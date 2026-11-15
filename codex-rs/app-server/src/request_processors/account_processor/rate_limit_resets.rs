@@ -11,6 +11,7 @@ const CONFIRMATION_CAPACITY: usize = 256;
 const RECONFIRM: &str = "Reset confirmation is no longer valid. A previous attempt's outcome may be unknown; read usage and reconfirm before starting another attempt.";
 
 struct ResetCreditAuthority {
+    config: Arc<Config>,
     auth_manager: Arc<AuthManager>,
     owner_generation: u64,
     scope: ResetCreditScope,
@@ -123,11 +124,13 @@ impl AccountRequestProcessor {
         }
         let scope =
             reset_credit_scope(params.thread_id.as_deref(), params.new_thread.as_ref()).ok()?;
+        let config = Arc::new(self.load_latest_config().await);
         Some(
             self.reset_credit_confirmations
                 .lock()
                 .await
                 .insert(ResetCreditAuthority {
+                    config,
                     auth_manager,
                     owner_generation,
                     scope,
@@ -245,8 +248,8 @@ impl AccountRequestProcessor {
         if authority.auth_manager.is_account_scoped() {
             authority.auth_manager.reload().await;
         }
-        let Some((auth, http_client_factory)) =
-            authority.auth_manager.auth_with_http_client_factory().await
+        let credentials = Self::captured_backend_credentials(&authority.auth_manager)?;
+        let Some((auth, http_client_factory)) = credentials.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(RECONFIRM));
         };
@@ -272,11 +275,8 @@ impl AccountRequestProcessor {
             return Err(invalid_request(RECONFIRM));
         }
         // The factory revokes captured credentials if their owner changes after validation.
-        Ok(BackendClient::from_auth(
-            self.config.chatgpt_base_url.clone(),
-            &auth,
-            http_client_factory,
-        ))
+        self.backend_client_for_config(&authority.config, &credentials, &auth, http_client_factory)
+            .await
     }
 }
 

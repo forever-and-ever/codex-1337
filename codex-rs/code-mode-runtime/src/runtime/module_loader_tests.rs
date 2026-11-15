@@ -23,7 +23,7 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     let (runtime_command_tx, _runtime_command_rx) = std_mpsc::channel();
     scope.set_slot(RuntimeState {
-        event_tx,
+        event_tx: event_tx.into(),
         pending_tool_calls: HashMap::new(),
         pending_timeouts: HashMap::new(),
         stored_values: HashMap::new(),
@@ -101,7 +101,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         ("write_stdin", ToolName::plain("write_stdin")),
     ];
     scope.set_slot(RuntimeState {
-        event_tx,
+        event_tx: event_tx.into(),
         pending_tool_calls: HashMap::new(),
         pending_timeouts: HashMap::new(),
         stored_values: HashMap::new(),

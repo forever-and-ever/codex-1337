@@ -33,7 +33,10 @@ use codex_execpolicy::Policy;
 use codex_execpolicy::RuleMatch;
 use codex_features::Feature;
 use codex_model_provider::create_model_provider;
+use codex_network_proxy::EnvironmentNetworkPolicy;
 use codex_network_proxy::NetworkDecision;
+use codex_network_proxy::NetworkDecisionSource;
+use codex_network_proxy::NetworkPolicyDecision;
 use codex_network_proxy::NetworkPolicyRequest;
 use codex_network_proxy::NetworkProtocol;
 use codex_protocol::config_types::ApprovalsReviewer;
@@ -43,6 +46,7 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::NetworkPermissions;
 use codex_protocol::models::ResponseInputItem;
+use codex_protocol::network_policy::NetworkPolicyDecisionPayload;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
@@ -175,6 +179,22 @@ async fn next_exec_approval(
     .expect("captured action should request user approval")
 }
 
+async fn make_guardian_session_and_context(base_url: String) -> (Session, TurnContext) {
+    let (session, turn, _) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model_provider.base_url = Some(base_url);
+            config.model_provider.supports_websockets = false;
+        },
+    )
+    .await;
+    (
+        Arc::into_inner(session).expect("unshared fixture session"),
+        Arc::into_inner(turn).expect("unshared fixture turn"),
+    )
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
     let server = start_mock_server().await;
@@ -200,7 +220,8 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
     )
     .await;
 
-    let (mut session, mut turn_context_raw) = make_session_and_context().await;
+    let (mut session, mut turn_context_raw) =
+        make_guardian_session_and_context(format!("{}/v1", server.uri())).await;
     update_turn_settings_for_test(&mut turn_context_raw, |settings| {
         Arc::make_mut(&mut settings.model_info).node_repl_auto_review_required = true;
     });
@@ -558,7 +579,8 @@ async fn guardian_allows_exec_command_additional_permissions_requests_past_polic
     )
     .await;
 
-    let (mut session, mut turn_context_raw) = make_session_and_context().await;
+    let (mut session, mut turn_context_raw) =
+        make_guardian_session_and_context(format!("{}/v1", server.uri())).await;
     Arc::make_mut(&mut turn_context_raw.config)
         .permissions
         .approval_policy
@@ -617,6 +639,7 @@ async fn guardian_allows_exec_command_additional_permissions_requests_past_polic
             call_id: "test-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            native_call: None,
             environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
@@ -664,7 +687,8 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_exec_command_policy_s
     )
     .await;
 
-    let (mut session, mut turn_context_raw) = make_session_and_context().await;
+    let (mut session, mut turn_context_raw) =
+        make_guardian_session_and_context(format!("{}/v1", server.uri())).await;
     session.record_granted_request_permissions_for_turn(
         &RequestPermissionsResponse {
             permissions: RequestPermissionProfile {
@@ -743,6 +767,7 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_exec_command_policy_s
             call_id: "strict-shell-command-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: ToolCallSource::Direct,
+            native_call: None,
             environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
@@ -897,6 +922,7 @@ async fn delayed_exec_command_uses_its_captured_authority_after_next_turn_starts
         call_id: call_id.to_string(),
         tool_name: codex_tools::ToolName::plain("exec_command"),
         source: ToolCallSource::Direct,
+        native_call: None,
         environments: Default::default(),
         payload: ToolPayload::Function {
             arguments: serde_json::json!({
@@ -985,7 +1011,14 @@ async fn sandbox_denied_retry_uses_the_action_policy_and_reviewer() {
                         exit_code: 1,
                         ..Default::default()
                     }),
-                    network_policy_decision: None,
+                    network_policy_decision: Some(NetworkPolicyDecisionPayload {
+                        decision: NetworkPolicyDecision::Ask,
+                        source: NetworkDecisionSource::Decider,
+                        protocol: Some(NetworkApprovalProtocol::Https),
+                        host: Some("example.com".to_string()),
+                        port: Some(443),
+                        reason: None,
+                    }),
                 })));
             }
             Ok("sandbox-retry-succeeded".to_string())
@@ -1010,11 +1043,19 @@ async fn sandbox_denied_retry_uses_the_action_policy_and_reviewer() {
         call_id: call_id.to_string(),
         tool_name: codex_tools::ToolName::plain("exec_command"),
     };
-    let environment = context
+    let mut environment = context
         .step_context
         .environments
         .primary()
-        .expect("primary environment");
+        .expect("primary environment")
+        .clone();
+    environment.config_mut().network_policy = Some(EnvironmentNetworkPolicy::from_config(
+        &NetworkProxyConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        /*managed_allowed_domains_only*/ false,
+    ));
     let mut orchestrator = ToolOrchestrator::new();
     let mut runtime = DeniedOnceRuntime::default();
     let approve = async {
@@ -1022,16 +1063,30 @@ async fn sandbox_denied_retry_uses_the_action_policy_and_reviewer() {
         assert_eq!(approval.call_id, call_id);
         assert_eq!(approval.turn_id, action_turn.sub_id);
         assert_eq!(
-            approval.reason.as_deref(),
-            Some("command failed; retry without sandbox?")
+            approval.network_approval_context,
+            Some(NetworkApprovalContext {
+                host: "example.com".to_string(),
+                protocol: NetworkApprovalProtocol::Https,
+            })
         );
         session
-            .notify_approval(call_id, ReviewDecision::Approved)
+            .resolve_exec_approval(
+                approval.call_id.clone(),
+                Some(current_turn.sub_id.clone()),
+                ReviewDecision::Abort,
+            )
+            .await;
+        session
+            .resolve_exec_approval(
+                approval.call_id,
+                Some(approval.turn_id),
+                ReviewDecision::Approved,
+            )
             .await;
     };
 
     let (output, ()) = tokio::join!(
-        orchestrator.run(&mut runtime, environment, &context),
+        orchestrator.run(&mut runtime, &environment, &context),
         approve
     );
     assert_eq!(
@@ -1075,6 +1130,7 @@ async fn guardian_allows_unified_exec_additional_permissions_requests_past_polic
             call_id: "exec-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            native_call: None,
             environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
@@ -1201,6 +1257,7 @@ async fn exec_command_allows_sticky_turn_permissions_without_inline_request_perm
             call_id: "sticky-turn-grant".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            native_call: None,
             environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
@@ -1307,6 +1364,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         instructions: Default::default(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         auth_manager,
+        runtime_auth: Default::default(),
         models_manager,
         git_root_discovery: Arc::default(),
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),

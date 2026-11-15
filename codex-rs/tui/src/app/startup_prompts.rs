@@ -305,10 +305,13 @@ pub(super) async fn handle_model_migration_prompt_if_needed(
     config: &mut Config,
     local_settings: &crate::local_settings::LocalSettings,
     launch_choices: &mut crate::app_server_session::StartupLaunchChoices,
-    model: &str,
+    model: Option<&str>,
     app_event_tx: &AppEventSender,
     available_models: &[ModelPreset],
 ) -> std::io::Result<Option<AppExitInfo>> {
+    let Some(model) = model else {
+        return Ok(None);
+    };
     let upgrade = model_upgrade_for_migration(&config.model_provider_id, model, available_models);
 
     if let Some(ModelUpgrade {

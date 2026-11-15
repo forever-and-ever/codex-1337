@@ -43,18 +43,23 @@ impl AppsRequestProcessor {
         let mut snapshot_age = None;
         let mut snapshot_tool_count = 0;
         let result = async {
-            let AppsContext { config, auth_manager, mcp_manager, .. } = self
-                .load_apps_context(params.thread_id.as_deref())
-                .await?;
+            let AppsContext {
+                config,
+                auth_source,
+                runtime,
+                mcp_manager,
+                thread_mcp,
+                ..
+            } = self.load_apps_context(params.thread_id.as_deref()).await?;
+            auth_source
+                .validate()
+                .map_err(|error| internal_error(error.to_string()))?;
+            let auth_manager = auth_source.credentials();
             let auth = auth_manager.auth().await;
             let runtime_enabled = config
                 .features
                 .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend));
 
-            let thread = match params.thread_id.as_deref() {
-                Some(id) => Some(self.load_thread(id).await?.1),
-                None => None,
-            };
             let cache_key = connector_runtime_context_key(auth.as_ref());
             let previous_snapshot = mcp_manager
                 .codex_apps_tools_cache()
@@ -62,16 +67,17 @@ impl AppsRequestProcessor {
             let mut model_visible_tool_names = None;
             let tools = if force_refresh && runtime_enabled {
                 let refresh_result = async {
-                    if let Some(thread) = thread {
-                        let snapshot = thread.refresh_codex_apps_tools().await?;
-                        model_visible_tool_names = Some(snapshot.model_visible_tool_names);
-                        snapshot_age = Some(Duration::ZERO);
-                        return Ok(snapshot.tools);
-                    }
-                    let mcp_config = mcp_manager.runtime_config(&config).await;
+                    let mcp_config = match &thread_mcp {
+                        Some((_, mcp_config)) => Arc::clone(mcp_config),
+                        None => Arc::new(mcp_manager.runtime_config(&config).await),
+                    };
                     let mut mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
                     mcp_servers.retain(|name, _| name == CODEX_APPS_MCP_SERVER_NAME);
-                    let mcp_config = Arc::new(mcp_config.for_threadless_operations(&mcp_servers));
+                    let mcp_config = if thread_mcp.is_some() {
+                        mcp_config
+                    } else {
+                        Arc::new(mcp_config.for_threadless_operations(&mcp_servers))
+                    };
                     anyhow::ensure!(
                         !mcp_servers.is_empty(),
                         "host-owned MCP server '{CODEX_APPS_MCP_SERVER_NAME}' is not enabled"
@@ -90,6 +96,9 @@ impl AppsRequestProcessor {
                             .then(|| Arc::clone(&auth_manager));
                     let runtime = McpRuntime::new(McpRuntimeInput {
                         network_policy_metadata: None,
+                        runtime_auth: runtime.map(|(manager, mode)| {
+                            (Arc::new(std::sync::OnceLock::from(manager)), mode)
+                        }),
                         startup_policy: McpStartupPolicy::Eager,
                         config: Arc::clone(&mcp_config),
                         plugins_available: false,
@@ -111,20 +120,18 @@ impl AppsRequestProcessor {
                     .await;
 
                     let result = if runtime
-                        .latest_wait_for_server_ready(
-                            CODEX_APPS_MCP_SERVER_NAME,
-                            startup_timeout,
-                        )
+                        .latest_wait_for_server_ready(CODEX_APPS_MCP_SERVER_NAME, startup_timeout)
                         .await
                     {
-                        mcp_manager
-                            .codex_apps_tools_cache()
-                            .current_snapshot(config.codex_home.to_path_buf(), cache_key.clone())
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "hosted connector refresh completed without publishing a snapshot"
-                                )
-                            })
+                        let snapshot = match runtime.apps_tool_snapshot_from_mcp_client().await {
+                            Some(snapshot) => Ok(Some(snapshot)),
+                            None => runtime.capture_apps_tool_refresh().await,
+                        };
+                        snapshot.and_then(|snapshot| {
+                            snapshot.ok_or_else(|| anyhow::anyhow!(
+                                "hosted connector refresh completed without publishing a snapshot"
+                            ))
+                        })
                     } else {
                         Err(anyhow::anyhow!(
                             "failed to refresh tools for MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"
@@ -133,8 +140,14 @@ impl AppsRequestProcessor {
                     cancellation_token.cancel();
                     runtime.shutdown().await;
                     result.map(|snapshot| {
-                        snapshot_age = Some(snapshot.age());
-                        snapshot.tools().to_vec()
+                        snapshot_age = Some(Duration::ZERO);
+                        model_visible_tool_names = Some(snapshot.model_visible_tool_names);
+                        if let Some((thread, _)) = &thread_mcp {
+                            thread.mark_mcp_runtime_dirty(
+                                codex_core::McpRefreshReason::CodexAppsToolRefresh,
+                            );
+                        }
+                        snapshot.tools
                     })
                 }
                 .await;

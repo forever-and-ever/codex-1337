@@ -3,6 +3,7 @@
 
 use super::super::App;
 use super::super::agents_overview::AgentsOverviewState;
+use super::super::agents_overview_discovery::matches_query;
 use super::AgentsOverviewGroup;
 use super::AgentsOverviewGrouping;
 use super::AgentsOverviewView;
@@ -25,7 +26,7 @@ impl AgentsOverviewView {
             .is_some_and(|ranks| ranks.contains_key(&self.rows[index].thread_id))
     }
 
-    pub(super) fn visible_indices(&self) -> Vec<usize> {
+    pub(in crate::app) fn visible_indices(&self) -> Vec<usize> {
         let state = self.state();
         let search = state.search.to_lowercase();
         let (_, status_group) = super::command_center::TASK_FILTERS[state.status_filter];
@@ -34,16 +35,10 @@ impl AgentsOverviewView {
             .iter()
             .enumerate()
             .filter_map(|(index, row)| {
-                let searchable = format!(
-                    "{} {} {}",
-                    row.thread.name.as_deref().unwrap_or_default(),
-                    row.thread.preview,
-                    row.thread.cwd.display(),
-                )
-                .to_lowercase();
-                ((search.is_empty() || searchable.contains(&search))
-                    && (state.rename_target == Some(row.thread_id)
-                        || status_group.is_none_or(|group| group == row.group)))
+                (state.rename_target == Some(row.thread_id)
+                    || (state.includes_row(row)
+                        && (search.is_empty() || matches_query(&row.thread, &search))
+                        && status_group.is_none_or(|group| group == row.group)))
                 .then_some(index)
             })
             .partition(|index| self.is_pinned(*index));
@@ -79,7 +74,12 @@ impl AgentsOverviewView {
                     )
                 });
             }
-            AgentsOverviewGrouping::Status => {}
+            AgentsOverviewGrouping::Status => {
+                pinned.extend(visible);
+                // Stable grouping preserves pin order, then the supplied newest-first order.
+                pinned.sort_by_key(|index| self.rows[*index].group);
+                return pinned;
+            }
             AgentsOverviewGrouping::Model => visible.sort_by_key(|index| {
                 (
                     model_name(&self.rows[*index].thread),
@@ -97,14 +97,14 @@ impl AgentsOverviewView {
         left: usize,
         right: usize,
     ) -> bool {
-        if self.is_pinned(left) || self.is_pinned(right) {
-            return self.is_pinned(left) && self.is_pinned(right);
-        }
         match grouping {
+            AgentsOverviewGrouping::Status => self.rows[left].group == self.rows[right].group,
+            _ if self.is_pinned(left) || self.is_pinned(right) => {
+                self.is_pinned(left) && self.is_pinned(right)
+            }
             AgentsOverviewGrouping::Project => {
                 self.project_groups[left].key == self.project_groups[right].key
             }
-            AgentsOverviewGrouping::Status => self.rows[left].group == self.rows[right].group,
             AgentsOverviewGrouping::Model => {
                 model_name(&self.rows[left].thread) == model_name(&self.rows[right].thread)
             }

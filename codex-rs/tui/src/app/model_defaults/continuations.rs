@@ -7,12 +7,6 @@ use super::Result;
 use super::WriteStatus;
 
 impl App {
-    pub(in crate::app) fn reject_cloud_model_fallback(&mut self) {
-        self.chat_widget.add_error_message(
-            "This cloud conversation does not support changing its model from the TUI.".into(),
-        );
-    }
-
     pub(in crate::app) fn queue_model_defaults<A>(
         &mut self,
         server: &AppServerSession,

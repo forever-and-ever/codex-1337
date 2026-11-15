@@ -21,6 +21,7 @@ async fn queued_edit_acknowledgement_preserves_the_original_threads_draft() -> R
     .await?;
     let original = ThreadId::new();
     let item = QueuedSubmission {
+        responsesapi_client_metadata: None,
         id: "incoming".into(),
         client_user_message_id: "incoming".into(),
         input: Vec::new(),
@@ -94,12 +95,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let mut tui = tui::test_support::make_test_tui()?;
     let started = Box::pin(server.start_thread(&app.config)).await?;
     let thread_id = started.session.thread_id;
-    app.replace_chat_widget_with_app_server_thread(
+    Box::pin(app.replace_chat_widget_with_app_server_thread(
         &mut tui,
         started,
         ThreadAttachPresentation::SessionLineage,
         None,
-    )
+    ))
     .await?;
     while events.try_recv().is_ok() {}
     // A stalled typed request must not hold the UI task. Its synchronous
@@ -278,10 +279,21 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     )
     .message;
     app.chat_widget.snapshot_local_images = false;
-    let first = app
-        .chat_widget
-        .submit_user_message_as_plain_user_turn(rich_prompt.clone())
+    app.chat_widget
+        .submit_plain_user_turn_to(thread_id, rich_prompt.clone())
         .expect("submit ordinary prompt");
+    let first = std::iter::from_fn(|| events.try_recv().ok())
+        .find_map(|event| match event {
+            AppEvent::SubmitThreadOp {
+                thread_id: target,
+                op: op @ AppCommand::UserTurn { .. },
+            } => {
+                assert_eq!(target, thread_id);
+                Some(op)
+            }
+            _ => None,
+        })
+        .expect("captured ordinary prompt");
     // This failed against the synchronous routing: no subsequent App event could be serviced.
     time::timeout(
         Duration::from_secs(5),
@@ -1247,13 +1259,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .session
         .thread_id;
     app.ensure_thread_channel(closing_side).mark_live();
-    app.side_threads.insert(
-        closing_side,
-        SideThreadState {
-            parent_thread_id: other_id,
-            parent_status: None,
-        },
-    );
+    app.side_threads
+        .insert(closing_side, SideThreadState::new(other_id));
     app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
         .await?;
     app.enqueue_subagent_turn(

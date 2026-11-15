@@ -34,7 +34,10 @@ impl ChatWidget {
 
 impl ThreadInputState {
     pub(crate) fn has_unsent_input(&self) -> bool {
-        self.composer.is_some()
+        self.composer
+            .as_ref()
+            .is_some_and(super::user_messages::ThreadComposerState::has_content)
+            || self.initial_user_message.is_some()
             || self
                 .questions
                 .as_ref()

@@ -5,9 +5,12 @@ use super::super::rmcp_client::remote_aware_stdio_server_bin;
 use anyhow::Result;
 use codex_core::ConfigRefreshOutcome;
 use codex_features::Feature;
+use codex_protocol::mcp::McpServerConnectionStatus;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::McpStartupStatus;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::mock_server;
@@ -62,7 +65,7 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
         );
     }
     let catalog = serde_json::from_value(json!(messages))?;
-    let test = test_codex()
+    let mut test = test_codex()
         .with_config(move |config| {
             super::configure_scenario_catalog(config);
             config.code_mode.disable_in_process_fallback = true;
@@ -80,6 +83,14 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
                         "cwd": config.cwd,
                     }))
                     .expect("MCP resource fixture"),
+                ), (
+                    "known_resources".to_string(),
+                    serde_json::from_value(json!({
+                        "command": command,
+                        "environment_id": remote_aware_environment_id(),
+                        "cwd": config.cwd,
+                    }))
+                    .expect("known resource capability fixture"),
                 )]))
                 .expect("configure resources server");
         })
@@ -95,36 +106,99 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
         .build_with_auto_env(&server)
         .await?;
     wait_for_mcp_server(&test.codex, "resources").await?;
-    let mut events = vec![responses::ev_response_created("resources-response")];
-    events.extend(if tool_mode == ToolMode::CodeModeOnly {
-        let script = calls
-            .iter()
-            .map(|(name, arguments)| {
-                format!("text(describe_tool(\"{name}\"));\ntext(await tools.{name}({arguments}));")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        vec![responses::ev_custom_tool_call(
-            "resources-call",
-            "exec",
-            &script,
-        )]
-    } else {
-        calls
-            .iter()
-            .map(|(name, arguments)| responses::ev_function_call(name, name, arguments))
-            .collect()
-    });
-    events.push(responses::ev_completed("resources-response"));
+    let mut options = test.start_thread_options().await;
+    options.session_source = Some(SessionSource::SubAgent(SubAgentSource::Other(
+        "resource-discovery".to_string(),
+    )));
+    test.codex = test.thread_manager.start_thread(options).await?.thread;
+    // Fork resource helpers require a known resource-capable connection. Admit one
+    // explicitly while leaving the discovery target dormant in this child.
+    test.codex.call_mcp_tool(
+        "known_resources",
+        "echo",
+        Some(json!({"message": "discover the resource capability"})),
+        None,
+    ).await?;
+    let resource_calls = |id: &str, calls: &[(&str, &str)]| {
+        let mut events = vec![responses::ev_response_created(id)];
+        if tool_mode == ToolMode::CodeModeOnly {
+            let script = calls
+                .iter()
+                .map(|(name, args)| format!("text(describe_tool(\"{name}\"));\ntext(await tools.{name}({args}));"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            events.push(responses::ev_custom_tool_call(id, "exec", &script));
+        } else {
+            events.extend(calls.iter().map(|(name, args)| {
+                responses::ev_function_call(&format!("{id}-{name}"), name, args)
+            }));
+        }
+        events.push(responses::ev_completed(id));
+        responses::sse(events)
+    };
+    let broad = [
+        ("list_mcp_resources", "{}"),
+        ("list_mcp_resource_templates", "{}"),
+    ];
     let mock = responses::mount_sse_sequence(
         &server,
-        vec![responses::sse(events), responses::sse_completed("done")],
+        vec![
+            resource_calls("broad", &broad),
+            responses::sse_completed("broad-done"),
+            resource_calls("resources-call", &calls),
+            responses::sse_completed("done"),
+        ],
     )
     .await;
-    test.submit_turn("List the available resources and templates, then read the example note.")
+    test.submit_turn("List available MCP resources and templates.")
+        .await?;
+    let (config, _) = test.codex.current_mcp_config_and_runtime_context().await;
+    assert_eq!(
+        test.codex
+            .mcp_connection_statuses(&config)
+            .await
+            .get("resources"),
+        Some(&McpServerConnectionStatus::NotStarted)
+    );
+    test.submit_turn("Query the deferred server by name and read its example note.")
         .await?;
     let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 4);
+    if tool_mode == ToolMode::Direct {
+        for (tool, key) in [
+            ("list_mcp_resources", "resources"),
+            ("list_mcp_resource_templates", "resourceTemplates"),
+        ] {
+            let output = requests[1]
+                .function_call_output_text(&format!("broad-{tool}"))
+                .expect("aggregate result");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&output)?,
+                json!({
+                    key: [if key == "resources" {
+                        json!({
+                            "server": "known_resources",
+                            "uri": "memo://codex/example-note",
+                            "name": "example-note",
+                            "title": "Example Note",
+                            "description": "A sample MCP resource exposed for integration tests.",
+                            "mimeType": "text/plain",
+                        })
+                    } else {
+                        json!({
+                            "server": "known_resources",
+                            "uriTemplate": "memo://codex/{slug}",
+                            "name": "codex-memo",
+                            "title": "Codex Memo",
+                            "description": "Template for memo://codex/{slug} resources used in tests.",
+                            "mimeType": "text/plain",
+                        })
+                    }],
+                    "deferredServers": ["resources"],
+                })
+            );
+        }
+    }
     let body = requests[0].body_json();
     for (name, message) in &messages {
         if tool_mode == ToolMode::CodeModeOnly {
@@ -134,7 +208,8 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
                 "- tools.{name}: {}",
                 message["description"].as_str().expect("description")
             )));
-            assert!(requests[1].body_contains_text(&format!("Catalog server for {name}.")));
+            let contract_request = if name == "read_mcp_resource" { &requests[3] } else { &requests[1] };
+            assert!(contract_request.body_contains_text(&format!("Catalog server for {name}.")));
         } else {
             let tool = body["tools"]
                 .as_array()
@@ -152,17 +227,17 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
             );
         }
     }
-    assert!(requests[1].body_contains_text("Example Note"));
-    assert!(requests[1].body_contains_text("memo://codex/{slug}"));
+    assert!(requests[3].body_contains_text("Example Note"));
+    assert!(requests[3].body_contains_text("memo://codex/{slug}"));
     assert!(
-        requests[1]
+        requests[3]
             .body_contains_text("This is a sample MCP resource served by the rmcp test server.")
     );
     if tool_mode == ToolMode::CodeModeOnly {
         insta::assert_snapshot!(
             "mcp_resource_messages",
             context_snapshot::format_request_history_snapshot(
-                "Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.",
+                "A known resource-capable connection enables resource helpers. Broad discovery retains that connection's resources and names a second dormant server; calling the dormant server by name returns its resources and templates through Code Mode.",
                 &requests,
                 &ContextSnapshotOptions::default().include_request_settings(),
             )

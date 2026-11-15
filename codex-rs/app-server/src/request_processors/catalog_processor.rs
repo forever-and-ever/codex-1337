@@ -184,24 +184,35 @@ impl CatalogRequestProcessor {
         let account_catalog::AccountCatalog {
             config,
             models_manager,
-            auth_manager,
+            provider,
         } = self.account_catalog(&params).await?;
-        // Credential refresh must use the same account and policy as catalog discovery.
-        if let Some(gateway) = codex_model_provider::create_model_provider(
-            config.model_provider.clone(),
-            Some(auth_manager),
-        )
-        .gateway_auth_manager()
-        .map_err(|error| internal_error(error.to_string()))?
+        // TELOS(pinned-accounts): credential refresh shares catalog discovery authority.
+        if let Some(gateway) = provider
+            .gateway_auth_manager()
+            .map_err(|error| internal_error(error.to_string()))?
         {
             self.config_manager
                 .check_thread_model_provider(&config)
                 .await
                 .map_err(|err| config_load_error(&err))?;
-            if gateway.resolve_access_token().await.is_err() {
-                return Err(invalid_request(
-                    "Gateway sign-in required or unavailable. Complete gateway sign-in and retry fetching the model list",
-                ));
+            if let Err(error) = gateway.resolve_access_token().await {
+                let current = self
+                    .config_manager
+                    .load_latest_config(/*fallback_cwd*/ None)
+                    .await
+                    .map_err(|err| config_load_error(&err))?;
+                // An explicit selection need not match the current default.
+                if current.model_providers.get(&config.model_provider_id)
+                    != Some(&config.model_provider)
+                    || (params.model_provider.is_none()
+                        && params.thread_id.is_none()
+                        && current.model_provider_id != config.model_provider_id)
+                {
+                    return Err(invalid_request(
+                        "Model provider settings changed. Restart Codex to apply them, then retry fetching the model list",
+                    ));
+                }
+                return Err(invalid_request(error.to_string()));
             }
         }
         self.list_models(params, config, models_manager)
@@ -599,6 +610,14 @@ impl CatalogRequestProcessor {
                         config.config_layer_stack,
                     )
                     .with_plugin_skill_snapshots(plugin_skill_snapshots);
+                    let skills_input = match self
+                        .thread_manager
+                        .environment_manager()
+                        .default_environment_id()
+                    {
+                        Some(environment_id) => skills_input.with_environment_id(environment_id),
+                        None => skills_input,
+                    };
                     let snapshot = skills_request
                         .snapshot_for_cwd(&skills_input, force_reload, fs)
                         .await;

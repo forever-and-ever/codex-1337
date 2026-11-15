@@ -75,9 +75,13 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     // neither trust stale signed-out flags nor create a conversation to discover identity.
     for command in ["/usage", "/usage daily"] {
         if command == "/usage daily" {
-            // Replacing the widget can lose its capabilities while retaining the account cache.
+            // A payer refresh cannot grant or revoke the connection's reported authority.
+            assert!(app.chat_widget.has_codex_backend_auth());
             app.chat_widget
-                .update_account_state(None, None, false, false);
+                .update_account_state(crate::app_server_session::SessionAccount {
+                    requires_openai_auth: app.chat_widget.requires_openai_auth(),
+                    ..Default::default()
+                });
         }
         while events.try_recv().is_ok() {}
         app.chat_widget.insert_str(command);
@@ -176,8 +180,10 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         name: app.config.model_provider.name.clone(),
     };
     app.chat_widget.insert_str("Keep this draft");
-    app.chat_widget
-        .attach_image(app.config.cwd.join("draft-image.png").to_path_buf());
+    app.chat_widget.attach_image(
+        app.config.cwd.join("draft-image.png").to_path_buf(),
+        crate::chatwidget::ClipboardPasteContext::Composer,
+    );
     let original_input = serde_json::to_value(app.chat_widget.capture_thread_input_state())?
         .get("composer")
         .expect("serialized composer")
@@ -336,7 +342,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     app.start_draft_session(&server);
     let started = time::timeout(Duration::from_secs(10), async {
         loop {
-            if let Some(AppEvent::StartupThreadStarted { result }) = events.recv().await {
+            if let Some(AppEvent::StartupThreadStarted { result, .. }) = events.recv().await {
                 break result;
             }
         }

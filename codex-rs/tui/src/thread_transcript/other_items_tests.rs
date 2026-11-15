@@ -75,6 +75,7 @@ fn completed_patch_restores_rich_diff_and_styles() {
         },
         &cwd,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
 
     assert_eq!(actual.len(), 1);
@@ -111,6 +112,7 @@ fn unfinished_and_rejected_patches_keep_their_outcome() {
             },
             &cwd,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         )
     })
     .flat_map(|cell| cell.display_lines(/*width*/ 80))
@@ -189,9 +191,12 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
     let rendered = items
         .into_iter()
         .flat_map(|item| {
-            cells(item, &cwd, &|_| {
-                crate::multi_agents::AgentMetadata::default()
-            })
+            cells(
+                item,
+                &cwd,
+                &|_| crate::multi_agents::AgentMetadata::default(),
+                crate::history_cell::ImagePathOrigin::Local,
+            )
         })
         .flat_map(|cell| cell.display_lines(/*width*/ 80))
         .map(|line| line.to_string())

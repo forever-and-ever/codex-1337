@@ -2,6 +2,7 @@
 
 use super::super::ThreadComposerState;
 use super::super::ThreadInputState;
+use super::super::submission_dispatch::UserTurnDispatch;
 use super::InputQueueState;
 use super::MessageDelivery;
 use super::PendingSteer;
@@ -96,6 +97,7 @@ impl LegacyInput {
                 delivery: message.delivery,
                 pending_pastes: message.pending_pastes,
                 source: message.source,
+                dispatch: UserTurnDispatch::default(),
                 history_record: history
                     .next()
                     .unwrap_or(UserMessageHistoryRecord::UserMessageText),
@@ -125,6 +127,7 @@ impl LegacyInput {
                     message,
                     history: UserMessageHistoryRecord::UserMessageText,
                     source: self.safety_buffering_source,
+                    dispatch: UserTurnDispatch::default(),
                 };
                 if pending {
                     UserTurnInput::AwaitingStart(PendingTurnStart::Submitted(input))
@@ -162,6 +165,7 @@ impl LegacyInput {
                     },
                 });
         Ok(ThreadInputState {
+            provider_error: None,
             questions: self.questions,
             pending_thread_settings: self.pending_thread_settings,
             initial_user_message: None,

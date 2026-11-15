@@ -467,7 +467,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
             .context("requested model absent from actual catalogue")?
             .clone();
         ensure!(
-            model.anthropic.is_some() && !model.used_fallback_model_metadata,
+            model.anthropic.is_some(),
             "missing native authoritative capabilities"
         );
         Ok(model)
@@ -711,7 +711,10 @@ async fn main() -> Result<()> {
         Arm::Full => 1200,
         Arm::Signed => 240,
     };
-    tokio::time::timeout(Duration::from_secs(deadline), run(&args, arm))
-        .await
-        .context("overall acceptance deadline; preserve unknown receipt, do not retry")?
+    Box::pin(tokio::time::timeout(
+        Duration::from_secs(deadline),
+        run(&args, arm),
+    ))
+    .await
+    .context("overall acceptance deadline; preserve unknown receipt, do not retry")?
 }

@@ -145,6 +145,7 @@ impl App {
         name: String,
         conflict_thread_ids: Vec<String>,
     ) {
+        let writer = app_server.manual_thread_name_writer(thread_id);
         self.enqueue_server_operation(
             app_server,
             thread_id,
@@ -156,6 +157,7 @@ impl App {
                     conflict_thread_ids: (!conflict_thread_ids.is_empty())
                         .then_some(conflict_thread_ids),
                 },
+                writer,
             )),
         );
     }

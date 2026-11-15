@@ -8,6 +8,8 @@ use codex_core::ThreadManager;
 use codex_core::TurnStartOptions;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::AdditionalContextEntry;
+use codex_protocol::protocol::AdditionalContextKind;
 use codex_protocol::protocol::ThreadGoal;
 
 use crate::accounting::BudgetLimitedGoalDisposition;
@@ -17,6 +19,7 @@ use crate::analytics::GoalEventAttribution;
 use crate::events::GoalEventEmitter;
 use crate::metrics::GoalMetrics;
 use crate::opening::ContinuationOpening;
+use crate::steering::GOAL_OBJECTIVE_CONTEXT;
 use crate::steering::objective_updated_steering_item;
 use crate::tool::protocol_goal_from_state;
 use tokio::sync::Semaphore;
@@ -505,7 +508,15 @@ impl GoalRuntimeHandle {
             .get::<TurnStartOptions>()
             .map(|options| options.as_ref().clone())
             .unwrap_or_default();
-        let request = opening.turn_input(&protocol_goal_from_state(goal));
+        let goal = protocol_goal_from_state(goal);
+        // TELOS(retained-goal-rules): retain the opening and carry the objective as untrusted data.
+        let request = opening.turn_input(&goal).with_additional_context(
+            [(
+                GOAL_OBJECTIVE_CONTEXT.to_owned(),
+                AdditionalContextEntry::new(goal.objective, AdditionalContextKind::Untrusted),
+            )]
+            .into(),
+        );
 
         match thread
             .start_turn_if_idle(request.on_start(TurnStartOptions {

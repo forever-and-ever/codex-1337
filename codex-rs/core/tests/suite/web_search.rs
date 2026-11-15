@@ -475,6 +475,7 @@ async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<(
     let test = builder.build_with_auto_env(&server).await?;
     let session_store = ExtensionData::new("search-session");
     let step_store = ExtensionData::new("search-step");
+    step_store.insert(WebSearchMode::Live);
     let executor = extensions
         .tool_contributors()
         .iter()

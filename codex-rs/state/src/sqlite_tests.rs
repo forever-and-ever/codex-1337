@@ -8,6 +8,67 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePoolOptions;
 
+#[tokio::test]
+async fn current_schema_opens_while_another_connection_has_writer_reservation() -> anyhow::Result<()>
+{
+    let home = tempfile::TempDir::new()?;
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    sqlite.is_nfs.set(/*value*/ true)?;
+    let migrator = crate::migrations::runtime_thread_history_migrator();
+    let pool = sqlite
+        .open_thread_history_db(&migrator, /*telemetry_override*/ None)
+        .await?;
+    let transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let reopened = sqlite
+        .open_thread_history_db(&migrator, /*telemetry_override*/ None)
+        .await?;
+    let check: String = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_one(&reopened)
+        .await?;
+    assert_eq!(check, "ok");
+    transaction.rollback().await?;
+    reopened.close().await;
+    pool.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_openers_apply_schema_migrations_once() -> anyhow::Result<()> {
+    let home = tempfile::TempDir::new()?;
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    sqlite.is_nfs.set(/*value*/ true)?;
+    let migrator = crate::migrations::runtime_thread_history_migrator();
+
+    let mut openers = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let sqlite = sqlite.clone();
+        openers.spawn(async move {
+            sqlite
+                .open_thread_history_db(
+                    &crate::migrations::runtime_thread_history_migrator(),
+                    /*telemetry_override*/ None,
+                )
+                .await
+        });
+    }
+    while let Some(result) = openers.join_next().await {
+        let pool = result??;
+        let versions =
+            sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            versions,
+            migrator
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>()
+        );
+        pool.close().await;
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn sqlite_home_filesystem_probe_is_shared_by_clones_until_config_replacement()

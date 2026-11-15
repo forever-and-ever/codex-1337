@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/agents_overview_actions_tests.rs
-assertion_line: 1000
 expression: "normalize_agent_center_snapshot(render_bottom_popup(&app.chat_widget, 80))"
 ---
   Agent command center  Group: Project  ⌃s
@@ -10,10 +9,10 @@ expression: "normalize_agent_center_snapshot(render_bottom_popup(&app.chat_widge
   /tmp/project  1
   › ■ Current task                                     Ready           2m ago
 
-
       Permanently delete “Current task”?
-      This stops any running work in this task and its child agents, then
-      permanently deletes their history. This cannot be undone.
+      This stops running work in this task and its child agents, then
+      permanently deletes their history and saved side conversations. This
+      cannot be undone.
 
 
     › 1. Cancel

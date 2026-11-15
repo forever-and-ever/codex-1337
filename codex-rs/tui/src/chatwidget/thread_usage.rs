@@ -100,7 +100,7 @@ impl ChatWidget {
             .thread_usage
             .estimate
             .as_ref()
-            .and_then(|estimate| thread_cost_micros(estimate, self.plan_type));
+            .and_then(|estimate| thread_cost_micros(estimate, self.current_plan_type()));
         self.schedule_next_thread_usage_settlement();
         self.request_thread_usage();
     }
@@ -255,7 +255,7 @@ impl ChatWidget {
                     usage.groups.clone_from(&previous_usage.groups);
                 }
                 let estimated_credits_micros = usage.estimated_usage_credits_micros;
-                let estimated_usd_micros = thread_cost_micros(&usage, self.plan_type);
+                let estimated_usd_micros = thread_cost_micros(&usage, self.current_plan_type());
                 self.thread_usage.estimate = Some(usage);
                 if let Some(baseline) = self.thread_usage.settlement_baseline_credits_micros {
                     if !post_turn_request {
@@ -271,8 +271,9 @@ impl ChatWidget {
                     } else {
                         let mut selected = self.selected_thread_usage();
                         if !self.thread_usage.status_history_handles.is_empty() {
-                            selected.credits = self.plan_type != Some(PlanType::Ent26);
-                            selected.estimated_cost |= self.plan_type == Some(PlanType::Ent26)
+                            selected.credits = self.current_plan_type() != Some(PlanType::Ent26);
+                            selected.estimated_cost |= self.current_plan_type()
+                                == Some(PlanType::Ent26)
                                 || self.thread_usage.settlement_baseline_usd_micros.is_some()
                                 || estimated_usd_micros.is_some();
                         }
@@ -366,11 +367,11 @@ impl ChatWidget {
     }
 
     pub(super) fn thread_usage_is_available(&self) -> bool {
-        self.has_codex_backend_auth
+        self.has_codex_backend_auth()
             && !self.thread_usage.feature_disabled
             && self.thread_id.is_some()
             && matches!(
-                self.plan_type,
+                self.current_plan_type(),
                 Some(
                     PlanType::Ent26
                         | PlanType::Business
@@ -401,7 +402,7 @@ impl ChatWidget {
                 Ok(_) | Err(_) => {}
             }
         }
-        selected.credits &= self.plan_type != Some(PlanType::Ent26);
+        selected.credits &= self.current_plan_type() != Some(PlanType::Ent26);
         selected
     }
 

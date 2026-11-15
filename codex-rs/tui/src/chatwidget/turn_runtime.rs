@@ -45,7 +45,7 @@ impl ChatWidget {
     /// both the agent turn lifecycle and MCP startup lifecycle.
     pub(super) fn update_task_running_state(&mut self) {
         self.bottom_pane.set_task_running(
-            self.turn_lifecycle.agent_turn_running
+            self.turn_lifecycle.is_running_or_admitted()
                 || self.review.is_review_mode
                 || self.mcp_startup_status.is_some(),
         );
@@ -321,6 +321,12 @@ impl ChatWidget {
         None
     }
 
+    pub(crate) fn has_unsent_input(&self) -> bool {
+        !self.composer_is_empty()
+            || self.pending_image_submission.is_some()
+            || self.has_queued_follow_up_messages()
+    }
+
     pub(crate) fn has_queued_follow_up_messages(&self) -> bool {
         self.input_queue.has_queued_follow_up_messages()
     }
@@ -483,7 +489,7 @@ impl ChatWidget {
     pub(super) fn on_rate_limit_error(&mut self, error_kind: RateLimitErrorKind, message: String) {
         self.invalidate_ordinary_usage_recovery();
         // on_error can drain queued input, before the asynchronous recovery read completes.
-        self.input_queue.rate_limit_recovery_pending = self.has_chatgpt_account;
+        self.input_queue.rate_limit_recovery_pending = self.has_chatgpt_account();
         let usage_limit_error = matches!(error_kind, RateLimitErrorKind::UsageLimit);
         let rate_limit_reached_type = self.codex_rate_limit_reached_type.map(|kind| {
             if usage_limit_error {
@@ -528,7 +534,7 @@ impl ChatWidget {
         {
             self.open_workspace_owner_nudge_prompt(credit_type);
         }
-        if self.has_chatgpt_account {
+        if self.has_chatgpt_account() {
             self.app_event_tx.send(AppEvent::RefreshRateLimits {
                 origin: crate::app_event::RateLimitRefreshOrigin::Recovery,
             });

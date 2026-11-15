@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=70cf560d900a97f2):
-        - namespace/functions; hash=69754f4116ee673a
+00:additional_tools/developer (2; hash=72529de808544ed0):
+        - namespace/functions; hash=4d0a71fea423ba22
           - custom/python
           - custom/bash
           - function/exec_command
@@ -93,8 +93,8 @@ Settings:
 ## Window 2 (after request 3: input repeated)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=70cf560d900a97f2):
-        - namespace/functions; hash=69754f4116ee673a
+00:additional_tools/developer (2; hash=72529de808544ed0):
+        - namespace/functions; hash=4d0a71fea423ba22
           - custom/python
           - custom/bash
           - function/exec_command

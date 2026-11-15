@@ -12,14 +12,19 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> Result<()> {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None,
-        Some(PlanType::Business),
-        /*has_chatgpt_account*/ false,
-        /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Headers,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: None,
+            plan: Some(PlanType::Business),
+            requires_openai_auth: false,
+        });
     let selected = ThreadId::from_u128(/*value*/ 1);
     let other = ThreadId::new();
     let threads = [(selected, "Review parser"), (other, "Other task")].map(|(id, name)| {
@@ -100,7 +105,8 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
         &app_server,
         request_id,
         Ok(AgentsOverviewThreadRefresh {
-            threads: HashMap::from([(selected, Some(threads[0].clone()))]),
+            cleared_unread: Vec::new(),
+            threads: HashMap::from([(selected, Some((threads[0].clone(), false, None)))]),
             last_messages: HashMap::new(),
             recent_seed_complete: true,
             discovery: None,
@@ -200,12 +206,17 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
         assert_eq!(app.agents_overview.pending_usage, None);
         assert!(!app.agents_overview.usage_disabled);
     }
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None,
-        Some(PlanType::Ent26),
-        /*has_chatgpt_account*/ false,
-        /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Headers,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: None,
+            plan: Some(PlanType::Ent26),
+            requires_openai_auth: false,
+        });
     let view = app.agents_overview_view(threads.to_vec(), Some(selected));
     app.agents_overview.visible_thread_ids = view.thread_ids();
     app.chat_widget.show_bottom_pane_view(Box::new(view));

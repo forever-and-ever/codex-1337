@@ -8,7 +8,7 @@ use tracing::info;
 use tracing::warn;
 
 pub(crate) async fn rate_limits_ok(provider: &CapturedProvider, config: &Config) -> bool {
-    if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+    if provider.info().adapter == ModelProviderAdapter::ClaudeSubscription {
         // No native quota endpoint is implemented; unrelated ChatGPT quota is not evidence.
         return true;
     }
@@ -16,22 +16,35 @@ pub(crate) async fn rate_limits_ok(provider: &CapturedProvider, config: &Config)
 }
 
 async fn rate_limits_check(provider: &CapturedProvider, config: &Config) -> Option<bool> {
-    let auth = match provider.request_auth().await {
-        Ok(auth) => auth?,
+    let setup = match codex_model_provider::resolve_request(
+        &***provider.provider(),
+        /*scope*/ None,
+        /*routing*/ None,
+        config.http_client_factory(),
+    )
+    .await
+    {
+        Ok(setup) => setup,
         Err(error) => {
             warn!(%error, "memory-job credentials are unavailable");
             return Some(false);
         }
     };
+    let auth = setup.auth?;
     if !auth.uses_codex_backend() {
         return None;
     }
 
-    let client = BackendClient::from_auth(
+    let client = BackendClient::from_auth_with_runtime(
         config.chatgpt_base_url.clone(),
         &auth,
-        config.http_client_factory(),
-    );
+        setup.http_client_factory,
+        provider.provider().credential_runtime(),
+        /*headers*/ &Default::default(),
+    )
+    .await
+    .map_err(|error| warn!(%error, "failed to prepare memory rate-limit authentication"))
+    .ok()?;
 
     let snapshots = client
         .get_rate_limits_many()

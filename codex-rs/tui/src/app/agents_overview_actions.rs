@@ -1,4 +1,4 @@
-//! Server RPCs own lifecycle outcomes; successful actions invalidate dashboard group caches.
+//! Server RPCs own lifecycle outcomes; cache cleanup follows the backend's removal scope.
 //! Keep the dashboard browsable during RPCs while deferring task notifications.
 //! Removing the current root leaves an unattached dashboard, even when it is empty.
 
@@ -135,6 +135,7 @@ impl App {
             .threads
             .get(&thread_id)
             .and_then(Option::as_ref)
+            .or_else(|| self.agents_overview.search_matches.get(&thread_id))
         else {
             return;
         };
@@ -153,7 +154,7 @@ impl App {
             ),
             AgentsOverviewAction::Delete => (
                 format!("Permanently delete “{name}”?"),
-                "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.",
+                "This stops running work in this task and its child agents, then permanently deletes their history and saved side conversations. This cannot be undone.",
                 "Permanently delete task and child agents",
             ),
         };

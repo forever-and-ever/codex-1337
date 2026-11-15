@@ -8,4 +8,8 @@ export type QueuedSubmission = { id: string, input: Array<UserInput>,
 /**
  * User-message identity, or the queue item ID for tool output (which emits no user message).
  */
-clientUserMessageId: string, toolOutput: TurnToolOutput | null, };
+clientUserMessageId: string, toolOutput: TurnToolOutput | null,
+/**
+ * Metadata retained with this input, including across reconnect and restoration.
+ */
+responsesapiClientMetadata: { [key in string]?: string } | null, };

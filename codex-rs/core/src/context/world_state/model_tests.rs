@@ -51,12 +51,20 @@ fn unchanged_model_does_not_render() {
 #[test]
 fn legacy_model_snapshot_keeps_its_window_until_model_change_or_compaction() {
     let legacy: ModelInstructionsSnapshot = serde_json::from_str("\"gpt-old\"").unwrap();
-    let same_model = ModelInstructionsState::for_incremental_tools("gpt-old", "new prompt".into());
+    let same_model = ModelInstructionsState::for_incremental_tools(
+        "gpt-old",
+        "new prompt".into(),
+        /*suppress_model_change_announcements*/ false,
+    );
     let (snapshot, updates) = same_model.render_diff(PreviousSectionState::Known(&legacy));
     assert!(snapshot.is_none());
     assert!(updates.is_empty());
 
-    let new_model = ModelInstructionsState::for_incremental_tools("gpt-new", "new prompt".into());
+    let new_model = ModelInstructionsState::for_incremental_tools(
+        "gpt-new",
+        "new prompt".into(),
+        /*suppress_model_change_announcements*/ false,
+    );
     let (snapshot, updates) = new_model.render_diff(PreviousSectionState::Known(&legacy));
     assert!(snapshot.is_some());
     assert_eq!(updates.len(), 1);
@@ -84,7 +92,11 @@ fn legacy_model_snapshot_keeps_its_window_until_model_change_or_compaction() {
             let mut state = crate::context::world_state::WorldState::default();
             if incremental {
                 state.add_instruction_section_with_identity(
-                    ModelInstructionsState::for_incremental_tools("gpt-old", text.to_string()),
+                    ModelInstructionsState::for_incremental_tools(
+                        "gpt-old",
+                        text.to_string(),
+                        false,
+                    ),
                     "base_instructions",
                 );
             } else {
@@ -153,12 +165,13 @@ fn legacy_model_snapshot_keeps_its_window_until_model_change_or_compaction() {
     let incremental = |model: &str, text: &str| {
         let mut state = crate::context::world_state::WorldState::default();
         state.add_instruction_section_with_identity(
-            ModelInstructionsState::for_incremental_tools(model, text.to_string()),
+            ModelInstructionsState::for_incremental_tools(model, text.to_string(), false),
             "base_instructions",
         );
-        state.add_section(crate::context::world_state::ModelIdentityState(
-            model.to_string(),
-        ));
+        state.add_section(crate::context::world_state::ModelIdentityState {
+            model: model.to_string(),
+            suppress_model_change_announcements: false,
+        });
         state
     };
     let (previous, initial) = incremental("gpt-old", "initial base").render_full();
@@ -212,4 +225,50 @@ fn legacy_model_snapshot_keeps_its_window_until_model_change_or_compaction() {
             ))]
         );
     }
+}
+
+#[test]
+fn suppressed_model_changes_advance_snapshot_without_repeated_updates() {
+    let initial = ModelInstructionsState::for_incremental_tools(
+        "gpt-old",
+        "instructions".into(),
+        /*suppress_model_change_announcements*/ true,
+    );
+    let (snapshot, _) = initial.render_diff(PreviousSectionState::Absent);
+    let previous = snapshot.unwrap();
+    let switched = ModelInstructionsState::for_incremental_tools(
+        "gpt-new",
+        "instructions".into(),
+        /*suppress_model_change_announcements*/ true,
+    );
+    let (snapshot, updates) = switched.render_diff(PreviousSectionState::Known(&previous));
+    assert!(updates.is_empty());
+    let snapshot = snapshot.unwrap();
+    assert_eq!(snapshot, switched.snapshot);
+    let (unchanged, updates) = switched.render_diff(PreviousSectionState::Known(&snapshot));
+    assert!(unchanged.is_none());
+    assert!(updates.is_empty());
+    // The fork's independent identity section must obey the same announcement policy.
+    let mut state = crate::context::world_state::WorldState::default();
+    state.add_instruction_section_with_identity(initial, "base_instructions");
+    state.add_section(crate::context::world_state::ModelIdentityState {
+        model: "gpt-old".into(),
+        suppress_model_change_announcements: true,
+    });
+    let (previous, initial) = state.render_full();
+    let history = crate::context_manager::updates::merge_world_state_updates(initial);
+    let mut state = crate::context::world_state::WorldState::default();
+    state.add_instruction_section_with_identity(switched, "base_instructions");
+    state.add_section(crate::context::world_state::ModelIdentityState {
+        model: "gpt-new".into(),
+        suppress_model_change_announcements: true,
+    });
+    let (snapshot, updates) = state.render_history_diff(Some(&previous), &history);
+    assert!(updates.is_empty());
+    assert!(
+        state
+            .render_history_diff(Some(&snapshot), &history)
+            .1
+            .is_empty()
+    );
 }

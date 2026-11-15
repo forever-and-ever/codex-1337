@@ -416,6 +416,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
 
     chat.restore_thread_input_state(
         Some(ThreadInputState {
+            provider_error: None,
             pending_thread_settings: None,
             questions: None,
             initial_user_message: None,
@@ -986,6 +987,7 @@ async fn ctrl_c_restores_pending_steer_mention_bindings_to_composer() {
         )],
         Vec::new(),
         mention_bindings.clone(),
+        crate::bottom_pane::ShellPrefixHandling::Interpret,
     );
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 

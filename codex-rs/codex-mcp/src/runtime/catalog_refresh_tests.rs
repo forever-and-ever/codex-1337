@@ -1,6 +1,5 @@
 use super::*;
 use crate::connection_manager::tests::catalog_refresh::MutableCatalog;
-use codex_protocol::models::PermissionProfile;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -10,8 +9,8 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
     fixture.connections.list_all_tools().await;
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
     config
-        .server_permission_profiles
-        .insert("docs".to_string(), PermissionProfile::default());
+        .server_permissions
+        .insert("docs".to_string(), crate::McpServerPermissions::Thread);
     let published = Arc::new(PublishedMcpRuntime {
         connections: Arc::clone(&fixture.connections),
         config: Some(Arc::new(config)),

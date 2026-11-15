@@ -13,9 +13,7 @@ use crate::app_event::RateLimitRefreshOrigin;
 use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_info::app_info_from_api;
 use crate::app_server_session::AppServerSession;
-use crate::app_server_session::status_account_display_from_auth_mode;
 use codex_app_server_client::AppServerEvent;
-use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RateLimitReachedType;
@@ -60,34 +58,6 @@ impl App {
         );
     }
 
-    pub(super) fn refresh_mcp_startup_expected_servers_from_config(&mut self) {
-        if self
-            .current_displayed_thread_id()
-            .zip(self.primary_thread_id)
-            .is_some_and(|(thread_id, primary_thread_id)| {
-                self.agent_navigation.is_parent_owned(thread_id)
-                    || (thread_id != primary_thread_id
-                        && !self.side_threads.contains_key(&thread_id))
-            })
-        {
-            // Subagents can defer cached servers indefinitely, so only servers
-            // that actually report startup should keep their status running.
-            self.chat_widget
-                .set_mcp_startup_expected_servers(std::iter::empty());
-            return;
-        }
-
-        let enabled_config_mcp_servers: Vec<String> = self
-            .config
-            .mcp_servers
-            .get()
-            .iter()
-            .filter_map(|(name, server)| server.enabled.then_some(name.clone()))
-            .collect();
-        self.chat_widget
-            .set_mcp_startup_expected_servers(enabled_config_mcp_servers);
-    }
-
     pub(super) async fn handle_app_server_event(
         &mut self,
         app_server_client: &AppServerSession,
@@ -99,7 +69,6 @@ impl App {
                     skipped,
                     "app-server event consumer lagged; dropping ignored events"
                 );
-                self.refresh_mcp_startup_expected_servers_from_config();
                 self.chat_widget.finish_mcp_startup_after_lag();
                 if let Some(task) = self.agents_overview.refresh_task.take() {
                     task.abort();
@@ -224,8 +193,8 @@ impl App {
             return;
         }
         // Hidden helper threads must not enter visible thread routing or overview refreshes.
-        if let ServerNotificationThreadTarget::Thread(thread_id) =
-            server_notification_thread_target(&notification)
+        let target = server_notification_thread_target(&notification);
+        if let ServerNotificationThreadTarget::Thread(thread_id) = target
             && let Some(sender) = self.temporary_structured_requests.get(&thread_id)
         {
             if matches!(
@@ -236,6 +205,18 @@ impl App {
                 self.temporary_structured_requests.remove(&thread_id);
             }
 
+            return;
+        }
+        // Provisional lifecycle traffic belongs to the captured attachment before any global
+        // visibility hook can project an obsolete runtime's close.
+        if let ServerNotificationThreadTarget::Thread(thread_id) = target
+            && self.saved_openings.observe(
+                app_server_client.backend_id(),
+                thread_id,
+                self.thread_event_channels.get(&thread_id),
+                &notification,
+            )
+        {
             return;
         }
         self.handle_agent_picker_visibility_notification(app_server_client, &notification);
@@ -337,9 +318,6 @@ impl App {
                     }
                 }
             }
-            ServerNotification::McpServerStatusUpdated(_) => {
-                self.refresh_mcp_startup_expected_servers_from_config();
-            }
             ServerNotification::McpServerOauthLoginCompleted(notification) => {
                 // The start response identifies the new attempt. Hold completions until then
                 // so a replacement's cancellation cannot appear as a fresh login failure.
@@ -389,10 +367,22 @@ impl App {
                 return;
             }
             ServerNotification::AccountUpdated(notification) => {
+                self.chat_widget.update_backend_authority(
+                    crate::app_server_session::BackendAuthority::Reported(notification.auth_mode),
+                );
+                self.rate_limit_hard_stop_generation =
+                    self.rate_limit_hard_stop_generation.wrapping_add(1);
+                self.rate_limit_refresh_state.invalidate_recovery();
                 self.agents_overview.usage.clear();
                 self.agents_overview.pending_usage = None;
                 self.agents_overview.usage_disabled = false;
                 self.repaint_agents_overview();
+                if self.chat_widget.account_ready_reason().is_some() {
+                    if let Some(thread_id) = self.current_displayed_thread_id() {
+                        self.refresh_conversation_account(app_server_client, thread_id);
+                    }
+                    return;
+                }
                 // Global-login notifications cannot replace a draft's fresh-root identity.
                 if self.chat_widget.session_draft.is_some() {
                     return;
@@ -416,45 +406,14 @@ impl App {
                 if let Some(view) = &mut self.retained_analytics {
                     view.cancel_loads();
                 }
-                self.rate_limit_hard_stop_generation =
-                    self.rate_limit_hard_stop_generation.wrapping_add(1);
-                self.rate_limit_refresh_state.invalidate_recovery();
                 // Deferred terminal writes must never carry the previous account's billing into
                 // the newly authenticated identity, even when both accounts share one thread.
                 self.last_thread_usage_status_cell = None;
                 self.pending_thread_usage_history_refresh = false;
-                let has_codex_backend_auth = matches!(
-                    notification.auth_mode,
-                    Some(
-                        AuthMode::Chatgpt
-                            | AuthMode::ChatgptAuthTokens
-                            | AuthMode::AgentIdentity
-                            | AuthMode::PersonalAccessToken
-                    )
+                self.read_displayed_account(
+                    app_server_client,
+                    self.current_displayed_thread_id().map(|id| id.to_string()),
                 );
-                let account_display = status_account_display_from_auth_mode(
-                    notification.auth_mode,
-                    notification.plan_type,
-                );
-                let has_chatgpt_account = notification
-                    .auth_mode
-                    .is_some_and(AuthMode::has_chatgpt_account);
-                self.account_email_request_id = None;
-                self.chat_widget.update_account_state(
-                    account_display,
-                    notification.plan_type,
-                    has_chatgpt_account,
-                    has_codex_backend_auth,
-                );
-                if self.chat_widget.has_chatgpt_account() {
-                    self.refresh_account_email(app_server_client);
-                    crate::security_setup::prefetch(
-                        &self.config,
-                        app_server_client,
-                        self.app_event_tx.clone(),
-                        self.chat_widget.security_setup_request_id,
-                    );
-                }
                 return;
             }
             ServerNotification::AppListUpdated(notification) => {
@@ -474,8 +433,11 @@ impl App {
             _ => {}
         }
 
-        match server_notification_thread_target(&notification) {
+        match target {
             ServerNotificationThreadTarget::Thread(thread_id) => {
+                let attaching_saved = self
+                    .saved_openings
+                    .preparing(thread_id, self.thread_event_channels.get(&thread_id));
                 if self.current_displayed_thread_id() != Some(thread_id)
                     && let ServerNotification::ItemCompleted(item) = &notification
                     && let ThreadItemPayload::UserMessage {
@@ -504,12 +466,13 @@ impl App {
                 if self.primary_thread_id.is_none()
                     && !self.pending_startup_thread_start
                     && !background_voice
+                    && !attaching_saved
                 {
                     return;
                 }
                 let untracked_thread =
                     self.primary_thread_id.is_some() && !self.owns_thread_for_routing(thread_id);
-                if untracked_thread && !background_voice {
+                if untracked_thread && !background_voice && !attaching_saved {
                     if matches!(notification, ServerNotification::McpServerStatusUpdated(_)) {
                         self.verify_untracked_mcp_notification(
                             app_server_client,
@@ -613,6 +576,10 @@ impl App {
     ) {
         let request = &buffered_request.request;
         let thread_id = server_request_thread_id(request);
+        let attaching_saved = thread_id.is_some_and(|id| {
+            self.saved_openings
+                .preparing(id, self.thread_event_channels.get(&id))
+        });
         if thread_id
             .is_some_and(|thread_id| self.temporary_structured_requests.contains_key(&thread_id))
         {
@@ -669,6 +636,7 @@ impl App {
             && self.primary_thread_id.is_none()
             && !background_voice
             && self.pending_startup_thread_start
+            && !attaching_saved
         {
             if let Some(unsupported) = self
                 .pending_app_server_requests
@@ -719,6 +687,7 @@ impl App {
             && self.active_thread_id != Some(thread_id)
             && !unsupported_request
             && !background_voice
+            && !attaching_saved
             && let Some(requests) = self.agents_overview.dispatched_requests.get_mut(&thread_id)
         {
             requests.push(buffered_request);
@@ -729,6 +698,7 @@ impl App {
             && !background_voice
             && !self.pending_startup_thread_start
             && !unsupported_request
+            && !attaching_saved
         {
             return;
         }
@@ -737,6 +707,7 @@ impl App {
             && !self.is_attached_thread(thread_id)
             && !background_voice
             && !unsupported_request
+            && !attaching_saved
         {
             let thread = app_server_client
                 .request_handle()
@@ -817,7 +788,7 @@ impl App {
             return;
         };
 
-        let result = if self.primary_thread_id.is_none() && !background_voice {
+        let result = if self.primary_thread_id.is_none() && !background_voice && !attaching_saved {
             self.enqueue_primary_thread_request(buffered_request.request)
                 .await
         } else {

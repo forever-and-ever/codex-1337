@@ -4,7 +4,9 @@ use super::*;
 
 impl ChatWidget {
     pub(crate) fn new_with_app_event(common: ChatWidgetInit) -> Self {
-        Self::new_with_op_target(common, CodexOpTarget::AppEvent)
+        let mut widget = Self::new_with_op_target(common, CodexOpTarget::AppEvent);
+        widget.bottom_pane.enable_agents_navigation();
+        widget
     }
 
     pub(super) fn new_with_op_target(
@@ -19,13 +21,10 @@ impl ChatWidget {
             workspace_command_runner,
             initial_user_message,
             enhanced_keys_supported,
-            has_chatgpt_account,
-            requires_openai_auth,
-            has_codex_backend_auth,
+            account,
+            backend_authority,
             model_catalog,
             is_first_run,
-            status_account_display,
-            initial_plan_type,
             model,
             startup_tooltip_override,
             status_line_invalid_items_warned,
@@ -52,7 +51,7 @@ impl ChatWidget {
             .and_then(|mask| mask.model.clone())
             .unwrap_or_else(|| model_for_header.clone());
         let fallback_default = Settings {
-            model: header_model.clone(),
+            model: model.unwrap_or_default(),
             reasoning_effort: None,
             developer_instructions: None,
         };
@@ -74,7 +73,11 @@ impl ChatWidget {
             &header_model,
             &model_catalog.try_list_models().unwrap_or_default(),
         );
-        let runtime_keymap = RuntimeKeymap::from_config(&local_settings.tui.keymap).ok();
+        let runtime_keymap = RuntimeKeymap::for_session(
+            &local_settings.tui.keymap,
+            local_settings.workspace_enabled(&config),
+        )
+        .ok();
         let default_keymap = RuntimeKeymap::defaults();
         let copy_last_response_binding = runtime_keymap
             .as_ref()
@@ -112,9 +115,8 @@ impl ChatWidget {
             skills_initial_state: None,
             current_collaboration_mode,
             active_collaboration_mask,
-            has_chatgpt_account,
-            requires_openai_auth,
-            has_codex_backend_auth,
+            account,
+            backend_authority,
             model_catalog,
             model_popup_request: None,
             permission_popup: Default::default(),
@@ -123,7 +125,6 @@ impl ChatWidget {
             session_telemetry,
             session_header: SessionHeader::new(header_model),
             initial_user_message,
-            status_account_display,
             active_account_label: None,
             openrouter_ui: openrouter::OpenRouterUi::default(),
             remote_connection: None,
@@ -148,7 +149,6 @@ impl ChatWidget {
             pending_rate_limit_reset_hint: None,
             available_rate_limit_reset_credits: None,
             next_rate_limit_reset_request_id: 0,
-            plan_type: initial_plan_type,
             codex_rate_limit_reached_type: None,
             codex_spend_control_reached: None,
             rate_limit_warnings: RateLimitWarningState::default(),
@@ -186,12 +186,9 @@ impl ChatWidget {
             safety_buffering: SafetyBufferingState::default(),
             task_complete_pending: false,
             unified_exec_processes: Vec::new(),
+            pending_terminal_restore: None,
             mcp_startup_status: None,
-            mcp_startup_expected_servers: None,
-            mcp_startup_ignore_updates_until_next_start: false,
-            mcp_startup_allow_terminal_only_next_round: false,
-            mcp_startup_pending_next_round: HashMap::new(),
-            mcp_startup_pending_next_round_saw_starting: false,
+            mcp_startup_last_diagnostics: HashMap::new(),
             connectors: ConnectorsState::default(),
             plugins_cache: PluginsCacheState::default(),
             plugins_fetch_state: PluginListFetchState::default(),
@@ -216,6 +213,7 @@ impl ChatWidget {
             active_side_conversation: false,
             blocks_direct_input: false,
             external_writer_view: false,
+            provider_error: None,
             fork_in_progress: false,
             misalignment_policy_violation: None,
             normal_placeholder_text: placeholder,
@@ -312,7 +310,7 @@ impl ChatWidget {
             .set_connectors_enabled(widget.connectors_enabled());
         widget
             .bottom_pane
-            .set_token_activity_command_enabled(widget.has_codex_backend_auth);
+            .set_token_activity_command_enabled(widget.has_codex_backend_auth());
         widget.refresh_status_surfaces();
 
         widget

@@ -2,6 +2,7 @@
 //! Cancellation restores the draft; worker notifications from a retired submission are ignored.
 //! Preparation is serialized so canceled decodes cannot pile up across retries or thread switches.
 
+use super::submission_dispatch::UserTurnDispatch;
 use super::*;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
@@ -16,15 +17,17 @@ pub(super) struct PendingImageSubmission {
     pub(super) message: UserMessage,
     history_record: UserMessageHistoryRecord,
     source: UserMessageSource,
+    dispatch: UserTurnDispatch,
     result: oneshot::Receiver<Result<Vec<UserInput>, String>>,
 }
 
 impl ChatWidget {
-    pub(super) fn prepare_image_submission(
+    pub(super) fn prepare_image_submission_with_dispatch(
         &mut self,
         message: UserMessage,
         history_record: UserMessageHistoryRecord,
         source: UserMessageSource,
+        dispatch: UserTurnDispatch,
     ) {
         let id = uuid::Uuid::new_v4();
         let images = message.local_images.clone();
@@ -52,6 +55,7 @@ impl ChatWidget {
             message,
             history_record,
             source,
+            dispatch,
             result,
         });
         self.refresh_pending_input_preview();
@@ -71,12 +75,13 @@ impl ChatWidget {
             .unwrap_or_else(|error| Err(format!("Failed to prepare images: {error}")))
         {
             Ok(images) => {
-                let (accepted, _) = self.submit_user_message_with_prepared_images(
+                let (accepted, _) = self.submit_user_message_with_dispatch(
                     pending.message,
                     pending.history_record,
                     ShellEscapePolicy::Disallow,
                     pending.source,
                     Some(images),
+                    pending.dispatch,
                 );
                 if !accepted {
                     self.input_queue.recovered_queue |=
@@ -103,6 +108,7 @@ impl ChatWidget {
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source: pending.source,
+                    dispatch: pending.dispatch,
                     history_record: pending.history_record,
                     ..QueuedUserMessage::new(pending.message, QueuedInputAction::Literal)
                 });

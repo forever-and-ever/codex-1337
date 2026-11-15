@@ -56,6 +56,7 @@ pub(crate) enum ConfigEditor {
     StatusLine,
     TerminalTitle,
     Keyboard,
+    ModelProviders,
     SessionPickerLayout,
     ResumeDirectory,
     RightClickPaste,
@@ -134,6 +135,7 @@ impl ConfigEditorHandoff {
 impl ConfigEditor {
     fn value(self, tui: &Tui, status: ConfigPanelStatus) -> ConfigSettingValue {
         let label = match self {
+            Self::ModelProviders => "Choose".to_string(),
             Self::Theme => tui.theme.clone().unwrap_or_else(|| "Automatic".to_string()),
             Self::SessionPickerLayout => match tui.session_picker_view.unwrap_or_default() {
                 codex_config::types::SessionPickerViewMode::Comfortable => "Comfortable",
@@ -379,6 +381,13 @@ fn settings(tui: &Tui, status: ConfigPanelStatus) -> Vec<ConfigSetting> {
             description: "Choose which working directory to use when the current directory and saved session differ",
             keywords: "cwd folder path fork ask",
             value: ConfigEditor::ResumeDirectory.value(tui, status),
+        },
+        ConfigSetting {
+            section: ConfigSection::Sessions,
+            label: "Model providers",
+            description: "Choose the default provider for new chats on the connected server",
+            keywords: "provider gateway endpoint model default",
+            value: ConfigEditor::ModelProviders.value(tui, status),
         },
         ConfigSetting {
             section: ConfigSection::TextSelection,

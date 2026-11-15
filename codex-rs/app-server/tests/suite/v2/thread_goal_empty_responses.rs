@@ -272,9 +272,9 @@ command_windows = """Write-Output '{"continue":false}'"""
             continue;
         }
         let latest = reminders.last().expect("goal reminder");
-        assert!(
-            latest.contains("<objective>\nFinish &lt;the&gt; &amp; update_plan work\n</objective>")
-        );
+        // The reminder carries no objective; the canonical goal message owns it.
+        assert!(!latest.contains("<objective>"));
+        assert!(!latest.contains("Finish <the> & update_plan work"));
         assert!(latest.contains(
             "The full goal-continuation instructions earlier in this context still apply."
         ));

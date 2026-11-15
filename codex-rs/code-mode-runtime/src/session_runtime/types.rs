@@ -5,6 +5,8 @@ use std::time::Duration;
 use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 
+use crate::output::OutputCollector;
+
 /// Identifies one execution cell within a session runtime.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CellId(String);
@@ -54,32 +56,34 @@ impl From<ObserveMode> for Observation {
 }
 
 /// An observable cell lifecycle event.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub(crate) enum CellEvent {
     Yielded {
-        content_items: Vec<OutputItem>,
+        content_items: OutputCollector,
     },
     Pending {
-        content_items: Vec<OutputItem>,
+        content_items: OutputCollector,
         pending_tool_call_ids: Vec<String>,
     },
     Completed {
-        content_items: Vec<OutputItem>,
+        content_items: OutputCollector,
+        /// None is success. Server diagnostics have already been bounded
+        /// independently of the observing request's output budget.
         error_text: Option<String>,
         /// Time the completed result spent waiting for an observer.
         result_buffered_for: Duration,
     },
     Terminated {
-        content_items: Vec<OutputItem>,
+        content_items: OutputCollector,
     },
 }
-
-pub(crate) type OutputItem = codex_code_mode_protocol::FunctionCallOutputContentItem;
 
 /// Transport-neutral input for creating a cell.
 ///
 /// The owning session assigns the cell ID when it admits the request.
 pub(crate) struct CreateCellRequest {
+    pub(crate) output_truncation: codex_code_mode_protocol::CodeModeOutputTruncation,
     pub(crate) tool_call_id: String,
     pub(crate) enabled_tools: Vec<ToolDefinition>,
     pub(crate) source: String,

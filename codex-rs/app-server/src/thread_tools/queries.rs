@@ -48,6 +48,8 @@ pub(super) async fn list(
     }
     let page = service
         .list(ThreadListParams {
+            include_attached_threads: false,
+            current_account_only: false,
             originators: None,
             excluded_thread_ids: None,
             cursor: args.cursor,
@@ -190,6 +192,7 @@ pub(super) async fn wait(
                         tokio::time::timeout_at(
                             target_deadline,
                             service.items(ThreadItemsListParams {
+                                defer_output: None,
                                 thread_id: thread.id.clone(),
                                 turn_id: Some(turn.id.clone()),
                                 cursor: None,
@@ -213,6 +216,7 @@ pub(super) async fn wait(
                                         item,
                                         started_at_ms: None,
                                         completed_at_ms: None,
+                                        output_deferred: false,
                                     })
                                     .collect(),
                             )

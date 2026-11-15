@@ -29,6 +29,6 @@ impl App {
             );
             return;
         }
-        self.persist_daybreak_selection_continuation(server, thread_id, enabled)
+        self.persist_daybreak_selection_continuation(server, thread_id, enabled, |_| {});
     }
 }

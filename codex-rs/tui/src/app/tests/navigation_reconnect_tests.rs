@@ -256,6 +256,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                         "skills/list" => Some(json!({"result": {"data": []}})),
                         "plugin/list" => Some(json!({"result": {"marketplaces": [], "marketplaceLoadErrors": [], "featuredPluginIds": []}})),
                         "thread/read" => Some(json!({"result": {"thread": fresh.iter().find(|thread| request.params.as_ref().unwrap()["threadId"] == thread.id).unwrap()}})),
+                        "plugin/installed" => Some(json!({"result": {"marketplaces": [], "marketplaceLoadErrors": []}})),
                         method => panic!("unexpected daemon reconnect request: {method}"),
                     }
                 })).await?);
@@ -304,6 +305,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             &session,
             stale_request,
             Ok(AgentsOverviewThreadRefresh {
+                cleared_unread: Vec::new(),
                 last_messages: HashMap::new(),
                 threads: HashMap::new(),
                 recent_seed_complete: false,
@@ -379,7 +381,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             while app.agents_overview.request_id.is_some() {
                 let event = events.recv().await.expect("inventory refresh event");
                 if matches!(event, AppEvent::AgentsOverviewThreadsLoaded { .. }) {
-                    app.handle_event(&mut tui, &mut session, event).await?;
+                    Box::pin(app.handle_event(&mut tui, &mut session, event)).await?;
                 } else {
                     deferred.push(event);
                 }
@@ -449,8 +451,12 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             &session,
             stale_request,
             Ok(AgentsOverviewThreadRefresh {
+                cleared_unread: Vec::new(),
                 last_messages: HashMap::new(),
-                threads: stale_threads,
+                threads: stale_threads
+                    .into_iter()
+                    .map(|(id, thread)| (id, thread.map(|thread| (thread, false, None))))
+                    .collect(),
                 recent_seed_complete: true,
                 discovery: None,
                 pinned_thread_ids: None,
@@ -502,8 +508,13 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             .await?;
             assert_eq!(app.chat_widget.composer_text_with_pending(), "latest draft");
             assert!(
-                !std::iter::from_fn(|| events.try_recv().ok())
-                    .any(|event| matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
+                !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                    event,
+                    AppEvent::SubmitThreadOp {
+                        op: AppCommand::UserTurn { .. },
+                        ..
+                    } | AppEvent::CodexOp(AppCommand::UserTurn { .. })
+                ))
             );
             app.handle_tui_event(&mut tui, &mut session, TuiEvent::Paste("!".into()))
                 .await?;
@@ -511,7 +522,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.chat_widget.composer_text_with_pending(),
                 "latest draft!"
             );
-            app.handle_event(&mut tui, &mut session, AppEvent::OpenAgentsOverview)
+            Box::pin(app.handle_event(&mut tui, &mut session, AppEvent::OpenAgentsOverview))
                 .await?;
             assert!(app.chat_widget.has_active_view());
             app.handle_tui_event(
@@ -566,11 +577,11 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.chat_widget
                     .set_reasoning_effort(Some(ReasoningEffortConfig::High));
             }
-            app.handle_event_and_settle_navigation(
+            Box::pin(app.handle_event_and_settle_navigation(
                 &mut tui,
                 &mut session,
                 AppEvent::SelectAgentsOverviewThread { thread_id: id },
-            )
+            ))
             .await?;
             assert!(!app.thread_unavailable(id));
             assert_eq!(app.chat_widget.current_model(), "gpt-test");
@@ -623,7 +634,13 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             .await?;
             while !events.is_empty() || !app.server_operations.is_empty() {
                 while let Ok(event) = events.try_recv() {
-                    if matches!(&event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
+                    if matches!(
+                        &event,
+                        AppEvent::SubmitThreadOp {
+                            op: AppCommand::UserTurn { .. },
+                            ..
+                        } | AppEvent::CodexOp(AppCommand::UserTurn { .. })
+                    ) {
                         dispatched_user_turns += 1;
                     }
                     app.handle_event(&mut tui, &mut session, event).await?;

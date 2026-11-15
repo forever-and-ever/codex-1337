@@ -71,6 +71,7 @@ pub(in crate::app) enum SelectionAfter {
     Fork,
     DiscardSide(ThreadId),
     SurfaceInactive,
+    HideSide { parent: ThreadId },
 }
 
 pub(super) struct SelectionContext {
@@ -79,6 +80,7 @@ pub(super) struct SelectionContext {
     cached_session: Option<ThreadSessionState>,
     target: SelectionTarget,
     after: SelectionAfter,
+    metadata: Option<crate::app_server_session::session_preparation::ThreadMetadata>,
 }
 
 enum SelectionTarget {
@@ -101,13 +103,14 @@ enum SelectedThread {
         replay: ReplayMode,
         verification: Result<Option<String>>,
     },
+    Installed(ReplayMode),
     Attached(AppServerStartedThread),
     Refreshed(AppServerStartedThread),
     ReadOnly(Box<api::Thread>),
 }
 
 pub(super) enum SelectionReceipt {
-    Liveness(Result<api::Thread>),
+    Liveness(Result<crate::app_server_session::session_preparation::ThreadMetadata>),
     Resumed {
         prepared: PreparedSession,
         handle: AppServerRequestHandle,
@@ -124,6 +127,7 @@ enum SelectionEffect {
     },
     Liveness {
         thread_id: ThreadId,
+        backend_id: crate::backend_id::BackendId,
         handle: AppServerRequestHandle,
     },
     Resume {
@@ -132,6 +136,7 @@ enum SelectionEffect {
     },
     Fallback {
         thread_id: ThreadId,
+        backend_id: crate::backend_id::BackendId,
         handle: AppServerRequestHandle,
         config: Box<Config>,
         local_settings: Box<LocalSettings>,
@@ -161,12 +166,18 @@ impl App {
             operation,
             SelectionEffect::Liveness {
                 thread_id,
+                backend_id: server.backend_id(),
                 handle: server.request_handle(),
             },
         );
     }
 
     fn spawn_selection_effect(&self, operation: &mut PendingNavigation, effect: SelectionEffect) {
+        let image_origin = if self.app_server_target.uses_remote_workspace() {
+            crate::history_cell::ImagePathOrigin::Remote
+        } else {
+            crate::history_cell::ImagePathOrigin::Local
+        };
         let completions = self.server_operations.control_tx.clone();
         let (id, order, epoch, generation) = (
             operation.id,
@@ -189,9 +200,10 @@ impl App {
                         };
                         SelectionReceipt::SideDetached(receipt)
                     }
-                    SelectionEffect::Liveness { thread_id, handle } => SelectionReceipt::Liveness(
-                        crate::app_server_session::session_preparation::read_thread(
+                    SelectionEffect::Liveness { thread_id, backend_id, handle } => SelectionReceipt::Liveness(
+                        crate::app_server_session::session_preparation::read_thread_with_receipt(
                             RequestPolicy::Interactive,
+                            backend_id,
                             &handle,
                             thread_id,
                         )
@@ -203,6 +215,7 @@ impl App {
                     },
                     SelectionEffect::Fallback {
                         thread_id,
+                        backend_id,
                         handle,
                         config,
                         local_settings,
@@ -213,6 +226,8 @@ impl App {
                             thread_id,
                             *config,
                             *local_settings,
+                            image_origin,
+                            backend_id,
                         ))
                         .await,
                     )),
@@ -255,13 +270,15 @@ impl App {
             (SelectStage::Liveness { thread_id, after }, SelectionReceipt::Liveness(result))
                 if matching =>
             {
-                if !self.apply_thread_liveness(result, thread_id) {
+                let metadata = result.as_ref().ok().cloned();
+                if !self.apply_thread_liveness(result.map(|metadata| metadata.thread), thread_id) {
                     self.add_agents_overview_error(format!(
                         "Agent thread {thread_id} is no longer available."
                     ));
                     return Ok(());
                 }
-                let context = Box::new(self.capture_selection_context(thread_id, after).await);
+                let mut context = Box::new(self.capture_selection_context(thread_id, after).await);
+                context.metadata = metadata;
                 self.advance_selection(tui, server, operation, context)
                     .await?;
             }
@@ -276,6 +293,18 @@ impl App {
                     };
                     let thread_id = plan.origin().expect("side cleanup has a target");
                     self.finish_detach_plan(&plan, receipt).await;
+                    if !unknown {
+                        for pane in self.sidebars.values_mut() {
+                            if let Some(creation) = &mut pane.creation
+                                && let crate::app::sidebar::CreationState::Failed {
+                                    cleanup, ..
+                                } = &mut creation.state
+                                && *cleanup == Some(thread_id)
+                            {
+                                *cleanup = None;
+                            }
+                        }
+                    }
                     if unknown {
                         self.add_agents_overview_error(format!("Closing side conversation {thread_id} was not confirmed. Close and reopen this TUI to resynchronize; the earlier request may still complete."));
                         self.retain_navigation_uncertainty(operation, vec![thread_id], false);
@@ -291,8 +320,17 @@ impl App {
                     custody,
                     observations,
                 } = prepared;
-                if same_epoch {
-                    server.apply_session_observations(observations);
+                let valid_origin = server.accepts_session_observations(&observations);
+                let matching = matching && valid_origin;
+                let result = if valid_origin {
+                    result
+                } else {
+                    Err(color_eyre::eyre::eyre!(
+                        "prepared session belongs to a different backend"
+                    ))
+                };
+                if same_epoch && valid_origin {
+                    server.apply_session_observations(observations)?;
                 }
                 let matching = matching && self.selection_target_is_current(&context);
                 if !matching {
@@ -472,6 +510,7 @@ impl App {
             cached_session,
             target,
             after,
+            metadata: None,
         }
     }
 
@@ -490,7 +529,7 @@ impl App {
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
         mut operation: PendingNavigation,
-        context: Box<SelectionContext>,
+        mut context: Box<SelectionContext>,
     ) -> Result<()> {
         let thread_id = context.thread_id;
         let closed = self
@@ -507,7 +546,7 @@ impl App {
             None
         };
         if let Some(kind) = kind {
-            let plan = server.prepare_resume_thread(
+            let mut plan = server.prepare_resume_thread(
                 RequestPolicy::Interactive,
                 &self.local_settings,
                 self.config.clone(),
@@ -515,6 +554,9 @@ impl App {
                 crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
                 crate::resume_permissions::ResumePermissions::default(),
             );
+            if let Some(metadata) = context.metadata.take() {
+                plan = plan.with_metadata(metadata);
+            }
             operation.intent = NavigationIntent::Select(SelectStage::Resume { context, kind });
             self.spawn_selection_effect(
                 &mut operation,
@@ -559,6 +601,7 @@ impl App {
             &mut operation,
             SelectionEffect::Fallback {
                 thread_id,
+                backend_id: server.backend_id(),
                 handle: server.request_handle(),
                 config: Box::new(self.config.clone()),
                 local_settings: Box::new(self.local_settings.clone()),
@@ -605,6 +648,30 @@ impl App {
         store.rebase_buffer_after_session_refresh();
     }
 
+    pub(in crate::app) async fn select_installed_side_locally(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+        live: bool,
+    ) -> Result<()> {
+        self.supersede_pending_navigation();
+        let context = self
+            .capture_selection_context(thread_id, SelectionAfter::SelectOnly)
+            .await;
+        self.commit_agent_selection(
+            tui,
+            server,
+            context,
+            SelectedThread::Installed(if live {
+                ReplayMode::Live
+            } else {
+                ReplayMode::AttachFailed
+            }),
+        )
+        .await
+    }
+
     pub(in crate::app) async fn select_tracked_side_locally(
         &mut self,
         tui: &mut tui::Tui,
@@ -634,6 +701,13 @@ impl App {
     ) -> Result<()> {
         match after {
             SelectionAfter::SelectOnly => {}
+            SelectionAfter::HideSide { parent } => {
+                if self.current_displayed_thread_id() == Some(parent) {
+                    self.sidebar_mut().hide();
+                    tui.frame_requester().schedule_frame();
+                    self.focus_returned_parent_composer(parent).await?;
+                }
+            }
             SelectionAfter::Fork => {
                 // The continuation lease ends here; admission installs the fork's lease.
                 self.chat_widget.fork_in_progress = false;
@@ -671,13 +745,19 @@ impl App {
             .active_turn_id_for_thread(thread_id)
             .await
             .unwrap_or_default();
+        let failed_creation = self.sidebars.values().any(|pane| pane.creation.as_ref().is_some_and(|creation| matches!(creation.state, crate::app::sidebar::CreationState::Failed { cleanup: Some(target), .. } if target == thread_id)));
+        if self.server_operations.navigation.retired.iter().any(|operation| matches!(&operation.intent, NavigationIntent::Select(SelectStage::DiscardSide(plan)) if plan.origin() == Some(thread_id))) { return; }
         let plan = detach::DetachPlan {
             targets: vec![detach::DetachTarget {
                 thread_id,
                 store,
-                kind: detach::DetachKind::Side {
-                    turn_id,
-                    replay_only,
+                kind: if failed_creation {
+                    detach::DetachKind::FailedSide
+                } else {
+                    detach::DetachKind::Side {
+                        turn_id,
+                        replay_only,
+                    }
                 },
             }],
             voice: None,
@@ -715,7 +795,9 @@ impl App {
             SelectedThread::Cached { .. } | SelectedThread::ReadOnly(_) => {
                 crate::chatwidget::ThreadInputSettingsAuthority::Retained
             }
-            SelectedThread::Attached(_) | SelectedThread::Refreshed(_) => {
+            SelectedThread::Installed(_)
+            | SelectedThread::Attached(_)
+            | SelectedThread::Refreshed(_) => {
                 crate::chatwidget::ThreadInputSettingsAuthority::Session {
                     accepted_mode: None,
                 }
@@ -737,6 +819,12 @@ impl App {
                 replay != ReplayMode::Live,
                 replay == ReplayMode::AttachFailed,
                 verification,
+                None,
+            ),
+            SelectedThread::Installed(replay) => (
+                replay != ReplayMode::Live,
+                replay == ReplayMode::AttachFailed,
+                Ok(None),
                 None,
             ),
             SelectedThread::Attached(started) => {
@@ -860,6 +948,22 @@ impl App {
             !is_replay_only,
             settings_authority,
         )?;
+        if self.side_retention_enabled(tui) {
+            if self.side_threads.contains_key(&thread_id) {
+                self.sidebar_mut().show(
+                    crate::app::sidebar::SidebarContent::Chat(thread_id),
+                    crate::app::sidebar::PaneFocus::Sidebar,
+                );
+            } else if let Some(crate::app::sidebar::SidebarContent::Chat(child)) = self
+                .sidebar()
+                .and_then(crate::app::sidebar::SidebarPane::visible_content)
+            {
+                self.sidebar_mut().show(
+                    crate::app::sidebar::SidebarContent::Chat(child),
+                    crate::app::sidebar::PaneFocus::Main,
+                );
+            }
+        }
         if let Ok(Some(notice)) = session_verification {
             self.chat_widget.add_info_message(notice, /*hint*/ None);
         }

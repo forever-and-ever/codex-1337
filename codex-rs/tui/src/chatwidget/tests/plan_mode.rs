@@ -138,16 +138,10 @@ async fn plan_implementation_popup_clear_context_emits_clear_submit_event() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let event = rx.try_recv().expect("expected AppEvent");
-    let AppEvent::ClearUiAndSubmitUserMessage { text } = event else {
-        panic!("expected ClearUiAndSubmitUserMessage, got {event:?}");
+    let AppEvent::ImplementPlanInFreshSession { plan } = event else {
+        panic!("expected ImplementPlanInFreshSession, got {event:?}");
     };
-    assert_eq!(
-        text,
-        "A previous agent produced the plan below to accomplish the user's task. \
-        Implement the plan in a fresh context. Treat the plan as the source of \
-        user intent, re-read files as needed, and carry the work through \
-        implementation and verification.\n\n- Step 1\n- Step 2\n"
-    );
+    assert_eq!(plan, plan_markdown);
 }
 
 #[tokio::test]
@@ -813,6 +807,7 @@ async fn plan_implementation_popup_skips_replayed_turn_complete() {
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![ThreadItem::untimed(
                 AppServerThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "msg-plan".to_string(),
                     text: "Plan details".to_string(),
                     phase: Some(MessagePhase::FinalAnswer),
@@ -856,6 +851,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![ThreadItem::untimed(
                 AppServerThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "msg-plan-replay".to_string(),
                     text: "Plan details".to_string(),
                     phase: Some(MessagePhase::FinalAnswer),
@@ -1081,7 +1077,7 @@ async fn plan_implementation_popup_shows_after_new_plan_follows_steer() {
 #[tokio::test]
 async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.has_chatgpt_account = true;
+    chat.set_test_chatgpt_account(true);
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
         .expect("expected plan collaboration mask");
@@ -1598,7 +1594,7 @@ async fn plan_slash_command_with_hidden_shell_paste_queued_before_session_submit
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     chat.queue_user_message(UserMessage::from("queued follow-up"));
-    chat.finish_mcp_startup(Vec::new(), Vec::new());
+    chat.finish_mcp_startup();
     assert_eq!(
         chat.queued_user_message_texts(),
         vec![format!("/plan {payload}"), "queued follow-up".to_string()]
@@ -1624,7 +1620,7 @@ async fn rejected_initial_image_does_not_submit_later_queued_prompt() {
     initial_message.remote_image_urls = vec!["https://example.com/image.png".to_string()];
     chat.initial_user_message = Some(initial_message);
     chat.queue_user_message(UserMessage::from("queued follow-up"));
-    chat.finish_mcp_startup(Vec::new(), Vec::new());
+    chat.finish_mcp_startup();
 
     let mut session = plan_test_session(ThreadId::new());
     session.model = current_model;
@@ -1692,7 +1688,13 @@ async fn make_startup_chat_with_cli_overrides(
     let resolved_model = get_model_offline_for_tests(cfg.model.as_deref());
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
     let init = ChatWidgetInit {
-        requires_openai_auth: true,
+        account: crate::app_server_session::BootstrapAccount::Loaded(
+            crate::app_server_session::SessionAccount {
+                requires_openai_auth: true,
+                ..Default::default()
+            },
+        ),
+        backend_authority: crate::app_server_session::BackendAuthority::Reported(None),
         local_settings: crate::local_settings::LocalSettings::from(&cfg),
         config: cfg.clone(),
         frame_requester: FrameRequester::test_dummy(),
@@ -1700,12 +1702,8 @@ async fn make_startup_chat_with_cli_overrides(
         workspace_command_runner: None,
         initial_user_message: None,
         enhanced_keys_supported: false,
-        has_chatgpt_account: false,
-        has_codex_backend_auth: false,
         model_catalog: test_model_catalog(&cfg),
         is_first_run: true,
-        status_account_display: None,
-        initial_plan_type: None,
         model: Some(resolved_model),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),

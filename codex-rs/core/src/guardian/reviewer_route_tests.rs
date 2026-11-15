@@ -1,3 +1,4 @@
+use super::CapturedReviewer;
 use super::ReviewerRoute;
 use crate::guardian::ApprovalRequestReasons;
 use crate::guardian::GuardianApprovalRequest;
@@ -111,7 +112,7 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
     session.services.models_manager = Arc::new(StaticModelsManager::new(
         Some(Arc::clone(&auth)),
         ModelsResponse {
-            models: vec![turn.model_info().as_ref().clone()],
+            models: vec![turn.model_info().model.as_ref().clone()],
         },
         codex_models_manager::ModelOrigin::Provider,
     ));
@@ -146,7 +147,7 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
     let route = Box::pin(ReviewerRoute::resolve(&session, &context)).await;
     assert!(matches!(
         &route,
-        ReviewerRoute::ChatgptAutoReview { account_id } if account_id == &saved_account
+        ReviewerRoute::ChatgptAutoReview { account_id, .. } if account_id == &saved_account
     ));
     let (outcome, _) = Box::pin(run_guardian_review_session_before_deadline(
         session,
@@ -217,6 +218,13 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
         let account_id = "reviewer-account".to_owned();
         let chosen = ReviewerRoute::ChatgptAutoReview {
             account_id: account_id.clone(),
+            captured: CapturedReviewer(Arc::new(
+                session
+                    .services
+                    .model_client
+                    .capture_provider()
+                    .expect("capture test provider"),
+            )),
         };
         let route = Mutex::new(chosen.clone());
         let before = Instant::now();

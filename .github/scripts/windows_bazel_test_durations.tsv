@@ -32,7 +32,6 @@
 //codex-rs/chatgpt:chatgpt-unit-tests	27
 //codex-rs/cli:cli-app_server-test-windows-cross	3
 //codex-rs/cli:cli-app_server_daemon-test-windows-cross	1
-//codex-rs/cli:cli-cloud_auth-test-windows-cross	47
 //codex-rs/cli:cli-cloud_config-test-windows-cross	3
 //codex-rs/cli:cli-daemon_startup-test-windows-cross	4
 //codex-rs/cli:cli-daemon_telemetry-test-windows-cross	1
@@ -63,10 +62,6 @@
 //codex-rs/cli:codex-bin-unit-tests	60
 //codex-rs/cli:logs_client-bin-unit-tests	1
 //codex-rs/cloud-config:cloud-config-unit-tests	47
-//codex-rs/cloud-tasks-client:cloud-tasks-client-unit-tests	35
-//codex-rs/cloud-tasks-mock-client:cloud-tasks-mock-client-unit-tests	59
-//codex-rs/cloud-tasks:cloud-tasks-env_filter-test-windows-cross	1
-//codex-rs/cloud-tasks:cloud-tasks-unit-tests	1
 //codex-rs/code-mode-host:code-mode-host-grpc-test-windows-cross	28
 //codex-rs/code-mode-host:code-mode-host-grpc_notifications-test-windows-cross	25
 //codex-rs/code-mode-host:code-mode-host-grpc_tcp-test-windows-cross	1

@@ -13,15 +13,18 @@ async fn foreign_backend_events_leave_thread_cache_and_connection_untouched() ->
     let (mut app, mut events, _) = make_test_app_with_channels().await;
     let (server, requests, proxy) =
         session_lifecycle_requests::start_recording_remote_app_server(&app.config).await?;
+    app.app_server_target = AppServerTarget::Remote {
+        endpoint: crate::resolve_remote_addr("ws://127.0.0.1:1")?,
+    };
     let id = ThreadId::new();
     app.primary_thread_id = Some(id);
-    app.active_thread_id = Some(id);
     set_test_initial_prompt(&mut app, String::new());
     app.chat_widget
         .handle_thread_session(test_thread_session(id, app.config.cwd.to_path_buf()));
     app.chat_widget
         .restore_user_message_to_composer("keep draft".into());
     app.ensure_thread_channel(id);
+    app.activate_thread_channel(id).await;
     while events.try_recv().is_ok() {}
     requests.lock().unwrap().clear();
     let input = app.chat_widget.capture_thread_input_state();
@@ -108,6 +111,28 @@ async fn foreign_backend_events_leave_thread_cache_and_connection_untouched() ->
             .active_turn_id(),
         Some("owned-turn")
     );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.drain_active_thread_events(&mut tui).await?;
+    app.handle_backend_event(
+        &server,
+        AppServerSessionEvent {
+            backend_id: server.backend_id(),
+            event: AppServerEvent::Disconnected {
+                message: "owned connection ended".into(),
+            },
+        },
+    )
+    .await;
+    app.drain_active_thread_events(&mut tui).await?;
+    assert!(
+        app.reconnect.offline,
+        "the owning native connection loss starts recovery"
+    );
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "keep draft");
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "receiver loss cannot initiate server work"
+    );
     server.shutdown().await?;
     proxy.await??;
     Ok(())
@@ -132,8 +157,22 @@ async fn transport_events_retain_the_session_backend() -> Result<()> {
     )
     .await?
     .expect("settings update emits an event");
-    assert_eq!(event.backend_id, server.backend_id());
-    server.shutdown().await?;
+    let owner = server.backend_id();
+    assert_eq!(event.backend_id, owner);
+    let mut backend = super::super::backend_sessions::BackendSession::new(server);
+    backend.defer_startup(event);
+    assert!(backend.take_ready_startup(|_| false).is_none());
+    let event = backend
+        .take_ready_startup(|_| true)
+        .expect("registered child retains its source event");
+    assert_eq!(event.backend_id, owner);
+    backend.defer_startup(event);
+    backend.resume_events(owner);
+    assert!(
+        backend.take_ready_startup(|_| true).is_none(),
+        "a new connection cannot receive retired startup events"
+    );
+    backend.shutdown().await?;
     proxy.await??;
     Ok(())
 }

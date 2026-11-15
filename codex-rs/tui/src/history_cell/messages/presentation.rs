@@ -75,12 +75,23 @@ pub(super) fn user_lines(
         cell.presentation,
         UserMessagePresentation::AsyncReplies { .. }
     );
+    let mut copy_as_prose = !replies;
     let mut wrapped_message = match &cell.presentation {
         UserMessagePresentation::AsyncReplies { replies, cwd } => {
             super::super::async_replies::render(replies, cwd, usize::from(wrap_width))
         }
-        UserMessagePresentation::Plain | UserMessagePresentation::Spoken => {
-            wrap_user_message(message, text_elements, style, wrap_width)
+        UserMessagePresentation::Typed | UserMessagePresentation::Spoken => {
+            let markdown = if cell.uses_markdown() {
+                crate::markdown::render_markdown_for_viewport(message, wrap_width)
+            } else {
+                Vec::new()
+            };
+            copy_as_prose = !crate::markdown_copy::has_visible_markup(&markdown, message);
+            if copy_as_prose {
+                wrap_user_message(message, text_elements, style, wrap_width)
+            } else {
+                markdown
+            }
         }
     };
     if !wrapped_message.is_empty() {
@@ -108,7 +119,7 @@ pub(super) fn user_lines(
         }
         if let Some(source) = &mut line.source {
             source.right_reserve = 1;
-            source.copy_as_prose |= !replies;
+            source.copy_as_prose |= copy_as_prose;
         }
     }
     spoken(lines, Bracket::Prompt)
@@ -206,3 +217,5 @@ pub(crate) fn is_message(cell: &dyn HistoryCell) -> bool {
         || cell.as_any().is::<AgentMessageCell>()
         || cell.as_any().is::<AgentMarkdownCell>()
 }
+
+// TELOS(fast-ui-thread): parked stream handoff carries raw source; its worker strips directives.

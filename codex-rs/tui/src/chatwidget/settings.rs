@@ -15,9 +15,9 @@ impl ChatWidget {
         // Preserve a resumed preference while account state is still unknown. Once an API-key
         // account is known, both flags must be enabled before using that preference.
         self.config.features.enabled(Feature::CliDaybreak)
-            && (self.has_chatgpt_account
+            && (self.has_chatgpt_account()
                 || !matches!(
-                    self.status_account_display,
+                    self.status_account_display().cloned(),
                     Some(StatusAccountDisplay::ApiKey)
                 )
                 || self
@@ -29,10 +29,16 @@ impl ChatWidget {
     /// UI and turn-selection eligibility; the catalog and server still determine program access.
     pub(crate) fn daybreak_account_eligible(&self) -> bool {
         self.daybreak_feature_enabled()
-            && self.config.model_provider_id == "openai"
-            && (self.has_chatgpt_account
+            && self
+                .config
+                .model_providers
+                .get(&self.config.model_provider_id)
+                .is_some_and(|provider| {
+                    provider.supports_cyber_access_programs(&self.config.model_provider_id)
+                })
+            && (self.has_chatgpt_account()
                 || matches!(
-                    self.status_account_display,
+                    self.status_account_display().cloned(),
                     Some(StatusAccountDisplay::ApiKey)
                 ))
     }
@@ -224,8 +230,66 @@ impl ChatWidget {
         self.refresh_model_dependent_surfaces();
     }
 
+    pub(crate) fn account_state(&self) -> crate::app_server_session::BootstrapAccount {
+        self.account.clone()
+    }
+
+    pub(crate) fn backend_authority(&self) -> crate::app_server_session::BackendAuthority {
+        self.backend_authority
+    }
+
+    pub(crate) fn update_backend_authority(
+        &mut self,
+        authority: crate::app_server_session::BackendAuthority,
+    ) {
+        self.backend_authority = authority;
+        if !self.has_codex_backend_auth() {
+            self.clear_pending_rate_limit_reset_requests();
+            self.clear_thread_usage_state();
+        }
+        self.bottom_pane
+            .set_token_activity_command_enabled(self.has_codex_backend_auth());
+        self.refresh_status_surfaces();
+    }
+
+    pub(super) fn loaded_account(&self) -> Option<&crate::app_server_session::SessionAccount> {
+        match &self.account {
+            crate::app_server_session::BootstrapAccount::AwaitingResume => None,
+            crate::app_server_session::BootstrapAccount::Loaded(account) => Some(account),
+        }
+    }
+
+    pub(super) fn loaded_account_mut(
+        &mut self,
+    ) -> Option<&mut crate::app_server_session::SessionAccount> {
+        match &mut self.account {
+            crate::app_server_session::BootstrapAccount::AwaitingResume => None,
+            crate::app_server_session::BootstrapAccount::Loaded(account) => Some(account),
+        }
+    }
+
+    pub(crate) fn requires_openai_auth(&self) -> bool {
+        self.loaded_account()
+            .is_some_and(|account| account.requires_openai_auth)
+    }
+
+    pub(crate) fn account_ready_reason(&self) -> Option<&'static str> {
+        self.loaded_account().is_none().then_some(
+            "Account and model settings are unavailable until this conversation finishes resuming.",
+        )
+    }
+
+    pub(super) fn refuse_pending_account_operation(&mut self) -> bool {
+        let Some(reason) = self.account_ready_reason() else {
+            return false;
+        };
+        self.add_error_message(reason.to_owned());
+        true
+    }
+
     pub(crate) fn status_account_display(&self) -> Option<&StatusAccountDisplay> {
-        self.status_account_display.as_ref()
+        self.loaded_account()
+            .and_then(|account| account.display.as_ref())
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -233,43 +297,28 @@ impl ChatWidget {
         self.model_catalog.clone()
     }
 
-    pub(crate) fn on_account_email_loaded(
-        &mut self,
-        current_email: Option<String>,
-        current_workspace: Option<String>,
-    ) {
-        if let Some(StatusAccountDisplay::ChatGpt {
-            email, workspace, ..
-        }) = &mut self.status_account_display
-        {
-            *email = current_email;
-            *workspace = current_workspace;
-        }
-    }
-
     pub(crate) fn current_plan_type(&self) -> Option<PlanType> {
-        self.plan_type
+        self.loaded_account().and_then(|account| account.plan)
     }
 
     pub(crate) fn has_chatgpt_account(&self) -> bool {
-        self.has_chatgpt_account
+        self.loaded_account()
+            .is_some_and(crate::app_server_session::SessionAccount::has_chatgpt_account)
     }
 
     pub(crate) fn has_codex_backend_auth(&self) -> bool {
-        self.has_codex_backend_auth
+        self.backend_authority.has_codex_backend_auth()
     }
 
     pub(crate) fn update_account_state(
         &mut self,
-        status_account_display: Option<StatusAccountDisplay>,
-        plan_type: Option<PlanType>,
-        has_chatgpt_account: bool,
-        has_codex_backend_auth: bool,
+        account: crate::app_server_session::SessionAccount,
     ) {
         // Account-update notifications are the identity boundary. The visible account fields can
         // be identical across two accounts, so always invalidate account-scoped requests and data.
         self.bottom_pane
             .dismiss_view_by_id(super::provider_models::PROVIDER_MODELS_VIEW);
+        self.dismiss_stale_model_picker();
         self.invalidate_permission_discovery();
         self.permission_discovery = None;
         self.invalidate_connector_scope();
@@ -302,23 +351,21 @@ impl ChatWidget {
         self.status_line_workspace_headline_last_requested_at = None;
         self.status_line_workspace_messages_disabled = false;
         self.clear_thread_usage_state();
-        self.status_account_display = status_account_display;
-        self.plan_type = plan_type;
-        self.has_chatgpt_account = has_chatgpt_account;
+        self.account = crate::app_server_session::BootstrapAccount::Loaded(account);
         self.refresh_account_scoped_models();
         self.set_daybreak_enabled(self.daybreak_enabled);
-        self.has_codex_backend_auth = has_codex_backend_auth;
         self.bottom_pane
             .set_connectors_enabled(self.connectors_enabled());
         self.refresh_connector_mentions(/*force_refresh*/ false);
         self.bottom_pane
-            .set_token_activity_command_enabled(has_codex_backend_auth);
+            .set_token_activity_command_enabled(self.has_codex_backend_auth());
         self.refresh_status_surfaces();
     }
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
         if model != self.current_model() {
+            self.queue_unavailable_daybreak_disable(model);
             if self.current_model() == crate::model_catalog::LUNA_RESERVE_MODEL {
                 self.clear_reserve_return();
             } else {
@@ -338,6 +385,26 @@ impl ChatWidget {
         }
         self.refresh_effective_service_tier();
         self.refresh_model_dependent_surfaces();
+    }
+
+    pub(super) fn queue_unavailable_daybreak_disable(&self, model: &str) {
+        if let Some(thread_id) = self.thread_id
+            && self.should_disable_daybreak(model)
+        {
+            self.app_event_tx
+                .send(AppEvent::DisableUnavailableDaybreak {
+                    thread_id,
+                    model: model.to_owned(),
+                });
+        }
+    }
+
+    pub(crate) fn should_disable_daybreak(&self, model: &str) -> bool {
+        self.daybreak_enabled
+            && self.model_catalog.models.iter().any(|entry| {
+                entry.model == model
+                    && crate::daybreak::availability(std::slice::from_ref(entry)) == Some(false)
+            })
     }
 
     pub(crate) fn current_model(&self) -> &str {
@@ -441,10 +508,9 @@ impl ChatWidget {
         model_catalog: &ModelCatalog,
         model_override: Option<&str>,
     ) -> Option<CollaborationModeMask> {
+        let model_override = model_override?;
         let mut mask = collaboration_modes::default_mask(model_catalog)?;
-        if let Some(model_override) = model_override {
-            mask.model = Some(model_override.to_string());
-        }
+        mask.model = Some(model_override.to_string());
         Some(mask)
     }
 
@@ -510,6 +576,7 @@ impl ChatWidget {
         let cwd_changed = self.config.cwd != settings.cwd;
         self.apply_thread_settings_cwd(settings.cwd.clone());
         self.config.model_provider_id = settings.model_provider.clone();
+        self.set_daybreak_enabled(self.daybreak_enabled);
         self.set_service_tier(settings.service_tier.clone());
         if let Err(err) = self
             .config
@@ -549,6 +616,9 @@ impl ChatWidget {
             }
         }
 
+        if self.current_model() != settings.model {
+            self.queue_unavailable_daybreak_disable(&settings.model);
+        }
         settings.collaboration_mode.settings.model = settings.model;
         settings.collaboration_mode.settings.reasoning_effort = settings.effort;
         self.set_effective_collaboration_mode(settings.collaboration_mode);
@@ -737,6 +807,9 @@ impl ChatWidget {
         }
         self.active_collaboration_mask = Some(mask);
         self.update_collaboration_mode_indicator();
+        if previous_model != self.current_model() {
+            self.queue_unavailable_daybreak_disable(self.current_model());
+        }
         self.refresh_model_dependent_surfaces();
         let next_mode = self.active_mode_kind();
         let next_model = self.current_model();

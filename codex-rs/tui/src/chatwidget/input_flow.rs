@@ -6,6 +6,7 @@
 //! Composer submissions resume transcript following before dispatch or startup queueing,
 //! except for reversible settings pickers that preserve the reading position.
 
+use super::submission_dispatch::UserTurnDispatch;
 use super::*;
 
 pub(super) struct PreparedSubagentText {
@@ -84,7 +85,9 @@ impl ChatWidget {
     )]
     pub(super) fn emit_subagent_text(&mut self, input: PreparedSubagentText) {
         let source = match input.source {
-            UserMessageSource::Prompt => crate::app::turn_submissions::SubagentTextSource::Prompt,
+            UserMessageSource::Prompt | UserMessageSource::SafetyRecourse => {
+                crate::app::turn_submissions::SubagentTextSource::Prompt
+            }
             UserMessageSource::QuestionAnswer => {
                 crate::app::turn_submissions::SubagentTextSource::QuestionAnswer(Box::new(
                     self.capture_thread_input_state()
@@ -177,7 +180,12 @@ impl ChatWidget {
                     self.reasoning_header = None;
                     self.reasoning_summary_parts.clear();
                     self.set_status_header(String::from("Working"));
-                    self.submit_user_message(user_message);
+                    self.submit_user_message_with_history_and_shell_escape_policy(
+                        user_message,
+                        UserMessageHistoryRecord::UserMessageText,
+                        ShellEscapePolicy::Allow,
+                        UserMessageSource::Prompt,
+                    );
                 } else {
                     self.queue_user_message(user_message);
                 }
@@ -292,6 +300,7 @@ impl ChatWidget {
                     delivery: MessageDelivery::Unsent,
                     pending_pastes,
                     source,
+                    dispatch: UserTurnDispatch::Frontend.capture(self.thread_id),
                     history_record: UserMessageHistoryRecord::UserMessageText,
                 });
             self.refresh_pending_input_preview();
@@ -362,12 +371,15 @@ impl ChatWidget {
             match queued_message.action {
                 QueuedInputAction::Plain => {
                     let source = queued_message.source;
+                    let dispatch = queued_message.dispatch;
                     submitted_follow_up = self
-                        .submit_user_message_with_history_and_shell_escape_policy(
+                        .submit_user_message_with_dispatch(
                             queued_message.into_user_message(),
                             history_record,
                             ShellEscapePolicy::Allow,
                             source,
+                            None,
+                            dispatch,
                         )
                         .0;
                     break;
@@ -378,6 +390,7 @@ impl ChatWidget {
                         prepared_images,
                         pending_pastes,
                         source,
+                        dispatch,
                         ..
                     } = queued_message;
                     let mut restored_pending_pastes = self.bottom_pane.composer_pending_pastes();
@@ -404,12 +417,13 @@ impl ChatWidget {
                             );
                     }
                     submitted_follow_up = self
-                        .submit_user_message_with_prepared_images(
+                        .submit_user_message_with_dispatch(
                             user_message,
                             history_record,
                             ShellEscapePolicy::Disallow,
                             source,
                             prepared_images,
+                            dispatch,
                         )
                         .0;
                     if !submitted_follow_up {
@@ -443,7 +457,7 @@ impl ChatWidget {
     pub(crate) fn is_user_turn_pending_or_running(&self) -> bool {
         self.pending_image_submission.is_some()
             || self.input_queue.turn.is_pending()
-            || self.turn_lifecycle.agent_turn_running
+            || self.turn_lifecycle.is_running_or_admitted()
             || self.review.is_review_mode
             || (self.bottom_pane.is_task_running() && self.mcp_startup_status.is_none())
     }

@@ -32,198 +32,187 @@ use wiremock::matchers::query_param;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const WORKSPACE_ID: &str = "123e4567-e89b-42d3-a456-426614174010";
 
-enum ToolSuggestFeature {
-    Enabled,
-    Disabled,
+enum RecommendationFeature {
+    ToolSuggest,
+    RecommendedPlugins,
 }
 
 #[tokio::test]
 async fn first_turn_after_external_login_waits_for_recommended_plugins() -> Result<()> {
-    recommended_plugins_after_external_login(ToolSuggestFeature::Enabled).await
+    recommended_plugins_after_external_login(RecommendationFeature::ToolSuggest).await
 }
 
 #[tokio::test]
 async fn first_turn_after_external_login_waits_for_recommended_plugins_without_tool_suggest()
 -> Result<()> {
-    recommended_plugins_after_external_login(ToolSuggestFeature::Disabled).await
+    recommended_plugins_after_external_login(RecommendationFeature::RecommendedPlugins).await
 }
 
-async fn recommended_plugins_after_external_login(
-    tool_suggest_feature: ToolSuggestFeature,
-) -> Result<()> {
-    let tool_suggest_enabled = matches!(tool_suggest_feature, ToolSuggestFeature::Enabled);
-    let recommended_plugins_config = if tool_suggest_enabled {
-        ""
-    } else {
-        "recommended_plugins = true\n"
+async fn recommended_plugins_after_external_login(feature: RecommendationFeature) -> Result<()> {
+    let feature_args: &[&str] = match feature {
+        RecommendationFeature::ToolSuggest => &["-c", "features.tool_suggest=true"],
+        RecommendationFeature::RecommendedPlugins => &["-c", "features.recommended_plugins=true"],
     };
     let server = responses::start_mock_server().await;
     mock_server::run(&[&server], async {
-    let apps_server = AppsTestServer::mount(&server).await?;
-    Mock::given(method("GET"))
-        .and(path("/ps/plugins/suggested/codex"))
-        .and(query_param("scope", "GLOBAL"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_delay(Duration::from_millis(250))
-                .set_body_json(json!({
-                    "enabled": true,
-                    "plugins": [{
-                        "id": "plugin_github",
-                        "name": "github",
-                        "display_name": "GitHub"
-                    }]
-                })),
+        let apps_server = AppsTestServer::mount(&server).await?;
+        Mock::given(method("GET"))
+            .and(path("/ps/plugins/suggested/codex"))
+            .and(query_param("scope", "GLOBAL"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(250))
+                    .set_body_json(json!({
+                        "enabled": true,
+                        "plugins": [{
+                            "id": "plugin_github",
+                            "name": "github",
+                            "display_name": "GitHub"
+                        }]
+                    })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let response = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "done"),
+            responses::ev_completed("resp-1"),
+        ]);
+        let responses_mock = responses::mount_sse_once(&server, response).await;
+
+        let codex_home = TempDir::new()?;
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            codex_home.path(),
+            &server.uri(),
+            &apps_server.chatgpt_base_url,
+        )?;
+        let sqlite_home = codex_home.path().to_string_lossy();
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .with_args(&["-c", "features.apps=true", "-c", "features.plugins=true"])
+            .with_args(feature_args)
+            .with_env_overrides(&[("CODEX_SQLITE_HOME", Some(sqlite_home.as_ref()))])
+            .build()
+            .await?;
+        timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+        let access_token = encode_id_token(
+            &ChatGptIdTokenClaims::new()
+                .email("embedded@example.com")
+                .plan_type("pro")
+                .chatgpt_account_id(WORKSPACE_ID),
+        )?;
+        let login_id = app_server
+            .send_chatgpt_auth_tokens_login_request(
+                access_token,
+                WORKSPACE_ID.to_string(),
+                Some("pro".to_string()),
+            )
+            .await?;
+        let login_response: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_response_message(RequestId::Integer(login_id)),
         )
-        .expect(1)
-        .mount(&server)
-        .await;
-    let response = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "done"),
-        responses::ev_completed("resp-1"),
-    ]);
-    let responses_mock = responses::mount_sse_once(&server, response).await;
+        .await??;
+        assert_eq!(
+            to_response::<LoginAccountResponse>(login_response)?,
+            LoginAccountResponse::ChatgptAuthTokens {}
+        );
 
-    let codex_home = TempDir::new()?;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        codex_home.path(),
-        &server.uri(),
-        &apps_server.chatgpt_base_url,
-    )?;
-    let config_path = codex_home.path().join("config.toml");
-    let config = std::fs::read_to_string(&config_path)?;
-    std::fs::write(
-        config_path,
-        format!(
-            "{config}\n[features]\napps = true\nplugins = true\ntool_suggest = {tool_suggest_enabled}\n{recommended_plugins_config}"
-        ),
-    )?;
-
-    let sqlite_home = codex_home.path().to_string_lossy();
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .with_env_overrides(&[("CODEX_SQLITE_HOME", Some(sqlite_home.as_ref()))])
-        .build()
-        .await?;
-    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
-
-    let access_token = encode_id_token(
-        &ChatGptIdTokenClaims::new()
-            .email("embedded@example.com")
-            .plan_type("pro")
-            .chatgpt_account_id(WORKSPACE_ID),
-    )?;
-    let login_id = app_server
-        .send_chatgpt_auth_tokens_login_request(
-            access_token,
-            WORKSPACE_ID.to_string(),
-            Some("pro".to_string()),
+        // Login clears the recommendation cache after its RPC response. Wait for completion so
+        // thread startup and the background refresh share the same cache generation.
+        let notification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_notification_message("account/login/completed"),
         )
-        .await?;
-    let login_response: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_response_message(RequestId::Integer(login_id)),
-    )
-    .await??;
-    assert_eq!(
-        to_response::<LoginAccountResponse>(login_response)?,
-        LoginAccountResponse::ChatgptAuthTokens {}
-    );
+        .await??;
+        let ServerNotification::AccountLoginCompleted(payload) = notification.try_into()? else {
+            bail!("unexpected notification")
+        };
+        assert_eq!(
+            payload,
+            AccountLoginCompletedNotification {
+                login_id: None,
+                success: true,
+                error: None,
+                onboarding_entrypoint: None,
+            }
+        );
 
-    // Login clears the recommendation cache after its RPC response. Wait for completion so
-    // thread startup and the background refresh share the same cache generation.
-    let notification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_notification_message("account/login/completed"),
-    )
-    .await??;
-    let ServerNotification::AccountLoginCompleted(payload) = notification.try_into()? else {
-        bail!("unexpected notification")
-    };
-    assert_eq!(
-        payload,
-        AccountLoginCompletedNotification {
-            login_id: None,
-            success: true,
-            error: None,
-            onboarding_entrypoint: None,
-        }
-    );
+        let thread_id = app_server
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let thread_response: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_response_message(RequestId::Integer(thread_id)),
+        )
+        .await??;
+        let ThreadStartResponse { thread, .. } = to_response(thread_response)?;
 
-    let thread_id = app_server
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let thread_response: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_response_message(RequestId::Integer(thread_id)),
-    )
-    .await??;
-    let ThreadStartResponse { thread, .. } = to_response(thread_response)?;
+        let turn_id = app_server
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id,
+                input: vec![UserInput::Text {
+                    text: "suggest a plugin".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_response_message(RequestId::Integer(turn_id)),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let turn_id = app_server
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id,
-            input: vec![UserInput::Text {
-                text: "suggest a plugin".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_response_message(RequestId::Integer(turn_id)),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let requests = responses_mock.requests();
-    let request = requests
-        .iter()
-        .find(|request| {
-            request
-                .message_input_texts("user")
-                .iter()
-                .any(|text| text.contains("suggest a plugin"))
-        })
-        .expect("turn request");
-    let recommendations = request
-        .message_input_texts("developer")
-        .into_iter()
-        .filter(|text| text.starts_with("<recommended_plugins>"))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        recommendations,
-        vec![concat!(
-            "<recommended_plugins>\n",
-            "Here is a list of plugins that are available but not installed.\n\n",
-            "- GitHub (github@openai-curated-remote)\n",
-            "</recommended_plugins>",
-        )]
-    );
-    let body = request.body_json();
-    let tool_names = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        tool_names.contains(&"request_plugin_install"),
-        tool_suggest_enabled
-    );
-    assert!(!tool_names.contains(&"list_available_plugins_to_install"));
-    Ok(())
+        let requests = responses_mock.requests();
+        let request = requests
+            .iter()
+            .find(|request| {
+                request
+                    .message_input_texts("user")
+                    .iter()
+                    .any(|text| text.contains("suggest a plugin"))
+            })
+            .expect("turn request");
+        let recommendations = request
+            .message_input_texts("developer")
+            .into_iter()
+            .filter(|text| text.starts_with("<recommended_plugins>"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            recommendations,
+            vec![concat!(
+                "<recommended_plugins>\n",
+                "Here is a list of plugins that are available but not installed.\n\n",
+                "- GitHub (github@openai-curated-remote)\n",
+                "</recommended_plugins>",
+            )]
+        );
+        let body = request.body_json();
+        let tool_names = body
+            .get("tools")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_names.contains(&"request_plugin_install"),
+            matches!(feature, RecommendationFeature::ToolSuggest)
+        );
+        assert!(!tool_names.contains(&"list_available_plugins_to_install"));
+        Ok(())
     })
     .await
 }

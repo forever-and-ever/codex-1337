@@ -124,7 +124,7 @@ impl Session {
         let settings = thread_settings::acquire_persistence_lock(self).await;
         let mut item = ContextualUserFragment::into(update);
         Self::stamp_response_item_for_history(&mut item, &context.sub_id);
-        Self::assign_missing_response_item_id(&mut item);
+        self.assign_missing_response_item_id(&mut item);
         let mut item = ResponseItemEnvelope {
             item,
             metadata: Some(CodexHarnessMetadata {

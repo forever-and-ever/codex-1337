@@ -6,6 +6,9 @@
 //! [`crate::connection_manager`]. Registry removal revokes EMA authority before
 //! the thread becomes untracked.
 
+#[cfg(test)]
+#[path = "runtime/apps_tool_refresh_tests.rs"]
+mod apps_tool_refresh_tests;
 mod catalog_boundary;
 mod host_call;
 mod status;
@@ -79,8 +82,10 @@ use crate::tools::ToolInfo;
 pub enum McpStartupPolicy {
     /// Start configured servers when their task's MCP runtime is published.
     Eager,
-    /// Start servers with cached tool definitions on first use.
-    LazyWhenCached,
+    /// Defer cached stdio servers unless startup requires their live connection.
+    DeferCachedStdio,
+    /// Allow cached tools to satisfy startup for any eligible transport, including required servers.
+    DeferCachedServers,
 }
 
 /// A host-requested tool result and its identity in the published MCP catalog.
@@ -111,6 +116,10 @@ pub struct McpRuntimeInput {
     pub client_mcp_extensions: ClientMcpExtensions,
     pub auth: Option<CodexAuth>,
     pub auth_manager: Option<Arc<AuthManager>>,
+    pub runtime_auth: Option<(
+        codex_runtime_agent_instance::RuntimeAuthSlot,
+        codex_features::RuntimeAuthMode,
+    )>,
     pub elicitation_reviewer: Option<ElicitationReviewerHandle>,
     pub elicitation_lifecycle: Option<ElicitationLifecycle>,
 }
@@ -121,6 +130,8 @@ pub struct McpRuntimeInput {
 /// their exact connections and configuration for as long as they are needed.
 pub struct McpRuntime {
     current: ArcSwap<PublishedMcpRuntime>,
+    // This mutex is held only through synchronous publication, never network I/O or call drain.
+    catalog_publication: Mutex<u64>,
     // Old bindings keep leases alive after publication; cancellation alone does not release them.
     superseded_connections: Mutex<Vec<Weak<McpConnectionSet>>>,
     event_stream_cancellation: Mutex<EventStreamCancellation>,
@@ -303,6 +314,15 @@ impl McpPublicationGate {
 }
 
 impl McpRuntime {
+    /// Supersede pending fetches as soon as Core requests a configuration change.
+    pub fn invalidate_apps_tool_refresh(&self) {
+        let mut generation = self
+            .catalog_publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *generation = generation.wrapping_add(1);
+    }
+
     /// Creates a runtime with no configured servers.
     ///
     /// This is useful while constructing a thread that must publish a stable
@@ -323,6 +343,7 @@ impl McpRuntime {
                 ready_environments: HashMap::new(),
                 cached_binding: Mutex::new(None),
             }),
+            catalog_publication: Mutex::new(0),
             superseded_connections: Mutex::default(),
             event_stream_cancellation: Mutex::new(EventStreamCancellation {
                 event_server_available: false,
@@ -444,7 +465,7 @@ impl McpRuntime {
         &self,
         thread_id: ThreadId,
         call_id: &str,
-        uri: &str,
+        params: ReadResourceRequestParams,
     ) -> anyhow::Result<ReadResourceResult> {
         let origin = self
             .resource_origins
@@ -456,7 +477,7 @@ impl McpRuntime {
             .await
             .ok_or_else(|| anyhow::anyhow!("codex_apps MCP server is unavailable"))?;
 
-        origin.read(&binding, thread_id, uri).await
+        origin.read(&binding, thread_id, params).await
     }
 
     pub async fn new(input: McpRuntimeInput) -> Self {
@@ -511,6 +532,8 @@ impl McpRuntime {
     }
 
     async fn publish(&self, input: McpRuntimeInput, reuse_previous: bool) {
+        // Also cover callers which replace the runtime without Core's dirty-state machinery.
+        self.invalidate_apps_tool_refresh();
         let current = self.current.load_full();
         let retain_ema = current.config.is_some();
         let ema_auth = (input.config.xaa_enabled
@@ -597,6 +620,10 @@ impl McpRuntime {
             superseded.retain(|connections| connections.strong_count() > 0);
             superseded.push(Arc::downgrade(&current.connections));
         }
+        let catalog_publication = self
+            .catalog_publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let publication = Arc::new(PublishedMcpRuntime {
             connections,
             config: Some(config),
@@ -627,6 +654,7 @@ impl McpRuntime {
                 lease.ready_publication = Some(Arc::downgrade(&publication));
             }
         }
+        drop(catalog_publication);
         let _ = publish.send(true);
         cancellation.event_server_available = hosted_event_server_retained;
         if !hosted_event_server_retained {
@@ -743,13 +771,20 @@ impl McpRuntime {
 
     /// Prepares one advertised tool against this publication's current client and policy.
     /// Its model-visible name stays fixed while execution metadata comes from the live catalog.
-    pub async fn prepare_call(&self, advertised_tool: &ToolInfo) -> Option<PreparedMcpCall> {
+    /// A failed connection returns its startup error even if the cache advertised the tool.
+    pub async fn prepare_call(
+        &self,
+        advertised_tool: &ToolInfo,
+    ) -> anyhow::Result<PreparedMcpCall> {
         let current = self.current.load_full();
         let expected = {
-            let leases = self.server_leases.lock().ok()?;
+            let leases = self
+                .server_leases
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MCP server lease authority poisoned"))?;
             let lease = leases.get(&advertised_tool.server_name);
             if lease.is_some_and(|lease| !lease.authorizes(&current)) {
-                return None;
+                return Err(advertised_tool.unavailable_to_model_error());
             }
             lease.map(|lease| Arc::clone(&lease.cancellation))
         };
@@ -757,13 +792,18 @@ impl McpRuntime {
             leases: Arc::clone(&self.server_leases),
             expected,
         };
+        let config = current
+            .config
+            .as_ref()
+            .ok_or_else(|| advertised_tool.unavailable_to_model_error())?;
         let call = current
             .connections
-            .prepare_call_for_tool(Arc::clone(current.config.as_ref()?), advertised_tool)
+            .prepare_call_for_tool(Arc::clone(config), advertised_tool)
             .await?;
-        guard
-            .is_valid(&advertised_tool.server_name)
-            .then(|| call.with_lease_guard(guard))
+        if !guard.is_valid(&advertised_tool.server_name) {
+            return Err(advertised_tool.unavailable_to_model_error());
+        }
+        Ok(call.with_lease_guard(guard))
     }
 
     /// Captures the current runtime after its selected server has finished startup.
@@ -808,14 +848,6 @@ impl McpRuntime {
             })
     }
 
-    pub fn elicitations_auto_deny(&self) -> bool {
-        self.elicitation_router.auto_deny()
-    }
-
-    pub fn set_elicitations_auto_deny(&self, auto_deny: bool) {
-        self.elicitation_router.set_auto_deny(auto_deny);
-    }
-
     pub fn enable_full_access_form_input(&self) {
         self.elicitation_router.enable_full_access_form_input();
     }
@@ -839,17 +871,78 @@ impl McpRuntime {
             .await
     }
 
-    /// Refreshes the published Apps client and returns its exact inventory and MCP eligibility.
-    pub async fn refresh_codex_apps_tools(&self) -> anyhow::Result<CodexAppsToolSnapshot> {
+    /// Captures the current Apps client under Core's session permit.
+    /// Await the returned fetch after releasing the permit. A stale result is skipped.
+    pub fn capture_apps_tool_refresh(
+        &self,
+    ) -> impl Future<Output = anyhow::Result<Option<CodexAppsToolSnapshot>>> + Send {
+        let (generation, current) = {
+            let generation = self
+                .catalog_publication
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (*generation, self.current.load_full())
+        };
+        let auth_changes = current.auth_manager.as_ref().map(|manager| {
+            let mut changes = manager.auth_change_state_receiver();
+            // Subscribe before reading auth to catch changes during capture.
+            if !current.auth_matches(manager.auth_cached().as_ref()) {
+                changes.mark_changed();
+            }
+            changes
+        });
+        async move {
+            let validate = || {
+                let publication = self
+                    .catalog_publication
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                // Hold the watch read guard through publication. Auth writers take cache then watch.
+                let auth = auth_changes.as_ref().map(watch::Receiver::borrow);
+                (*publication == generation
+                    && Arc::ptr_eq(&self.current.load(), &current)
+                    && auth_changes
+                        .as_ref()
+                        .is_none_or(|changes| matches!(changes.has_changed(), Ok(false))))
+                .then_some((publication, auth))
+            };
+            let config = current
+                .config
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("MCP runtime is not configured"))?;
+            let snapshot = current
+                .connections
+                .refresh_codex_apps_client_catalog(config, validate)
+                .await?;
+            Ok(snapshot.filter(|_| validate().is_some()))
+        }
+    }
+
+    /// Read the admitted standalone Apps startup catalog without relisting its tools.
+    pub async fn apps_tool_snapshot_from_mcp_client(&self) -> Option<CodexAppsToolSnapshot> {
         let current = self.current.load_full();
-        let config = current
-            .config
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("MCP runtime is not configured"))?;
-        current
+        let config = current.config.as_deref()?;
+        let auth_changes = current.auth_manager.as_ref().map(|manager| {
+            let mut changes = manager.auth_change_state_receiver();
+            if !current.auth_matches(manager.auth_cached().as_ref()) {
+                changes.mark_changed();
+            }
+            changes
+        });
+        let snapshot = current
             .connections
-            .refresh_codex_apps_client_catalog(config)
-            .await
+            .apps_tool_snapshot_from_mcp_client(config)
+            .await?;
+        let _publication = self
+            .catalog_publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _auth = auth_changes.as_ref().map(watch::Receiver::borrow);
+        (Arc::ptr_eq(&self.current.load(), &current)
+            && auth_changes
+                .as_ref()
+                .is_none_or(|changes| matches!(changes.has_changed(), Ok(false))))
+        .then_some(snapshot)
     }
 
     /// Returns tools from this thread’s ready, unshared Apps MCP client.
@@ -873,6 +966,16 @@ impl McpRuntime {
         params: ReadResourceRequestParams,
     ) -> anyhow::Result<ReadResourceResult> {
         host_call::read_resource(self, server, params).await
+    }
+
+    pub async fn latest_call_tool_without_attribution(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: Option<serde_json::Value>,
+        meta: Option<serde_json::Value>,
+    ) -> anyhow::Result<CallToolResult> {
+        host_call::call_tool_without_attribution(self, server, tool, arguments, meta).await
     }
 
     /// Calls a tool for the host, retaining attribution while its catalogs stay unchanged.
@@ -1113,6 +1216,14 @@ impl McpRuntimeContext {
         self.local_process_cwd.clone()
     }
 
+    pub(crate) fn http_client_factory(&self) -> codex_http_client::HttpClientFactory {
+        self.environment_manager.http_client_factory().clone()
+    }
+
+    pub(crate) fn set_local_http_client(&mut self, client: Arc<dyn HttpClient>) {
+        self.local_http_client = client;
+    }
+
     pub(crate) fn local_http_client(&self) -> Arc<dyn HttpClient> {
         Arc::clone(&self.local_http_client)
     }
@@ -1187,7 +1298,6 @@ mod catalog_refresh_tests;
 
 #[cfg(test)]
 mod tests {
-    use codex_protocol::models::PermissionProfile;
     use codex_utils_path_uri::PathUri;
     use std::collections::HashMap;
 
@@ -1200,6 +1310,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::McpServerPermissions;
 
     fn stdio_server(environment_id: &str) -> McpServerConfig {
         McpServerConfig {
@@ -1266,9 +1377,9 @@ mod tests {
         // Complete the fixture's shared startup future before testing stable reuse.
         connections.list_all_tools().await;
         let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-        config.server_permission_profiles.insert(
+        config.server_permissions.insert(
             CODEX_APPS_MCP_SERVER_NAME.to_string(),
-            PermissionProfile::default(),
+            McpServerPermissions::Thread,
         );
         let published = Arc::new(PublishedMcpRuntime {
             connections: Arc::clone(&connections),
@@ -1284,6 +1395,17 @@ mod tests {
             ready_environments: HashMap::new(),
             cached_binding: Mutex::new(None),
         });
+        let runtime = McpRuntime::empty(/*prefix_mcp_tool_names*/ true);
+        runtime.current.store(Arc::clone(&published));
+        runtime
+            .latest_call_tool_without_attribution(
+                CODEX_APPS_MCP_SERVER_NAME,
+                "search",
+                /*arguments*/ None,
+                /*meta*/ None,
+            )
+            .await?;
+        assert!(published.cached_binding.lock().unwrap().is_none());
         let before = McpRuntime::binding_from_published_runtime(
             Arc::clone(&published),
             /*required_servers*/ &[],

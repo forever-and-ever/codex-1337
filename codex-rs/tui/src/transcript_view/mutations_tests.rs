@@ -398,6 +398,7 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         )
     };
     for selecting in [false, true] {

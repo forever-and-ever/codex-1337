@@ -133,10 +133,39 @@ pub(super) struct ResumeReady {
     presentation: ResumePresentation,
 }
 
+pub(super) enum ReadOnlyCause {
+    ExternalWriter,
+    Provider(api::ModelProviderError),
+}
+
 pub(super) enum ResumePresentation {
     Writable,
     CachedBlank,
-    ReadOnly(Option<&'static str>),
+    ReadOnly {
+        notice: Option<&'static str>,
+        cause: ReadOnlyCause,
+    },
+}
+
+impl ResumePresentation {
+    fn refresh_provider_error(&self, input: &mut crate::chatwidget::ThreadInputState) {
+        match self {
+            Self::Writable
+            | Self::ReadOnly {
+                cause: ReadOnlyCause::ExternalWriter,
+                ..
+            } => {
+                input.provider_error = None;
+            }
+            Self::ReadOnly {
+                cause: ReadOnlyCause::Provider(error),
+                ..
+            } => {
+                input.provider_error = Some(error.clone());
+            }
+            Self::CachedBlank => {}
+        }
+    }
 }
 
 pub(super) enum ResumeStage {
@@ -172,7 +201,10 @@ pub(super) enum ResumeStage {
     Hooks(Box<ResumeContext>),
     Acquiring(Box<ResumeContext>),
     RestoringBlank(Box<ResumeContext>),
-    Viewing(Box<ResumeContext>),
+    Viewing {
+        context: Box<ResumeContext>,
+        cause: ReadOnlyCause,
+    },
     Detaching {
         ready: Box<ResumeReady>,
         plan: detach::DetachPlan,
@@ -203,7 +235,7 @@ impl ResumeStage {
             | Self::Hooks(context)
             | Self::Acquiring(context)
             | Self::RestoringBlank(context)
-            | Self::Viewing(context) => context.target.thread_id,
+            | Self::Viewing { context, .. } => context.target.thread_id,
             Self::Detaching { ready, .. } => ready.started.session.thread_id,
         }
     }
@@ -543,6 +575,7 @@ impl App {
                 let exit =
                     plan.note_consent(crate::onboarding::onboarding_screen::OnboardingResult {
                         directory_trust_persisted: true,
+                        selected_gateway: None,
                         should_exit: false,
                     });
                 assert!(
@@ -936,8 +969,17 @@ impl App {
                     custody,
                     observations,
                 } = prepared;
-                if same_epoch {
-                    server.apply_session_observations(observations);
+                let valid_origin = server.accepts_session_observations(&observations);
+                let matching = matching && valid_origin;
+                let result = if valid_origin {
+                    result
+                } else {
+                    Err(color_eyre::eyre::eyre!(
+                        "prepared session belongs to a different backend"
+                    ))
+                };
+                if same_epoch && valid_origin {
+                    server.apply_session_observations(observations)?;
                 }
                 match result {
                     Ok(started) if matching => {
@@ -985,9 +1027,13 @@ impl App {
                             }
                             SubscriptionCustody::None
                                 if matching
-                                    && result.as_ref().is_err_and(
-                                        crate::app_server_session::is_active_writer_error,
-                                    ) =>
+                                    && result.as_ref().is_err_and(|error| {
+                                        crate::app_server_session::is_active_writer_error(error)
+                                            || crate::app_server_session::model_provider_error(
+                                                error,
+                                            )
+                                            .is_some()
+                                    }) =>
                             {
                                 let plan = server.prepare_thread_view(
                                     RequestPolicy::Interactive,
@@ -995,8 +1041,15 @@ impl App {
                                     &context.settings,
                                     context.target.thread_id,
                                 );
-                                operation.intent =
-                                    NavigationIntent::Resume(ResumeStage::Viewing(context));
+                                let cause = result
+                                    .as_ref()
+                                    .err()
+                                    .and_then(crate::app_server_session::model_provider_error)
+                                    .map_or(ReadOnlyCause::ExternalWriter, ReadOnlyCause::Provider);
+                                operation.intent = NavigationIntent::Resume(ResumeStage::Viewing {
+                                    context,
+                                    cause,
+                                });
                                 self.spawn_resume_effect(
                                     &mut operation,
                                     handle,
@@ -1009,8 +1062,16 @@ impl App {
                     }
                 }
             }
-            (ResumeStage::Viewing(context), ResumeOutcome::Viewed(prepared)) if matching => {
-                server.apply_session_observations(prepared.observations);
+            (ResumeStage::Viewing { context, cause }, ResumeOutcome::Viewed(prepared))
+                if matching =>
+            {
+                if !server.accepts_session_observations(&prepared.observations) {
+                    self.add_agents_overview_error(
+                        "prepared thread view belongs to a different backend".into(),
+                    );
+                    return Ok(AppRunControl::Continue);
+                }
+                server.apply_session_observations(prepared.observations)?;
                 match prepared.result {
                     Ok((started, notice)) => {
                         self.detach_for_resume(
@@ -1019,13 +1080,13 @@ impl App {
                             Box::new(ResumeReady {
                                 context: *context,
                                 started,
-                                presentation: ResumePresentation::ReadOnly(notice),
+                                presentation: ResumePresentation::ReadOnly { notice, cause },
                             }),
                         )
                         .await;
                     }
                     Err(error) => self.add_agents_overview_error(format!(
-                        "Failed to view thread open elsewhere: {error:#}"
+                        "Failed to view saved thread: {error:#}"
                     )),
                 }
             }
@@ -1065,12 +1126,12 @@ impl App {
                             CleanupContinuation::Done,
                             false,
                         ),
-                        ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank
+                        ResumePresentation::ReadOnly { .. } | ResumePresentation::CachedBlank
                             if same_epoch && !fences.is_empty() =>
                         {
                             self.retain_navigation_uncertainty(operation, fences, false);
                         }
-                        ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank => {}
+                        ResumePresentation::ReadOnly { .. } | ResumePresentation::CachedBlank => {}
                     }
                 } else {
                     Box::pin(self.commit_resumed_navigation(tui, server, operation, *ready))
@@ -1291,7 +1352,7 @@ impl App {
             .turns
             .last()
             .is_some_and(|turn| turn.status == TurnStatus::InProgress);
-        let read_only = matches!(ready.presentation, ResumePresentation::ReadOnly(_));
+        let read_only = matches!(ready.presentation, ResumePresentation::ReadOnly { .. });
         let retained_input = ((self.chat_widget.is_external_writer_view()
             || self.thread_unavailable(thread_id))
             && self.chat_widget.thread_id() == Some(thread_id))
@@ -1303,14 +1364,13 @@ impl App {
         tui.set_notification_settings(&self.local_settings.tui.notification_settings);
         self.file_search
             .update_search_dir(self.config.cwd.to_path_buf());
-        if let Err(error) = self
-            .replace_chat_widget_with_app_server_thread(
-                tui,
-                ready.started,
-                ThreadAttachPresentation::SessionLineage,
-                None,
-            )
-            .await
+        if let Err(error) = Box::pin(self.replace_chat_widget_with_app_server_thread(
+            tui,
+            ready.started,
+            ThreadAttachPresentation::SessionLineage,
+            None,
+        ))
+        .await
         {
             self.add_agents_overview_error(format!(
                 "Failed to attach to resumed app-server thread: {error}"
@@ -1346,6 +1406,7 @@ impl App {
         if let Some(mut input) =
             retained_input.or(self.agents_overview.input_states.remove(&thread_id))
         {
+            ready.presentation.refresh_provider_error(&mut input);
             let pending_settings = matches!(ready.presentation, ResumePresentation::CachedBlank)
                 .then(|| input.pending_thread_settings.take())
                 .flatten();
@@ -1371,12 +1432,8 @@ impl App {
         if !read_only {
             self.chat_widget.maybe_send_next_queued_input();
         }
-        if let ResumePresentation::ReadOnly(notice) = &ready.presentation {
-            self.ensure_thread_channel(thread_id).mark_external_writer();
-            self.chat_widget.show_external_writer_thread();
-            if let Some(notice) = notice {
-                self.chat_widget.add_info_message((*notice).into(), None);
-            }
+        if let ResumePresentation::ReadOnly { notice, cause } = &ready.presentation {
+            self.apply_resumed_read_only(thread_id, *notice, cause);
         }
         if matches!(
             self.runtime_approval_policy_override,
@@ -1405,5 +1462,28 @@ impl App {
         );
         self.server_operations.navigation.current = Some(operation);
         Ok(())
+    }
+}
+
+impl App {
+    fn apply_resumed_read_only(
+        &mut self,
+        thread_id: ThreadId,
+        notice: Option<&'static str>,
+        cause: &ReadOnlyCause,
+    ) {
+        match cause {
+            ReadOnlyCause::ExternalWriter => {
+                self.ensure_thread_channel(thread_id).mark_external_writer();
+                self.chat_widget.show_external_writer_thread();
+            }
+            ReadOnlyCause::Provider(error) => {
+                self.ensure_thread_channel(thread_id).mark_replay_only();
+                self.chat_widget.show_provider_error(error.clone(), None);
+            }
+        }
+        if let Some(notice) = notice {
+            self.chat_widget.add_info_message(notice.into(), None);
+        }
     }
 }

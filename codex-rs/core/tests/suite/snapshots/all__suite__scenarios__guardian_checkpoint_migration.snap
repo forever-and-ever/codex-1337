@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 2649
 expression: snapshot
 ---
 Scenario: An old checkpoint retains a user restriction, assistant questions, and a verified answer. Incompatible automatic compaction keeps legacy review across restart with its saved answer; compatible manual compaction immediately activates thread-owned review.
@@ -16,7 +15,7 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (11; hash=aa89cbb22016a2e7):
+  tools (11; hash=b55e5b31f37d95bf):
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
     - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=383228a84558a0ce
@@ -24,7 +23,7 @@ Settings:
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=a9d43b5bf9e672b5
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=7c8f464569dbaa9c
     - custom/apply_patch: The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the pat...; hash=dea9f12b0111a4ba
-    - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[detail, path]; hash=3b766d5bdec5d50e
+    - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[path]; hash=1908de9c0be7118a
     - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
     - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
     - web_search; hash=f103e327c6870a46
@@ -73,8 +72,8 @@ Settings: relative to window 2
   reasoning: {"context":"all_turns","effort":"medium"}
   tools: <removed>
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=91f7d4ee509c719f):
-        - namespace/functions; hash=811aad5672bc2c27
+00:additional_tools/developer (1; hash=8b269ea980f5ea64):
+        - namespace/functions; hash=558b60c48928c8d2
           - custom/exec
           - function/wait
           - custom/python
@@ -112,8 +111,8 @@ Settings: relative to window 3
   text: {"format":{"name":"codex_output_schema","schema":{"additionalProperties":false,"properties":{"outcome":{"enum":["allow","deny"],"type":"string"},"rationale":{"type":"string"},"risk_level":{"enum":["low","medium","high","critical"],"type":"string"},"user_authorization":{"enum":["unknown","low","medium","high"],"type":"string"}},"required":["outcome"],"type":"object"},"strict":false,"type":"json_schema"},"verbosity":"low"}
 -- request 6 (turn) --
 00:compaction:encrypted=true; chars=39; hash=4010be12538dbedf
-01:additional_tools/developer (1; hash=56b8de3f3d0aab13):
-        - namespace/functions; hash=2eda32b79f95eaf5
+01:additional_tools/developer (1; hash=dd258cceb73c7bfe):
+        - namespace/functions; hash=a8f9d13e8eaea496
           - custom/exec
           - function/wait
 02:message/developer:
@@ -210,8 +209,8 @@ Settings: relative to window 3
 ## Window 5 (after request 6: input diverged at item 00)
 Settings: same as window 3
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=91f7d4ee509c719f):
-        - namespace/functions; hash=811aad5672bc2c27
+00:additional_tools/developer (1; hash=8b269ea980f5ea64):
+        - namespace/functions; hash=558b60c48928c8d2
           - custom/exec
           - function/wait
           - custom/python
@@ -248,8 +247,8 @@ Settings: same as window 3
 ## Window 6 (after request 8: input diverged at item 03)
 Settings: same as window 3
 -- request 9 (turn) --
-00:additional_tools/developer (1; hash=91f7d4ee509c719f):
-        - namespace/functions; hash=811aad5672bc2c27
+00:additional_tools/developer (1; hash=8b269ea980f5ea64):
+        - namespace/functions; hash=558b60c48928c8d2
           - custom/exec
           - function/wait
           - custom/python
@@ -285,8 +284,8 @@ Settings: same as window 3
 Settings: same as window 4
 -- request 10 (turn) --
 00:compaction:encrypted=true; chars=33; hash=5c07b4383c427607
-01:additional_tools/developer (1; hash=56b8de3f3d0aab13):
-        - namespace/functions; hash=2eda32b79f95eaf5
+01:additional_tools/developer (1; hash=dd258cceb73c7bfe):
+        - namespace/functions; hash=a8f9d13e8eaea496
           - custom/exec
           - function/wait
 02:message/developer:
@@ -382,8 +381,8 @@ Settings: same as window 4
 ## Window 8 (after request 10: input diverged at item 00)
 Settings: same as window 3
 -- request 11 (turn) --
-00:additional_tools/developer (1; hash=91f7d4ee509c719f):
-        - namespace/functions; hash=811aad5672bc2c27
+00:additional_tools/developer (1; hash=8b269ea980f5ea64):
+        - namespace/functions; hash=558b60c48928c8d2
           - custom/exec
           - function/wait
           - custom/python

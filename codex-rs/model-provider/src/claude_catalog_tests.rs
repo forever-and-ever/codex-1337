@@ -69,8 +69,10 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     assert_eq!(
         manager
             .get_model_info(missing_slug, &context_override)
-            .await,
-        missing
+            .await
+            .model
+            .as_ref(),
+        &missing
     );
     first.slug = "claude-sonnet-5-5".into();
     first.display_name = first.slug.clone();
@@ -98,13 +100,17 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     assert_eq!(
         configured
             .get_model_info(missing_slug, &context_override)
-            .await,
-        missing
+            .await
+            .model
+            .as_ref(),
+        &missing
     );
     assert_eq!(
         configured
             .get_model_info(&first.slug, &context_override)
-            .await,
-        first
+            .await
+            .model
+            .as_ref(),
+        &first
     );
 }

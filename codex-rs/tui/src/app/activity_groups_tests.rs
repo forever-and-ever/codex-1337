@@ -409,6 +409,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             /*animations*/ false,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         )
         .unwrap();
     let partial_sibling = banks
@@ -418,6 +419,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             /*animations*/ false,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         )
         .unwrap();
     assert!(
@@ -440,6 +442,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             /*animations*/ false,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         )
         .unwrap();
     assert!(
@@ -474,6 +477,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             /*animations*/ false,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         )
         .unwrap();
     let conflicting = CodeModeOwner {
@@ -491,6 +495,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 &app.config.cwd,
                 /*animations*/ false,
                 &|_| crate::multi_agents::AgentMetadata::default(),
+                history_cell::ImagePathOrigin::Local,
             )
             .is_err()
     );
@@ -549,6 +554,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         RawReasoningVisibility::Hidden,
         None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        history_cell::ImagePathOrigin::Local,
     )
     .pop()
     .unwrap();
@@ -649,6 +655,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         RawReasoningVisibility::Hidden,
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        history_cell::ImagePathOrigin::Local,
     ));
     assert_prompt_arrival_ordering().await;
     // Work and process inventories identify real calls, not the block's display identity.
@@ -692,6 +699,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         RawReasoningVisibility::Hidden,
         None,
         &|_| Default::default(),
+        history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(navigation.len(), 2);
     for call_id in [
@@ -748,6 +756,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         );
         for cell in app.transcript_cells.clone() {
             if cell.as_any().is::<history_cell::CodeModeCell>() {
@@ -761,6 +770,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            history_cell::ImagePathOrigin::Local,
         );
         let mut page = Vec::new();
         for cell in older {
@@ -806,8 +816,11 @@ async fn assert_prompt_arrival_ordering() {
             }
         }
     };
-    app.chat_widget
-        .submit_user_message_as_plain_user_turn("one".into());
+    assert!(
+        app.chat_widget
+            .submit_plain_user_turn_to(thread, "one".into())
+            .is_ok()
+    );
     drain(&mut app, &mut rx, &mut tui);
     let client_id = app
         .transcript_cells
@@ -954,6 +967,7 @@ async fn assert_prompt_arrival_ordering() {
     for (index, item) in items.iter().enumerate() {
         clocks.record(&codex_app_server_protocol::ThreadItemEntry {
             turn_id: "turn".into(),
+            output_deferred: false,
             started_at_ms: None,
             completed_at_ms: None,
             item: ThreadItem {
@@ -1010,6 +1024,7 @@ fn project(
         RawReasoningVisibility::Hidden,
         Some(&app.config),
         &|_| crate::multi_agents::AgentMetadata::default(),
+        history_cell::ImagePathOrigin::Local,
     )
 }
 
@@ -2639,6 +2654,7 @@ async fn every_page_split_folds_reasoning_before_answer_and_completion_boundarie
             let mut items = vec![call("call", kind, "completed"), reasoning("detail")];
             if let Some(text) = answer {
                 items.push(ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "answer".to_owned(),
                     text: text.to_owned(),
                     phase: None,

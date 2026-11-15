@@ -51,7 +51,7 @@ impl PreambleTools<'_> {
 
 /// The initial context already reported for this window, not a rolling inventory.
 pub(crate) struct PreambleMark {
-    window_id: uuid::Uuid,
+    window_id: codex_protocol::ContextWindowId,
     parts: Vec<PreamblePart>,
     sources: Vec<codex_protocol::ContextSource>,
 }
@@ -59,8 +59,8 @@ pub(crate) struct PreambleMark {
 impl PreambleMark {
     pub(super) fn restore(
         rollout: &[codex_history::RolloutItem],
-        window_id: uuid::Uuid,
-    ) -> Option<uuid::Uuid> {
+        window_id: codex_protocol::ContextWindowId,
+    ) -> Option<codex_protocol::ContextWindowId> {
         let mut legacy_window = true;
         for item in rollout.iter().rev() {
             match item {
@@ -91,8 +91,8 @@ impl Session {
     ) -> Option<AbortOnDropHandle<PreambleMark>> {
         let window_id = {
             let state = self.state.lock().await;
-            let id = state.auto_compact_window_ids().window_id;
-            if state.preamble_window == Some(id) {
+            let id = state.auto_compact_window_ids().window_id.clone();
+            if state.preamble_window.as_ref() == Some(&id) {
                 return None;
             }
             id
@@ -186,7 +186,7 @@ impl Session {
             parts,
             sources,
         } = mark;
-        self.state.lock().await.preamble_window = Some(window_id);
+        self.state.lock().await.preamble_window = Some(window_id.clone());
         let turn_id = &turn_context.sub_id;
         let completed_at_ms = crate::turn_timing::now_unix_timestamp_ms();
         let preamble = PreambleItem {
@@ -206,6 +206,7 @@ impl Session {
                 turn_id: turn_id.clone(),
                 item: TurnItem::Preamble(preamble),
                 started_at_ms: None,
+                content_token_count: None,
                 completed_at_ms,
             }),
         )

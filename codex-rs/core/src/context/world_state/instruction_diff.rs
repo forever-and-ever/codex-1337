@@ -372,7 +372,7 @@ fn render_eloquent(
     if first {
         updates.retain(|update| match &update.content {
             WorldStateUpdateContent::Fragment(fragment) => !vacuous(fragment.as_ref()),
-            WorldStateUpdateContent::Item(_) => true,
+            WorldStateUpdateContent::Item(_) | WorldStateUpdateContent::Environment(_) => true,
         });
     }
     (state, updates)

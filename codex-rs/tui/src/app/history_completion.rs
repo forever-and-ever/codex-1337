@@ -1,50 +1,44 @@
-//! Seat terminal metadata at the source turn boundary, including unloaded failure witnesses.
-//! A split turn receives its terminal metadata only on the page containing its last item.
+//! Seat terminal metadata on the page owning its source-turn boundary.
 
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStatus;
 use std::collections::HashMap;
+use std::ops::Range;
 
-pub(super) fn group_turn_items(
-    items: Vec<ThreadItem>,
-    turns: &[Turn],
-) -> Vec<(Vec<ThreadItem>, Option<&Turn>)> {
-    let owners: HashMap<_, _> = turns
+pub(super) fn group_turn_items<'a>(
+    items: &[ThreadItem],
+    turns: &'a [Turn],
+) -> Vec<(Range<usize>, Option<&'a Turn>)> {
+    let offsets: HashMap<_, _> = items
         .iter()
         .enumerate()
-        .flat_map(|(index, turn)| turn.items.iter().map(move |item| (item.id(), index)))
+        .map(|(index, item)| (item.id(), index + 1))
         .collect();
+    let first = turns.iter().find_map(|turn| turn.items.first());
+    let mut end = first
+        .filter(|item| offsets.get(item.id()) == Some(&1))
+        .map(|_| 0);
+    let mut start = 0;
     let mut groups = Vec::new();
-    let mut pending = Vec::new();
-    let mut next_empty = 0;
-    for item in items {
-        let owner = owners.get(item.id()).copied();
-        if let Some(index) = owner {
-            // NotLoaded cannot distinguish a real zero-item failure from an unloaded
-            // turn. Keep its witness before this page until its own items arrive.
-            for turn in &turns[next_empty..index.max(next_empty)] {
-                if turn.items.is_empty() && turn.status == TurnStatus::Failed {
-                    if !pending.is_empty() {
-                        groups.push((std::mem::take(&mut pending), None));
-                    }
-                    groups.push((Vec::new(), Some(turn)));
-                }
-            }
-            next_empty = next_empty.max(index + 1);
+    for turn in turns {
+        if let Some(last) = turn.items.last() {
+            end = offsets.get(last.id()).copied();
+        } else if turn.status != TurnStatus::Failed
+            && (turn.status != TurnStatus::Interrupted
+                || turn.items_view == TurnItemsView::NotLoaded)
+        {
+            // An unloaded interruption has no admitted boundary of its own.
+            continue;
         }
-        let boundary = owner
-            .map(|index| &turns[index])
-            .filter(|turn| turn.items.last().is_some_and(|last| last.id() == item.id()));
-        pending.push(item);
-        if let Some(turn) = boundary {
-            let completed_turn =
-                matches!(turn.status, TurnStatus::Completed | TurnStatus::Failed).then_some(turn);
-            groups.push((std::mem::take(&mut pending), completed_turn));
+        if let Some(end) = end {
+            groups.push((start..end, Some(turn)));
+            start = end;
         }
     }
-    if !pending.is_empty() {
-        groups.push((pending, None));
+    if start < items.len() {
+        groups.push((start..items.len(), None));
     }
     groups
 }

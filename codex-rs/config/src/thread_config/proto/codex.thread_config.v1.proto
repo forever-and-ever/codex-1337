@@ -50,13 +50,21 @@ message ModelProvider {
   bool supports_websockets = 17;
   bool supports_standalone_web_search = 18;
   optional string model_catalog_url = 19;
-  ModelProviderAdapter adapter = 20;
+  reserved 20, 21, 22;
+  reserved "project_id", "location", "credential_file";
+  // TELOS(adapter-not-transport): fork-only wire fields never occupy upstream numbers.
+  ModelProviderAdapter adapter = 1000;
+  optional ModelProviderCapabilities capabilities = 23;
 }
 
 enum ModelProviderAdapter {
   OPENAI_COMPATIBLE = 0;
   CLAUDE_SUBSCRIPTION = 1;
   OPEN_ROUTER = 2;
+}
+
+message ModelProviderCapabilities {
+  optional bool cyber_access_programs = 1;
 }
 
 message StringMap {

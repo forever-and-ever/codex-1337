@@ -69,6 +69,7 @@ impl MutableCatalog {
             connection_sharing: ConnectionSharing::Private,
             shared_elicitation: None,
             _auth_change_notifications: None,
+            startup_tools: None,
             client: Arc::clone(&client),
             server_info: create_test_server_info("Mutable catalog"),
             tool_catalog: Arc::new(ClientToolCatalog::new(
@@ -186,7 +187,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
             .connections
             .prepare_call_for_tool(Arc::clone(before.config()), stale_call.tool_info(),)
             .await
-            .is_none()
+            .is_err()
     );
     assert_eq!(after.tools(), concurrent.tools());
     assert_eq!(before.tools(), old_tools);
@@ -208,7 +209,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
                 .connections
                 .prepare_call_for_tool(Arc::clone(after.config()), tool,)
                 .await
-                .is_some()
+                .is_ok()
         );
         assert_eq!(
             Box::pin(call.call(
@@ -245,7 +246,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
                     .tool_info(),
             )
             .await
-            .is_none()
+            .is_err()
     );
     let after = capture_binding(&fixture.connections).await;
 
@@ -264,7 +265,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
                     .tool_info(),
             )
             .await
-            .is_none()
+            .is_err()
     );
     let failed = capture_binding(&fixture.connections).await;
     assert_eq!(failed.tools(), after.tools());
@@ -322,7 +323,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
             .prepare_call_for_tool(Arc::clone(second.config()), old_call.tool_info()),
     )
     .await?;
-    assert!(prepared.is_none());
+    assert!(prepared.is_err());
     let error = Box::pin(
         old_call.call_with_preparation(/*requested_timeout*/ None, || async {
             panic!("pending notification must reject before preparation")

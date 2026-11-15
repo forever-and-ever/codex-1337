@@ -12,6 +12,7 @@ connecting:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts
 
 listening:
   • Ready
@@ -24,6 +25,7 @@ listening:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts
 
 speaking:
   • Ready
@@ -36,6 +38,7 @@ speaking:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts
 
 muted:
   • Ready
@@ -48,6 +51,7 @@ muted:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts
 
 transcript:
   • Ready
@@ -60,6 +64,7 @@ transcript:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts
 
 interrupted:
   • Ready
@@ -72,3 +77,4 @@ interrupted:
 › Ask Codex to do anything
                                                                               󰜗
   status line stays visible
+  ? for shortcuts

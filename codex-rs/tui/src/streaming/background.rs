@@ -27,6 +27,17 @@ pub(super) struct Background {
 }
 
 impl Core {
+    pub(super) fn source_snapshot(&self) -> String {
+        match self {
+            Self::Inline(core) => format!(
+                "{}{}",
+                core.state.collector.committed_source(),
+                core.state.collector.pending_source()
+            ),
+            Self::Background(core) => core.source.clone(),
+        }
+    }
+
     pub(super) fn inline(&self) -> Option<&StreamCore> {
         match self {
             Self::Inline(core) => Some(core),

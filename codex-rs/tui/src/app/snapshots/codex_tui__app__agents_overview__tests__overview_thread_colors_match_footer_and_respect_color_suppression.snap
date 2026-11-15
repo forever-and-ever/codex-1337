@@ -2,5 +2,11 @@
 source: tui/src/app/agents_overview_tests.rs
 expression: "snapshot.join(\"\\n\")"
 ---
-    ■ Named task                                          │ Selected task | title style: Style::new().fg(Color::Indexed(128)).bg(Color::Reset).underline_color(Color::Reset)
-    ■ Named task                                          │ Selected task | title style: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+    ■ Named task                                          │ Selected task | unread: false | title style: Style::new().fg(Color::Indexed(128)).bg(Color::Reset).underline_color(Color::Reset)
+selected dot Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed() | title Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).reversed()
+    ■ Named task                                          │ Selected task | unread: true | title style: Style::new().fg(Color::Indexed(128)).bg(Color::Reset).underline_color(Color::Reset).bold()
+selected dot Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed() | title Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed()
+    ■ Named task                                          │ Selected task | unread: false | title style: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+selected dot Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed() | title Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).reversed()
+    ■ Named task                                          │ Selected task | unread: true | title style: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold()
+selected dot Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed() | title Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset).bold().reversed()

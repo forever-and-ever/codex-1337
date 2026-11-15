@@ -15,7 +15,6 @@ use codex_app_server_protocol::TurnStartParams;
     reason = "Wire patch distinguishes keeping, clearing, and setting the service tier"
 )]
 pub(crate) fn turn_start_params(
-    mode: super::ThreadParamsMode,
     thread_id: ThreadId,
     client_user_message_id: String,
     items: Vec<UserInput>,
@@ -32,17 +31,6 @@ pub(crate) fn turn_start_params(
     output_schema: Option<serde_json::Value>,
     cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
 ) -> Result<TurnStartParams> {
-    if mode.settings_owner() == super::ThreadSettingsOwner::Server {
-        return Ok(TurnStartParams {
-            thread_id: thread_id.to_string(),
-            turn_trigger: Some("user".to_string()),
-            client_user_message_id: Some(client_user_message_id),
-            input: items,
-            output_schema,
-            cyber_access_program,
-            ..Default::default()
-        });
-    }
     let (sandbox_policy, permissions) =
         turn_permissions_overrides(permissions_override, cwd.as_path())?;
     Ok(TurnStartParams {

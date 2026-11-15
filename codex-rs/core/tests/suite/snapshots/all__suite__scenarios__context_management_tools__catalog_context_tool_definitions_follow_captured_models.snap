@@ -15,7 +15,7 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (13; hash=fc82a68a2bde3926):
+  tools (13; hash=0bf7a8b04ecd6880):
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
     - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=383228a84558a0ce
@@ -25,7 +25,7 @@ Settings:
     - function/new_context: Catalog context guidance.; args=[]; hash=8d300f346fb11d84
     - function/get_context_remaining: Catalog context guidance.; args=[]; hash=802b1cf4a796b439
     - custom/apply_patch: The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the pat...; hash=dea9f12b0111a4ba
-    - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[detail, path]; hash=3b766d5bdec5d50e
+    - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[path]; hash=1908de9c0be7118a
     - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
     - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
     - web_search; hash=f103e327c6870a46
@@ -50,7 +50,7 @@ Settings:
 ## Window 2 (after request 1)
 Settings: relative to window 1
   model: "context-tools-updated"
-  tools (13; hash=b684c552d9bf6bb8):
+  tools (13; hash=823122f91bd56336):
     ~ function/new_context; args=[]; hash=b9263827b0adbb78
     ~ function/get_context_remaining; args=[]; hash=3e96d66806c56bdd
 -- request 2 (turn) --

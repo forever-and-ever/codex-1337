@@ -6,8 +6,8 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=3ff4ed438d746c14):
-        - namespace/functions; hash=1e278c28f274be06
+00:additional_tools/developer (1; hash=ea85edaa1ab75197):
+        - namespace/functions; hash=65ef2be5780ae473
           - custom/exec
           - function/wait
           - custom/python
@@ -22,22 +22,20 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <COLLABORATION_MODE>
 03:message/developer:
-    <MULTI_AGENT_ROLE>
-04:message/developer:
     <MULTI_AGENT_MODE>
-05:message/user:
+04:message/user:
     <ENVIRONMENT_CONTEXT>
-06:message/user:
+05:message/user:
     Remember PRIOR_CONTEXT_5241.
-07:configuration_update:reasoning={"effort":"low"}
+06:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-08:message/user:
+07:message/user:
     Remember TRANSFERRED_CONTEXT_7391 and ask the host to start a worker.
 
 ## Window 2 (after request 2: input diverged at item 03)
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=3ff4ed438d746c14):
-        - namespace/functions; hash=1e278c28f274be06
+00:additional_tools/developer (1; hash=ea85edaa1ab75197):
+        - namespace/functions; hash=65ef2be5780ae473
           - custom/exec
           - function/wait
           - custom/python
@@ -72,9 +70,7 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
     \\ No newline at end of file
     </instruction_diff>
 08:message/developer:
-    <MULTI_AGENT_ROLE>
-09:message/developer:
     <MULTI_AGENT_MODE>
-10:message/user:
+09:message/user:
     Report TRANSFERRED_TASK_8812 and the remembered context.
-11:configuration_update:reasoning={"effort":"low"}
+10:configuration_update:reasoning={"effort":"low"}

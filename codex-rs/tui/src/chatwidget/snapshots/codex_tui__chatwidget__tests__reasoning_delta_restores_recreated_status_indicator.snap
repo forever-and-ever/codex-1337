@@ -12,3 +12,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "────────────────────────────────────────────────────────────────────────────────"
 "  Reasoning Checking files and preparing a response                             "
 "  GPT-5.6-Sol default · /tmp/project                                            "
+"  ? for shortcuts                                                               "

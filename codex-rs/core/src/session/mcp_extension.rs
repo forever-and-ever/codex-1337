@@ -34,7 +34,8 @@ impl Drop for PendingMcpExtensionAttach {
         self.cancellation.cancel();
         let removed = {
             let Ok(mut lease) = self.session.mcp_extension.write() else {
-                self.session.mark_mcp_runtime_dirty();
+                self.session
+                    .mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
                 self.session.schedule_mcp_prewarm();
                 return;
             };
@@ -51,7 +52,8 @@ impl Drop for PendingMcpExtensionAttach {
             if let Ok(mut delta) = self.session.mcp_extension_context_delta.lock() {
                 *delta = Some(DETACHED_INSTRUCTIONS.to_string());
             }
-            self.session.mark_mcp_runtime_dirty();
+            self.session
+                .mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
             self.session.schedule_mcp_prewarm();
         }
     }
@@ -121,7 +123,7 @@ impl Session {
                 self.services
                     .mcp_runtime
                     .set_server_lease(server_name.clone(), cancellation.clone());
-                self.mark_mcp_runtime_dirty();
+                self.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
                 Box::pin(self.refresh_mcp_if_dirty()).await;
                 let ready = self.services
                     .mcp_runtime
@@ -164,7 +166,7 @@ impl Session {
                     .unwrap_or_else(|_| panic!("MCP extension instruction delta poisoned")) =
                     Some(DETACHED_INSTRUCTIONS.to_string());
             }
-            self.mark_mcp_runtime_dirty();
+            self.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
             self.schedule_mcp_prewarm();
         }
     }

@@ -28,7 +28,11 @@ impl ThreadManagerState {
         {
             return Ok(ThreadEvictionOutcome::NotCurrent);
         }
-        match self.seal_idle_thread(&thread, &eligibility) {
+        match self.seal_idle_thread(
+            &thread,
+            &eligibility,
+            &crate::session::IdleMailboxPolicy::RetainQueued,
+        ) {
             crate::runtime_holds::IdleSeal::Sealed => {}
             crate::runtime_holds::IdleSeal::Busy => return Ok(ThreadEvictionOutcome::Busy),
             crate::runtime_holds::IdleSeal::Contended => {
@@ -64,7 +68,13 @@ impl ThreadManagerState {
             let _ = runtime.mailboxes.enqueue(thread_id, /*id*/ None, mail);
             // Preserve configured bindings across eviction without retaining turn-only attachments.
             // Raw bindings keep the original pending owner configuration alive.
+            let (config, ..) = Box::pin(thread.session.fork_config()).await;
             let environments = EvictedEnvironments {
+                config: Arc::new(config),
+                has_independent_service_tier: matches!(
+                    &thread.session.agent_runtime,
+                    crate::agent::host::AgentRuntimeServices::Host(services) if services.service_tier.is_none()
+                ),
                 selections: thread.environment_selections().await,
                 bindings: thread
                     .session

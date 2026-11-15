@@ -22,7 +22,6 @@ impl ChatWidget {
             self.status_state.retry_status_header = Some(StatusIndicatorState::working().header);
             self.status_state.reasoning_item_id = None;
             self.status_state.reasoning_resume_turn_id = None;
-            self.status_state.reasoning_recovered_after_refresh = false;
         }
         self.clear_active_stream_tail();
         self.adaptive_chunking.reset();

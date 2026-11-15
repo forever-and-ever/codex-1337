@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
-assertion_line: 635
 expression: "hints.join(\"\\n\")"
 ---
 awaiting measurement
@@ -61,6 +60,7 @@ Buffer {
         x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
+expanded, 80 columns: ↑ previous · ↓ next · enter details · esc back
 "ctrl-x t": <composer hints>
 ["ctrl-x t","f4"]: <composer hints>
 []: <composer hints>

@@ -1,4 +1,4 @@
-//! Verifies startup recovery preserves corrupt databases and allows thread creation.
+//! Verifies database failures preserve saved threads and report actionable diagnostics.
 
 use anyhow::Result;
 use app_test_support::TestAppServer;
@@ -181,6 +181,8 @@ async fn state_recovery_restores_saved_threads() -> Result<()> {
         .await?;
     let request = server
         .send_thread_list_request(ThreadListParams {
+            include_attached_threads: false,
+            current_account_only: false,
             excluded_thread_ids: None,
             attached_to_thread_id: None,
             originators: None,

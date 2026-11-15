@@ -1360,6 +1360,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         assert_eq!(replay.len(), 1);
         assert_eq!(
@@ -1395,6 +1396,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         None,
         &|_| AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(replay.len(), 3);
     assert_eq!(replay[0].outer_call_id(), Some("interrupt-p"));
@@ -1418,6 +1420,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         &cwd,
         crate::code_mode_transcript::Source::Live,
         &|_| AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(live.tool_call_ids(), scoped[0].tool_call_ids());
     assert_eq!(live.activity_ids(), scoped[0].activity_ids());

@@ -152,7 +152,6 @@ async fn external_writer_fork_opens_editable_thread_without_taking_source_lease(
         .await?;
     app.enqueue_primary_thread_session(view.session, view.turns)
         .await?;
-    app.ensure_thread_channel(thread_id).mark_external_writer();
     app.chat_widget
         .set_queue_autosend_suppressed(/*suppressed*/ true);
     app.chat_widget.insert_str("Retained queued prompt");
@@ -163,13 +162,40 @@ async fn external_writer_fork_opens_editable_thread_without_taking_source_lease(
         vec!["Retained queued prompt".to_string()]
     );
     app.chat_widget.insert_str("Retained draft");
+    app.ensure_thread_channel(thread_id).mark_external_writer();
+    // Navigation back to this read-only root must acknowledge its fresh snapshot.
+    let db = crate::init_state_db_for_app_server_target(&app.config, &AppServerTarget::Embedded)
+        .await?
+        .expect("state database");
+    assert!(
+        db.publish_thread_attention(thread_id, "parent-result")
+            .await
+            .map_err(std::io::Error::other)?
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.select_agent_thread_and_settle(&mut tui, &mut server, thread_id)
+        .await?;
+    assert_eq!(
+        app.thread_event_channels[&thread_id].attachment(),
+        ThreadEventAttachment::ExternalWriter
+    );
+    let revision = db
+        .thread_read_states(&[thread_id])
+        .await
+        .map_err(std::io::Error::other)?[&thread_id]
+        .revision
+        .clone();
+    assert_eq!(
+        server.viewed_revision(thread_id, /*frozen*/ true),
+        Some(revision)
+    );
+
     app.chat_widget.show_external_writer_thread();
     let retained_input = app.chat_widget.capture_thread_input_state();
     let retained_model = app.chat_widget.current_model().to_owned();
     let retained_effort = app.chat_widget.current_reasoning_effort();
     while events.try_recv().is_ok() {}
     requests.lock().expect("request recorder lock").clear();
-    let mut tui = crate::tui::test_support::make_test_tui()?;
 
     app.handle_tui_event(
         &mut tui,

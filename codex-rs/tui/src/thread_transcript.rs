@@ -95,6 +95,7 @@ pub(crate) async fn load_session_transcript(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &(dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata + Sync),
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> std::io::Result<TranscriptCells> {
     let mut thread = app_server
         .thread_read(thread_id, /*include_turns*/ false)
@@ -107,7 +108,7 @@ pub(crate) async fn load_session_transcript(
             /*item_cursor*/ None,
             /*config*/ None,
             /*local_settings*/ None,
-            HistoryHydrationScope::Complete,
+            HistoryHydrationScope::FullTranscript,
         )
         .await
         .map_err(std::io::Error::other)?;
@@ -116,6 +117,7 @@ pub(crate) async fn load_session_transcript(
         raw_reasoning_visibility,
         config,
         metadata,
+        image_origin,
     ))
 }
 
@@ -124,6 +126,7 @@ pub(crate) fn thread_to_transcript_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
     let cwd = thread.cwd;
     let thread_id = ThreadId::from_string(&thread.id).ok();
@@ -139,7 +142,13 @@ pub(crate) fn thread_to_transcript_cells(
             raw_reasoning_visibility,
             config,
             metadata,
+            image_origin,
         );
+        if let Some(error) = turn.error {
+            cells.push(Arc::new(crate::history_cell::new_error_event(
+                error.message,
+            )));
+        }
     }
     if cells.is_empty() {
         cells.push(Arc::new(PlainHistoryCell::new(vec![
@@ -156,6 +165,7 @@ pub(crate) fn thread_items_to_transcript_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
     let mut cells = Vec::new();
     let mut owned = crate::code_mode_transcript::Reducers::default();
@@ -168,6 +178,7 @@ pub(crate) fn thread_items_to_transcript_cells(
         raw_reasoning_visibility,
         config,
         metadata,
+        image_origin,
     );
     cells
 }
@@ -185,6 +196,7 @@ fn append_thread_items(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) {
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
@@ -205,6 +217,7 @@ fn append_thread_items(
                 cwd,
                 /*animations*/ false,
                 metadata,
+                image_origin,
             ) {
                 Ok(projection) => {
                     let incoming = projection
@@ -266,6 +279,7 @@ fn append_thread_items(
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
                 metadata,
+                image_origin,
             ) {
                 group.group.push_detail(cell);
             }
@@ -313,6 +327,7 @@ fn append_thread_items(
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
                     metadata,
+                    image_origin,
                 );
                 if !projected.is_empty() {
                     flush_computer(&mut pending, cells);
@@ -358,6 +373,7 @@ fn item_to_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
     let item_started_at_ms = item.started_at_ms;
     let item_completed_at_ms = item.completed_at_ms;
@@ -517,7 +533,7 @@ fn item_to_cells(
                 cells.push(Arc::new(command.into_cell()));
             }
         }
-        other => cells.extend(other_items::cells(other, cwd, metadata)),
+        other => cells.extend(other_items::cells(other, cwd, metadata, image_origin)),
     }
     cells
 }
@@ -528,6 +544,7 @@ pub(crate) fn scoped_item_cells(
     cwd: &AbsolutePathBuf,
     source: crate::code_mode_transcript::Source,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
     if let ThreadItemPayload::ToolInput(input) = item {
         return vec![Arc::new(crate::history_cell::ToolInputCell(input))];
@@ -579,5 +596,6 @@ pub(crate) fn scoped_item_cells(
         RawReasoningVisibility::Hidden,
         /*inline_visualization_context*/ None,
         metadata,
+        image_origin,
     )
 }

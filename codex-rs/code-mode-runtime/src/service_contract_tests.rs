@@ -670,7 +670,9 @@ async fn natural_completion_cleans_up_callbacks_before_responding() {
                 text: "done".to_string(),
             }],
             result_buffered_for: Duration::ZERO,
-            error_text: None,
+            // Completion drains abandoned callbacks, but cannot make an unawaited
+            // tool call a successful fence prerequisite.
+            error_text: Some("Script completed with unawaited tool calls".to_owned()),
         }
     );
     assert!(delegate.tool_finished.load(Ordering::Acquire));

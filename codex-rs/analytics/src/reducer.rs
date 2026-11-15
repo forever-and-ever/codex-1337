@@ -110,6 +110,7 @@ use crate::facts::SkillInvocationLocation;
 use crate::facts::SkillInvokedInput;
 use crate::facts::SubAgentThreadStartedInput;
 use crate::facts::ThreadInitializationMode;
+use crate::facts::TurnAnalyticsMetadata;
 use crate::facts::TurnCodexError;
 use crate::facts::TurnCodexErrorFact;
 use crate::facts::TurnProfile;
@@ -182,6 +183,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 const MAX_TOOL_RESPONSE_ENTRIES: usize = 256;
 const MAX_RECENT_VOICE_SESSION_WINDOWS: usize = 16;
 
@@ -211,6 +213,9 @@ pub(crate) fn valid_plugin_measurement_row(row: &PluginMeasurementRow) -> bool {
 // of incomplete turns when lifecycle facts are dropped.
 const MAX_PENDING_TURNS: usize = 256;
 
+#[path = "thread_hint_reducer.rs"]
+mod thread_hint_reducer;
+
 #[derive(Default)]
 pub(crate) struct AnalyticsReducer {
     requests: HashMap<(u64, RequestId), RequestState>,
@@ -225,6 +230,7 @@ pub(crate) struct AnalyticsReducer {
     item_review_summaries: HashMap<ToolItemKey, ItemReviewSummary>,
     // Bounded to 256 entries, keeping linear lookups small; evict the oldest entry when full.
     pending_mcp_tool_elicitations: VecDeque<(ToolItemKey, ElicitationType)>,
+    pending_thread_hints: VecDeque<crate::thread_hint::ThreadHintStatusEvent>,
 }
 
 struct ConnectionState {
@@ -747,32 +753,7 @@ impl AnalyticsReducer {
                     self.ingest_goal(*input, out);
                 }
                 CustomAnalyticsFact::ThreadHintStatus(input) => {
-                    if let Some((connection, thread, metadata)) =
-                        self.thread_context_or_warn(AnalyticsDropSite {
-                            event_name: "codex_thread_hint_status",
-                            thread_id: &input.thread_id,
-                            turn_id: None,
-                            review_id: None,
-                            item_id: None,
-                        })
-                    {
-                        out.push(TrackEventRequest::ThreadHintStatus(Box::new(
-                            crate::thread_hint::ThreadHintStatusEventRequest {
-                                event_type: "codex_thread_hint_status",
-                                event_params: crate::thread_hint::ThreadHintStatusEventParams {
-                                    thread_id: input.thread_id,
-                                    session_id: metadata.session_id.clone(),
-                                    app_server_client: thread.app_server_client(connection),
-                                    runtime: connection.runtime.clone(),
-                                    thread_source: metadata.thread_source.clone(),
-                                    subagent_source: metadata.subagent_source.clone(),
-                                    parent_thread_id: metadata.parent_thread_id.clone(),
-                                    status: input.status,
-                                    occurred_at_ms: input.occurred_at_ms,
-                                },
-                            },
-                        )));
-                    }
+                    self.ingest_thread_hint(*input, out);
                 }
                 CustomAnalyticsFact::GuardianV2(input) => {
                     let event_type = match &input.kind {
@@ -1064,7 +1045,7 @@ impl AnalyticsReducer {
                 self.record_tool_event(
                     &thread_id,
                     &turn_id,
-                    turn_metadata.root_turn_id(),
+                    Some(turn_metadata.as_ref()),
                     event,
                     ToolEventEmission::AwaitResponse,
                     out,
@@ -1141,7 +1122,7 @@ impl AnalyticsReducer {
         self.record_tool_event(
             &thread_id,
             &turn_id,
-            turn_metadata.root_turn_id(),
+            Some(turn_metadata.as_ref()),
             event,
             ToolEventEmission::AwaitResponse,
             out,
@@ -1200,7 +1181,7 @@ impl AnalyticsReducer {
         &mut self,
         thread_id: &str,
         turn_id: &str,
-        root_turn_id: Option<String>,
+        turn_metadata: Option<&dyn TurnAnalyticsMetadata>,
         mut event: TrackEventRequest,
         emission: ToolEventEmission,
         out: &mut Vec<TrackEventRequest>,
@@ -1209,7 +1190,8 @@ impl AnalyticsReducer {
             out.push(event);
             return;
         };
-        base.root_turn_id = root_turn_id;
+        base.root_turn_id = turn_metadata.and_then(TurnAnalyticsMetadata::root_turn_id);
+        base.turn_trigger = turn_metadata.and_then(TurnAnalyticsMetadata::turn_trigger);
         let state = self
             .tool_response_states
             .entry((thread_id.to_string(), turn_id.to_string()))
@@ -1322,6 +1304,7 @@ impl AnalyticsReducer {
                 subagent_thread_started_event_request(input),
             ));
         }
+        self.flush_thread_hints(out);
     }
 
     fn ingest_guardian_review(
@@ -1497,12 +1480,14 @@ impl AnalyticsReducer {
                     (skill_id, skill_scope)
                 }
             };
+            let turn = tracking.turn_metadata.as_deref();
             out.push(TrackEventRequest::SkillInvocation(
                 SkillInvocationEventRequest {
                     event_type: "skill_invocation",
                     skill_id,
                     skill_name: invocation.skill_name.clone(),
                     event_params: SkillInvocationEventParams {
+                        turn_trigger: turn.and_then(TurnAnalyticsMetadata::turn_trigger),
                         thread_id: Some(tracking.thread_id.clone()),
                         turn_id: Some(tracking.turn_id.clone()),
                         voice_session_id: self
@@ -1751,7 +1736,8 @@ impl AnalyticsReducer {
             ServerRequest::CommandExecutionRequestApproval { request_id, params } => {
                 let is_stdin_review = match params.kind {
                     CommandExecutionApprovalKind::WriteStdin => true,
-                    CommandExecutionApprovalKind::Command => false,
+                    CommandExecutionApprovalKind::Command
+                    | CommandExecutionApprovalKind::HumanCommand => false,
                 };
                 let is_network_access_review = params.network_approval_context.is_some();
                 let requested_network_access = is_network_access_review
@@ -1768,7 +1754,9 @@ impl AnalyticsReducer {
                 let requested_additional_permissions = params.additional_permissions.is_some();
                 let trigger = if is_stdin_review {
                     ReviewTrigger::Initial
-                } else if params.approval_id.is_some() {
+                } else if params.kind != CommandExecutionApprovalKind::HumanCommand
+                    && params.approval_id.is_some()
+                {
                     ReviewTrigger::ExecveIntercept
                 } else if requested_network_access {
                     ReviewTrigger::NetworkPolicyDenial
@@ -2125,11 +2113,11 @@ impl AnalyticsReducer {
                         .get(&(notification.thread_id.clone(), notification.turn_id.clone())),
                     self.code_mode_cells.get(&notification.thread_id),
                 );
-                let root_turn_id = self
+                let turn_metadata = self
                     .turns
                     .get(&notification.turn_id)
                     .and_then(|turn| turn.resolved_config.as_ref())
-                    .and_then(|config| config.turn_metadata.root_turn_id());
+                    .map(|config| config.turn_metadata.as_ref());
                 out.push(TrackEventRequest::CuaToolCallStarted(
                     CodexCuaToolCallStartedEventRequest {
                         event_type: "codex_cua_tool_call_started",
@@ -2137,7 +2125,10 @@ impl AnalyticsReducer {
                             thread_id: notification.thread_id,
                             session_id: thread_metadata.session_id.clone(),
                             turn_id: notification.turn_id,
-                            root_turn_id,
+                            root_turn_id: turn_metadata
+                                .and_then(TurnAnalyticsMetadata::root_turn_id),
+                            turn_trigger: turn_metadata
+                                .and_then(TurnAnalyticsMetadata::turn_trigger),
                             item_id: item_id.to_string(),
                             cell_id: attribution.cell_id,
                             parent_call_id: attribution.parent_call_id,
@@ -2253,11 +2244,11 @@ impl AnalyticsReducer {
                             .get(&notification.turn_id)
                             .and_then(|turn| turn.voice_session_id.clone());
                     }
-                    let root_turn_id = self
+                    let turn_metadata = self
                         .turns
                         .get(&notification.turn_id)
                         .and_then(|turn| turn.resolved_config.as_ref())
-                        .and_then(|config| config.turn_metadata.root_turn_id());
+                        .map(|config| Arc::clone(&config.turn_metadata));
                     // Fast collaborator tools can complete before their sampling response.
                     // Keep the event until that response can supply its originating ID.
                     let emission = if matches!(
@@ -2271,7 +2262,7 @@ impl AnalyticsReducer {
                     self.record_tool_event(
                         &notification.thread_id,
                         &notification.turn_id,
-                        root_turn_id,
+                        turn_metadata.as_deref(),
                         event,
                         emission,
                         out,
@@ -2497,6 +2488,7 @@ impl AnalyticsReducer {
                 },
             },
         ));
+        self.flush_thread_hints(out);
     }
 
     fn ingest_compaction(&mut self, input: CodexCompactionEvent, out: &mut Vec<TrackEventRequest>) {
@@ -3482,6 +3474,7 @@ fn tool_item_base(
         thread_id: thread_id.to_string(),
         session_id: thread_metadata.session_id.clone(),
         turn_id: turn_id.to_string(),
+        turn_trigger: None,
         root_turn_id: None,
         item_id,
         cell_id: None,

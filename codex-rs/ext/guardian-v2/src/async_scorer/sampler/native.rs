@@ -34,7 +34,9 @@ use codex_model_provider_info::ModelProviderAdapter;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::CatalogModel;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::GuardianRiskLevel;
 use codex_protocol::protocol::TruncationPolicy;
@@ -49,13 +51,13 @@ use tokio::sync::oneshot;
 
 pub(super) struct Catalog {
     account_id: String,
-    model: OnceCell<ModelInfo>,
+    model: OnceCell<CatalogModel>,
 }
 
 pub(super) async fn model(
     sampler: &LunaSampler,
     account_id: &str,
-) -> Result<ModelInfo, LunaSamplerError> {
+) -> Result<CatalogModel, LunaSamplerError> {
     // A single retained scope bounds memory; only successful discovery is cached.
     // Replacing it never mutates a catalogue already borrowed by a dispatched request.
     let catalog = {
@@ -95,6 +97,10 @@ pub(super) async fn model(
                 .find(|model| {
                     model.slug == sampler.config.provider.approval_review_preferred_model()
                         && model.anthropic.is_some()
+                })
+                .map(|model| CatalogModel {
+                    model: Arc::new(model),
+                    origin: ModelOrigin::Provider,
                 })
                 .ok_or_else(|| {
                     LunaSamplerError::Provider(CodexErr::InvalidRequest(

@@ -7,6 +7,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 
 use std::sync::Arc;
@@ -113,6 +114,7 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
             replacement.clone(),
             context.to_turn_context_item(),
             baseline,
+            /*rejected_audio_file_ids*/ BTreeSet::default(),
             metadata(),
         )
         .await
@@ -145,7 +147,7 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
         let state = session.state.lock().await;
         (
             state.auto_compact_window_number(),
-            state.auto_compact_window_ids(),
+            state.auto_compact_window_ids().clone(),
         )
     };
     // Reusing the old captured prefix after a successful swap must not install
@@ -156,6 +158,7 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
                 vec![ResponseItemEnvelope::new(checkpoint)],
                 context.to_turn_context_item(),
                 world_state.render_full().0,
+                /*rejected_audio_file_ids*/ BTreeSet::default(),
                 metadata()
             )
             .await
@@ -171,6 +174,6 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
             state.auto_compact_window_number(),
             state.auto_compact_window_ids()
         ),
-        window_before
+        (window_before.0, &window_before.1)
     );
 }

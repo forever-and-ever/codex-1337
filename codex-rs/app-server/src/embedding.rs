@@ -27,29 +27,32 @@ pub fn install_embedded_runtime() {
 
 fn start(args: InProcessClientStartArgs) -> BoxFuture<'static, IoResult<Box<dyn EmbeddedServer>>> {
     Box::pin(async move {
-        let initialize = args.initialize_params();
-        let handle = crate::in_process::start(InProcessStartArgs {
-            arg0_paths: args.arg0_paths,
-            config: args.config,
-            cli_overrides: args.cli_overrides,
-            loader_overrides: args.loader_overrides,
-            strict_config: args.strict_config,
-            cloud_config_bundle: args.cloud_config_bundle,
-            embedded_network_policy: args.embedded_network_policy,
-            thread_config_loader: Arc::new(NoopThreadConfigLoader),
-            feedback: args.feedback,
-            log_db: args.log_db,
-            state_db: args.state_db,
-            environment_manager: args.environment_manager,
-            config_warnings: args.config_warnings,
-            session_source: args.session_source,
-            enable_codex_api_key_env: args.enable_codex_api_key_env,
-            initialize,
-            channel_capacity: args.channel_capacity,
-        })
-        .await?;
+        let handle = crate::in_process::start(runtime_start_args(args)).await?;
         Ok(Box::new(handle) as Box<dyn EmbeddedServer>)
     })
+}
+
+fn runtime_start_args(args: InProcessClientStartArgs) -> InProcessStartArgs {
+    let initialize = args.initialize_params();
+    InProcessStartArgs {
+        arg0_paths: args.arg0_paths,
+        config: args.config,
+        cli_overrides: args.cli_overrides,
+        loader_overrides: args.loader_overrides,
+        strict_config: args.strict_config,
+        cloud_config_bundle: args.cloud_config_bundle,
+        embedded_network_policy: args.embedded_network_policy,
+        thread_config_loader: Arc::new(NoopThreadConfigLoader),
+        feedback: args.feedback,
+        log_db: args.log_db,
+        state_db: args.state_db,
+        environment_manager: args.environment_manager,
+        config_warnings: args.config_warnings,
+        session_source: args.session_source,
+        enable_codex_api_key_env: args.enable_codex_api_key_env,
+        initialize,
+        channel_capacity: args.channel_capacity,
+    }
 }
 
 impl EmbeddedServer for InProcessClientHandle {
@@ -86,5 +89,86 @@ impl EmbeddedConnection for InProcessClientSender {
 
     fn fail_server_request(&self, request_id: RequestId, error: JSONRPCErrorError) -> IoResult<()> {
         InProcessClientSender::fail_server_request(self, request_id, error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_app_server_embedding::EmbeddedNetworkPolicy;
+    use codex_arg0::Arg0DispatchPaths;
+    use codex_config::CloudConfigBundleLoader;
+    use codex_config::LoaderOverrides;
+    use codex_core::config::ConfigBuilder;
+    use codex_exec_server::EnvironmentManager;
+    use codex_exec_server::ExecServerRuntimeOptions;
+    use codex_feedback::CodexFeedback;
+    use codex_protocol::protocol::SessionSource;
+
+    #[tokio::test]
+    async fn runtime_start_args_forward_environment_manager_and_capabilities() {
+        let home = tempfile::tempdir().expect("temporary Codex home");
+        let config = Arc::new(
+            ConfigBuilder::default()
+                .codex_home(home.path().to_path_buf())
+                .fallback_cwd(Some(home.path().to_path_buf()))
+                .build()
+                .await
+                .expect("test config"),
+        );
+        let environment_manager = Arc::new(
+            EnvironmentManager::create_for_tests(
+                Some("ws://127.0.0.1:8765".to_string()),
+                Some(
+                    ExecServerRuntimeOptions::new(
+                        std::env::current_exe().expect("current exe"),
+                        /*codex_linux_sandbox_exe*/ None,
+                    )
+                    .expect("runtime paths"),
+                ),
+            )
+            .await,
+        );
+        let runtime_args = runtime_start_args(InProcessClientStartArgs {
+            required_human_approval: true,
+            arg0_paths: Arg0DispatchPaths::default(),
+            config: Arc::clone(&config),
+            cli_overrides: Vec::new(),
+            loader_overrides: LoaderOverrides::default(),
+            strict_config: false,
+            cloud_config_bundle: CloudConfigBundleLoader::default(),
+            embedded_network_policy: EmbeddedNetworkPolicy::default(),
+            feedback: CodexFeedback::new(),
+            log_db: None,
+            state_db: None,
+            environment_manager: Arc::clone(&environment_manager),
+            config_warnings: Vec::new(),
+            session_source: SessionSource::Exec,
+            enable_codex_api_key_env: false,
+            client_name: "codex-app-server-embedding-test".to_string(),
+            client_version: "0.0.0-test".to_string(),
+            experimental_api: true,
+            mcp_server_openai_form_elicitation: true,
+            opt_out_notification_methods: Vec::new(),
+            channel_capacity: crate::in_process::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        });
+        assert_eq!(runtime_args.config, config);
+        let capabilities = runtime_args
+            .initialize
+            .capabilities
+            .expect("initialize capabilities");
+        assert!(capabilities.required_human_approval);
+        assert!(capabilities.mcp_server_openai_form_elicitation);
+        assert!(Arc::ptr_eq(
+            &runtime_args.environment_manager,
+            &environment_manager
+        ));
+        assert!(
+            runtime_args
+                .environment_manager
+                .default_environment()
+                .expect("default environment")
+                .is_remote()
+        );
     }
 }

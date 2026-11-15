@@ -15,6 +15,7 @@ import type { SleepItem } from "../SleepItem";
 import type { WebSearchItem } from "../WebSearchItem";
 import type { JsonValue } from "../serde_json/JsonValue";
 import type { AgentMessageDelivery } from "./AgentMessageDelivery";
+import type { AgentMessageModeration } from "./AgentMessageModeration";
 import type { ArrivalItem } from "./ArrivalItem";
 import type { AsyncUserInputQuestion } from "./AsyncUserInputQuestion";
 import type { CodeModeItem } from "./CodeModeItem";
@@ -53,7 +54,7 @@ startedAtMs?: number | null,
 /**
  * Unix timestamp in milliseconds when the item completed, if recorded.
  */
-completedAtMs?: number | null, } & ({ "type": "codeModeOwned" } & CodeModeOwned<ThreadItemPayload> | { "type": "codeMode" } & CodeModeItem | { "type": "toolInput" } & ToolInput | { "type": "stepAdmission" } & StepAdmissionItem | { "type": "arrival" } & ArrivalItem | { "type": "userMessage", id: string, clientId: string | null, sourceResponseItemId?: ResponseItemId, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
+completedAtMs?: number | null, } & ({ "type": "codeModeOwned" } & CodeModeOwned<ThreadItemPayload> | { "type": "codeMode" } & CodeModeItem | { "type": "toolInput" } & ToolInput | { "type": "stepAdmission" } & StepAdmissionItem | { "type": "arrival" } & ArrivalItem | { "type": "userMessage", id: string, clientId: string | null, sourceResponseItemId?: ResponseItemId, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", moderation: AgentMessageModeration | null, id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
 /**
  * Enclosing invocation; absent in older persisted history.
  */

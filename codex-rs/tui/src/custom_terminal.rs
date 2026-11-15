@@ -131,6 +131,11 @@ impl Frame<'_> {
     pub fn buffer_mut(&mut self) -> &mut Buffer {
         self.buffer
     }
+
+    /// The cursor style selected by the last layer painted in this frame.
+    pub(crate) fn cursor_style(&self) -> SetCursorStyle {
+        self.cursor_style
+    }
 }
 
 #[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
@@ -772,20 +777,18 @@ impl ModifierDiff {
         if removed.contains(Modifier::REVERSED) {
             queue!(w, SetAttribute(CAttribute::NoReverse))?;
         }
-        if removed.contains(Modifier::BOLD) {
+        let intensity = Modifier::BOLD | Modifier::DIM;
+        let mut added = self.to - self.from;
+        if removed.intersects(intensity) {
+            // SGR 22 clears both intensities, including one the next cell may retain.
             queue!(w, SetAttribute(CAttribute::NormalIntensity))?;
-            if self.to.contains(Modifier::DIM) {
-                queue!(w, SetAttribute(CAttribute::Dim))?;
-            }
+            added |= self.to & intensity;
         }
         if removed.contains(Modifier::ITALIC) {
             queue!(w, SetAttribute(CAttribute::NoItalic))?;
         }
         if removed.contains(Modifier::UNDERLINED) {
             queue!(w, SetAttribute(CAttribute::NoUnderline))?;
-        }
-        if removed.contains(Modifier::DIM) {
-            queue!(w, SetAttribute(CAttribute::NormalIntensity))?;
         }
         if removed.contains(Modifier::CROSSED_OUT) {
             queue!(w, SetAttribute(CAttribute::NotCrossedOut))?;
@@ -794,7 +797,6 @@ impl ModifierDiff {
             queue!(w, SetAttribute(CAttribute::NoBlink))?;
         }
 
-        let added = self.to - self.from;
         if added.contains(Modifier::REVERSED) {
             queue!(w, SetAttribute(CAttribute::Reverse))?;
         }

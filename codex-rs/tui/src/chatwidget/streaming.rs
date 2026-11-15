@@ -4,6 +4,8 @@
 //! cells, commit ticks, and interrupt deferral.
 
 use super::*;
+use crate::app_event::CapturedSideDisplay;
+use crate::app_event::CapturedSideWork;
 use crate::markdown_render::ListSpacing;
 
 fn streamed_message_matches_completed(streamed: &str, completed: &str) -> bool {
@@ -38,7 +40,6 @@ impl ChatWidget {
             return;
         }
         self.status_state.reasoning_item_id = Some(id);
-        self.status_state.reasoning_recovered_after_refresh = false;
         self.reasoning_buffer.clear();
         self.reasoning_summary_parts.clear();
         self.restore_reasoning_status_header();
@@ -110,6 +111,11 @@ impl ChatWidget {
         {
             let needs_scrollback_reflow = controller.needs_scrollback_reflow();
             self.clear_active_stream_tail();
+            let interrupted_item = self
+                .transcript
+                .active_streamed_agent_message
+                .take()
+                .filter(|_| completed_message.is_none());
             let (cell, streamed_source) = controller.finalize();
             let completed_display = completed_message.map(|source| {
                 parse_assistant_markdown(source, self.config.cwd.as_path()).visible_markdown
@@ -169,6 +175,7 @@ impl ChatWidget {
                 });
                 self.note_stream_consolidation_queued();
                 self.app_event_tx.send(AppEvent::ConsolidateAgentMessage {
+                    interrupted_item,
                     source,
                     item_id: completed_message
                         .and(self.transcript.last_completed_agent_message.as_ref())
@@ -247,6 +254,52 @@ impl ChatWidget {
                     && completed.item_id == flushed.item_id
                     && streamed_message_matches_completed(&flushed.source, message)
             })
+    }
+
+    /// Capture at handoff, while links and visualization directives still have the outgoing cwd.
+    pub(crate) fn take_side_display(&mut self, width: u16) -> CapturedSideDisplay {
+        self.flush_completed_tool_activity();
+        let visualizations = self.thread_id.and_then(|id| {
+            crate::inline_visualization::InlineVisualizationContext::from_config(&self.config, id)
+        });
+        let source = self.active_cell_transcript_key();
+        let visible = |cell: &dyn HistoryCell| {
+            !cell.as_any().is::<history_cell::StreamingAgentTailCell>()
+                && !cell.as_any().is::<history_cell::StreamingPlanTailCell>()
+        };
+        let mut tail = self.active_transcript_snapshot(width);
+        tail.active = tail.active.filter(|cell| visible(cell.as_ref()));
+        let active = self
+            .transcript
+            .take_active_cell()
+            .filter(|cell| visible(cell.as_ref()));
+        CapturedSideDisplay {
+            rendered_completion_turn_ids: self.turn_lifecycle.rendered_completion_turn_ids.clone(),
+            active,
+            last_completed_agent_message: self.transcript.last_completed_agent_message.clone(),
+            preparations: std::mem::take(&mut self.transcript.preparations),
+            source,
+            tail,
+            draft: {
+                let snapshot = self.bottom_pane.composer_recovery_snapshot();
+                let mut draft = Box::new(crate::bottom_pane::TextArea::new());
+                draft.set_text_with_elements(&snapshot.text, &snapshot.text_elements);
+                draft
+            },
+            status: self.status_line_text(),
+            work: self
+                .last_turn_id()
+                .filter(|_| self.is_agent_turn_running())
+                .map(|turn_id| {
+                    CapturedSideWork::new(
+                        turn_id.to_owned(),
+                        self.new_status_indicator(),
+                        self.bottom_pane.status_elapsed().unwrap_or_default(),
+                    )
+                }),
+            cwd: self.config.cwd.clone(),
+            visualizations,
+        }
     }
 
     pub(super) fn finalize_completed_assistant_message(
@@ -381,6 +434,26 @@ impl ChatWidget {
         }
     }
 
+    pub(super) fn replace_reasoning_parts(
+        &mut self,
+        mut summary: Vec<String>,
+        content: Vec<String>,
+    ) {
+        if self.config.show_raw_agent_reasoning {
+            summary.extend(content);
+        }
+        // Empty completions follow some streamed items. Preserve their deltas.
+        if summary.iter().all(String::is_empty) {
+            return;
+        }
+        self.reasoning_buffer.clear();
+        self.reasoning_summary_parts.clear();
+        for part in summary {
+            self.on_reasoning_section_break();
+            self.on_agent_reasoning_delta(part);
+        }
+    }
+
     pub(super) fn on_agent_reasoning_delta(&mut self, delta: String) {
         self.reasoning_buffer.push_str(&delta);
         let previous = self.reasoning_header.take();
@@ -428,7 +501,6 @@ impl ChatWidget {
         // Keep the last useful summary through tools and later empty items.
         self.status_state.reasoning_item_id = None;
         self.status_state.reasoning_resume_turn_id = None;
-        self.status_state.reasoning_recovered_after_refresh = false;
         self.reasoning_summary_parts.clear();
         self.request_redraw();
     }
@@ -485,10 +557,20 @@ impl ChatWidget {
         }
         let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
         let questions = item.questions.as_deref().unwrap_or_default();
-        if (from_replay || !questions.is_empty())
+        let interrupted = self
+            .transcript
+            .last_flushed_agent_message
+            .take()
+            .filter(|flushed| flushed.turn_id == turn_id && flushed.item_id == item.id)
+            .map(|flushed| (flushed.turn_id, flushed.item_id));
+        if interrupted.is_some() {
+            // Commit any resumed stream fragment before replacing all fragments with
+            // the authoritative message. Markdown references can span interruptions.
+            self.flush_answer_stream_with_separator();
+        }
+        if (from_replay || !questions.is_empty() || interrupted.is_some())
             && self.stream_controller.is_none()
             && !parsed.visible_markdown.is_empty()
-            && !self.completed_agent_message_was_flushed(&message)
         {
             self.prepare_assistant_message();
             self.mark_safety_buffering_agent_message_started();
@@ -509,13 +591,19 @@ impl ChatWidget {
                 .with_copy_source(Some(message.clone()));
             cell.timestamp = self.transcript.agent_timestamp;
             cell.item_id = Some(item.id.clone());
-            self.add_to_history(cell);
+            if let Some(item) = interrupted {
+                self.app_event_tx
+                    .send(AppEvent::CorrectFlushedAgentMessage { item, cell });
+            } else {
+                self.add_to_history(cell);
+            }
             self.handle_stream_finished();
             self.request_redraw();
         } else {
             self.finalize_completed_assistant_message(Some(&message), questions);
         }
         self.transcript.agent_timestamp = None;
+        self.transcript.last_flushed_agent_message = None;
         if !parsed.visible_markdown.is_empty() {
             self.transcript
                 .record_agent_markdown(parsed.visible_markdown.clone(), message);
@@ -579,11 +667,10 @@ impl ChatWidget {
 
     /// Runs a commit tick for the current stream queue snapshot.
     ///
-    /// `scope` controls whether this call may commit in smooth mode or only when catch-up
-    /// is currently active. While lines are actively streaming we hide the status row to avoid
-    /// duplicate "in progress" affordances. Restoration is gated separately so we only re-show
+    /// `scope` selects paced, catch-up, or replay draining. While lines are actively streaming
+    /// we hide the status row to avoid duplicate "in progress" affordances. We only re-show
     /// the row after commentary completion once stream queues are idle.
-    pub(super) fn run_commit_tick_with_scope(&mut self, scope: CommitTickScope) {
+    pub(crate) fn run_commit_tick_with_scope(&mut self, scope: CommitTickScope) {
         let now = Instant::now();
         let outcome = run_commit_tick(
             &mut self.adaptive_chunking,

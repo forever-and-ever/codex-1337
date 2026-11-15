@@ -30,6 +30,7 @@ impl ExecPolicyManager {
                 bypass_sandbox,
                 proposed_execpolicy_amendment: None,
             },
+            human @ ExecApprovalRequirement::NeedsHumanApproval { .. } => human,
             forbidden @ ExecApprovalRequirement::Forbidden { .. } => forbidden,
         }
     }

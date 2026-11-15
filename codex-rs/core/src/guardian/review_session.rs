@@ -148,6 +148,7 @@ pub struct GuardianReviewSessionReuseKey {
     model: Option<String>,
     model_provider_id: String,
     model_provider: ModelProviderInfo,
+    captured_authority: Option<super::reviewer_route::CapturedReviewer>,
     model_context_window: Option<i64>,
     model_auto_compact_token_limit: Option<i64>,
     model_auto_compact_token_limit_scope: AutoCompactTokenLimitScope,
@@ -192,6 +193,7 @@ impl GuardianReviewSessionReuseKey {
             model: spawn_config.model.clone(),
             model_provider_id: spawn_config.model_provider_id.clone(),
             model_provider: spawn_config.model_provider.clone(),
+            captured_authority: None,
             model_context_window: model_policy.model_context_window,
             model_auto_compact_token_limit: model_policy.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: spawn_config.model_auto_compact_token_limit_scope,
@@ -254,15 +256,9 @@ async fn run_review_on_session(
         };
     }
     let review_model = &params.review_model;
-    let models_manager = match &params.reviewer_route {
-        super::reviewer_route::ReviewerRoute::ParentProvider => {
-            &params.parent_session.services.models_manager
-        }
-        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. }
-        | super::reviewer_route::ReviewerRoute::OpenRouterUnavailable => {
-            &review_session.session.services.models_manager
-        }
-    };
+    let models_manager =
+        super::reviewer_catalog::session_manager(&review_session.session, &params.parent_session)
+            .await;
     let model_info = models_manager
         .get_model_info(
             review_model.model.as_str(),
@@ -349,6 +345,11 @@ async fn run_review_on_session(
         false
     };
     if should_compact {
+        let mut execution_attempt =
+            crate::turn_timing::review_execution::ReviewExecutionObservation::install(
+                Arc::clone(&review_session.session),
+                params.parent_context.review_execution.clone(),
+            );
         let compact_submission = run_before_review_deadline(
             deadline,
             params.external_cancel.as_ref(),
@@ -384,6 +385,7 @@ async fn run_review_on_session(
             &mut analytics_result,
         )
         .await;
+        execution_attempt.finish(result.turn_completed);
         if !matches!(
             result.outcome,
             GuardianReviewSessionOutcome::Completed(Ok(_))
@@ -576,9 +578,10 @@ async fn run_review_on_session(
         .session
         .services
         .thread_extension_data
-        .insert(super::input_budget::PendingReviewContext(
-            prompt_items.context,
-        ));
+        .insert(super::input_budget::PendingReviewContext {
+            context: prompt_items.context,
+            elastic: params.spawn_config.guardian_sync_elastic_budget.clone(),
+        });
     review_session
         .session
         .services
@@ -586,6 +589,11 @@ async fn run_review_on_session(
         .insert(super::PendingReviewRouting(
             params.parent_context.parent_response.clone(),
         ));
+    let mut execution_attempt =
+        crate::turn_timing::review_execution::ReviewExecutionObservation::install(
+            Arc::clone(&review_session.session),
+            params.parent_context.review_execution.clone(),
+        );
     let request = codex_guardian_reviewer::ReviewerTurn {
         items,
         environments: codex_protocol::protocol::TurnEnvironmentSelections::new(
@@ -597,7 +605,12 @@ async fn run_review_on_session(
         personality: params.personality,
         model: review_model.model.clone(),
         reasoning_effort: review_model.reasoning_effort.clone(),
-        cyber_access_program: parent_turn.cyber_access_program,
+        cyber_access_program: parent_turn.cyber_access_program.filter(|_| {
+            crate::RequiredCyberAccessPrograms::for_thread(
+                &params.parent_session.services.thread_extension_data,
+            )
+            .is_none()
+        }),
         parent_response_id: params
             .parent_context
             .parent_response
@@ -608,6 +621,14 @@ async fn run_review_on_session(
         root_turn_id: parent_turn.turn_metadata_state.root_turn_id(),
     }
     .into_request();
+    let store = &review_session.session.services.thread_extension_data;
+    if params
+        .spawn_config
+        .features
+        .enabled(Feature::GuardianDenialReconsideration)
+    {
+        store.insert(codex_guardian_reviewer::DenialResample::default());
+    }
     let child_turn_id = match codex_guardian_reviewer::start_review_turn(
         review_session,
         request,
@@ -618,11 +639,13 @@ async fn run_review_on_session(
     {
         Ok(turn_id) => turn_id,
         Err(outcome) => {
+            store.remove::<codex_guardian_reviewer::DenialResample>();
             review_session
                 .session
                 .services
                 .thread_extension_data
                 .remove::<super::PendingReviewRouting>();
+
             review_session
                 .session
                 .services
@@ -651,11 +674,13 @@ async fn run_review_on_session(
         &mut analytics_result,
     )
     .await;
-    review_session
-        .session
-        .services
-        .thread_extension_data
-        .remove::<super::PendingReviewRouting>();
+    execution_attempt.finish(turn_result.turn_completed);
+    let turn_result = match store.remove::<codex_guardian_reviewer::DenialResample>() {
+        Some(resample) => resample.finish(turn_result, &parent_turn.session_telemetry),
+        None => turn_result,
+    };
+    store.remove::<super::PendingReviewRouting>();
+
     // Finalizing input consumes this context; failures before admission leave it pending.
     let transcript_admitted = review_session
         .session
@@ -667,10 +692,8 @@ async fn run_review_on_session(
         turn_result.outcome,
         GuardianReviewSessionOutcome::Completed(_)
     );
-    if completed_review
-        && turn_result.turn_completed
-        && let Some(total_token_usage) = review_session.session.total_token_usage().await
-    {
+    // Failed reviews can still spend tokens on completed inference requests.
+    if let Some(total_token_usage) = review_session.session.total_token_usage().await {
         analytics_result.token_usage = Some(token_usage_delta(
             &token_usage_at_review_start,
             &total_token_usage,

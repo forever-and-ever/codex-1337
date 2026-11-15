@@ -385,6 +385,20 @@ async fn backend_banner_account_changes_invalidate_pending_recovery() -> Result<
         )),
     )
     .await;
+    assert_ne!(app.rate_limit_hard_stop_generation, pending.1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while app.account_ui.displayed.is_none() {
+            let completion = app
+                .server_operations
+                .control_rx
+                .recv()
+                .await
+                .expect("actual scoped payer receipt");
+            Box::pin(app.handle_server_completion(&mut tui, &mut session, completion)).await?;
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
     app.handle_event(
         &mut tui,
         &mut session,

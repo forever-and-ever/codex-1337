@@ -70,7 +70,10 @@ impl Baseline {
 }
 
 impl StepMark {
-    pub(super) fn orphaned(rollout: &[RolloutItem]) -> Option<Self> {
+    pub(super) fn orphaned(
+        rollout: &[RolloutItem],
+        thread_id: codex_protocol::ThreadId,
+    ) -> Option<Self> {
         let mut orphan: Option<Self> = None;
         let mut tip = None;
         for entry in rollout {
@@ -82,10 +85,11 @@ impl StepMark {
                 }
                 RolloutItem::Compacted(_) => tip = None,
                 RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                    thread_id: owner,
                     turn_id,
                     item,
                     ..
-                })) => match item {
+                })) if *owner == thread_id => match item {
                     TurnItem::StepAdmission(item) if item.admission == Admission::Pending => {
                         orphan = Some(Self {
                             item: item.clone(),
@@ -388,6 +392,7 @@ impl Session {
                 turn_id: turn_id.to_string(),
                 item,
                 started_at_ms: None,
+                content_token_count: None,
                 completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
             }),
         )

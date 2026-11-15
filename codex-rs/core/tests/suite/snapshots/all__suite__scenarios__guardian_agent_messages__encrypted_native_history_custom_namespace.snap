@@ -96,8 +96,8 @@ Scenario: A historical MAv2 send_message call and an encrypted parent reply reac
 
 ## Window 3 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=110585635a464723):
-        - namespace/functions; hash=b1aa229c49700375
+00:additional_tools/developer (1; hash=867de8fb03d2c86a):
+        - namespace/functions; hash=edad7945587744c2
           - custom/exec
           - function/wait
 01:message/developer:
@@ -232,8 +232,8 @@ Scenario: A historical MAv2 send_message call and an encrypted parent reply reac
 
 ## Window 5 (after request 5: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 6 (turn) --
-00:additional_tools/developer (1; hash=110585635a464723):
-        - namespace/functions; hash=b1aa229c49700375
+00:additional_tools/developer (1; hash=867de8fb03d2c86a):
+        - namespace/functions; hash=edad7945587744c2
           - custom/exec
           - function/wait
 01:message/developer:

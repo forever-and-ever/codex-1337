@@ -67,7 +67,7 @@ pub(crate) fn product_event_batches(
     batches
 }
 
-fn event_thread_id(event: &TrackEventRequest) -> Option<&str> {
+pub(crate) fn event_thread_id(event: &TrackEventRequest) -> Option<&str> {
     match event {
         TrackEventRequest::SkillInvocation(event) => event.event_params.thread_id.as_deref(),
         TrackEventRequest::ThreadInitialized(event) => Some(&event.event_params.thread_id),

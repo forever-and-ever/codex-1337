@@ -445,6 +445,7 @@ impl LegacyRolloutCanonicalizer {
             writer,
             timestamp,
             RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                content_token_count: None,
                 thread_id: self.thread_id,
                 turn_id,
                 item,

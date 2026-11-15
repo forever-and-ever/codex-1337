@@ -335,7 +335,7 @@ fn selection_mouse_does_not_open_links() {
             )
         };
         assert!(matches!(
-            view.handle_selection_mouse(down, &cells),
+            view.handle_selection_mouse(down, &cells, /*patch_approval*/ None),
             Some(ViewAction::Changed)
         ));
         let area = view.area;
@@ -347,6 +347,7 @@ fn selection_mouse_does_not_open_links() {
                     ..down
                 },
                 &cells,
+                /*patch_approval*/ None,
             ),
             Some(ViewAction::Changed)
         ));

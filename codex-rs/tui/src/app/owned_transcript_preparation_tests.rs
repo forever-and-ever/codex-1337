@@ -12,17 +12,21 @@ pub(super) fn out_of_order_streams(
     // Finalizations can complete out of order after unrelated output arrives.
     let thread_id = ThreadId::new();
     app.active_thread_id = Some(thread_id);
-    let make_final = |id: &str| crate::streaming::completion::PreparedStream {
-        assistant: None,
-        thread_id,
-        item_id: id.into(),
-        cell: Arc::new(history_cell::AgentMarkdownCell::new(
-            format!("Final {id}"),
-            &app.config.cwd,
-        )),
+    let make_final = |app: &mut App, id: &str| {
+        let prepared = app
+            .chat_widget
+            .admit_stream_preparation(thread_id, id.into());
+        prepared.complete(
+            None,
+            Arc::new(history_cell::AgentMarkdownCell::new(
+                format!("Final {id}"),
+                &app.config.cwd,
+            )),
+        );
+        prepared
     };
-    let first = make_final("first");
-    let second = make_final("second");
+    let first = make_final(app, "first");
+    let second = make_final(app, "second");
     let marker: Arc<dyn HistoryCell> = Arc::new(history_cell::RespondingCell {
         item_id: "first".into(),
     });
@@ -42,14 +46,14 @@ pub(super) fn out_of_order_streams(
         retained.clone(),
     ]);
     let keep = app.transcript_cells.last().unwrap().clone();
-    app.handle_prepared_stream(tui, second)?;
+    app.handle_prepared_stream(tui, &second)?;
     assert!(Arc::ptr_eq(app.transcript_cells.last().unwrap(), &keep));
     assert!(app.transcript_cells.iter().any(|cell| {
         cell.as_any()
             .downcast_ref::<history_cell::RespondingCell>()
             .is_some_and(|marker| marker.item_id == "first")
     }));
-    app.handle_prepared_stream(tui, first)?;
+    app.handle_prepared_stream(tui, &first)?;
     assert!(
         !app.transcript_cells
             .iter()
@@ -66,15 +70,10 @@ pub(super) fn out_of_order_streams(
     );
     let finished = app.transcript_cells.clone();
     for (thread_id, item_id) in [(ThreadId::new(), "first"), (thread_id, "missing")] {
-        app.handle_prepared_stream(
-            tui,
-            crate::streaming::completion::PreparedStream {
-                assistant: None,
-                thread_id,
-                item_id: item_id.into(),
-                cell: retained.clone(),
-            },
-        )?;
+        let prepared =
+            crate::streaming::completion::PreparedStream::pending(thread_id, item_id.into());
+        prepared.complete(None, retained.clone());
+        app.handle_prepared_stream(tui, &prepared)?;
     }
     assert!(
         app.transcript_cells

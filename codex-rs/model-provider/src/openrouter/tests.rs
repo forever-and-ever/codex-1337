@@ -109,7 +109,7 @@ fn normalization_contract() {
                 && info.anthropic.is_none()
                 && info.experimental_supported_tools.is_empty()
         );
-        assert!(!info.used_fallback_model_metadata);
+
         if openai {
             let bundled = bundled_models_response()
                 .expect("bundled models")

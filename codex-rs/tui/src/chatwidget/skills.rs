@@ -456,3 +456,14 @@ mod tests {
         );
     }
 }
+
+pub(super) fn contains_tool_mention(text: &str) -> bool {
+    let mentions = extract_tool_mentions_from_text(text);
+    let plugins = extract_tool_mentions_from_text_with_sigil(
+        text,
+        codex_utils_plugins::mention_syntax::PLUGIN_TEXT_MENTION_SIGIL,
+    );
+    !mentions.names.is_empty()
+        || !mentions.linked_paths.is_empty()
+        || !plugins.linked_paths.is_empty()
+}

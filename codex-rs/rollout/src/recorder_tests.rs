@@ -66,6 +66,7 @@ fn paginated_session_meta_item(thread_id: ThreadId, cwd: &Path) -> RolloutItem {
 
 fn agent_message_item(message: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+        moderation: None,
         message: message.to_string(),
         phase: None,
         memory_citation: None,
@@ -215,6 +216,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
 
     let session_meta_line = SessionMetaLine {
         meta: SessionMeta {
+            account_scoped: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -698,7 +700,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     let config = test_config(home.path());
     let session_id = SessionId::default();
     let thread_id = ThreadId::new();
-    let initial_window_id = Uuid::now_v7().to_string();
+    let initial_window_id = codex_protocol::ContextWindowId::new_uuid_v7();
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
@@ -726,6 +728,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::AgentMessage(
             AgentMessageEvent {
+                moderation: None,
                 message: "buffered-event".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -998,6 +1001,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::AgentMessage(
             AgentMessageEvent {
+                moderation: None,
                 message: "buffered-before-persist".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -1053,6 +1057,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     };
     state.add_items(vec![RolloutItem::EventMsg(EventMsg::AgentMessage(
         AgentMessageEvent {
+            moderation: None,
             message: "queued-after-writer-error".to_string(),
             phase: None,
             memory_citation: None,
@@ -1351,6 +1356,7 @@ async fn discovery_without_database_skips_attached_threads_before_pagination() -
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page1.items.len(), 1);
@@ -1369,6 +1375,7 @@ async fn discovery_without_database_skips_attached_threads_before_pagination() -
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page2.items.len(), 1);
@@ -1407,6 +1414,7 @@ async fn list_archived_threads_without_db_keeps_threads_without_previews() -> st
             /*cwd_filters*/ None,
             config.model_provider_id.as_str(),
             /*search_term*/ None,
+            /*include_attached_threads*/ false,
         )
         .await?;
         assert_eq!(page.items.len(), 1);
@@ -1448,14 +1456,14 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         .with_ymd_and_hms(2025, 1, 3, 13, 0, 0)
         .single()
         .expect("valid datetime");
-    let mut builder = codex_state::ThreadMetadataBuilder::new(
+    let builder = codex_state::ThreadMetadataBuilder::new(
         thread_id,
         stale_path,
         created_at,
         SessionSource::Cli,
-    );
-    builder.model_provider = Some(config.model_provider_id.clone());
-    builder.cwd = home.path().to_path_buf();
+    )
+    .with_model_provider(Some(config.model_provider_id.clone()))
+    .with_cwd(home.path().to_path_buf());
     let mut metadata = builder.build(config.model_provider_id.as_str());
     metadata.first_user_message = Some("Hello from user".to_string());
     metadata.preview = metadata.first_user_message.clone();
@@ -1471,14 +1479,14 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         .with_ymd_and_hms(2025, 1, 2, 13, 0, 0)
         .single()
         .expect("valid datetime");
-    let mut valid_builder = codex_state::ThreadMetadataBuilder::new(
+    let valid_builder = codex_state::ThreadMetadataBuilder::new(
         valid_thread_id,
         valid_path.clone(),
         valid_created_at,
         SessionSource::Cli,
-    );
-    valid_builder.model_provider = Some(config.model_provider_id.clone());
-    valid_builder.cwd = home.path().to_path_buf();
+    )
+    .with_model_provider(Some(config.model_provider_id.clone()))
+    .with_cwd(home.path().to_path_buf());
     let mut valid_metadata = valid_builder.build(config.model_provider_id.as_str());
     valid_metadata.first_user_message = Some("Older valid thread".to_string());
     valid_metadata.preview = valid_metadata.first_user_message.clone();
@@ -1502,6 +1510,7 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page.items.len(), 1);
@@ -1517,7 +1526,7 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         .expect("state db lookup should succeed");
     assert_eq!(stored_metadata, Some(metadata));
     let cursor = page.next_cursor.expect("another thread remains");
-    assert_eq!(cursor.thread_id(), None);
+    assert_eq!(cursor.thread_id(), Some(valid_thread_id));
     runtime.close().await;
     let fallback = RolloutRecorder::list_threads(
         Some(runtime),
@@ -1531,6 +1540,7 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(fallback.items.len(), 1);
@@ -1615,6 +1625,7 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(repaired_page.items.len(), 1);
@@ -1678,14 +1689,14 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         .with_ymd_and_hms(2025, 1, 3, 13, 0, 0)
         .single()
         .expect("valid datetime");
-    let mut builder = codex_state::ThreadMetadataBuilder::new(
+    let builder = codex_state::ThreadMetadataBuilder::new(
         thread_id,
         real_path,
         created_at,
         SessionSource::Cli,
-    );
-    builder.model_provider = Some(config.model_provider_id.clone());
-    builder.cwd = stale_cwd.clone();
+    )
+    .with_model_provider(Some(config.model_provider_id.clone()))
+    .with_cwd(stale_cwd.clone());
     let mut metadata = builder.build(config.model_provider_id.as_str());
     metadata.first_user_message = Some("Hello from user".to_string());
     metadata.preview = metadata.first_user_message.clone();
@@ -1723,6 +1734,7 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(scanned_page.items.len(), 0);
@@ -1768,19 +1780,19 @@ async fn list_threads_metadata_filter_overlays_state_db_list_metadata() -> std::
         .with_ymd_and_hms(2025, 1, 3, 16, 0, 0)
         .single()
         .expect("valid datetime");
-    let mut builder = codex_state::ThreadMetadataBuilder::new(
+    let builder = codex_state::ThreadMetadataBuilder::new(
         thread_id,
         rollout_path,
         created_at,
         SessionSource::Cli,
-    );
-    builder.model_provider = Some(config.model_provider_id.clone());
-    builder.cwd = home.path().to_path_buf();
-    builder.git_branch = Some("sqlite-branch".to_string());
-    builder.git_sha = Some("sqlite-sha".to_string());
-    builder.git_origin_url = Some(
+    )
+    .with_model_provider(Some(config.model_provider_id.clone()))
+    .with_cwd(home.path().to_path_buf())
+    .with_git_branch(Some("sqlite-branch".to_string()))
+    .with_git_sha(Some("sqlite-sha".to_string()))
+    .with_git_origin_url(Some(
         SanitizedGitUrl::try_from("https://example.com/repo.git").expect("valid git remote URL"),
-    );
+    ));
     let mut metadata = builder.build(config.model_provider_id.as_str());
     metadata.first_user_message = Some("Hello from user".to_string());
     metadata.preview = metadata.first_user_message.clone();
@@ -1801,6 +1813,7 @@ async fn list_threads_metadata_filter_overlays_state_db_list_metadata() -> std::
         /*cwd_filters*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
 
@@ -1840,6 +1853,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         ),
         source: None,
         history_mode: Default::default(),
+        attached_to_thread_id: None,
         parent_thread_id: None,
         agent_nickname: None,
         agent_role: None,
@@ -1875,6 +1889,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         ),
         source: Some(SessionSource::Exec),
         history_mode: Default::default(),
+        attached_to_thread_id: None,
         parent_thread_id: None,
         agent_nickname: Some("state-agent".to_string()),
         agent_role: Some("state-role".to_string()),
@@ -1945,14 +1960,14 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         .with_ymd_and_hms(2025, 1, 3, 15, 0, 0)
         .single()
         .expect("valid datetime");
-    let mut builder = codex_state::ThreadMetadataBuilder::new(
+    let builder = codex_state::ThreadMetadataBuilder::new(
         thread_id,
         real_path,
         created_at,
         SessionSource::Cli,
-    );
-    builder.model_provider = Some(config.model_provider_id.clone());
-    builder.cwd = home.path().to_path_buf();
+    )
+    .with_model_provider(Some(config.model_provider_id.clone()))
+    .with_cwd(home.path().to_path_buf());
     let mut metadata = builder.build(config.model_provider_id.as_str());
     metadata.title = "needle stale first user".to_string();
     metadata.first_user_message = Some(metadata.title.clone());
@@ -1990,6 +2005,7 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         /*cwd_filters*/ None,
         config.model_provider_id.as_str(),
         Some("needle"),
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(scanned_page.items.len(), 0);
@@ -2028,15 +2044,14 @@ async fn resume_candidate_matches_cwd_reads_latest_turn_context() -> std::io::Re
         item: RolloutItem::TurnContext(TurnContextItem {
             turn_id: Some("turn-1".to_string()),
             root_turn_id: None,
+            direct_only_tool_namespaces: None,
             disabled_plugin_ids: None,
             cwd: serde_json::from_value(serde_json::json!(&latest_cwd))
                 .expect("absolute latest cwd"),
             approval_policy: AskForApproval::Never,
             approvals_reviewer: None,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            permission_profile: None,
+            permission_profile: codex_protocol::models::PermissionProfile::read_only(),
             active_permission_profile: None,
-            file_system_sandbox_policy: None,
             model: "test-model".to_string(),
             comp_hash: None,
             collaboration_mode: None,

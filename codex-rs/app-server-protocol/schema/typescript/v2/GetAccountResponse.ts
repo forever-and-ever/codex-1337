@@ -9,4 +9,7 @@ export type GetAccountResponse = {/**
 accountId: string | null, account: Account | null, /**
  * Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.
  */
-displayName: string | null, requiresOpenaiAuth: boolean};
+displayName: string | null, /**
+ * ChatGPT user ID belonging to this account response, when available.
+ */
+userId: string | null, requiresOpenaiAuth: boolean};

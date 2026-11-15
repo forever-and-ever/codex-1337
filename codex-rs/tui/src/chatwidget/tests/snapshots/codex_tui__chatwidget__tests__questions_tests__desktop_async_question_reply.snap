@@ -11,7 +11,7 @@ expression: persisted
     Line::default().bg(Color::Indexed(35)),
     Line::from_iter([
         Span::from("  "),
-        Span::from("Answer from "),
-        Span::from("desktop").fg(Color::Indexed(64)).bold(),
+        Span::from("Answer from ").bg(Color::Indexed(35)),
+        Span::from("desktop").fg(Color::Indexed(64)).bg(Color::Indexed(35)).bold(),
     ]).bg(Color::Indexed(35)),
 ]

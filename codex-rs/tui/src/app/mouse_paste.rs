@@ -9,6 +9,7 @@ use super::Arc;
 use super::ThreadId;
 use super::TuiEvent;
 use super::tui;
+use crate::chatwidget::ClipboardPasteContext;
 use crate::clipboard_copy::SelectionTarget;
 use crate::transcript_mode::TranscriptMode;
 use crate::tui::VscodeDetection;
@@ -24,7 +25,8 @@ pub(super) struct PendingPaste {
     target: (Option<ThreadId>, crate::bottom_pane::ClipboardPasteTarget),
     source: SelectionTarget,
     shortcut: Option<KeyCode>,
-    _request: Arc<()>,
+    // Retain the clipboard request until completion or explicit cancellation.
+    pub(super) _request: Arc<()>,
 }
 
 #[expect(
@@ -129,12 +131,31 @@ impl App {
     }
 
     pub(super) fn start_mouse_paste(&mut self, tui: &mut tui::Tui, mouse: MouseEvent) {
+        self.start_mouse_paste_in(tui, mouse, ClipboardPasteContext::Composer);
+    }
+
+    pub(super) fn start_mouse_paste_in(
+        &mut self,
+        tui: &mut tui::Tui,
+        mouse: MouseEvent,
+        context: ClipboardPasteContext,
+    ) {
         let source = match mouse.kind {
             MouseEventKind::Down(MouseButton::Right) => SelectionTarget::Clipboard,
             MouseEventKind::Down(MouseButton::Middle) => SelectionTarget::Primary,
             _ => return,
         };
         if !mouse.modifiers.is_empty() || self.pending_mouse_paste.is_some() {
+            return;
+        }
+        // The restricted handoff does not run the ordinary mouse editor first. Settle any
+        // held typing before taking the target of an eligible click.
+        if context == ClipboardPasteContext::DraftHandoff
+            && (self
+                .clipboard_paste_target(tui, source, /*shortcut*/ None)
+                .is_none()
+                || !self.chat_widget.prepare_composer_mouse(mouse))
+        {
             return;
         }
         self.start_clipboard_text_paste(tui, source, /*shortcut*/ None);

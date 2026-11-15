@@ -154,3 +154,41 @@ pub(super) async fn read_resource(
         read.await
     }
 }
+
+// Direct host calls retain lease authority without capturing an attribution catalog.
+pub(super) async fn call_tool_without_attribution(
+    runtime: &McpRuntime,
+    server: &str,
+    tool: &str,
+    arguments: Option<serde_json::Value>,
+    meta: Option<serde_json::Value>,
+) -> anyhow::Result<super::CallToolResult> {
+    let current = runtime.current.load_full();
+    let guard = dispatch_guard(runtime, &current, server)?;
+    let call = async {
+        current.connections.validate_tool_call(server, tool, None)?;
+        current.connections.wait_for_server_startup(server).await;
+        if !guard.is_valid(server) {
+            anyhow::bail!("extension MCP lease revoked");
+        }
+        let result = Box::pin(
+            current
+                .connections
+                .call_tool(server, tool, None, arguments, meta, None, true),
+        )
+        .await?;
+        if !guard.is_valid(server) {
+            anyhow::bail!("extension MCP lease revoked");
+        }
+        Ok(result)
+    };
+    if let Some(cancellation) = guard.cancellation() {
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => anyhow::bail!("extension MCP lease revoked"),
+            result = call => result,
+        }
+    } else {
+        call.await
+    }
+}

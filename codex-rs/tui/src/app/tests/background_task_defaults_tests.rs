@@ -1049,10 +1049,21 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         "Background draft"
     );
     assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
-    let op = app
-        .chat_widget
-        .submit_user_message_as_plain_user_turn(crate::chatwidget::UserMessage::from("Hello"))
+    app.chat_widget
+        .submit_plain_user_turn_to(startup, crate::chatwidget::UserMessage::from("Hello"))
         .expect("submit the first turn");
+    let op = std::iter::from_fn(|| events.try_recv().ok())
+        .find_map(|event| match event {
+            AppEvent::SubmitThreadOp {
+                thread_id,
+                op: op @ crate::app_command::AppCommand::UserTurn { .. },
+            } => {
+                assert_eq!(thread_id, startup);
+                Some(op)
+            }
+            _ => None,
+        })
+        .expect("captured first turn");
     app.submit_thread_op(&mut server, startup, op).await?;
     app.settle_turn_submissions(&mut server).await?;
     let turns = recorded_params(&requests, "turn/start");

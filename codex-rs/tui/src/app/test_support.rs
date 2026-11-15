@@ -7,12 +7,32 @@
 
 mod continuations;
 pub(super) use continuations::settle_frontend_requests;
+pub(in crate::app) use continuations::settle_until_painted;
 
+use super::owned_transcript::tests::buffer_text;
 use super::*;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
 use crate::test_support::boxed_future;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
+
+pub(super) fn enable_side_retention(app: &mut App) -> Result<()> {
+    app.config.features.enable(Feature::TuiWorkspace)?;
+    app.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Owned;
+    app.keymap = crate::keymap::RuntimeKeymap::for_session(
+        &app.local_settings.tui.keymap,
+        app.local_settings.workspace_enabled(&app.config),
+    )
+    .map_err(color_eyre::eyre::Report::msg)?;
+    Ok(())
+}
+
+pub(super) fn side_frame(app: &mut App, tui: &mut tui::Tui, size: Size) -> Result<String> {
+    let size = tui.screen_size_for_event(&TuiEvent::Resize(size))?;
+    app.handle_draw_pre_render(tui, size)?;
+    app.render_chat_widget_frame(tui, size)?;
+    Ok(buffer_text(tui.terminal.previous_buffer()))
+}
 
 pub(crate) async fn make_test_app() -> Box<App> {
     let (mut chat_widget, app_event_tx, _rx, _op_rx) =
@@ -28,6 +48,7 @@ pub(crate) async fn make_test_app() -> Box<App> {
         reload_requested: false,
         farm: Default::default(),
         jira: None,
+        provider_writes: HashMap::new(),
         feature_write_lock: Arc::default(),
         config_notification_test_generation: 0,
         config_notification_test_pending: None,
@@ -37,12 +58,12 @@ pub(crate) async fn make_test_app() -> Box<App> {
         app_event_tx,
         chat_widget,
         workspace_command_runner: None,
+
         launch_cwd: config.cwd.to_path_buf(),
         local_shell: Default::default(),
         runtime_working_directory_override: None,
         local_settings: crate::local_settings::LocalSettings::from(&config),
         config,
-        state_db: None,
         cli_kv_overrides: Vec::new(),
         harness_overrides: ConfigOverrides::default(),
         loader_overrides: LoaderOverrides::without_managed_config_for_tests(),
@@ -59,6 +80,7 @@ pub(crate) async fn make_test_app() -> Box<App> {
         native_history: Default::default(),
         turn_tips: Default::default(),
         transcript_view: Default::default(),
+        conversation_frame: Default::default(),
         last_rendered_history_tail: None,
         last_thread_usage_status_cell: None,
         pending_thread_usage_history_refresh: false,
@@ -110,6 +132,14 @@ pub(crate) async fn make_test_app() -> Box<App> {
         active_export: None,
         pending_revert: None,
         rewind: None,
+        saved_openings: Default::default(),
+        sidebars: HashMap::new(),
+        side_companions: HashMap::new(),
+        zoomed_thread: None,
+        exact_sidebar_width: None,
+        divider_drag: None,
+        pane_resize: None,
+        passive_link_drag: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -125,7 +155,6 @@ pub(crate) async fn make_test_app() -> Box<App> {
 
         startup_protected_input_boundary: false,
         startup_pending_protected_request: false,
-        account_email_request_id: None,
         rate_limit_hard_stop_generation: 0,
         rate_limit_refresh_state: Default::default(),
         queued_messages: Default::default(),

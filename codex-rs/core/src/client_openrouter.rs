@@ -105,8 +105,8 @@ impl ModelClient {
         let bearer = credentials(&self.openrouter_home()?, key).await?;
         Ok(CurrentClientSetup {
             auth: None,
-            auth_owner_generation: Some(route.generation),
-            auth_revision: None,
+            auth_owner: None,
+            auth_revision: Some(route.generation),
             api_provider: self.state.provider.info().to_api_provider(None)?,
             redirect_policy: ClientRedirectPolicy::Reject,
             api_auth: Arc::new(bearer),

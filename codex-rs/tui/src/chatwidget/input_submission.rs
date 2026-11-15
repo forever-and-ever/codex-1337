@@ -1,5 +1,6 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
+use super::submission_dispatch::UserTurnDispatch;
 use super::*;
 use codex_app_server_protocol::ImageReference;
 use codex_utils_path_uri::LegacyAppPathString;
@@ -135,6 +136,32 @@ impl ChatWidget {
         source: UserMessageSource,
         prepared_images: Option<Vec<UserInput>>,
     ) -> (bool, Option<AppCommand>) {
+        self.submit_user_message_with_dispatch(
+            user_message,
+            history_record,
+            shell_escape_policy,
+            source,
+            prepared_images,
+            UserTurnDispatch::Frontend,
+        )
+    }
+
+    pub(super) fn submit_user_message_with_dispatch(
+        &mut self,
+        user_message: UserMessage,
+        history_record: UserMessageHistoryRecord,
+        shell_escape_policy: ShellEscapePolicy,
+        source: UserMessageSource,
+        prepared_images: Option<Vec<UserInput>>,
+        dispatch: UserTurnDispatch,
+    ) -> (bool, Option<AppCommand>) {
+        let dispatch = dispatch.capture(self.thread_id);
+        if let UserTurnDispatch::Thread(thread_id) = dispatch
+            && self.thread_id != Some(thread_id)
+        {
+            self.add_error_message("This input belongs to a different conversation.".into());
+            return (false, None);
+        }
         self.bottom_pane.dismiss_composer_sparkle();
         if self.has_misalignment_policy_violation() {
             return (false, None);
@@ -145,6 +172,11 @@ impl ChatWidget {
             || self.safety_recourse.is_some();
         #[cfg(target_os = "linux")]
         let hold_submission = hold_submission || crate::reload::worker::is_activating();
+        if dispatch == UserTurnDispatch::Prepared
+            && (hold_submission || !self.is_session_configured())
+        {
+            return (false, None);
+        }
         if hold_submission {
             // A prepared submission was accepted before any messages queued behind it.
             let queue_index = if prepared_images.is_some() {
@@ -156,6 +188,7 @@ impl ChatWidget {
                 queue_index,
                 QueuedUserMessage {
                     source,
+                    dispatch,
                     history_record,
                     prepared_images,
                     ..QueuedUserMessage::new(
@@ -177,6 +210,7 @@ impl ChatWidget {
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source,
+                    dispatch,
                     history_record,
                     ..QueuedUserMessage::from(user_message)
                 });
@@ -245,7 +279,10 @@ impl ChatWidget {
         if let Some(prepared_images) = prepared_images {
             items.extend(prepared_images);
         } else if self.snapshot_local_images && !local_images.is_empty() {
-            self.prepare_image_submission(
+            if dispatch == UserTurnDispatch::Prepared {
+                return (false, None);
+            }
+            self.prepare_image_submission_with_dispatch(
                 UserMessage {
                     text,
                     local_images,
@@ -255,6 +292,7 @@ impl ChatWidget {
                 },
                 history_record,
                 source,
+                dispatch,
             );
             return (true, None);
         } else {
@@ -428,6 +466,7 @@ impl ChatWidget {
         let pending_steer = (!render_in_history).then(|| PendingSteer {
             client_id: client_user_message_id.clone(),
             items: items.clone(),
+            admission: super::user_messages::SteerAdmission::Pending,
             user_message: UserMessage {
                 text: text.clone(),
                 local_images: local_images.clone(),
@@ -464,7 +503,11 @@ impl ChatWidget {
                     },
                 );
         let op = AppCommand::user_turn(
-            "user",
+            if source == UserMessageSource::SafetyRecourse {
+                "safety_recourse_follow_up"
+            } else {
+                "user"
+            },
             client_user_message_id.clone(),
             items,
             pending_steer_replacement,
@@ -507,7 +550,7 @@ impl ChatWidget {
             );
         }
 
-        if !self.submit_op(op.clone()) {
+        if !self.dispatch_user_turn(dispatch, op.clone()) {
             return (false, None);
         }
         self.dismiss_backend_banner_for_new_turn();
@@ -519,6 +562,7 @@ impl ChatWidget {
                     message: submitted_message.clone(),
                     history: history_record.clone(),
                     source,
+                    dispatch,
                 }),
             );
         }

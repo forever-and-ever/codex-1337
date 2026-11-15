@@ -192,7 +192,7 @@ fn snapshot_file_name_parser_supports_legacy_and_suffixed_names() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn inactive_profiles_keep_snapshots() -> Result<()> {
+async fn executor_snapshot_preference_selects_local_fallback() -> Result<()> {
     let dir = tempdir()?;
     std::fs::create_dir(dir.path().join(".codex"))?;
     std::fs::write(
@@ -216,18 +216,12 @@ async fn inactive_profiles_keep_snapshots() -> Result<()> {
         shell_type: ShellType::Bash,
         shell_path: PathBuf::from("/bin/bash"),
     };
-    for (state, prefer_executor_snapshots, expect_snapshot) in [
-        (SnapshotCredentialBrokerState::Unavailable, false, false),
-        (SnapshotCredentialBrokerState::Inactive, false, true),
-        (SnapshotCredentialBrokerState::Inactive, true, false),
-    ] {
-        let (_sender, receiver) = watch::channel(state);
+    for (prefer_executor_snapshots, expect_snapshot) in [(false, true), (true, false)] {
         let config = Arc::new(ShellSnapshotConfig {
             codex_home: dir.path().abs(),
             session_id,
             session_telemetry: session_telemetry.clone(),
             state_db: None,
-            credential_broker: Some(receiver),
             prefer_executor_snapshots,
         });
         let snapshot = tokio::time::timeout(

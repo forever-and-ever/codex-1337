@@ -163,6 +163,12 @@ impl Catalog {
 }
 
 impl ModelsManager for Catalog {
+    fn ensure_initialized(&self, _factory: HttpClientFactory) -> ModelsManagerFuture<'_, ()> {
+        Box::pin(async move {
+            self.models().await;
+        })
+    }
+
     fn get_default_model<'a>(
         &'a self,
         model: &'a Option<String>,
@@ -194,7 +200,7 @@ impl ModelsManager for Catalog {
                 .await
                 .into_iter()
                 .map(|model| CatalogModel {
-                    model,
+                    model: model.into(),
                     origin: ModelOrigin::Provider,
                 })
                 .collect()
@@ -225,15 +231,21 @@ impl ModelsManager for Catalog {
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
-    ) -> ModelsManagerFuture<'a, ModelInfo> {
+    ) -> ModelsManagerFuture<'a, CatalogModel> {
         Box::pin(async move {
             let info = self
                 .models()
                 .await
                 .into_iter()
                 .find(|info| info.slug == model)
-                .unwrap_or_else(|| local(model));
-            with_config_overrides(info, config)
+                .map_or_else(
+                    || (local(model), ModelOrigin::Synthetic),
+                    |info| (info, ModelOrigin::Provider),
+                );
+            CatalogModel {
+                model: with_config_overrides(info.0, config).into(),
+                origin: info.1,
+            }
         })
     }
 

@@ -15,8 +15,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=a35e80384e54cbb0):
-    - custom/exec: Catalog exec instructions. Yield ceiling: 1234 ms. `image(value, detail?)`: append an image. Valu...; hash=40ca049b10f750d5
+  tools (10; hash=bf5028a9bd3b3869):
+    - custom/exec: Catalog exec instructions. Yield ceiling: 1234 ms. `image(value)`: append an image. Value is a ba...; hash=cdf1bb439794fe20
     - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=67bc0f04da3505b3
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069

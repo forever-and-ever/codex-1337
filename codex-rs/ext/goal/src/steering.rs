@@ -42,6 +42,8 @@ pub(crate) fn objective_updated_steering_item(goal: &ThreadGoal) -> ResponseItem
     goal_context_input_item(objective_updated_prompt(goal))
 }
 
+pub(crate) const GOAL_OBJECTIVE_CONTEXT: &str = "goal_objective";
+
 pub(crate) fn continuation_steering_item(goal: &ThreadGoal) -> ResponseItem {
     goal_context_input_item(continuation_prompt(goal))
 }
@@ -54,7 +56,6 @@ pub(crate) fn goal_context_input_item(prompt: String) -> ResponseItem {
 }
 
 fn continuation_prompt(goal: &ThreadGoal) -> String {
-    let objective = escape_xml_text(&goal.objective);
     let tokens_used = goal.tokens_used.to_string();
     let token_budget = goal
         .token_budget
@@ -67,7 +68,6 @@ fn continuation_prompt(goal: &ThreadGoal) -> String {
 
     CONTINUATION_PROMPT_TEMPLATE
         .render([
-            ("objective", objective.as_str()),
             ("tokens_used", tokens_used.as_str()),
             ("token_budget", token_budget.as_str()),
             ("remaining_tokens", remaining_tokens.as_str()),

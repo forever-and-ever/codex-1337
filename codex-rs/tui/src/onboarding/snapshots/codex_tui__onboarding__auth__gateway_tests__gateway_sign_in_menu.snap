@@ -1,0 +1,10 @@
+---
+source: tui/src/onboarding/gateway_tests.rs
+expression: "screen(&widget, 8)"
+---
+  Sign in another way
+
+> 1. Use an OpenAI API key
+  2. Use a custom provider or gateway
+  Press enter to continue
+  Press esc to go back

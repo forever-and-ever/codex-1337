@@ -68,6 +68,7 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
                 &cwd,
                 /*animations*/ false,
                 &|_| crate::multi_agents::AgentMetadata::default(),
+                crate::history_cell::ImagePathOrigin::Local,
             )
             .unwrap()
             .block

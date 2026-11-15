@@ -380,11 +380,21 @@ pub(crate) async fn capture_binding_with_mode(
             call,
         );
     }
+    let deferred_servers = connections
+        .servers
+        .iter()
+        .filter(|(_, view)| {
+            view.connection.startup_is_dormant()
+                && !view.connection.client.cancel_token.is_cancelled()
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
     let clients = Arc::new(McpBindingClients::new(
         clients
             .into_iter()
             .map(|(server_name, (client, _))| (server_name, client))
             .collect(),
+        deferred_servers,
     ));
     McpBinding::new(
         Arc::clone(connections),

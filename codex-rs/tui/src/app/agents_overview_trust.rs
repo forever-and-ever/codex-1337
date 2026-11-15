@@ -105,6 +105,7 @@ impl DashboardTrustAdmission {
                 assert!(
                     plan.note_consent(OnboardingResult {
                         directory_trust_persisted: true,
+                        selected_gateway: None,
                         should_exit: false
                     })
                     .is_none(),

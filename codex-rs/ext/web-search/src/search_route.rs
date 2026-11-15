@@ -1,9 +1,7 @@
 use codex_core::chatgpt_delegate::ChatgptDelegate;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::FunctionCallError;
-use codex_login::AuthManager;
 use codex_model_provider::SharedModelProvider;
-use codex_model_provider::create_model_provider;
 use codex_model_provider_info::SearchRoute;
 use std::sync::Arc;
 
@@ -16,20 +14,15 @@ impl SearchExecutor {
     pub(crate) fn from_route(
         route: &SearchRoute,
         thread_store: &ExtensionData,
-        auth_manager: &Arc<AuthManager>,
+        step_store: &ExtensionData,
     ) -> Option<Self> {
         match route {
             SearchRoute::Unavailable => None,
-            SearchRoute::Own { provider } => Some(Self::Own(create_model_provider(
-                provider.as_ref().clone(),
-                Some(
-                    thread_store
-                        .get::<Arc<AuthManager>>()
-                        .as_deref()
-                        .cloned()
-                        .unwrap_or_else(|| auth_manager.clone()),
-                ),
-            ))),
+            // Core captures the selected provider under step admission before contributors run.
+            // Never recreate it from mutable thread credentials or an installation fallback.
+            SearchRoute::Own { .. } => step_store
+                .get::<SharedModelProvider>()
+                .map(|provider| Self::Own(Arc::clone(provider.as_ref()))),
             SearchRoute::ChatgptDelegate => thread_store
                 .get::<ChatgptDelegate>()
                 .map(Self::ChatgptDelegate),

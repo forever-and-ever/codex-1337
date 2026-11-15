@@ -9,13 +9,15 @@ pub(super) struct CredentialOwner(pub(super) Arc<AuthManager>);
 
 impl PartialEq for CredentialOwner {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        self.0.same_credential_authority(&other.0)
     }
 }
 impl Eq for CredentialOwner {}
 impl std::hash::Hash for CredentialOwner {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(&Arc::as_ptr(&self.0), state);
+        // Equal captured authorities always retain the same selected account.
+        // Source/principal distinctions remain in equality, not wrapper addresses.
+        std::hash::Hash::hash(&self.0.selected_account_id(), state);
     }
 }
 
@@ -26,4 +28,18 @@ pub(super) fn scope(
     let mut scoped = processor.clone();
     scoped.auth_manager = Arc::clone(&request.credentials);
     scoped
+}
+
+pub(super) fn capture_error(error: &std::io::Error) -> super::WorkspaceRoutingError {
+    if let Some(failure) = error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<codex_login::auth::RefreshTokenFailedError>())
+    {
+        return super::WorkspaceRoutingError::RefreshTokenRejected(failure.clone());
+    }
+    if error.kind() == std::io::ErrorKind::Interrupted {
+        super::WorkspaceRoutingError::AccountChanged
+    } else {
+        super::WorkspaceRoutingError::DiscoveryFailed
+    }
 }

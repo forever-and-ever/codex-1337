@@ -194,7 +194,7 @@ impl CoreToolRuntime for ScriptExecHandler {
                 |workdir| environment.cwd().join(workdir),
             )
             .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-        Ok((!environment.environment.is_remote()).then_some(cwd))
+        Ok((!environment.environment().is_remote()).then_some(cwd))
     }
 
     fn with_updated_hook_input(

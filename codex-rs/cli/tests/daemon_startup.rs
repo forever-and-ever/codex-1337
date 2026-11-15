@@ -16,6 +16,18 @@ async fn auto_daemon_start_attaches_to_shared_server() -> Result<()> {
 
 #[tokio::test]
 #[cfg(unix)]
+async fn agents_show_status_without_a_competing_daemon_restart() -> Result<()> {
+    daemon_startup("agents").await
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn agents_defers_launch_directory_trust_until_starting_a_task() -> Result<()> {
+    daemon_startup("agents-untrusted").await
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn discovered_daemon_reconnects_after_explicit_cli_restart_with_auto_start_disabled()
 -> Result<()> {
     daemon_startup("discovered").await
@@ -161,7 +173,11 @@ async fn daemon_startup(command: &str) -> Result<()> {
                 ""
             },
             serde_json::to_string(&workspace_path)?,
-            "trusted",
+            if command == "agents-untrusted" {
+                "untrusted"
+            } else {
+                "trusted"
+            },
         ),
     )?;
     let mismatch = command.starts_with("mismatch-");
@@ -177,7 +193,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
         "CODEX_EXEC_SERVER_URL",
         "CODEX_ACCESS_TOKEN",
         "CODEX_API_KEY",
-        "CODEX_CLOUD_TASKS_MODE",
         "OPENAI_API_KEY",
         "OPENAI_FEDERATION_RULE_ID",
         "OPENAI_IDENTITY_TOKEN_FILE",
@@ -196,7 +211,11 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let mut args = Vec::new();
     let mut steps: VecDeque<(&str, &[u8])> = VecDeque::new();
-    if matches!(command, "start" | "discovered" | "restrictive-job") || mismatch {
+    if matches!(
+        command,
+        "start" | "agents" | "agents-untrusted" | "discovered" | "restrictive-job"
+    ) || mismatch
+    {
         // A selected package with a stopped daemon avoids installing a release.
         let managed = home
             .path()
@@ -210,7 +229,8 @@ async fn daemon_startup(command: &str) -> Result<()> {
         fs::hard_link(&codex, &managed)
             .or_else(|_| codex_utils_cargo_bin::copy_executable(&codex, &managed))?;
         if command != "restrictive-job" {
-            fs::create_dir(home.path().join("app-server-daemon"))?;
+            codex_uds::prepare_private_socket_directory(&home.path().join("app-server-daemon"))
+                .await?;
             fs::write(
                 home.path().join("app-server-daemon/settings.json"),
                 if persisted {
@@ -245,6 +265,16 @@ async fn daemon_startup(command: &str) -> Result<()> {
             // The draft header is visible before the session's command composer is ready.
             steps.push_back(("GPT-5.6-Terra", b"/status\r"));
             "Server:Localbackgroundserver"
+        } else if command == "agents" {
+            args.push("agents".into());
+            steps.push_back(("Notasksyet", b"\x0e"));
+            steps.push_back(("GPT-5.6-Terra", b"/daemon\r"));
+            // The fork reports the systemd-managed service, never replaces it from the TUI.
+            "Localsharedservice:"
+        } else if command == "agents-untrusted" {
+            args.push("agents".into());
+            steps.push_back(("Notasksyet", b"\x0e"));
+            "entercontinue·escback"
         } else if command == "discovered" {
             args.extend(["--disable".into(), "daemon_auto_start".into()]);
             // Empty drafts need not survive a daemon restart. Renaming materializes the
@@ -254,7 +284,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
             steps.push_back(("·daemon-restart-test", b""));
             // Offline editing preserves text but suppresses Enter. Observe the command
             // popup in a complete connected frame before submitting the retained draft.
-            steps.push_back(("GPT-5.6-Terra", b"/status"));
+            steps.push_back(("·daemon-restart-test", b"/status"));
             steps.push_back(("/statusshowcurrentsessionconfigurationandtokenusage", b"\r"));
             "Server:Localbackgroundserver"
         } else if elevated_launch || command == "restrictive-job" && elevated {
@@ -397,7 +427,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
                     && text.contains(ready)
                 {
                     if command == "discovered" {
-                        if *ready == "·daemon-restart-test" {
+                        if input.is_empty() {
                             let Some(thread_id) = screen
                                 .screen()
                                 .contents()
@@ -493,6 +523,9 @@ async fn daemon_startup(command: &str) -> Result<()> {
                                 assert_eq!(settings["featureOverrides"], serde_json::json!({(flag): false}));
                             }
                         }
+                    } else if command == "agents" {
+                        ensure!(text.contains("Close"));
+                        ensure!(!text.contains("Restartbackgroundserver"));
                     } else if command == "start" {
                         ensure!(text.contains("Server:Localbackgroundserver"));
                         ensure!(home.path().join("app-server-daemon/daemon.pid").exists());
@@ -511,7 +544,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
                         ensure!(!home.path().join("packages/app-server-daemon").exists());
                     } else if command == "restrictive-job" {
                         ensure!(!pid_file.exists());
-                        if command == "restrictive-job" && !elevated {
+                        if !elevated {
                             let contents = screen.screen().contents();
                             let warning = contents.lines()
                                 .find(|line| line.contains("Running without the shared background server:"))
@@ -576,7 +609,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         ))
     }
     .await;
-    // Always stop the detached daemon, including on timeout or failed assertions.
+    // Stop the detached daemon, including on timeout or failed assertions.
     let stopped = Command::new(&codex)
         .env_clear()
         .envs(&env)

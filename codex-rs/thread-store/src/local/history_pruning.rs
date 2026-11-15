@@ -134,8 +134,13 @@ pub(super) async fn ensure_projected(
             continue;
         }
         let started = Instant::now();
-        let built =
-            materialize_to_sqlite_locked(store, rollout_id, segment.rollout_path.as_path()).await;
+        let built = materialize_to_sqlite_locked(
+            store,
+            rollout_id,
+            segment.rollout_path.as_path(),
+            &lineage.reads,
+        )
+        .await;
         // Another process may finish the same build first; only an unfinished one is an error.
         let state = projection_state(store, rollout_id).await?;
         match (built, state) {

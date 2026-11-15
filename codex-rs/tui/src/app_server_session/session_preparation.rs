@@ -20,7 +20,6 @@ use super::ThreadId;
 use super::ThreadParamsMode;
 use super::ThreadResumeParams;
 use super::ThreadResumeResponse;
-use super::ThreadSettingsOwner;
 use super::ThreadStartParams;
 use super::ThreadStartSource;
 use super::TypedRequestError;
@@ -47,6 +46,28 @@ pub(crate) async fn read_thread(
     thread_id: ThreadId,
 ) -> Result<Thread> {
     history::preparation::read_thread(policy, handle, thread_id, false).await
+}
+
+#[derive(Clone)]
+pub(crate) struct ThreadMetadata {
+    backend_id: crate::backend_id::BackendId,
+    pub(crate) thread: Thread,
+    receipt: Option<codex_app_server_protocol::ThreadReadState>,
+}
+
+pub(crate) async fn read_thread_with_receipt(
+    policy: RequestPolicy,
+    backend_id: crate::backend_id::BackendId,
+    handle: &AppServerRequestHandle,
+    thread_id: ThreadId,
+) -> Result<ThreadMetadata> {
+    let (thread, receipt) =
+        history::preparation::read_thread_with_receipt(policy, handle, thread_id, false).await?;
+    Ok(ThreadMetadata {
+        backend_id,
+        thread,
+        receipt,
+    })
 }
 
 pub(crate) async fn loaded_observations(
@@ -90,11 +111,21 @@ pub(crate) struct HydratedThread {
 pub(crate) struct PreparedHistory {
     result: Result<HydratedThread>,
     update: HistoryPaginationUpdate,
+    backend_id: crate::backend_id::BackendId,
+    receipt: Option<(ThreadId, Option<codex_app_server_protocol::ThreadReadState>)>,
 }
 
 impl PreparedHistory {
     pub(crate) fn apply(self, server: &mut AppServerSession) -> Result<HydratedThread> {
+        color_eyre::eyre::ensure!(
+            server.backend_id() == self.backend_id,
+            "prepared history belongs to a different backend"
+        );
         server.apply_history_preparation(self.update);
+        if let Some((thread_id, receipt)) = self.receipt {
+            server.remember_read_state(thread_id, receipt);
+            server.freeze_viewed_receipt(thread_id);
+        }
         self.result
     }
 }
@@ -105,10 +136,15 @@ pub(crate) async fn prepare_thread_history(
     thread_id: ThreadId,
     config: Config,
     local_settings: LocalSettings,
+    image_origin: crate::history_cell::ImagePathOrigin,
+    backend_id: crate::backend_id::BackendId,
 ) -> PreparedHistory {
     let mut update = HistoryPaginationUpdate::Untracked;
+    let mut receipt = None;
     let result = async {
-        let mut thread = read_thread(policy, &handle, thread_id).await?;
+        let metadata = read_thread_with_receipt(policy, backend_id, &handle, thread_id).await?;
+        receipt = Some((thread_id, metadata.receipt));
+        let mut thread = metadata.thread;
         let (result, observation) = history::preparation::prepare_initial_thread_history(
             policy,
             &handle,
@@ -118,6 +154,7 @@ pub(crate) async fn prepare_thread_history(
             Some(&config),
             Some(&local_settings),
             HistoryHydrationScope::Initial,
+            image_origin,
         )
         .await;
         update = observation;
@@ -127,7 +164,12 @@ pub(crate) async fn prepare_thread_history(
         })
     }
     .await;
-    PreparedHistory { result, update }
+    PreparedHistory {
+        result,
+        update,
+        backend_id,
+        receipt,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -180,6 +222,7 @@ pub(super) fn apply_selected_start_permissions(
 }
 
 pub(crate) struct StartPreparation {
+    backend_id: crate::backend_id::BackendId,
     handle: AppServerRequestHandle,
     params: ThreadStartParams,
     config: Config,
@@ -203,11 +246,9 @@ impl AppServerSession {
                     self.remote_cwd_override.as_deref(),
                     source,
                 );
-                if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
-                    params.model_provider = self.explicit_model_provider(config);
-                    params.daybreak_enabled =
-                        (config.daybreak_enabled && !config.ephemeral).then_some(true);
-                }
+                params.model_provider = self.explicit_model_provider(config);
+                params.daybreak_enabled =
+                    (config.daybreak_enabled && !config.ephemeral).then_some(true);
                 params
             }
             ThreadStartChoice::Provider(provider) => {
@@ -217,9 +258,7 @@ impl AppServerSession {
                     self.remote_cwd_override.as_deref(),
                     None,
                 );
-                if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
-                    params.model_provider = Some(provider);
-                }
+                params.model_provider = Some(provider);
                 params
             }
         };
@@ -235,6 +274,7 @@ impl AppServerSession {
             params.history_mode = None;
         }
         StartPreparation {
+            backend_id: self.backend_id(),
             handle: self.request_handle(),
             params,
             config: config.clone(),
@@ -255,6 +295,7 @@ impl StartPreparation {
 
     pub(crate) async fn run(self) -> PreparedSession {
         let Self {
+            backend_id,
             handle,
             params,
             config,
@@ -263,18 +304,17 @@ impl StartPreparation {
             history_support,
         } = self;
         let mut observations = SessionObservations {
+            backend_id,
             history: HistoryPaginationUpdate::Untracked,
             history_support,
+            receipt: None,
+            subscribed: false,
+            freeze_receipt: false,
+            side_storage: None,
         };
         let mut custody = SubscriptionCustody::NewThreadUncertain;
         let selected_profile = params.permissions.is_some();
         let result = async {
-            if mode.settings_owner() == ThreadSettingsOwner::Server && selected_profile {
-                custody = SubscriptionCustody::None;
-                color_eyre::eyre::bail!(
-                    "Cloud conversations currently use server-selected permissions."
-                );
-            }
             let request_id = RequestId::String(format!("tui-start-{}", Uuid::new_v4()));
             let (response, support, task_tools_available) =
                 request_thread_start_with_history_fallback(&handle, request_id, params)
@@ -315,12 +355,14 @@ impl StartPreparation {
 }
 
 pub(crate) struct ViewPreparation {
+    backend_id: crate::backend_id::BackendId,
     handle: AppServerRequestHandle,
     thread_id: ThreadId,
     config: Config,
     local_settings: LocalSettings,
     policy: RequestPolicy,
     history_support: ThreadHistorySupport,
+    image_origin: crate::history_cell::ImagePathOrigin,
 }
 pub(crate) struct PreparedView {
     pub(crate) result: Result<(AppServerStartedThread, Option<&'static str>)>,
@@ -335,33 +377,48 @@ impl AppServerSession {
         thread_id: ThreadId,
     ) -> ViewPreparation {
         ViewPreparation {
+            backend_id: self.backend_id(),
             handle: self.request_handle(),
             thread_id,
             config: config.clone(),
             local_settings: local_settings.clone(),
             policy,
             history_support: self.history_support,
+            image_origin: if self.uses_remote_workspace() {
+                crate::history_cell::ImagePathOrigin::Remote
+            } else {
+                crate::history_cell::ImagePathOrigin::Local
+            },
         }
     }
 }
 impl ViewPreparation {
     pub(crate) async fn run(self) -> PreparedView {
         let Self {
+            backend_id,
             handle,
             thread_id,
             config,
             local_settings,
             policy,
             history_support,
+            image_origin,
         } = self;
         let mut observations = SessionObservations {
+            backend_id,
             history: HistoryPaginationUpdate::Untracked,
             history_support,
+            receipt: None,
+            subscribed: false,
+            freeze_receipt: false,
+            side_storage: None,
         };
         let result = async {
-            let mut thread = read_thread(policy, &handle, thread_id).await?;
+            let (mut thread, receipt) = history::preparation::read_thread_with_receipt(policy, &handle, thread_id, false).await?;
+            observations.receipt = Some((thread_id, receipt));
+            observations.freeze_receipt = true;
             let (history, update) = history::preparation::prepare_initial_thread_history(
-                policy, &handle, &mut thread, None, None, Some(&config), Some(&local_settings), HistoryHydrationScope::Initial,
+                policy, &handle, &mut thread, None, None, Some(&config), Some(&local_settings), HistoryHydrationScope::Initial, image_origin,
             ).await;
             observations.history = update;
             let mut history_notice = None;
@@ -420,6 +477,7 @@ impl ViewPreparation {
 }
 
 pub(crate) struct ResumePreparation {
+    backend_id: crate::backend_id::BackendId,
     handle: AppServerRequestHandle,
     policy: RequestPolicy,
     thread_id: ThreadId,
@@ -429,8 +487,9 @@ pub(crate) struct ResumePreparation {
     mode: ThreadParamsMode,
     history_support: ThreadHistorySupport,
     known_legacy: bool,
-    embedded: bool,
     task_tools_available: bool,
+    anchored: bool,
+    metadata: Option<ThreadMetadata>,
 }
 
 pub(crate) enum SubscriptionCustody {
@@ -441,11 +500,17 @@ pub(crate) enum SubscriptionCustody {
 }
 
 pub(crate) struct SessionObservations {
+    pub(super) backend_id: crate::backend_id::BackendId,
     pub(super) history: HistoryPaginationUpdate,
     pub(super) history_support: ThreadHistorySupport,
+    pub(super) receipt: Option<(ThreadId, Option<codex_app_server_protocol::ThreadReadState>)>,
+    pub(super) subscribed: bool,
+    pub(super) freeze_receipt: bool,
+    pub(crate) side_storage: Option<super::SideChatStorage>,
 }
 
 pub(crate) struct SafetyHistoryPreparation {
+    backend_id: crate::backend_id::BackendId,
     handle: AppServerRequestHandle,
     policy: RequestPolicy,
     thread_id: ThreadId,
@@ -466,6 +531,7 @@ impl AppServerSession {
         turn_id: String,
     ) -> SafetyHistoryPreparation {
         SafetyHistoryPreparation {
+            backend_id: self.backend_id(),
             handle: self.request_handle(),
             policy,
             thread_id,
@@ -486,8 +552,13 @@ impl SafetyHistoryPreparation {
             )
             .await,
             observations: SessionObservations {
+                backend_id: self.backend_id,
                 history: HistoryPaginationUpdate::Untracked,
                 history_support: self.history_support,
+                receipt: None,
+                subscribed: false,
+                freeze_receipt: false,
+                side_storage: None,
             },
         }
     }
@@ -511,7 +582,9 @@ impl AppServerSession {
     ) -> ResumePreparation {
         let session_config = if matches!(
             model_settings,
-            ResumeModelSettings::RestoreFromThread | ResumeModelSettings::PreserveExistingThread
+            ResumeModelSettings::RestoreFromThread
+                | ResumeModelSettings::PreserveExistingThread
+                | ResumeModelSettings::PreserveSideConversation
         ) {
             config.clone()
         } else {
@@ -525,12 +598,11 @@ impl AppServerSession {
             model_settings,
             permission_overrides,
         );
-        if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client
-            && model_settings == ResumeModelSettings::OverrideFromCurrentConfig
-        {
+        if model_settings == ResumeModelSettings::OverrideFromCurrentConfig {
             params.model_provider = self.explicit_model_provider(&config);
         }
         ResumePreparation {
+            backend_id: self.backend_id(),
             handle: self.request_handle(),
             policy,
             thread_id,
@@ -543,21 +615,51 @@ impl AppServerSession {
                 .history_pagination
                 .get(&thread_id)
                 .is_some_and(|state| state.history_mode == ThreadHistoryMode::Legacy),
-            embedded: self.uses_embedded_app_server(),
             task_tools_available: self.task_tools_available(thread_id),
+            anchored: self.attachment_subscribed.is_some(),
+            metadata: None,
         }
     }
-    pub(crate) fn apply_session_observations(&mut self, observations: SessionObservations) {
+    pub(crate) fn accepts_session_observations(&self, observations: &SessionObservations) -> bool {
+        self.backend_id() == observations.backend_id
+    }
+
+    pub(crate) fn apply_session_observations(
+        &mut self,
+        observations: SessionObservations,
+    ) -> Result<()> {
+        color_eyre::eyre::ensure!(
+            self.accepts_session_observations(&observations),
+            "prepared session belongs to a different backend"
+        );
         if observations.history_support == ThreadHistorySupport::LegacyOnly {
             self.history_support = ThreadHistorySupport::LegacyOnly;
         }
         self.apply_history_preparation(observations.history);
+        if let Some((thread_id, receipt)) = observations.receipt {
+            self.remember_read_state(thread_id, receipt);
+            if observations.freeze_receipt {
+                self.freeze_viewed_receipt(thread_id);
+            }
+        }
+        if observations.subscribed
+            && let Some(subscribed) = &mut self.attachment_subscribed
+        {
+            *subscribed = true;
+        }
+        Ok(())
     }
 }
 
 impl ResumePreparation {
+    pub(crate) fn with_metadata(mut self, metadata: ThreadMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
     pub(crate) async fn run(self) -> PreparedSession {
         let Self {
+            backend_id,
             handle,
             policy,
             thread_id,
@@ -567,36 +669,42 @@ impl ResumePreparation {
             mode,
             history_support,
             known_legacy,
-            embedded,
             task_tools_available,
+            anchored,
+            metadata,
         } = self;
         let mut observations = SessionObservations {
+            backend_id,
             history: HistoryPaginationUpdate::Untracked,
             history_support,
+            receipt: None,
+            subscribed: false,
+            freeze_receipt: false,
+            side_storage: None,
         };
         let mut custody = SubscriptionCustody::None;
-        let result = async {
-        let mut rollout_maintenance_guard = None;
-        params.exclude_turns = if observations.history_support == ThreadHistorySupport::Paginated {
-            let known_legacy_history = known_legacy
-                && (!embedded
-                    || ({
-                        // The guard prevents migration through the full resume,
-                        // regardless of the server's migration feature settings.
-                        rollout_maintenance_guard =
-                            codex_rollout::try_acquire_rollout_maintenance_lock(
-                                config.codex_home.as_path(),
-                            )
-                            .ok()
-                            .flatten();
-                        rollout_maintenance_guard.is_some()
-                    } && history::preparation::read_thread(policy, &handle, thread_id, false)
-                        .await
-                        .is_ok_and(|thread| thread.history_mode == ThreadHistoryMode::Legacy)));
-            !known_legacy_history
+        let embedded = matches!(&handle, AppServerRequestHandle::InProcess(_));
+        let result = Box::pin(async {
+        if let Some(metadata) = &metadata {
+            color_eyre::eyre::ensure!(metadata.backend_id == backend_id && metadata.thread.id == thread_id.to_string(), "resume metadata belongs to a different backend or thread");
+        }
+        let paginated = observations.history_support == ThreadHistorySupport::Paginated;
+        let cached_legacy = paginated && known_legacy;
+        let mut rollout_maintenance_guard = if cached_legacy && embedded {
+            codex_rollout::try_acquire_rollout_maintenance_lock(config.codex_home.as_path()).ok().flatten()
+        } else { None };
+        observations.receipt = Some((thread_id, None));
+        // Legacy maintenance needs a snapshot taken while its lock is held.
+        let metadata = if cached_legacy && embedded {
+            history::preparation::read_thread_with_receipt(policy, &handle, thread_id, false).await.ok()
+        } else if let Some(metadata) = metadata {
+            Some((metadata.thread, metadata.receipt))
         } else {
-            false
+            history::preparation::read_thread_with_receipt(policy, &handle, thread_id, false).await.ok()
         };
+        if let Some((_, receipt)) = &metadata { observations.receipt = Some((thread_id, receipt.clone())); }
+        let known_legacy_history = cached_legacy && (!embedded || (rollout_maintenance_guard.is_some() && metadata.as_ref().is_some_and(|(thread, _)| thread.history_mode == ThreadHistoryMode::Legacy)));
+        params.exclude_turns = paginated && !known_legacy_history;
         if params.exclude_turns {
             rollout_maintenance_guard = None;
         }
@@ -632,13 +740,16 @@ impl ResumePreparation {
             }
         };
         custody = SubscriptionCustody::Subscribed(thread_id);
-        let (history, update) = history::preparation::prepare_initial_thread_history(policy, &handle,
+        observations.subscribed = true;
+        let (history, update) = history::preparation::prepare_anchored_thread_history(policy, &handle,
                 &mut response.thread,
                 response.turns_backwards_cursor.clone(),
                 response.items_backwards_cursor.clone(),
                 Some(&config),
                 Some(&local_settings),
                 HistoryHydrationScope::Initial,
+                anchored,
+                if mode == ThreadParamsMode::Remote { crate::history_cell::ImagePathOrigin::Remote } else { crate::history_cell::ImagePathOrigin::Local },
             )
             .await;
         observations.history = update;
@@ -668,7 +779,7 @@ impl ResumePreparation {
             started.task_tools_available = true;
         }
         Ok(started)
-        }.await;
+        }).await;
         PreparedSession {
             result,
             custody,

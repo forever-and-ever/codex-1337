@@ -3,6 +3,7 @@ use crate::outgoing_message::ClientRequestResult;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::request_processors::thread_settings_from_config_snapshot;
 use crate::server_request_error::is_turn_transition_server_request_error;
+use crate::thread_state::PendingNetworkApproval;
 use crate::thread_state::ThreadState;
 use crate::thread_state::TurnSummary;
 use crate::thread_state::resolve_server_request_on_thread_listener;
@@ -668,6 +669,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             tokio::spawn(async move {
                 on_file_change_request_approval_response(
                     item_id,
+                    event.turn_id,
                     pending_request_id,
                     rx,
                     conversation,
@@ -761,7 +763,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                         Some(shlex_join(&command)),
                         Some(completion_item.cwd.clone()),
                         Some(command_actions),
-                        Some(completion_item),
+                        (kind != codex_protocol::approvals::ExecApprovalKind::HumanCommand)
+                            .then_some(completion_item),
                     ),
                 };
             if approval_starts_command && let Some(completion_item) = completion_item.as_ref() {
@@ -788,6 +791,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let additional_permissions =
                 additional_permissions.map(V2AdditionalPermissionProfile::from);
 
+            let is_network_approval = network_approval_context.is_some();
             let params = CommandExecutionRequestApprovalParams {
                 kind: kind.into(),
                 thread_id: conversation_id.to_string(),
@@ -811,6 +815,18 @@ pub(crate) async fn apply_bespoke_event_handling(
                     params,
                 ))
                 .await;
+            let permission_guard = if is_network_approval {
+                thread_state.lock().await.network_approvals.insert(
+                    approval_id.as_ref().unwrap_or(&call_id).clone(),
+                    PendingNetworkApproval {
+                        request_id: pending_request_id.clone(),
+                        permission_guard,
+                    },
+                );
+                None
+            } else {
+                Some(permission_guard)
+            };
             tokio::spawn(async move {
                 on_command_execution_request_approval_response(
                     event_turn_id,
@@ -822,11 +838,22 @@ pub(crate) async fn apply_bespoke_event_handling(
                     rx,
                     conversation,
                     outgoing,
-                    thread_state.clone(),
+                    thread_state,
                     permission_guard,
                 )
                 .await;
             });
+        }
+        EventMsg::NetworkApprovalResolved { approval_id } => {
+            let pending = thread_state
+                .lock()
+                .await
+                .network_approvals
+                .remove(&approval_id);
+            if let Some(pending) = pending {
+                outgoing.resolve_server_request(pending.request_id).await;
+                drop(pending.permission_guard);
+            }
         }
         EventMsg::RequestUserInput(request) => {
             let user_input_guard = thread_watch_manager
@@ -1245,6 +1272,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     .send_server_notification(ServerNotification::ItemCompleted(
                         codex_app_server_protocol::ItemCompletedNotification {
                             completed_at_ms: projection.item.completed_at_ms.unwrap_or_default(),
+                            content_token_count: None,
                             item: projection.item,
                             thread_id: conversation_id.to_string(),
                             turn_id: event_turn_id.clone(),
@@ -1353,6 +1381,12 @@ pub(crate) async fn apply_bespoke_event_handling(
             .await;
         }
         EventMsg::ShutdownComplete => {
+            // The proxy waiter may send its resolution after this last core event.
+            let approvals = std::mem::take(&mut thread_state.lock().await.network_approvals);
+            for pending in approvals.into_values() {
+                outgoing.resolve_server_request(pending.request_id).await;
+                drop(pending.permission_guard);
+            }
             thread_watch_manager
                 .note_thread_shutdown(&conversation_id.to_string())
                 .await;
@@ -2051,6 +2085,7 @@ fn map_file_change_approval_decision(decision: FileChangeApprovalDecision) -> Re
 #[allow(clippy::too_many_arguments)]
 async fn on_file_change_request_approval_response(
     item_id: String,
+    turn_id: String,
     pending_request_id: RequestId,
     receiver: oneshot::Receiver<ClientRequestResult>,
     codex: Arc<CodexThread>,
@@ -2079,13 +2114,17 @@ async fn on_file_change_request_approval_response(
         }
     };
 
-    if let Err(err) = codex
-        .submit(Op::PatchApproval {
+    let op = match decision {
+        ReviewDecision::Abort => Op::CancelPatchApproval {
+            id: item_id,
+            turn_id,
+        },
+        decision => Op::PatchApproval {
             id: item_id,
             decision,
-        })
-        .await
-    {
+        },
+    };
+    if let Err(err) = codex.submit(op).await {
         error!("failed to submit PatchApproval: {err}");
     }
 }
@@ -2102,11 +2141,22 @@ async fn on_command_execution_request_approval_response(
     conversation: Arc<CodexThread>,
     outgoing: ThreadScopedOutgoingMessageSender,
     thread_state: Arc<Mutex<ThreadState>>,
-    permission_guard: ThreadWatchActiveGuard,
+    permission_guard: Option<ThreadWatchActiveGuard>,
 ) {
     let response = receiver.await;
-    resolve_server_request_on_thread_listener(&thread_state, pending_request_id).await;
-    drop(permission_guard);
+    // Core resolves network prompts in event order, including when the execution disappears.
+    if let Some(permission_guard) = permission_guard {
+        resolve_server_request_on_thread_listener(&thread_state, pending_request_id).await;
+        drop(permission_guard);
+    } else if response.is_err()
+        && !thread_state
+            .lock()
+            .await
+            .network_approvals
+            .contains_key(approval_id.as_ref().unwrap_or(&item_id))
+    {
+        return;
+    }
     let (decision, completion_status) = match response {
         Ok(Ok(value)) => {
             match serde_json::from_value::<CommandExecutionRequestApprovalResponse>(value) {
@@ -3437,6 +3487,7 @@ mod tests {
             Event {
                 id: "turn-1".to_string(),
                 msg: EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: "turn-1".to_string(),
                     item: CoreTurnItem::SubAgentActivity(SubAgentActivityItem {
@@ -3593,6 +3644,17 @@ mod tests {
             ThreadId::new(),
         );
         let thread_state = new_thread_state();
+        handle_error(
+            conversation_id,
+            TurnError {
+                misalignment: None,
+                message: "conversation is not running".to_string(),
+                codex_error_info: Some(V2CodexErrorInfo::Other),
+                additional_details: None,
+            },
+            &thread_state,
+        )
+        .await;
         let event = turn_complete_event(&event_turn_id);
         {
             let mut state = thread_state.lock().await;
@@ -3611,9 +3673,11 @@ mod tests {
             state.track_current_turn_event(
                 &event_turn_id,
                 &EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: event_turn_id.clone(),
                     item: CoreTurnItem::AgentMessage(CoreAgentMessageItem {
+                        moderation: None,
                         id: "msg-1".to_string(),
                         content: vec![
                             CoreAgentMessageContent::Text {
@@ -3635,9 +3699,11 @@ mod tests {
             state.track_current_turn_event(
                 &event_turn_id,
                 &EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: event_turn_id.clone(),
                     item: CoreTurnItem::AgentMessage(CoreAgentMessageItem {
+                        moderation: None,
                         id: "msg-2".to_string(),
                         content: vec![CoreAgentMessageContent::Text {
                             text: "  ".to_string(),
@@ -3745,6 +3811,18 @@ mod tests {
         let conversation_id = ThreadId::new();
         let event_turn_id = "complete_err1".to_string();
         let thread_state = new_thread_state();
+        thread_state.lock().await.track_current_turn_event(
+            &event_turn_id,
+            &EventMsg::TurnStarted(codex_protocol::protocol::TurnStartedEvent {
+                turn_attribution: None,
+                turn_id: event_turn_id.clone(),
+                root_turn_id: None,
+                trace_id: None,
+                started_at: Some(42),
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }),
+        );
         handle_error(
             conversation_id,
             TurnError {

@@ -43,6 +43,10 @@ async fn foreign_backend_selection_cannot_resume_same_id_or_unarchive() -> Resul
         SessionSelection::Resume(target.clone()),
     )
     .await?;
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "picker rejects foreign custody before RPC"
+    );
     app.resume_target_session(&mut tui, &mut server, target.clone())
         .await?;
     assert_eq!(app.current_displayed_thread_id(), Some(thread_id));
@@ -61,7 +65,7 @@ async fn foreign_backend_selection_cannot_resume_same_id_or_unarchive() -> Resul
         })
         .collect();
     insta::assert_snapshot!(errors.join("\n"), @r###"
-    ■ Unable to resume session: This session belongs to a different backend. Open the session picker again.
+    ■ This conversation belongs to another backend. Open it using that backend.
     ■ Unable to resume session: This session belongs to a different backend. Open the session picker again.
     "###);
     for action in [
@@ -77,7 +81,6 @@ async fn foreign_backend_selection_cannot_resume_same_id_or_unarchive() -> Resul
                 config: &app.config,
                 local_settings: &app.local_settings,
             },
-            &AppServerTarget::Embedded,
             &target,
             action,
             Err(color_eyre::eyre::eyre!(
@@ -154,7 +157,7 @@ async fn failed_factory_connections_never_change_backend() -> Result<()> {
         expected_target.preserve_selected_backend(&selection);
         assert_eq!(target, expected_target);
     }
-    let error = crate::start_app_server_for_picker(
+    let error = crate::test_support::start_test_app_server(
         BackendId::new(),
         &app.config,
         &daemon_target,
@@ -180,7 +183,7 @@ async fn auxiliary_picker_connection_preserves_backend_selection() -> Result<()>
     let mut sessions = Vec::new();
     for _ in 0..2 {
         sessions.push(
-            crate::start_app_server_for_picker(
+            crate::test_support::start_test_app_server(
                 backend_id,
                 &app.config,
                 &AppServerTarget::Embedded,
@@ -203,9 +206,14 @@ async fn auxiliary_picker_connection_preserves_backend_selection() -> Result<()>
         /*git_info*/ None,
     )
     .expect("saved rollout");
-    let target = crate::lookup_session_target_with_app_server(&mut picker, &app.config, &id)
-        .await?
-        .expect("picker target");
+    let target = crate::lookup_session_target_with_app_server(
+        crate::resume_picker::SessionPickerAction::Resume,
+        &mut picker,
+        &app.config,
+        &id,
+    )
+    .await?
+    .expect("picker target");
     assert_eq!(target.backend_id, consumer.backend_id());
     crate::legacy_core::config::set_project_trust_level(
         app.config.codex_home.as_path(),
@@ -250,7 +258,7 @@ async fn startup_rejects_foreign_resume_and_fork_before_requests() -> Result<()>
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let result = super::startup_defaults_tests::run_startup_for_test(
             &mut tui,
-            crate::app::backend_sessions::InitialBackendSessions::singleton(server),
+            server,
             app.config.clone(),
             Some(bootstrap),
             selection,
@@ -267,5 +275,85 @@ async fn startup_rejects_foreign_resume_and_fork_before_requests() -> Result<()>
         assert!(requests.lock().unwrap().is_empty());
         proxy.abort();
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn prepared_resume_cannot_activate_through_another_backend() -> Result<()> {
+    use crate::app_server_session::session_preparation::PreparedSession;
+    use crate::app_server_session::session_preparation::RequestPolicy;
+    use crate::app_server_session::session_preparation::SubscriptionCustody;
+
+    let (mut app, mut events, _) = make_test_app_with_channels().await;
+    let (mut server, requests, proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
+    let active_thread = ThreadId::new();
+    app.enqueue_primary_thread_session(
+        test_thread_session(active_thread, app.config.cwd.to_path_buf()),
+        Vec::new(),
+    )
+    .await?;
+    app.chat_widget.insert_str("keep this draft");
+
+    let mut saved_config = app.config.clone();
+    saved_config.ephemeral = false;
+    let origin = crate::start_embedded_app_server_for_picker(&saved_config).await?;
+    let prepared_thread = create_history_rollout(
+        &saved_config,
+        ThreadHistoryMode::Legacy,
+        "prepared foreign receipt",
+    )?;
+    let original_handle = origin.request_handle();
+    let PreparedSession {
+        result,
+        custody,
+        observations,
+    } = origin
+        .prepare_resume_thread(
+            RequestPolicy::Unbounded,
+            &app.local_settings,
+            saved_config,
+            prepared_thread,
+            ResumeModelSettings::RestoreFromThread,
+            crate::resume_permissions::ResumePermissions::default(),
+        )
+        .run()
+        .await;
+    assert_eq!(result?.session.thread_id, prepared_thread);
+    assert!(matches!(custody, SubscriptionCustody::Subscribed(id) if id == prepared_thread));
+    requests.lock().unwrap().clear();
+    while events.try_recv().is_ok() {}
+    assert!(!server.accepts_session_observations(&observations));
+    let error = server.apply_session_observations(observations).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "prepared session belongs to a different backend"
+    );
+    assert_eq!(app.current_displayed_thread_id(), Some(active_thread));
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "keep this draft"
+    );
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "foreign receipt cannot perform RPC"
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "foreign receipt cannot publish UI state"
+    );
+    crate::app::turn_submissions::detach::unsubscribe(
+        &original_handle,
+        uuid::Uuid::new_v4(),
+        prepared_thread,
+    )
+    .await?;
+    origin.shutdown().await?;
+    server.shutdown().await?;
+    proxy.await??;
     Ok(())
 }

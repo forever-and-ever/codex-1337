@@ -16,9 +16,7 @@ fn completed_timing_preserves_content_and_distinguishes_zero_from_unavailable() 
             },
             detail: None,
         },
-        FunctionCallOutputContentItem::InputAudio {
-            audio_url: "data:audio/wav;base64,audio".to_string(),
-        },
+        FunctionCallOutputContentItem::inline_audio("data:audio/wav;base64,audio".to_string()),
     ];
     for (host_duration, expected_timing) in [
         (
@@ -83,7 +81,9 @@ fn completed_timing_preserves_content_and_distinguishes_zero_from_unavailable() 
                 post_tool_use_payload: None,
             }
             .into_response();
-            let mut history = crate::context_manager::ContextManager::new();
+            let mut history = crate::context_manager::ContextManager::new(
+                codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
+            );
             history.record_annotated_items(
                 std::slice::from_mut(&mut envelope),
                 codex_protocol::protocol::TruncationPolicy::Tokens(1),
@@ -94,7 +94,9 @@ fn completed_timing_preserves_content_and_distinguishes_zero_from_unavailable() 
                 item: envelope.item.clone(),
                 metadata: serde_json::from_value(persisted).unwrap(),
             };
-            let mut history = crate::context_manager::ContextManager::new();
+            let mut history = crate::context_manager::ContextManager::new(
+                codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
+            );
             history.replay_annotated_item(
                 &replayed,
                 codex_protocol::protocol::TruncationPolicy::Bytes(1),

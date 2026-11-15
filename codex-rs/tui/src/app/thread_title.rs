@@ -4,14 +4,11 @@
 //! the originating thread's saved name takes precedence over an automatic result. Manual
 //! renames cancel pending requests; canceled events cannot affect newer requests.
 
-mod continuations;
-
 use super::App;
 use super::thread_events::ThreadBufferedEvent;
 use crate::app_event::AppEvent;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
-use crate::app_server_session::ThreadSettingsOwner;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
 use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
@@ -70,13 +67,6 @@ impl App {
         destination: ThreadTitleDestination,
         prompt: String,
     ) {
-        if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server {
-            if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
-                self.chat_widget
-                    .apply_thread_name_suggestion(thread_id, request_id, None);
-            }
-            return;
-        }
         let model = if self.chat_widget.config_ref().model_provider_id == "openai"
             && self.chat_widget.has_chatgpt_account()
             && self
@@ -141,7 +131,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn on_thread_title_started(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
@@ -185,6 +175,8 @@ impl App {
         self.temporary_structured_requests
             .insert(temporary_thread_id, sender);
 
+        let save_name = (destination == ThreadTitleDestination::Automatic)
+            .then(|| app_server.automatic_thread_name_writer(thread_id));
         let request_handle = app_server.request_handle();
         let event_sender = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -200,6 +192,12 @@ impl App {
             .await
             .map_err(|error| error.to_string());
 
+            if let Some(save_name) = save_name
+                && let Ok(response) = &result
+                && let Some(title) = parse_thread_title(response)
+            {
+                save_name.save(title, &cancellation).await;
+            }
             event_sender.send(AppEvent::GeneratedThreadTitle {
                 cancellation,
                 thread_id,

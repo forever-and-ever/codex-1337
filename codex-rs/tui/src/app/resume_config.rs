@@ -109,7 +109,8 @@ impl App {
                     basis.current.clone()
                 }
                 Ok(crate::session_resume::ResolveCwdOutcome::Exit) => {
-                    return Err(AppRunControl::Exit(ExitReason::UserRequested));
+                    self.app_event_tx.send(AppEvent::Exit(ExitMode::Immediate));
+                    return Err(AppRunControl::Continue);
                 }
                 Err(error) => {
                     self.add_agents_overview_error(format!(

@@ -277,6 +277,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
         .await?;
         app.finish_reconnect(&mut tui, &mut session, &mut events, connected, "2.1.0")
             .await?;
+        app.settle_navigation(&mut tui, &mut session).await?;
         assert_eq!(session.backend_id(), backend_id);
         if edit_offline {
             assert!(!app.chat_widget.has_active_view());
@@ -556,6 +557,7 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
         CODEX_CLI_VERSION,
     )
     .await?;
+    app.settle_navigation(&mut tui, &mut session).await?;
     assert!(app.pending_server_profiles.contains_key(&primary));
 
     app.select_agent_thread_and_settle(&mut tui, &mut session, primary)
@@ -583,7 +585,13 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     while let Ok(event) = events.try_recv() {
-        if matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
+        if matches!(
+            event,
+            AppEvent::SubmitThreadOp {
+                op: AppCommand::UserTurn { .. },
+                ..
+            } | AppEvent::CodexOp(AppCommand::UserTurn { .. })
+        ) {
             app.handle_event(&mut tui, &mut session, event).await?;
         }
     }
@@ -633,7 +641,10 @@ async fn reconnect_exhaustion_and_unknown_initial_thread_stay_offline() -> Resul
         "reconnect_failed",
         format!(
             "{error}\n{}",
-            render_bottom_popup(&app.chat_widget, /*width*/ 80)
+            super::disconnect::normalize_reconnect_status(&render_bottom_popup(
+                &app.chat_widget,
+                /*width*/ 80
+            ))
         )
     );
     tokio::time::resume();
@@ -730,6 +741,7 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
                 CODEX_CLI_VERSION,
             )
             .await?;
+            app.settle_navigation(&mut tui, &mut session).await?;
             assert!(app.thread_unavailable(id));
             assert_eq!(app.chat_widget.current_model(), retained_model);
             app.handle_tui_event(
@@ -811,6 +823,10 @@ pub(super) async fn drain_history(
         if matches!(
             event,
             AppEvent::InsertHistoryCell(_)
+                | AppEvent::SubmitThreadOp {
+                    op: AppCommand::UserTurn { .. },
+                    ..
+                }
                 | AppEvent::CodexOp(AppCommand::UserTurn { .. })
                 | AppEvent::BeginThreadSwitchHistoryReplayBuffer
                 | AppEvent::EndInitialHistoryReplayBuffer

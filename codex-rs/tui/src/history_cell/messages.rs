@@ -27,7 +27,7 @@ pub(crate) struct UserHistoryCell {
 #[derive(Clone, Debug, Default)]
 pub(crate) enum UserMessagePresentation {
     #[default]
-    Plain,
+    Typed,
     Spoken,
     /// Render each submitted answer as Markdown beneath its question caption.
     AsyncReplies {
@@ -201,6 +201,11 @@ impl UserHistoryCell {
         matches!(self.presentation, UserMessagePresentation::Spoken)
     }
 
+    pub(crate) fn uses_markdown(&self) -> bool {
+        // Inline elements use byte ranges in the literal prompt.
+        matches!(self.presentation, UserMessagePresentation::Typed) && self.text_elements.is_empty()
+    }
+
     pub(crate) fn has_visible_content(&self) -> bool {
         !sanitize_user_text(Cow::Borrowed(&self.message))
             .trim()
@@ -237,24 +242,16 @@ impl HistoryCell for UserHistoryCell {
         presentation::user_lines(self, width, presentation::Surface::Inline)
     }
 
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.display_hyperlink_lines(width)
+    }
+
     fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
         presentation::user_lines(self, width, presentation::Surface::Transcript)
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)
-    }
-
-    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut lines = self.display_hyperlink_lines(width);
-        if self.is_spoken() {
-            for line in &mut lines {
-                if let Some(source) = &line.source {
-                    line.line.style.fg = source.line_style.fg;
-                }
-            }
-        }
-        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -502,8 +499,8 @@ impl HistoryCell for AgentMessageCell {
 #[derive(Debug)]
 pub(crate) struct AgentMarkdownCell {
     pub(crate) timestamp: Option<HistoryTimestamp>,
-    /// The message's item id, which places it in its step's Feed Item.
     pub(crate) item_id: Option<String>,
+    pub(crate) interrupted_item: Option<(String, String)>,
     markdown_source: String,
     copy_source: Option<String>,
     cwd: PathBuf,
@@ -514,6 +511,18 @@ pub(crate) struct AgentMarkdownCell {
 }
 
 impl AgentMarkdownCell {
+    pub(crate) fn from_parsed_message(
+        visible_markdown: String,
+        source: String,
+        cwd: &Path,
+        context: Option<crate::inline_visualization::InlineVisualizationContext>,
+        questions: &[codex_protocol::items::AsyncUserInputQuestion],
+    ) -> Self {
+        Self::new_with_inline_visualizations(visible_markdown, cwd, context)
+            .with_questions(questions)
+            .with_copy_source(Some(source))
+    }
+
     pub(crate) fn with_copy_source(mut self, source: Option<String>) -> Self {
         self.copy_source = source;
         self
@@ -544,6 +553,7 @@ impl AgentMarkdownCell {
             (!crate::inline_visualization::contains_inline_visualization(&markdown_source))
                 .then(MarkdownRenderCache::default);
         Self {
+            interrupted_item: None,
             markdown_source,
             timestamp: None,
             item_id: None,
@@ -576,7 +586,9 @@ impl AgentMarkdownCell {
     }
 }
 
-fn normalize_whitespace_only_hyperlink_lines(mut lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
+pub(super) fn normalize_whitespace_only_hyperlink_lines(
+    mut lines: Vec<HyperlinkLine>,
+) -> Vec<HyperlinkLine> {
     for line in &mut lines {
         if line
             .line
@@ -718,7 +730,7 @@ pub(crate) fn new_user_prompt(
         remote_image_urls,
         timestamp: None,
         prompt_identity: Default::default(),
-        presentation: UserMessagePresentation::Plain,
+        presentation: UserMessagePresentation::Typed,
     }
 }
 

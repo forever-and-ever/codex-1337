@@ -32,7 +32,12 @@ impl ChatWidget {
         timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         self.flush_answer_stream_with_separator();
-        let mut cell = history_cell::new_view_image_tool_call(path);
+        let origin = if self.snapshot_local_images {
+            history_cell::ImagePathOrigin::Remote
+        } else {
+            history_cell::ImagePathOrigin::Local
+        };
+        let mut cell = history_cell::new_view_image_tool_call(path, origin);
         cell.timestamp = timestamp;
         self.add_to_history(history_cell::ToolItemCell::new(call_id, cell));
         self.request_redraw();

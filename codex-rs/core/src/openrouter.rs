@@ -3,7 +3,6 @@ use crate::config::Config;
 use codex_config::read_openrouter_config;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_models_manager::manager::RefreshStrategy;
-use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use std::sync::Arc;
@@ -31,7 +30,7 @@ pub(crate) fn initial_account(
 
 pub(crate) async fn default_model(
     config: &Config,
-    manager: &SharedModelsManager,
+    manager: &dyn codex_models_manager::manager::ModelsManager,
     allow_fallback: bool,
     refresh: RefreshStrategy,
 ) -> Result<String> {

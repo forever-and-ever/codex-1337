@@ -11,14 +11,12 @@ use super::LocalSettings;
 use super::PermissionProfile;
 use super::PermissionProfileSelection;
 use super::RequestId;
-use super::ResponseItem;
+use super::SideChatStorage;
 use super::ThreadForkParams;
 use super::ThreadForkResponse;
 use super::ThreadHistoryMode;
 use super::ThreadHistorySupport;
 use super::ThreadId;
-use super::ThreadInjectItemsParams;
-use super::ThreadInjectItemsResponse;
 use super::ThreadParamsMode;
 use super::TypedRequestError;
 use super::Uuid;
@@ -37,6 +35,8 @@ use super::started_thread_from_fork_response;
 use super::thread_blocks_direct_input;
 use super::thread_fork_params_from_config;
 use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_protocol::ThreadInjectItemsParams;
+use codex_app_server_protocol::ThreadInjectItemsResponse;
 
 enum ForkPermissions {
     InheritSaved,
@@ -45,6 +45,7 @@ enum ForkPermissions {
 }
 
 pub(crate) struct ForkPreparation {
+    backend_id: crate::backend_id::BackendId,
     handle: AppServerRequestHandle,
     policy: RequestPolicy,
     parent: ThreadId,
@@ -57,7 +58,7 @@ pub(crate) struct ForkPreparation {
     source: ForkConfigSource,
     permissions: ForkPermissions,
     task_tools_available: bool,
-    boundary_items: Vec<ResponseItem>,
+    uses_remote_workspace: bool,
 }
 
 impl AppServerSession {
@@ -68,9 +69,8 @@ impl AppServerSession {
         config: Config,
         parent: ThreadId,
         selected_profile: Option<&PermissionProfileSelection>,
-        boundary_items: Vec<ResponseItem>,
     ) -> ForkPreparation {
-        let mut plan = self.prepare_fork_with_presentation(
+        self.prepare_fork_with_presentation(
             policy,
             local_settings,
             config,
@@ -78,14 +78,12 @@ impl AppServerSession {
             None,
             None,
             ForkGoalContinuation::StartIfIdle,
-            ForkPresentation::SideConversation,
+            ForkPresentation::SideConversation(SideChatStorage::Temporary),
             selected_profile,
             ForkPermissionMode::InheritSaved,
             ForkConfigSource::Session,
             None,
-        );
-        plan.boundary_items = boundary_items;
-        plan
+        )
     }
 
     #[expect(
@@ -149,7 +147,7 @@ impl AppServerSession {
                 ForkPresentation::Regular => {
                     codex_app_server_protocol::ThreadForkSnapshot::Interrupted
                 }
-                ForkPresentation::SideConversation => {
+                ForkPresentation::SideConversation(_) => {
                     codex_app_server_protocol::ThreadForkSnapshot::Side
                 }
             },
@@ -188,6 +186,7 @@ impl AppServerSession {
             }
         };
         ForkPreparation {
+            backend_id: self.backend_id(),
             handle: self.request_handle(),
             policy,
             parent: thread_id,
@@ -200,46 +199,79 @@ impl AppServerSession {
             source,
             permissions,
             task_tools_available: self.task_tools_available(thread_id),
-            boundary_items: Vec::new(),
+            uses_remote_workspace: self.uses_remote_workspace(),
         }
     }
 }
 
 impl ForkPreparation {
+    pub(crate) fn with_storage(mut self, storage: SideChatStorage) -> Self {
+        if matches!(self.presentation, ForkPresentation::SideConversation(_)) {
+            self.presentation = ForkPresentation::SideConversation(storage);
+        }
+        self
+    }
+
     pub(crate) async fn run(self) -> PreparedSession {
         let Self {
+            backend_id,
             handle,
             policy,
             parent,
             mut params,
-            config,
+            mut config,
             local_settings,
             mode,
             history_support,
-            presentation,
+            mut presentation,
             source,
             permissions,
             task_tools_available,
-            boundary_items,
+            uses_remote_workspace,
         } = self;
         let mut observations = SessionObservations {
+            backend_id,
             history: HistoryPaginationUpdate::Untracked,
             history_support,
+            receipt: None,
+            subscribed: false,
+            freeze_receipt: false,
+            side_storage: None,
         };
         let mut custody = SubscriptionCustody::None;
         let result = Box::pin(async {
-            if mode == ThreadParamsMode::Cloud {
-                color_eyre::eyre::bail!("Cloud conversations cannot be forked in the TUI yet.");
+            let base_developer_instructions = config.developer_instructions.clone();
+            let mut boundary_items = Vec::new();
+            if let ForkPresentation::SideConversation(mut storage) = presentation {
+                if storage == SideChatStorage::Attached {
+                    let supported = if uses_remote_workspace { false } else {
+                        let mut view = AppServerSession::from_parts(crate::backend_id::BackendId::new(), None, handle.clone(), mode);
+                        view.attached_side_chat_query(parent).await?.is_some()
+                            && read_thread(policy, &handle, parent).await.is_ok_and(|thread| !thread.ephemeral && thread.history_mode == ThreadHistoryMode::Paginated)
+                    };
+                    if !supported { storage = SideChatStorage::Temporary; }
+                }
+                presentation = ForkPresentation::SideConversation(storage);
+                storage.configure_fork(&mut config);
+                params.ephemeral = config.ephemeral;
+                params.developer_instructions = config.developer_instructions.clone();
+                params.attach_to_source = storage == SideChatStorage::Attached;
+                if params.attach_to_source {
+                    params.thread_source = Some(codex_app_server_protocol::ThreadSource::Feature(super::ATTACHED_SIDE_CHAT_SOURCE.to_owned()));
+                }
+                // Inherited turn context can suppress configured instructions; checkpoint both policy and boundary.
+                boundary_items = storage.policy().fork_items();
+                observations.side_storage = Some(storage);
             }
             let fork_parent = match presentation {
                 ForkPresentation::Regular => read_thread(policy, &handle, parent).await.ok(),
-                ForkPresentation::SideConversation => None,
+                ForkPresentation::SideConversation(_) => None,
             };
             params.exclude_turns = history_support == ThreadHistorySupport::Paginated
                 && (fork_parent
                     .as_ref()
                     .is_some_and(|thread| thread.history_mode == ThreadHistoryMode::Paginated)
-                    || presentation == ForkPresentation::SideConversation);
+                    || matches!(presentation, ForkPresentation::SideConversation(_)));
             let child_fork = source == ForkConfigSource::Session
                 && fork_parent.as_ref().is_some_and(thread_blocks_direct_input);
             if child_fork {
@@ -269,7 +301,25 @@ impl ForkPreparation {
             {
                 Ok(response) => response,
                 Err(TypedRequestError::Server { source, .. })
-                    if params.exclude_turns && is_history_pagination_unsupported(&source) =>
+                    if params.attach_to_source && source.code == super::JSONRPC_METHOD_NOT_FOUND
+                        && source.message == "attached threads is not supported yet" =>
+                {
+                    params.attach_to_source = false;
+                    params.thread_source = None;
+                    params.ephemeral = true;
+                    params.developer_instructions = Some(SideChatStorage::Temporary.policy().instructions(base_developer_instructions.as_deref()));
+                    presentation = ForkPresentation::SideConversation(SideChatStorage::Temporary);
+                    observations.side_storage = Some(SideChatStorage::Temporary);
+                    boundary_items = SideChatStorage::Temporary.policy().fork_items();
+                    handle.request_typed(ClientRequest::ThreadFork {
+                        request_id: RequestId::String(format!("tui-fork-{}", Uuid::new_v4())), params: params.clone(),
+                    }).await.map_err(|error| {
+                        if matches!(error, TypedRequestError::Server { .. }) { custody = SubscriptionCustody::None; }
+                        bootstrap_request_error("thread/fork failed during TUI bootstrap", error)
+                    })?
+                }
+                Err(TypedRequestError::Server { source, .. })
+                    if params.exclude_turns && !params.attach_to_source && is_history_pagination_unsupported(&source) =>
                 {
                     observations.history_support = ThreadHistorySupport::LegacyOnly;
                     params.exclude_turns = false;
@@ -326,10 +376,30 @@ impl ForkPreparation {
                     if !matches!(error, TypedRequestError::Server { .. }) {
                         custody = SubscriptionCustody::Uncertain(child);
                     }
+                    if presentation == ForkPresentation::SideConversation(SideChatStorage::Attached) {
+                        let rollback: Result<codex_app_server_protocol::ThreadDeleteResponse, TypedRequestError> = session_preparation::request(policy, &handle, ClientRequest::ThreadDelete {
+                            request_id: RequestId::String(format!("tui-side-rollback-{}", Uuid::new_v4())),
+                            params: codex_app_server_protocol::ThreadDeleteParams { thread_id: child.to_string() },
+                        }).await;
+                        if rollback.is_ok() { custody = SubscriptionCustody::None; }
+                        else { tracing::warn!(%child, ?rollback, "failed to roll back incomplete attached side conversation"); }
+                    }
                     return Err(bootstrap_request_error(
                         "side conversation boundary could not be confirmed",
                         error,
                     ));
+                }
+            }
+            if presentation == ForkPresentation::SideConversation(SideChatStorage::Attached) {
+                let child = ThreadId::from_string(&response.thread.id)?;
+                let checkpoint = super::side_chat_history::side_context_checkpoint(response.thread.path.as_deref()).await;
+                if !matches!(checkpoint, Ok(Some(_))) {
+                    let rollback = handle.request_typed::<codex_app_server_protocol::ThreadDeleteResponse>(ClientRequest::ThreadDelete {
+                        request_id: RequestId::String(format!("tui-side-rollback-{}", Uuid::new_v4())),
+                        params: codex_app_server_protocol::ThreadDeleteParams { thread_id: child.to_string() },
+                    }).await;
+                    if rollback.is_ok() { custody = SubscriptionCustody::None; }
+                    color_eyre::eyre::bail!("Saved side conversation context was not confirmed; checkpoint={checkpoint:?}, rollback={rollback:?}");
                 }
             }
             let mut response = response;
@@ -343,6 +413,7 @@ impl ForkPreparation {
                     Some(&config),
                     Some(&local_settings),
                     HistoryHydrationScope::Initial,
+                    if uses_remote_workspace { crate::history_cell::ImagePathOrigin::Remote } else { crate::history_cell::ImagePathOrigin::Local },
                 )
                 .await;
                 observations.history = update;
@@ -366,7 +437,7 @@ impl ForkPreparation {
             if let Some(permissions) = selected_permissions {
                 started.session.permission_profile = permissions;
             }
-            if presentation == ForkPresentation::SideConversation {
+            if matches!(presentation, ForkPresentation::SideConversation(_)) {
                 started.session.daybreak_enabled = false;
             }
             started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
@@ -381,5 +452,32 @@ impl ForkPreparation {
             custody,
             observations,
         }
+    }
+}
+
+#[cfg(test)]
+impl AppServerSession {
+    pub(crate) async fn fork_side_thread(
+        &mut self,
+        local_settings: &LocalSettings,
+        config: Config,
+        thread_id: ThreadId,
+        selected_profile: Option<&PermissionProfileSelection>,
+        storage: SideChatStorage,
+    ) -> color_eyre::Result<super::AppServerStartedThread> {
+        let prepared = Box::pin(
+            self.prepare_side_thread(
+                RequestPolicy::Unbounded,
+                local_settings,
+                config,
+                thread_id,
+                selected_profile,
+            )
+            .with_storage(storage)
+            .run(),
+        )
+        .await;
+        self.apply_session_observations(prepared.observations)?;
+        prepared.result
     }
 }

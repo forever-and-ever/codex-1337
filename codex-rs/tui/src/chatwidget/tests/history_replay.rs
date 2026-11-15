@@ -45,7 +45,7 @@ async fn resumed_initial_messages_render_history() {
     };
 
     // The first attachment can change project credentials even with an in-process server.
-    chat.status_account_display = Some(StatusAccountDisplay::ApiKey);
+    chat.test_account_mut().display = Some(StatusAccountDisplay::ApiKey);
     let mut model = crate::test_support::TEST_MODEL_PRESETS[0].clone();
     model.available_access_programs = Some(codex_protocol::openai_models::ModelAccessPrograms {
         cyber: vec![codex_protocol::turn_input::CyberAccessProgram::Standard],
@@ -69,7 +69,7 @@ async fn resumed_initial_messages_render_history() {
     );
 
     // A saved On preference cannot bypass the API-key gate.
-    chat.status_account_display = Some(StatusAccountDisplay::ApiKey);
+    chat.test_account_mut().display = Some(StatusAccountDisplay::ApiKey);
     chat.set_feature_enabled(Feature::ApiKeyCyberAccessPrograms, /*enabled*/ false);
     chat.set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
     configured.thread_id = ThreadId::new();
@@ -93,10 +93,18 @@ async fn resumed_initial_messages_render_history() {
     configured.thread_id = ThreadId::new();
     chat.handle_thread_session(configured);
     assert!(chat.daybreak_enabled);
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     assert!(chat.daybreak_enabled);
     replay_user_message_text(
         &mut chat,
@@ -328,21 +336,35 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
         name: "send_message_to_thread".to_string(),
         namespace: Some("codex_tui".to_string()),
         output: FunctionCallOutputBody::Text(format!(
-            "<codex_delegation>\n  <source_thread_id>source-task</source_thread_id>\n  <source_thread_name>SYSADMIN</source_thread_name>\n  <sent_at>{sent_at}</sent_at>\n  <input>Follow &lt;up&gt; &amp; report</input>\n</codex_delegation>"
+            "<codex_delegation>\n  <source_thread_id>source-task</source_thread_id>\n  <source_thread_name>SYSADMIN</source_thread_name>\n  <sent_at>{sent_at}</sent_at>\n  <input>**Follow up** on [the PR](https://example.com/pr).\n\n- Review `&lt;up&gt; &amp; report`.\n- Share the result.</input>\n</codex_delegation>"
         )),
     };
+
+    chat.handle_server_notification(
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            item.clone(),
+            /*started_at_ms*/ None,
+            /*completed_at_ms*/ 0,
+        )),
+        /*replay_kind*/ None,
+    );
+    let live = drain_insert_history(&mut rx);
+
     chat.replay_thread_item(
         item.clone(),
         "turn-1".to_string(),
         ReplayKind::ResumeInitialMessages,
     );
-
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1);
+    assert_eq!(live, cells);
     assert_chatwidget_snapshot!(
         "replayed_delegated_tool_output",
         lines_to_single_string(&cells[0])
     );
+
     let projected = crate::thread_transcript::thread_items_to_transcript_cells(
         /*thread_id*/ None,
         &chat.config.cwd,
@@ -350,14 +372,31 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(
         projected
             .iter()
-            .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
+            .map(|cell| cell.transcript_lines(/*width*/ 80))
             .collect::<Vec<_>>(),
-        vec![lines_to_single_string(&cells[0])]
+        cells,
     );
+    assert_eq!(
+        projected[0]
+            .transcript_hyperlink_lines(/*width*/ 80)
+            .iter()
+            .flat_map(|line| &line.hyperlinks)
+            .map(|link| link.destination.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["https://example.com/pr"]),
+    );
+    let narrow = projected[0].transcript_hyperlink_lines(/*width*/ 32);
+    let mut source_rows = narrow.iter().filter_map(|line| line.source.as_ref());
+    let first = source_rows.next().expect("delegated body has a source");
+    let continuation = source_rows
+        .next()
+        .expect("delegated body wraps from the same source");
+    assert!(std::sync::Arc::ptr_eq(&first.text, &continuation.text));
     crate::terminal_palette::with_test_default_colors(
         crate::terminal_probe::DefaultColors {
             fg: (220, 220, 220),
@@ -418,6 +457,7 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         );
         if call_id.is_none() {
             assert_eq!(
@@ -498,6 +538,7 @@ async fn replayed_nested_review_prompts_do_not_render_or_seed_composer_history()
                     ThreadItem::untimed(user_message("review-prompt-1", review_prompt)),
                     ThreadItem::untimed(user_message("review-prompt-2", review_prompt)),
                     ThreadItem::untimed(AppServerThreadItemPayload::AgentMessage {
+                        moderation: None,
                         id: "review-result".to_string(),
                         text: "review result is retained".to_string(),
                         phase: Some(MessagePhase::FinalAnswer),
@@ -1076,6 +1117,7 @@ async fn prompt_edit_stops_streaming_without_submitting_queued_input() {
     let retained_turn = AppServerTurn {
         items: vec![
             ThreadItem::untimed(AppServerThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "retained-response".to_string(),
                 text: "retained response".to_string(),
                 phase: Some(MessagePhase::FinalAnswer),
@@ -1094,6 +1136,7 @@ async fn prompt_edit_stops_streaming_without_submitting_queued_input() {
                 }],
             }),
             ThreadItem::untimed(AppServerThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "private-commentary".to_string(),
                 text: "hidden voice commentary".to_string(),
                 phase: Some(MessagePhase::Commentary),

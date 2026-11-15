@@ -6,8 +6,8 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=6dfe4fbf34208008):
-        - namespace/functions; hash=805bd231f7917331
+00:additional_tools/developer (2; hash=60681db9866e9e3f):
+        - namespace/functions; hash=be98766e604442dc
           - custom/exec
           - function/wait
           - custom/python
@@ -52,8 +52,8 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 2 (after request 3: input diverged at item 12)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=6dfe4fbf34208008):
-        - namespace/functions; hash=805bd231f7917331
+00:additional_tools/developer (2; hash=60681db9866e9e3f):
+        - namespace/functions; hash=be98766e604442dc
           - custom/exec
           - function/wait
           - custom/python

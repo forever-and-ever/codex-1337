@@ -67,8 +67,8 @@ async fn plugin_attribution_for_guardian_request(
                     .find(|environment| {
                         environment.selection.environment_id.as_str() == environment_id
                     })?;
-            if turn_environment.environment.is_remote() {
-                let file_system = turn_environment.environment.get_filesystem();
+            if turn_environment.environment().is_remote() {
+                let file_system = turn_environment.environment().get_filesystem();
                 turn.plugin_attribution_for_executor_command(command, cwd, file_system.as_ref())
                     .await
             } else {
@@ -99,7 +99,7 @@ pub(crate) struct GuardianReviewOptions {
 }
 
 pub(super) struct GuardianReviewSessionConfig {
-    reviewer_route: super::reviewer_route::ReviewerRoute,
+    pub(super) reviewer_route: super::reviewer_route::ReviewerRoute,
     pub(super) spawn_config: crate::config::Config,
     pub(super) node_repl_policy: GuardianNodeReplPolicy,
     review_model: ReviewModel,
@@ -129,10 +129,10 @@ pub(super) async fn guardian_review_session_config_for_route(
             anyhow::bail!(super::reviewer_route::OPENROUTER_REVIEW_LOGIN_REQUIRED);
         }
         super::reviewer_route::ReviewerRoute::ParentProvider => {
-            super::reviewer_config::resolve_review_model(session, context).await
+            super::reviewer_config::resolve_review_model(session, context).await?
         }
         super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. } => {
-            super::reviewer_route::ReviewerRoute::resolve_chatgpt_model(session, context).await?
+            route.resolve_chatgpt_model(context).await?
         }
     };
     let reviewer_config = session
@@ -216,10 +216,6 @@ impl ReviewInput {
     }
 
     /// Assess the supplied request in a fresh reviewer without publishing a live approval.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "consumed by the recorded-call stack layer")
-    )]
     pub(super) async fn assess_isolated(
         self,
         deadline: ReviewDeadline,

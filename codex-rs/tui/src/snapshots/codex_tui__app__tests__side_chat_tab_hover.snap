@@ -1,0 +1,45 @@
+---
+source: tui/src/app/tests.rs
+assertion_line: 6230
+expression: "tab_styles.join(\"\\n\")"
+---
+sidebar rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED  selected Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | REVERSED  add Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE
+sidebar selected  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar leave  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar light rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar light hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+sidebar light add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+sidebar add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+sidebar add fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  selected Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | REVERSED  add Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED
+main rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED  selected Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | UNDERLINED  add Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE
+main selected  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main leave  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main light rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main light hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(182, 182, 182)/Rgb(10, 5, 3)/NONE
+main light add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+main add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/BOLD  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+main add fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  selected Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | UNDERLINED  add Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED
+chooser rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED  selected Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  add Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | REVERSED
+chooser selected  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser leave  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser light rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser light hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser light add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(217, 217, 217)/Rgb(39, 19, 0)/BOLD
+chooser add fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  selected Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  add Rgb(245, 208, 177)/Rgb(10, 5, 3)/BOLD | UNDERLINED | REVERSED
+chooser main rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED  selected Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  add Rgb(152, 152, 152)/Rgb(10, 5, 3)/NONE
+chooser main selected  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main leave  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main light rest  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main light hover  inactive Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE
+chooser main light add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+chooser main add  inactive Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  selected Rgb(182, 182, 182)/Rgb(25, 25, 28)/NONE  add Rgb(220, 220, 220)/Rgb(39, 19, 0)/NONE
+chooser main add fallback  inactive Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  selected Rgb(220, 220, 220)/Rgb(10, 5, 3)/NONE  add Rgb(220, 220, 220)/Rgb(10, 5, 3)/UNDERLINED

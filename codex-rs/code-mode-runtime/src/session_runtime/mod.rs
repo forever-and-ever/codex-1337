@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+pub(crate) use codex_code_mode_protocol::FunctionCallOutputContentItem as OutputItem;
 use opentelemetry::context::FutureExt;
 use serde_json::Value as JsonValue;
 use tokio::sync::Mutex;
@@ -21,7 +22,6 @@ pub(crate) use self::types::Error;
 pub(crate) use self::types::NestedToolCall;
 pub(crate) use self::types::Observation;
 pub(crate) use self::types::ObserveMode;
-pub(crate) use self::types::OutputItem;
 pub(crate) use self::types::SessionRuntimeDelegate;
 pub(crate) use self::types::ToolDefinition;
 pub(crate) use self::types::ToolKind;
@@ -55,6 +55,7 @@ struct Inner {
 }
 
 impl SessionRuntime {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::new_with_task_failure_handler(/*task_failure_handler*/ None)
     }
@@ -288,34 +289,48 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
     async fn commit_completion(
         &self,
         stored_value_writes: HashMap<String, Arc<JsonValue>>,
-        event: CellEvent,
+        event: impl FnOnce() -> CellEvent + Send,
         cell_state: Arc<CellState>,
     ) -> CompletionCommit {
         let cancellation_token = cell_state.cancellation_token();
         let mut stored_values = tokio::select! {
             biased;
             _ = cancellation_token.cancelled() => {
-                return CompletionCommit::Rejected(event);
+                return CompletionCommit::Rejected;
             }
             stored_values = self.inner.stored_values.lock() => stored_values,
         };
-        let outcome = match &event {
-            CellEvent::Completed {
-                error_text: None, ..
-            } => codex_code_mode_protocol::CellOutcome::Completed,
-            CellEvent::Completed {
-                error_text: Some(_),
-                ..
-            } => codex_code_mode_protocol::CellOutcome::Failed,
-            CellEvent::Terminated { .. } => codex_code_mode_protocol::CellOutcome::Terminated,
-            CellEvent::Yielded { .. } | CellEvent::Pending { .. } => {
-                unreachable!("completion must be terminal")
-            }
-        };
-        let committed = cell_state.commit_completion(event, || {
-            stored_values.extend(stored_value_writes);
-        });
+        // TELOS(code-mode-cell-outcomes): report the outcome only after terminal publication wins.
+        let mut outcome = None;
+        let committed = cell_state.commit_completion(
+            || {
+                let event = event();
+                outcome = Some(match &event {
+                    CellEvent::Completed {
+                        error_text: None, ..
+                    } => codex_code_mode_protocol::CellOutcome::Completed,
+                    CellEvent::Completed {
+                        error_text: Some(_),
+                        ..
+                    } => codex_code_mode_protocol::CellOutcome::Failed,
+                    CellEvent::Terminated { .. } => {
+                        codex_code_mode_protocol::CellOutcome::Terminated
+                    }
+                    CellEvent::Yielded { .. } | CellEvent::Pending { .. } => {
+                        unreachable!("completion must be terminal")
+                    }
+                });
+                event
+            },
+            || {
+                stored_values.extend(stored_value_writes);
+                drop(stored_values);
+            },
+        );
         if committed == CompletionCommit::Committed {
+            let Some(outcome) = outcome else {
+                unreachable!("committed completion constructs its terminal event")
+            };
             self.terminal_reported.store(true, Ordering::Release);
             self.delegate.cell_finished(&self.cell_id, outcome);
         }

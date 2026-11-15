@@ -120,8 +120,11 @@ async fn framed_shared_fork_resume_preserves_checkpoint_and_frozen_history() -> 
     }
     let config = test.config.clone();
     // A fresh store, as after a restart, reads the framed lineage from disk.
-    let store =
-        codex_core::thread_store_from_config(&config, codex_core::init_state_db(&config).await);
+    let store = codex_core::ThreadStoreBuilder::from_config(
+        &config,
+        codex_core::init_state_db(&config).await,
+    )
+    .build();
 
     // Follow the paginated resume path: load the latest checkpoint from disk, then resume core.
     let context = store

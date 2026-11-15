@@ -10,7 +10,6 @@ use super::ThreadId;
 use super::Uuid;
 use super::VecDeque;
 use crate::app_server_session::typed_requests::SessionRpc;
-use crate::status::StatusAccountDisplay;
 use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
@@ -24,7 +23,7 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 
 #[derive(Default)]
 pub(super) struct AccountUi {
-    serial: u64,
+    pub(in crate::app) serial: u64,
     // A newer identity read supersedes the data, not the submitted command.
     usage: Option<(Option<ThreadId>, String)>,
     picker_request: Option<Uuid>,
@@ -325,6 +324,17 @@ impl App {
         match result {
             Ok(response) => {
                 self.update_displayed_account(server, thread_id, response);
+                if self.chat_widget.has_codex_backend_auth()
+                    && self.chat_widget.has_chatgpt_account()
+                    && self.chat_widget.account_ready_reason().is_none()
+                {
+                    crate::security_setup::prefetch(
+                        &self.config,
+                        server,
+                        self.app_event_tx.clone(),
+                        self.chat_widget.security_setup_request_id,
+                    );
+                }
                 if let Some(args) = usage {
                     self.chat_widget.dispatch_usage(args);
                 }
@@ -352,37 +362,9 @@ impl App {
             );
         }
 
-        // Backend-only host authentication has no Account projection. Its
-        // capability flag remains owned by the global auth notifications.
-        let backend_only = response.account_id.is_none()
-            && response.account.is_none()
-            && self.chat_widget.has_codex_backend_auth()
-            && !self.chat_widget.has_chatgpt_account();
-        let (display, plan, chatgpt) = match response.account.clone() {
-            Some(Account::Chatgpt {
-                email,
-                plan_type,
-                workspace_name,
-            }) => (
-                Some(StatusAccountDisplay::ChatGpt {
-                    email,
-                    plan: Some(crate::status::plan_type_display_name(plan_type)),
-                    workspace: crate::app_server_session::workspace_display(
-                        workspace_name,
-                        response.workspace_routing.clone(),
-                    ),
-                }),
-                Some(plan_type),
-                true,
-            ),
-            Some(Account::ApiKey {}) => (Some(StatusAccountDisplay::ApiKey), None, false),
-            Some(Account::ClaudeSubscription { email }) => (
-                Some(StatusAccountDisplay::ClaudeSubscription { email }),
-                None,
-                false,
-            ),
-            None => (None, None, false),
-        };
+        let session_account = crate::app_server_session::SessionAccount::from(response.clone());
+        let display = session_account.display.clone();
+        let chatgpt = session_account.has_chatgpt_account();
         let account_label = response
             .display_name
             .clone()
@@ -413,8 +395,8 @@ impl App {
                 _ => None,
             },
         );
-        if self.chat_widget.has_chatgpt_account() == chatgpt
-            && self.chat_widget.has_codex_backend_auth() == (chatgpt || backend_only)
+        if self.chat_widget.account_ready_reason().is_none()
+            && self.chat_widget.has_chatgpt_account() == chatgpt
             && self
                 .account_ui
                 .displayed
@@ -425,8 +407,8 @@ impl App {
         {
             return;
         }
-        if self.chat_widget.has_chatgpt_account() == chatgpt
-            && self.chat_widget.has_codex_backend_auth() == (chatgpt || backend_only)
+        if self.chat_widget.account_ready_reason().is_none()
+            && self.chat_widget.has_chatgpt_account() == chatgpt
             && self
                 .account_ui
                 .displayed
@@ -466,8 +448,7 @@ impl App {
         self.rate_limit_refresh_state.invalidate_recovery();
         self.last_thread_usage_status_cell = None;
         self.pending_thread_usage_history_refresh = false;
-        self.chat_widget
-            .update_account_state(display, plan, chatgpt, chatgpt || backend_only);
+        self.chat_widget.update_account_state(session_account);
         self.chat_widget.refresh_status_line();
         if chatgpt {
             let reset_hint_request_id = self.chat_widget.start_rate_limit_reset_startup_check();

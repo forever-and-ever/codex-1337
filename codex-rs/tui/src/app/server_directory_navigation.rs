@@ -615,6 +615,7 @@ impl App {
         assert!(
             plan.note_consent(OnboardingResult {
                 directory_trust_persisted: true,
+                selected_gateway: None,
                 should_exit: false
             })
             .is_none()
@@ -957,8 +958,17 @@ impl App {
                     custody,
                     observations,
                 } = prepared;
-                if same_epoch {
-                    server.apply_session_observations(observations);
+                let valid_origin = server.accepts_session_observations(&observations);
+                let matching = matching && valid_origin;
+                let result = if valid_origin {
+                    result
+                } else {
+                    Err(color_eyre::eyre::eyre!(
+                        "prepared session belongs to a different backend"
+                    ))
+                };
+                if same_epoch && valid_origin {
+                    server.apply_session_observations(observations)?;
                 }
                 let source = ready.context.input.thread_id();
                 let history = ready.context.input.history;

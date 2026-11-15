@@ -106,6 +106,7 @@ pub(crate) fn assert_wait_history_retains_completion(wait: &codex_protocol::item
                 item: wait.clone(),
                 started_at_ms: Some(0),
                 completed_at_ms: 1_234,
+                content_token_count: None,
             })),
             wrap_event(end.clone()),
             wrap_event(begin.clone()),

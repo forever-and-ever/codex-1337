@@ -232,10 +232,18 @@ async fn account_update_rejects_stale_status_rate_limit_snapshots() {
         other => panic!("expected status refresh request, got {other:?}"),
     };
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (true).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     chat.finish_status_rate_limit_refresh(request_id, vec![snapshot(/*percent*/ 92.0)]);
 
     assert!(chat.rate_limit_snapshots_by_limit_id.is_empty());
@@ -248,7 +256,7 @@ async fn status_command_waits_for_usage_and_limits_without_status_line() {
     let thread_id =
         ThreadId::from_string("019fc8ab-1fb2-7000-8000-000000000001").expect("valid thread id");
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
 
@@ -329,7 +337,7 @@ async fn status_command_omits_thread_usage_for_unsupported_plans() {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         set_chatgpt_auth(&mut chat);
         chat.thread_id = Some(ThreadId::new());
-        chat.plan_type = plan_type;
+        chat.test_account_mut().plan = plan_type;
 
         chat.dispatch_command(SlashCommand::Status);
 
@@ -349,7 +357,7 @@ async fn status_command_reports_usage_failure_and_can_retry() {
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
     let request_id = match rx.try_recv() {
@@ -389,7 +397,7 @@ async fn status_command_renders_credits_and_breakdowns_without_usd_estimate() {
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
     let request_id = match rx.try_recv() {
@@ -443,7 +451,7 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
     let request_id = match rx.try_recv() {
@@ -491,12 +499,18 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
 async fn status_command_requests_thread_usage_for_remote_connection_metadata() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.update_account_state(
-        /*status_account_display*/ None,
-        Some(PlanType::Business),
-        /*has_chatgpt_account*/ false,
-        /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: Some(PlanType::Business),
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     chat.remote_connection = Some(crate::status::remote_connection::RemoteConnectionStatus {
         address: "wss://remote.example.com".to_string(),
         version: "v1.0.0".to_string(),
@@ -514,12 +528,18 @@ async fn status_command_requests_thread_usage_for_remote_connection_metadata() {
 async fn status_command_requests_thread_usage_with_backend_only_authentication() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.update_account_state(
-        /*status_account_display*/ None,
-        Some(PlanType::Business),
-        /*has_chatgpt_account*/ false,
-        /*has_codex_backend_auth*/ true,
-    );
+    {
+        chat.set_test_backend_auth(true);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: Some(PlanType::Business),
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
     assert!(!chat.has_chatgpt_account());
     assert!(chat.has_codex_backend_auth());
     assert_matches!(rx.try_recv(), Ok(AppEvent::FetchModels { .. }));
@@ -534,7 +554,7 @@ async fn status_command_is_cancelled_when_account_changes_during_usage_refresh()
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
     let request_id = match rx.try_recv() {
@@ -543,10 +563,18 @@ async fn status_command_is_cancelled_when_account_changes_during_usage_refresh()
     };
     drain_insert_history(&mut rx);
 
-    chat.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
-    );
+    {
+        chat.set_test_backend_auth(false);
+        chat.update_account_state(crate::app_server_session::SessionAccount {
+            display: (false).then(|| StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            plan: None,
+            requires_openai_auth: chat.requires_openai_auth(),
+        });
+    };
 
     assert!(!chat.finish_thread_usage_refresh(
         thread_id,
@@ -568,7 +596,7 @@ async fn status_command_is_cancelled_when_thread_changes_during_usage_refresh() 
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.plan_type = Some(PlanType::Business);
+    chat.test_account_mut().plan = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
     let request_id = match rx.try_recv() {

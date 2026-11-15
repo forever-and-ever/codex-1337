@@ -465,6 +465,19 @@ impl TextLayout {
         &self.text
     }
 
+    /// A disclosure label is activity even when its selectable source is empty.
+    pub(super) fn same_activity_content(&self, other: &Self) -> bool {
+        self.text() == other.text()
+            && self
+                .disclosure_controls
+                .iter()
+                .map(|control| control.label.as_str())
+                .eq(other
+                    .disclosure_controls
+                    .iter()
+                    .map(|control| control.label.as_str()))
+    }
+
     pub(crate) fn row_count(&self) -> usize {
         self.rows.len()
     }

@@ -4,7 +4,6 @@
 
 use super::AGENTS_OVERVIEW_VIEW_ID;
 use super::AbsolutePathBuf;
-use super::ActiveTurnSteerRace;
 use super::AgentNavigationDirection;
 use super::App;
 use super::AppCommand;
@@ -24,7 +23,6 @@ use super::Config;
 use super::ConfigBatchWriteParams;
 use super::ConfigWriteResponse;
 use super::Duration;
-use super::EnvironmentManager;
 use super::ExitMode;
 use super::ExitReason;
 use super::Feature;
@@ -32,7 +30,6 @@ use super::HashMap;
 use super::HashSet;
 use super::HooksListEntry;
 use super::Instant;
-use super::LoaderOverrides;
 use super::Mutex;
 use super::Path;
 use super::PathBuf;
@@ -50,7 +47,6 @@ use super::SessionTarget;
 use super::SideThreadState;
 use super::SkillsListParams;
 use super::SkillsListResponse;
-use super::StateDbHandle;
 use super::ThreadEventAttachment;
 use super::ThreadEventStore;
 use super::ThreadId;
@@ -66,8 +62,6 @@ use super::UiReply;
 use super::WrapErr;
 use super::WriteStatus;
 use super::active_turn_interrupt_race;
-use super::active_turn_not_steerable_turn_error;
-use super::active_turn_steer_race;
 use super::agent_status_feed;
 use super::agents_overview;
 use super::apply_managed_new_thread_defaults;
@@ -87,6 +81,9 @@ use super::thread_name;
 use super::tui;
 use super::unbounded_channel;
 use crate::app_command::PendingSteerCancelAction;
+use crate::app_server_session::user_message_submission::ActiveTurnSteerRace;
+use crate::app_server_session::user_message_submission::active_turn_not_steerable_turn_error;
+use crate::app_server_session::user_message_submission::active_turn_steer_race;
 use crate::chatwidget::PendingSteer;
 use crate::chatwidget::UserMessage;
 use codex_app_server_protocol::ClientRequest;
@@ -143,7 +140,7 @@ pub(in crate::app) struct ControlCompletion {
 }
 
 #[path = "server_detach_operations.rs"]
-mod detach;
+pub(in crate::app) mod detach;
 
 pub(in crate::app) use detach::DetachScope;
 

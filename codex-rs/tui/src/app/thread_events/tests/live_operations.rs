@@ -301,6 +301,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
                 text: "capture".to_owned(),
                 phase: None,
                 memory_citation: None,
+                moderation: None,
                 delivery: None,
                 questions: None,
             },

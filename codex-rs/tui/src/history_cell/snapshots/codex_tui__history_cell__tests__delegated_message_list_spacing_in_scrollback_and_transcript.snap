@@ -1,0 +1,21 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: "format!(\"Scrollback\\n{scrollback}\\n\\nRedrawable transcript\\n{transcript}\")"
+---
+Scrollback
+Message  Sent by other
+  • One
+  
+  • This item has enough words
+    to wrap
+  
+  • Three
+
+Redrawable transcript
+Message  Sent by other
+  • One
+  
+  • This item has enough words
+    to wrap
+  
+  • Three

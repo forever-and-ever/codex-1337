@@ -4,12 +4,14 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server::in_process;
+use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadQueueAddParams;
 use codex_app_server_protocol::ThreadQueueAddResponse;
 use codex_app_server_protocol::ThreadQueueListParams;
@@ -104,6 +106,7 @@ base_url = "{}/v1"
         .request(|request_id| ClientRequest::ThreadQueueAdd {
             request_id,
             params: ThreadQueueAddParams {
+                responsesapi_client_metadata: None,
                 thread_id: started.thread.id.clone(),
                 input: Some(input.clone()),
                 client_user_message_id: "queued-message".into(),
@@ -140,6 +143,10 @@ base_url = "{}/v1"
     };
     for (method, params) in [
         ("thread/resume", json!({"threadId": started.thread.id})),
+        (
+            "thread/guardianReview",
+            json!({ "threadId": started.thread.id }),
+        ),
         (
             "thread/goal/set",
             json!({"threadId": started.thread.id, "objective": "Blocked objective"}),
@@ -321,7 +328,7 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn malformed_system_defaults_reject_input_until_provider_can_be_resolved() -> Result<()> {
+async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result<()> {
     let provider = MockServer::start().await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&provider.uri()).write(home.path())?;
@@ -336,7 +343,7 @@ async fn malformed_system_defaults_reject_input_until_provider_can_be_resolved()
             .build()
             .await?,
     );
-    let client = in_process::start(InProcessStartArgs {
+    let mut client = in_process::start(InProcessStartArgs {
         arg0_paths: Arg0DispatchPaths::default(),
         config,
         cli_overrides: Vec::new(),
@@ -391,9 +398,23 @@ async fn malformed_system_defaults_reject_input_until_provider_can_be_resolved()
             },
         })
         .await?
-        .expect_err("cannot verify the selected provider from malformed configuration");
-    assert_eq!(response.code, -32600);
-    assert!(requests.requests().is_empty());
+        .expect("turn/start should succeed");
+    let _: TurnStartResponse = serde_json::from_value(response)?;
+    timeout(Duration::from_secs(/*secs*/ 60), async {
+        loop {
+            let Some(event) = client.next_event().await else {
+                anyhow::bail!("app-server stopped before turn/completed");
+            };
+            if let InProcessServerEvent::ServerNotification(notification) = event
+                && let ServerNotification::TurnCompleted(completed) = notification.as_ref()
+                && completed.thread_id == started.thread.id
+            {
+                return Ok::<(), anyhow::Error>(());
+            }
+        }
+    })
+    .await??;
+    assert_eq!(requests.requests().len(), 1);
     client.shutdown().await?;
     Ok(())
 }

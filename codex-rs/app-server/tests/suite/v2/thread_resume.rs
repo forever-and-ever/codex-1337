@@ -29,6 +29,7 @@ use codex_app_server_protocol::DeprecationNoticeNotification;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
 use codex_app_server_protocol::GeneratedImageRef;
+use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -134,7 +135,6 @@ use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
-use std::collections::HashMap;
 use std::fs::FileTimes;
 use std::io::Write;
 use std::path::Path;
@@ -158,6 +158,9 @@ use super::analytics::thread_initialized_event;
 use super::analytics::wait_for_analytics_payload;
 use super::analytics::wait_for_goal_event;
 use super::analytics::wait_for_matching_analytics_event;
+
+#[path = "thread_resume_account_tests.rs"]
+mod account_tests;
 
 #[cfg(windows)]
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
@@ -252,6 +255,14 @@ async fn thread_resume_paginated_model_context_preserves_original_metadata() -> 
     )
     .await??;
     timeout(DEFAULT_READ_TIMEOUT, primary.shutdown_gracefully()).await??;
+
+    assert!(
+        !codex_rollout::read_session_meta_line(&path)
+            .await?
+            .meta
+            .account_scoped,
+        "resuming legacy history must keep its cross-account visibility"
+    );
 
     let mut secondary = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -1184,11 +1195,24 @@ async fn cold_resume_workspace_roots_validate_foreign_startup_paths() -> Result<
     Ok(())
 }
 
+#[test_case(ApprovalsReviewer::AutoReview, "", ApprovalsReviewer::AutoReview; "explicit auto review")]
+#[test_case(ApprovalsReviewer::User, "", ApprovalsReviewer::User; "requirement removed")]
+#[test_case(ApprovalsReviewer::User, "allowed_approvals_reviewers = [\"auto_review\"]", ApprovalsReviewer::AutoReview; "allowlist tightened")]
 #[tokio::test]
-async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
+async fn thread_resume_preserves_persisted_approvals_reviewer(
+    requested_reviewer: ApprovalsReviewer,
+    resumed_requirements: &str,
+    expected_reviewer: ApprovalsReviewer,
+) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(codex_home.path())?;
+
+    let requirements_path = codex_home.path().join("requirements.toml");
+    std::fs::write(
+        &requirements_path,
+        "[auto_review]\nrequired_on_models = [\"gpt-5.4\"]\n",
+    )?;
 
     let thread_id = {
         let mut mcp = TestAppServer::builder()
@@ -1200,12 +1224,16 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
         let start_id = mcp
             .send_thread_start_request(ThreadStartParams {
                 model: Some("gpt-5.4".to_string()),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                approvals_reviewer: Some(requested_reviewer),
                 ..Default::default()
             })
             .await?;
-        let ThreadStartResponse { thread, .. } =
-            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        let ThreadStartResponse {
+            thread,
+            approvals_reviewer,
+            ..
+        } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        assert_eq!(approvals_reviewer, ApprovalsReviewer::AutoReview);
 
         let turn_id = mcp
             .send_turn_start_request(TurnStartParams {
@@ -1232,6 +1260,7 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
         thread.id
     };
 
+    std::fs::write(requirements_path, resumed_requirements)?;
     let config_path = codex_home.path().join("config.toml");
     let config = std::fs::read_to_string(&config_path)?;
     std::fs::write(
@@ -1257,7 +1286,7 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
         approvals_reviewer, ..
     } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
 
-    assert_eq!(approvals_reviewer, ApprovalsReviewer::AutoReview);
+    assert_eq!(approvals_reviewer, expected_reviewer);
 
     Ok(())
 }
@@ -3789,6 +3818,7 @@ async fn thread_goal_keeps_original_root_until_external_objective_edit() -> Resu
     let codex_home = TempDir::new()?;
     mock_responses_config(server.uri())
         .enable_feature(Feature::Goals)
+        .enable_feature(Feature::UntrustedAsToolOutput)
         .write(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -3919,6 +3949,35 @@ async fn thread_goal_keeps_original_root_until_external_objective_edit() -> Resu
         .expect("intervening user turn ID");
     responses::assert_root_turn(&intervening_request, Some(intervening_turn_id))?;
     let first_continuation = serde_json::from_slice::<serde_json::Value>(&requests[4])?;
+    let created = serde_json::from_slice::<serde_json::Value>(&requests[1])?;
+    let objective = created["input"]
+        .as_array()
+        .expect("request input")
+        .iter()
+        .find(|item| item["name"] == "goal_objective")
+        .expect("model-written goal objective");
+    assert!(
+        first_continuation["input"]
+            .as_array()
+            .expect("continuation input")
+            .contains(objective)
+    );
+    let mut wire_item = objective.as_object().expect("goal context item").clone();
+    wire_item.remove("id"); // Generated for each run.
+    wire_item.sort_keys();
+    insta::assert_snapshot!(
+        "model_written_goal_as_untrusted_tool_output",
+        serde_json::to_string_pretty(&wire_item)?,
+    );
+    for request in [&created, &first_continuation] {
+        let input = request["input"].as_array().expect("request input");
+        assert!(!input.iter().any(|item| {
+            item["role"] == "user"
+                && item["content"]
+                    .to_string()
+                    .contains("keep its original owner")
+        }));
+    }
     let first_continuation_turn_id = first_continuation["client_metadata"]["turn_id"]
         .as_str()
         .expect("first continuation turn ID");
@@ -4535,6 +4594,7 @@ async fn thread_resume_token_usage_replay_ignores_stale_interrupted_tail_turn() 
             "timestamp": meta_rfc3339,
             "type": "event_msg",
             "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Still running".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -4625,6 +4685,7 @@ async fn thread_resume_token_usage_replay_can_belong_to_interrupted_turn() -> Re
             "timestamp": meta_rfc3339,
             "type": "event_msg",
             "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Interrupted after usage".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -4792,6 +4853,7 @@ async fn thread_resume_prefers_persisted_git_metadata_for_local_threads() -> Res
     let rollout_dir = rollout_path.parent().expect("rollout parent directory");
     std::fs::create_dir_all(rollout_dir)?;
     let session_meta = SessionMeta {
+        account_scoped: false,
         attached_thread: false,
         creator_user_id: None,
         creator_account_id: None,
@@ -4950,6 +5012,7 @@ async fn thread_resume_and_read_interrupt_incomplete_rollout_turn_when_thread_is
             "timestamp": meta_rfc3339,
             "type": "event_msg",
             "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Still running".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -5516,6 +5579,8 @@ async fn thread_resume_rejoins_running_paginated_thread_with_initial_page() -> R
                 gate: None,
                 body: responses::sse(vec![
                     responses::ev_response_created("resp-2"),
+                    responses::ev_message_item_added("earlier", ""),
+                    responses::ev_assistant_message("earlier", "First progress update"),
                     responses::ev_message_item_added("progress", ""),
                     responses::ev_assistant_message("progress", "Checking"),
                     responses::ev_message_item_added("msg-2", ""),
@@ -5592,20 +5657,18 @@ async fn thread_resume_rejoins_running_paginated_thread_with_initial_page() -> R
         primary.read_stream_until_notification_message("turn/started"),
     )
     .await??;
-    // Starting the gated reply means the prompt and the progress message have completed.
-    let mut message_starts = HashMap::new();
-    timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let started: ItemStartedNotification =
-                primary.read_notification("item/started").await?;
-            assert_eq!(started.turn_id, running_turn.id);
-            if started.item.id() == "msg-2" {
-                return Ok::<(), anyhow::Error>(());
-            }
-            message_starts.insert(started.item.id().to_owned(), started.started_at_ms);
-        }
-    })
-    .await??;
+    // The final item is gated. Record exactly what subscribers saw before reconnecting.
+    let mut live_items = Vec::new();
+    for _ in 0..3 {
+        let completed: ItemCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            primary.read_notification("item/completed"),
+        )
+        .await??;
+        assert_eq!(completed.turn_id, running_turn.id);
+        live_items.push(completed.item);
+    }
+    let summary_items = [live_items[0].clone(), live_items[2].clone()];
 
     let resume_id = primary
         .send_thread_resume_request(ThreadResumeParams {
@@ -5677,6 +5740,10 @@ async fn thread_resume_rejoins_running_paginated_thread_with_initial_page() -> R
         "hot paginated resume should wait for a real token usage update"
     );
 
+    let history_db = codex_state::open_thread_history_db(
+        &codex_state::SqliteConfig::new_for_testing(codex_home.path().abs()),
+    )
+    .await?;
     for (exclude_turns, items_view) in [
         (true, None),
         (true, Some(TurnItemsView::Full)),
@@ -5704,25 +5771,50 @@ async fn thread_resume_rejoins_running_paginated_thread_with_initial_page() -> R
             page.data[0].items_view,
             items_view.unwrap_or(TurnItemsView::Summary)
         );
-        assert!(matches!(
-            page.data[0].items.as_slice(),
-            [codex_app_server_protocol::ThreadItem { payload: ThreadItemPayload::UserMessage { .. }, .. }, codex_app_server_protocol::ThreadItem { payload: ThreadItemPayload::AgentMessage { text, .. }, .. }] if text == "Checking"
-        ));
-        assert_eq!(
-            page.data[0]
-                .items
-                .iter()
-                .filter_map(|item| Some((item.id().to_owned(), item.started_at_ms?)))
-                .collect::<std::collections::HashMap<_, _>>(),
-            message_starts
-        );
+        let page_turn = &page.data[0];
+        let expected = if page_turn.items_view == TurnItemsView::Full {
+            live_items.as_slice()
+        } else {
+            &summary_items
+        };
+        assert_eq!(page_turn.items, expected);
+        if page_turn.items_view == TurnItemsView::Full {
+            // Simulate a prepared page that does not yet include the live turn.
+            let deleted = sqlx::query("DELETE FROM thread_turns WHERE turn_id = ?")
+                .bind(&running_turn.id)
+                .execute(&history_db)
+                .await?;
+            assert_eq!(deleted.rows_affected(), 1);
+        }
         if !exclude_turns {
             let full_turn = resumed.thread.turns.last().expect("full active turn");
             assert_eq!(full_turn.id, running_turn.id);
             assert_eq!(full_turn.items_view, TurnItemsView::Full);
-            assert!(!full_turn.items.is_empty());
+            assert_eq!(full_turn.items, live_items);
         }
     }
+
+    // An unreadable item only fails requests that need its text.
+    sqlx::query("UPDATE thread_items SET item_json = json_set(item_json, '$.text', '') WHERE turn_id = ? AND item_id = 'earlier'")
+        .bind(&running_turn.id).execute(&history_db).await?;
+    let missing_id = primary
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        primary.read_stream_until_error_message(RequestId::Integer(missing_id)),
+    )
+    .await??;
+    assert_eq!(
+        error.error.message,
+        format!(
+            "saved history is missing completed assistant items for turn {}",
+            running_turn.id
+        )
+    );
 
     let asc_resume_id = primary
         .send_thread_resume_request(ThreadResumeParams {
@@ -5731,7 +5823,7 @@ async fn thread_resume_rejoins_running_paginated_thread_with_initial_page() -> R
             initial_turns_page: Some(ThreadResumeInitialTurnsPageParams {
                 limit: Some(1),
                 sort_direction: Some(SortDirection::Asc),
-                items_view: Some(TurnItemsView::NotLoaded),
+                items_view: Some(TurnItemsView::Full),
             }),
             ..Default::default()
         })
@@ -6791,6 +6883,17 @@ async fn setup_rollout_fixture(codex_home: &Path, server_uri: &str) -> Result<Ro
     })
 }
 
+fn create_saved_gateway_rollout(home: &Path) -> Result<String> {
+    create_fake_rollout(
+        home,
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        "Saved history",
+        Some("old_provider"),
+        /*git_info*/ None,
+    )
+}
+
 #[test_case::test_case(false, false; "missing_definition_config_override")]
 #[test_case::test_case(false, true; "missing_definition_typed_override")]
 #[test_case::test_case(true, false; "policy_conflict_config_override")]
@@ -6803,14 +6906,7 @@ async fn thread_resume_returns_provider_error_even_with_provider_override(
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(home.path())?;
-    let thread_id = create_fake_rollout(
-        home.path(),
-        "2025-01-05T12-00-00",
-        "2025-01-05T12:00:00Z",
-        "Saved history",
-        Some("old_provider"),
-        /*git_info*/ None,
-    )?;
+    let thread_id = create_saved_gateway_rollout(home.path())?;
     if policy_conflict {
         let config_path = home.path().join("config.toml");
         let config = std::fs::read_to_string(&config_path)?;
@@ -6921,16 +7017,9 @@ async fn thread_resume_retains_saved_provider_and_recovers_missing_definition(
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(home.path())?;
-    let thread_id = create_fake_rollout(
-        home.path(),
-        "2025-01-05T12-00-00",
-        "2025-01-05T12:00:00Z",
-        "Saved history",
-        Some("old_provider"),
-        /*git_info*/ None,
-    )?;
-    let config_path = home.path().join("config.toml");
+    let thread_id = create_saved_gateway_rollout(home.path())?;
     if configured {
+        let config_path = home.path().join("config.toml");
         let config = std::fs::read_to_string(&config_path)?;
         let server_uri = server.uri();
         std::fs::write(
@@ -6973,18 +7062,34 @@ async fn thread_resume_retains_saved_provider_and_recovers_missing_definition(
         .await?;
     let read: codex_app_server_protocol::ThreadReadResponse = client.read_response(id).await?;
     assert_eq!(read.thread.model_provider, "old_provider");
-    let config = std::fs::read_to_string(&config_path)?;
-    let restored = if configured {
-        config.replace(
-            "model_provider = \"mock_provider\"",
-            "model_provider = \"old_provider\"",
-        )
-    } else {
-        config.replace("mock_provider", "old_provider")
-    };
-    std::fs::write(config_path, restored)?;
-    let id = client.send_thread_resume_request(params).await?;
+
+    if !configured {
+        let config_path = home.path().join("config.toml");
+        let config = std::fs::read_to_string(&config_path)?;
+        let server_uri = server.uri();
+        std::fs::write(
+            &config_path,
+            format!(
+                "{config}\n[model_providers.old_provider]\nname = 'Original provider'\nbase_url = '{server_uri}/v1'\n"
+            ),
+        )?;
+    }
+    if configured {
+        // Loaded actors intentionally ignore model overrides; exercise a cold resume.
+        assert!(client.shutdown_gracefully().await?.success());
+        client = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build_initialized()
+            .await?;
+    }
+    let id = client
+        .send_thread_resume_request(ThreadResumeParams {
+            model: Some("gpt-5.2-codex".into()),
+            ..params
+        })
+        .await?;
     let resumed: ThreadResumeResponse = client.read_response(id).await?;
     assert_eq!(resumed.model_provider, "old_provider");
+    assert_eq!(resumed.model, "gpt-5.2-codex");
     Ok(())
 }

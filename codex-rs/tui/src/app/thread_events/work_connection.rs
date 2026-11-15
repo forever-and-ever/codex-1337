@@ -26,6 +26,7 @@ impl ThreadEventChannel {
         let mut store = ThreadEventStore::new(capacity);
         store.connection_epoch = epoch;
         Self {
+            backend_id: None,
             sender,
             receiver: Some(receiver),
             store: Arc::new(Mutex::new(store)),

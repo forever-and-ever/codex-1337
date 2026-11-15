@@ -6,8 +6,6 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::thread_manager::accounts::AccountInheritance;
 use crate::thread_manager::accounts::account_auth_for_provider;
-use crate::thread_manager::build_models_manager;
-use codex_login::AuthManager;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderAdapter;
@@ -21,6 +19,13 @@ use std::sync::Weak;
 use std::time::Duration;
 
 pub struct ChatgptDelegate(Weak<Session>);
+
+pub(crate) struct BorrowedChatgpt {
+    pub(crate) config: Config,
+    pub(crate) captured: crate::CapturedProvider,
+    pub(crate) manager: SharedModelsManager,
+    pub(crate) account_id: Option<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChatgptDelegateError {
@@ -58,7 +63,12 @@ impl ChatgptDelegate {
             .upgrade()
             .ok_or(ChatgptDelegateError::ConversationUnavailable)?;
         let config = session.get_config().await;
-        let (candidate, auth, manager) = Box::pin(borrow_chatgpt(&session, &config)).await?;
+        let BorrowedChatgpt {
+            config: candidate,
+            captured,
+            manager,
+            ..
+        } = Box::pin(borrow_chatgpt(&session, &config)).await?;
         let model = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
             manager
                 .list_models(
@@ -73,10 +83,7 @@ impl ChatgptDelegate {
         })
         .await
         .map_err(|_| ChatgptDelegateError::CatalogUnavailable("request timed out".into()))??;
-        Ok((
-            create_model_provider(candidate.model_provider, Some(auth)),
-            model,
-        ))
+        Ok((Arc::clone(captured.provider()), model))
     }
 }
 
@@ -84,7 +91,7 @@ impl ChatgptDelegate {
 pub(crate) async fn borrow_chatgpt(
     session: &Session,
     config: &Config,
-) -> Result<(Config, Arc<AuthManager>, SharedModelsManager), ChatgptDelegateError> {
+) -> Result<BorrowedChatgpt, ChatgptDelegateError> {
     if !config.model_providers.contains_key(OPENAI_PROVIDER_ID) {
         return Err(ChatgptDelegateError::MissingOpenaiProvider(
             config.model_provider.adapter,
@@ -117,8 +124,21 @@ pub(crate) async fn borrow_chatgpt(
             config.model_provider.adapter,
         ));
     }
-    let manager = build_models_manager(&candidate, auth.clone());
-    Ok((candidate, auth, manager))
+    let account_id = auth.selected_account_id();
+    let captured = crate::CapturedProvider::capture_responses(create_model_provider(
+        candidate.model_provider.clone(),
+        Some(auth),
+    ))
+    .map_err(|error| ChatgptDelegateError::CatalogUnavailable(error.to_string()))?;
+    let manager = captured
+        .models_manager(&candidate)
+        .map_err(|error| ChatgptDelegateError::CatalogUnavailable(error.to_string()))?;
+    Ok(BorrowedChatgpt {
+        config: candidate,
+        captured,
+        manager,
+        account_id,
+    })
 }
 
 pub(crate) fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {

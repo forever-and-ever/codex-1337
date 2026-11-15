@@ -152,8 +152,9 @@ pub(super) async fn merge_thread_item_page(
         if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
             && !turn.items.iter().any(|item| item.id() == entry.item.id())
         {
-            items.push(entry.item.clone());
-            turn.items.insert(/*index*/ 0, entry.item);
+            let item = ThreadItem::try_from(entry)?;
+            items.push(item.clone());
+            turn.items.insert(/*index*/ 0, item);
             turn.items_view = TurnItemsView::Summary;
         }
     }
@@ -174,6 +175,17 @@ pub(in crate::app_server_session) async fn read_thread(
     thread_id: ThreadId,
     include_turns: bool,
 ) -> Result<Thread> {
+    read_thread_with_receipt(policy, handle, thread_id, include_turns)
+        .await
+        .map(|(thread, _)| thread)
+}
+
+pub(in crate::app_server_session) async fn read_thread_with_receipt(
+    policy: RequestPolicy,
+    handle: &codex_app_server_client::AppServerRequestHandle,
+    thread_id: ThreadId,
+    include_turns: bool,
+) -> Result<(Thread, Option<codex_app_server_protocol::ThreadReadState>)> {
     let request_id = codex_app_server_protocol::RequestId::String(format!(
         "tui-history-{}",
         uuid::Uuid::new_v4()
@@ -191,7 +203,7 @@ pub(in crate::app_server_session) async fn read_thread(
     )
     .await;
     let mut response: ThreadReadResponse = match response {
-        Ok(response) => return Ok(response.thread),
+        Ok(response) => return Ok((response.thread, response.read_state)),
         Err(TypedRequestError::Server { source, .. })
             if include_turns
                 && source.message
@@ -226,10 +238,11 @@ pub(in crate::app_server_session) async fn read_thread(
         /*config*/ None,
         /*local_settings*/ None,
         HistoryHydrationScope::Initial,
+        crate::history_cell::ImagePathOrigin::Remote, // Metadata-only hydration never projects local images.
     )
     .await;
     result?;
-    Ok(response.thread)
+    Ok((response.thread, response.read_state))
 }
 
 pub(in crate::app_server_session) async fn prepare_initial_thread_history(
@@ -241,6 +254,34 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     config: Option<&Config>,
     local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
+    image_origin: crate::history_cell::ImagePathOrigin,
+) -> (Result<()>, HistoryPaginationUpdate) {
+    prepare_anchored_thread_history(
+        policy,
+        handle,
+        thread,
+        turn_cursor,
+        item_cursor,
+        config,
+        local_settings,
+        scope,
+        false,
+        image_origin,
+    )
+    .await
+}
+
+pub(in crate::app_server_session) async fn prepare_anchored_thread_history(
+    policy: RequestPolicy,
+    handle: &codex_app_server_client::AppServerRequestHandle,
+    thread: &mut Thread,
+    turn_cursor: Option<String>,
+    item_cursor: Option<String>,
+    config: Option<&Config>,
+    local_settings: Option<&LocalSettings>,
+    scope: HistoryHydrationScope<'_>,
+    anchored: bool,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> (Result<()>, HistoryPaginationUpdate) {
     prepare_history_with_progress(
         policy,
@@ -252,6 +293,8 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
         local_settings,
         scope,
         &|| {},
+        anchored,
+        image_origin,
     )
     .await
 }
@@ -266,6 +309,8 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
     local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
     progress: &(dyn Fn() + Send + Sync),
+    anchored: bool,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> (Result<()>, HistoryPaginationUpdate) {
     let thread_id = match ThreadId::from_string(&thread.id)
         .wrap_err("invalid thread id in bounded history response")
@@ -294,23 +339,29 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
         ..ThreadHistoryPagination::default()
     };
     let result = async {
-        let page = thread_turns_page(
-            policy,
-            handle,
-            thread_id,
-            state.next_turn_cursor.clone(),
-            INITIAL_HISTORY_TURN_LIMIT,
-        )
-        .await?;
-        progress();
-        thread.turns = page.data.into_iter().rev().collect();
-        state.next_turn_cursor = page.next_cursor;
+        // A subscribed snapshot with no cursor was empty; an unanchored request would read later live events.
+        if !anchored || state.next_turn_cursor.is_some() {
+            let page = thread_turns_page(
+                policy,
+                handle,
+                thread_id,
+                state.next_turn_cursor.clone(),
+                INITIAL_HISTORY_TURN_LIMIT,
+            )
+            .await?;
+            progress();
+            thread.turns = page.data.into_iter().rev().collect();
+            state.next_turn_cursor = page.next_cursor;
+        }
         let (width, height) = crossterm::terminal::size().unwrap_or(/*default*/ (80, 24));
         let width = width.max(/*other*/ 1);
         let budget = HistoryLoadBudget::new(scope, config, local_settings, height);
         let mut scanned_items = 0;
         let mut rendered_rows = 0;
         while let Some(limit) = budget.next_page_size(rendered_rows, scanned_items) {
+            if anchored && state.next_item_cursor.is_none() {
+                break;
+            }
             let page = thread_items_page(
                 policy,
                 handle,
@@ -342,6 +393,12 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
             {
                 break;
             }
+            if empty_page || state.next_item_cursor.is_none() {
+                break;
+            }
+            if budget.rows.is_none() {
+                continue;
+            }
             if let Some((config, local_settings)) = config.zip(local_settings) {
                 rendered_rows = rendered_history_rows(
                     thread_id,
@@ -351,6 +408,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                     local_settings,
                     width,
                     rendered_rows,
+                    image_origin,
                 );
             } else {
                 rendered_rows = rendered_rows.saturating_add(items.len());
@@ -359,7 +417,10 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                 break;
             }
         }
-        if scope == HistoryHydrationScope::Complete {
+        if matches!(
+            scope,
+            HistoryHydrationScope::Complete | HistoryHydrationScope::FullTranscript
+        ) {
             while let Some(cursor) = state.next_turn_cursor.clone() {
                 let page = thread_turns_page(
                     policy,
@@ -373,6 +434,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                 merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
             }
         }
+        super::mark_loaded_interruptions(&mut thread.turns, state.next_item_cursor.as_deref());
         Ok(())
     }
     .await;
@@ -402,6 +464,7 @@ pub(in crate::app_server_session) async fn prepare_safety_retry_history(
             None,
             None,
             HistoryHydrationScope::Initial,
+            crate::history_cell::ImagePathOrigin::Remote, // Metadata-only hydration never projects local images.
         )
         .await;
         result?;
@@ -429,8 +492,8 @@ pub(in crate::app_server_session) async fn prepare_safety_retry_history(
                 .data
                 .into_iter()
                 .rev()
-                .map(|entry| entry.item)
-                .collect();
+                .map(ThreadItem::try_from)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             turn.items_view = TurnItemsView::Full;
         }
     }

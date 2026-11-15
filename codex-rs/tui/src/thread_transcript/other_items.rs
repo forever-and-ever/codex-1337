@@ -19,6 +19,7 @@ pub(super) fn cells(
     item: ThreadItemPayload,
     cwd: &AbsolutePathBuf,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
     let call_id = matches!(
         item,
@@ -38,6 +39,7 @@ pub(super) fn cells(
                 super::RawReasoningVisibility::Hidden,
                 /*config*/ None,
                 metadata,
+                image_origin,
             ))
         }
         ThreadItemPayload::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(
@@ -64,9 +66,9 @@ pub(super) fn cells(
                 item.action.unwrap_or(WebSearchAction::Other),
             )))
         }
-        ThreadItemPayload::ImageView { path, .. } => {
-            cells.push(Arc::new(history_cell::new_view_image_tool_call(path)))
-        }
+        ThreadItemPayload::ImageView { path, .. } => cells.push(Arc::new(
+            history_cell::new_view_image_tool_call(path, image_origin),
+        )),
         ThreadItemPayload::ImageGeneration(item) => {
             cells.push(Arc::new(history_cell::new_image_generation_call(
                 item.id,

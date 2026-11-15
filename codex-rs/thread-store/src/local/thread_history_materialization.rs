@@ -6,6 +6,7 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
+use std::path::PathBuf;
 
 use chrono::DateTime;
 use codex_app_server_protocol::ThreadHistoryChangeSet;
@@ -15,6 +16,7 @@ use codex_rollout::RolloutItem;
 use tracing::warn;
 
 use super::LocalThreadStore;
+use super::rollout_lineage::AncestorReads;
 use super::thread_history::ProjectedRolloutLine;
 use super::thread_history::RolloutProjectionStep;
 use crate::ThreadStoreError;
@@ -28,27 +30,47 @@ const SQLITE_PROJECTION_ANOMALY_METRIC: &str = "codex.thread_history.sqlite_proj
 const BATCH_SOURCE_BYTES: u64 = 1024 * 1024;
 const BATCH_STEPS: usize = 256;
 
+struct ProjectionRollout {
+    path: PathBuf,
+    reads: AncestorReads,
+}
+
 pub(super) async fn materialize_to_sqlite(
     store: &LocalThreadStore,
     thread_id: ThreadId,
     rollout_path: &Path,
 ) -> ThreadStoreResult<()> {
+    materialize_to_sqlite_with_reads(store, thread_id, rollout_path, &AncestorReads::default())
+        .await
+}
+
+/// Project this rollout and identify an unreadable ancestor before committing a batch.
+pub(super) async fn materialize_to_sqlite_with_reads(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    rollout_path: &Path,
+    reads: &AncestorReads,
+) -> ThreadStoreResult<()> {
     if store.state_db.is_none() {
         return Ok(());
     }
-    // TELOS(history-pruning): passes over one rollout never interleave, so a build from offset 0
-    // is never observed half done in this process.
+    // TELOS(history-pruning): all passes over one rollout hold the projection warden.
     let _projection = store.projection_warden.lock(thread_id).await;
-    materialize_to_sqlite_locked(store, thread_id, rollout_path).await
+    materialize_to_sqlite_locked(store, thread_id, rollout_path, reads).await
 }
 
-/// [`materialize_to_sqlite`] for a caller already holding the rollout's projection lock.
+/// Caller already owns the rollout's projection lock.
 pub(super) async fn materialize_to_sqlite_locked(
     store: &LocalThreadStore,
     thread_id: ThreadId,
     rollout_path: &Path,
+    reads: &AncestorReads,
 ) -> ThreadStoreResult<()> {
-    let result = materialize_to_sqlite_with_state_db(store, thread_id, rollout_path).await;
+    let rollout = ProjectionRollout {
+        path: rollout_path.to_owned(),
+        reads: reads.clone(),
+    };
+    let result = materialize_to_sqlite_with_state_db(store, thread_id, rollout).await;
     record_projection_outcome(&result);
     result
 }
@@ -56,22 +78,38 @@ pub(super) async fn materialize_to_sqlite_locked(
 async fn materialize_to_sqlite_with_state_db(
     store: &LocalThreadStore,
     thread_id: ThreadId,
-    rollout_path: &Path,
+    rollout: ProjectionRollout,
 ) -> ThreadStoreResult<()> {
     let projection_state = super::thread_history::projection_state(store, thread_id).await?;
     let start_offset = projection_state
         .as_ref()
         .map_or(0, |state| state.next_byte_offset);
+    if rollout
+        .reads
+        .cutoff(&rollout.path)
+        .is_some_and(|end| start_offset >= end.end_byte_offset)
+    {
+        return pipeline::finish_projection(store, thread_id).await;
+    }
     if projection_state.is_none()
-        && codex_rollout::existing_rollout_path(rollout_path)
+        && !rollout.reads.tracks(&rollout.path)
+        && codex_rollout::existing_rollout_path(&rollout.path)
             .await
             .is_none()
     {
         return Ok(());
     }
-    let session_meta = codex_rollout::read_session_meta_line(rollout_path)
+    let session_meta = codex_rollout::read_session_meta_line(&rollout.path)
         .await
-        .map_err(thread_store_io_error)?
+        .map_err(|err| {
+            rollout.reads.record_failure(&rollout.path);
+            ThreadStoreError::Internal {
+                message: format!(
+                    "failed to read rollout metadata {}: {err}",
+                    rollout.path.display()
+                ),
+            }
+        })?
         .meta;
     let initial_ordinal = session_meta
         .history_base
@@ -83,23 +121,18 @@ async fn materialize_to_sqlite_with_state_db(
     pipeline::read_and_apply(
         store,
         thread_id,
-        rollout_path,
+        rollout,
         start_offset,
         expected_ordinal,
         initial_ordinal,
         subagent_history_start_ordinal,
     )
-    .await?;
-    // The pass read through the end of the rollout, so a build from offset 0 is complete.
-    if projection_state.is_none_or(|state| state.rebuilding) {
-        super::history_pruning::finish_rebuild(store, thread_id).await?;
-    }
-    Ok(())
+    .await
 }
 
 /// Read and project the complete durable prefix in one blocking task.
 fn read_projection_batches(
-    rollout_path: &Path,
+    rollout: &ProjectionRollout,
     start_offset: u64,
     expected_ordinal: u64,
     thread_id: ThreadId,
@@ -107,20 +140,31 @@ fn read_projection_batches(
     is_cancelled: impl Fn() -> bool,
     mut emit: impl FnMut(Vec<RolloutProjectionStep>, u64) -> ThreadStoreResult<()>,
 ) -> ThreadStoreResult<()> {
-    let mut file = match codex_rollout::open_rollout_seekable_reader(rollout_path, &is_cancelled) {
+    let rollout_path = &rollout.path;
+    let mut file = match rollout.reads.open(rollout_path, &is_cancelled) {
         Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound && start_offset == 0 => {
+        Err(err)
+            if err.kind() == std::io::ErrorKind::NotFound
+                && start_offset == 0
+                && !rollout.reads.tracks(rollout_path) =>
+        {
             return Ok(());
         }
         Err(err) => return Err(thread_store_io_error(err)),
     };
-    let file_end_offset = file.seek(SeekFrom::End(0)).map_err(thread_store_io_error)?;
-    let byte_count =
-        file_end_offset
-            .checked_sub(start_offset)
-            .ok_or_else(|| ThreadStoreError::Internal {
-                message: "durable rollout shrank before projection".to_string(),
-            })?;
+    let file_end_offset = match rollout.reads.cutoff(rollout_path) {
+        Some(end) => end.end_byte_offset,
+        None => file.seek(SeekFrom::End(0)).map_err(thread_store_io_error)?,
+    };
+    let byte_count = file_end_offset.checked_sub(start_offset).ok_or_else(|| {
+        rollout.reads.record_failure(rollout_path);
+        ThreadStoreError::Internal {
+            message: format!(
+                "durable rollout shrank before projection: {}",
+                rollout_path.display()
+            ),
+        }
+    })?;
     file.seek(SeekFrom::Start(start_offset))
         .map_err(thread_store_io_error)?;
     // Freeze this pass at the captured end, without retaining the entire durable suffix.

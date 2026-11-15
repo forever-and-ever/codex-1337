@@ -6,8 +6,8 @@ Scenario: A parent with no configured environment delegates an API migration and
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=07d6dec49ba6dbe8):
-        - namespace/functions; hash=bfc27356ed768294
+00:additional_tools/developer (2; hash=16be74d5d9e864e5):
+        - namespace/functions; hash=208cb04ca1e79b71
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -60,8 +60,8 @@ Scenario: A parent with no configured environment delegates an API migration and
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=07d6dec49ba6dbe8):
-        - namespace/functions; hash=bfc27356ed768294
+00:additional_tools/developer (2; hash=16be74d5d9e864e5):
+        - namespace/functions; hash=208cb04ca1e79b71
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -100,8 +100,8 @@ Scenario: A parent with no configured environment delegates an API migration and
 08:function_call_output:Mira owns the API migration.
 09:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-10:additional_tools/developer (1; hash=4e1df1d00a5d94eb):
-        - namespace/functions; hash=c43f724b86ece87f
+10:additional_tools/developer (1; hash=6456834740b63fd0):
+        - namespace/functions; hash=69f07551688a7ed2
           - custom/exec
 11:message/user:
     <ENVIRONMENT_CONTEXT>
@@ -110,8 +110,8 @@ Scenario: A parent with no configured environment delegates an API migration and
     Mira owns the API migration.
 13:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-14:additional_tools/developer (1; hash=923e525c07f5e834):
-        - namespace/functions; hash=e676a2cbb491bfe6
+14:additional_tools/developer (1; hash=20c2aae0dbf1b893):
+        - namespace/functions; hash=c82725358a6e5acf
           - custom/exec
 15:message/user:
     <ENVIRONMENT_CONTEXT>
@@ -121,8 +121,8 @@ Scenario: A parent with no configured environment delegates an API migration and
 18:function_call_output:I will continue with Mira using the new API.
 19:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-20:additional_tools/developer (1; hash=4e1df1d00a5d94eb):
-        - namespace/functions; hash=c43f724b86ece87f
+20:additional_tools/developer (1; hash=6456834740b63fd0):
+        - namespace/functions; hash=69f07551688a7ed2
           - custom/exec
 21:message/user:
     <ENVIRONMENT_CONTEXT>

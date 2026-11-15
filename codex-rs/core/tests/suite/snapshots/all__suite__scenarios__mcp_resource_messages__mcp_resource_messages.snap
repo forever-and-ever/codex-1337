@@ -1,9 +1,8 @@
 ---
 source: core/tests/suite/scenarios_mcp_resource_messages.rs
-assertion_line: 162
-expression: "context_snapshot::format_request_history_snapshot(\"Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(\"A known resource-capable connection enables resource helpers. Broad discovery retains that connection's resources and names a second dormant server; calling the dormant server by name returns its resources and templates through Code Mode.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
-Scenario: Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.
+Scenario: A known resource-capable connection enables resource helpers. Broad discovery retains that connection's resources and names a second dormant server; calling the dormant server by name returns its resources and templates through Code Mode.
 
 ## Window 1
 Settings:
@@ -16,8 +15,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=0f9faeffcb96b999):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=c1b565a460d81fe8
+  tools (10; hash=b0b28a9493abd056):
+    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=ff58b71aa8fc079d
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
@@ -68,27 +67,7 @@ Settings:
 
         Never use the `request_user_input` tool for permission requests or permission-related escalations.
         </collaboration_mode>
-02:message/developer:
-    <multi_agent_role>You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
-
-    At the start of your turn, you are the active agent.
-    You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
-    All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
-
-    You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
-    `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~172 TOKENS; hash=1880e979c121dc83>
-    - All agents use the same current working directory.
-    - As a result, edits made by one agent are immediately visible to all other agents.
-
-    When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.
-
-    There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
-
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
-03:message/developer:
-    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
-04:message/user:
+02:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>
@@ -96,17 +75,42 @@ Settings:
       <timezone><HOST_TIMEZONE></timezone>
       <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...e="unrestricted" /></permission_profile></filesystem> [hash=0592734c170299c1]
     </environment_context>
-05:message/user:
-    List the available resources and templates, then read the example note.
-06:configuration_update:reasoning={"effort":"low"}
+03:message/user:
+    List available MCP resources and templates.
+04:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-07:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
+05:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
+    text(await tools.list_mcp_resources({}));
+    text(describe_tool("list_mcp_resource_templates"));
+    text(await tools.list_mcp_resource_templates({}));
+06:custom_tool_call_output:Script completed
+    Output:
+     | Call: await tools.list_mcp_resources(args).
+    Parameters: object
+      cursor (optional): string. Catalog cursor from the previous page.
+      server (optional): string. Catalog server for list_mcp_resources.
+      Other fields forbidden.
+    Returns: no declared shape.
+
+    Catalog instructions for list_mcp_resources. | {"resources":[{"server":"known_resources","uri":"memo://codex/example-note","name":"example-note","title...Type":"text/plain"}],"deferredServers":["resources"]} [hash=8dc982f1a8ff7f82] | Call: await tools.list_mcp_resource_templates(args).
+    Parameters: object
+      cursor (optional): string. Catalog cursor from the previous page.
+      server (optional): string. Catalog server for list_mcp_resource_templates.
+      Other fields forbidden.
+    Returns: no declared shape.
+
+    Catalog instructions for list_mcp_resource_templates. | {"resourceTemplates":[{"server":"known_resources","uriTemplate":"memo://codex/{slug}","name":"codex-memo...Type":"text/plain"}],"deferredServers":["resources"]} [hash=b1a9df9fa6b901b5]
+-- request 3 (turn) --
+07:message/user:
+    Query the deferred server by name and read its example note.
+-- request 4 (turn) --
+08:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
     text(await tools.list_mcp_resources({"server":"resources"}));
     text(describe_tool("list_mcp_resource_templates"));
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
     text(describe_tool("read_mcp_resource"));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
-08:custom_tool_call_output:Script completed
+09:custom_tool_call_output:Script completed
     Output:
      | Call: await tools.list_mcp_resources(args).
     Parameters: object

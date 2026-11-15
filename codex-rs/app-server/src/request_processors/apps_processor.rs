@@ -5,17 +5,23 @@ use codex_connectors::AppToolPolicyEvaluator;
 mod installed;
 mod read;
 
+#[derive(Clone)]
 struct AppsContext {
+    // TELOS(pinned-accounts): every auxiliary request retains one admission authority.
     config: Config,
-    auth_manager: Arc<AuthManager>,
+    auth_source: Arc<codex_login::CapturedAuthSource>,
+    runtime: Option<(
+        Arc<codex_runtime_agent_instance::RuntimeAuthManager>,
+        codex_features::RuntimeAuthMode,
+    )>,
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
+    thread_mcp: Option<(Arc<codex_core::CodexThread>, Arc<codex_mcp::McpConfig>)>,
 }
 
 pub(super) use read::APP_READ_MAX_IDS;
 
 pub(crate) struct AppsRequestProcessor {
-    auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
     config_manager: ConfigManager,
@@ -25,7 +31,6 @@ pub(crate) struct AppsRequestProcessor {
 
 impl AppsRequestProcessor {
     pub(crate) fn new(
-        auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
         outgoing: Arc<OutgoingMessageSender>,
         config_manager: ConfigManager,
@@ -33,7 +38,6 @@ impl AppsRequestProcessor {
     ) -> Self {
         let shutdown_drop_guard = shutdown_token.clone().drop_guard();
         Self {
-            auth_manager,
             thread_manager,
             outgoing,
             config_manager,
@@ -59,12 +63,9 @@ impl AppsRequestProcessor {
     ) -> Result<Option<AppsListResponse>, JSONRPCErrorError> {
         let installed_start = Instant::now();
         let reload = params.force_refetch;
-        let AppsContext {
-            config,
-            auth_manager,
-            plugins_manager,
-            mcp_manager,
-        } = self.load_apps_context(params.thread_id.as_deref()).await?;
+        let context = self.load_apps_context(params.thread_id.as_deref()).await?;
+        let auth_manager = context.auth_source.credentials();
+        let config = &context.config;
         let auth = auth_manager.auth().await;
         if !config
             .features
@@ -89,10 +90,8 @@ impl AppsRequestProcessor {
                     outgoing,
                     request,
                     params,
-                    config,
+                    context,
                     environment_manager,
-                    mcp_manager,
-                    plugins_manager,
                     installed_start,
                 ) => {}
             }
@@ -109,27 +108,16 @@ impl AppsRequestProcessor {
         outgoing: Arc<OutgoingMessageSender>,
         request_id: ConnectionRequestId,
         params: AppsListParams,
-        config: Config,
+        context: AppsContext,
         environment_manager: Arc<EnvironmentManager>,
-        mcp_manager: Arc<McpManager>,
-        plugins_manager: Arc<PluginsManager>,
         installed_start: Instant,
     ) {
         let reload = params.force_refetch;
         let retry_params = params.clone();
-        let retry_config = config.clone();
+        let retry_context = context.clone();
         let retry_environment_manager = Arc::clone(&environment_manager);
-        let retry_mcp_manager = Arc::clone(&mcp_manager);
-        let retry_plugins_manager = Arc::clone(&plugins_manager);
-        let result = Self::apps_list_response(
-            &outgoing,
-            params,
-            config,
-            environment_manager,
-            mcp_manager,
-            plugins_manager,
-        )
-        .await;
+        let result =
+            Self::apps_list_response(&outgoing, params, context, environment_manager).await;
         if result.is_ok() {
             record_legacy_apps_installed_duration(installed_start, reload);
         }
@@ -146,10 +134,8 @@ impl AppsRequestProcessor {
             if let Err(err) = Self::apps_list_response(
                 &outgoing,
                 retry_params,
-                retry_config,
+                retry_context,
                 retry_environment_manager,
-                retry_mcp_manager,
-                retry_plugins_manager,
             )
             .await
             {
@@ -161,11 +147,20 @@ impl AppsRequestProcessor {
     async fn apps_list_response(
         outgoing: &Arc<OutgoingMessageSender>,
         params: AppsListParams,
-        config: Config,
+        context: AppsContext,
         environment_manager: Arc<EnvironmentManager>,
-        mcp_manager: Arc<McpManager>,
-        plugins_manager: Arc<PluginsManager>,
     ) -> Result<(AppsListResponse, bool), JSONRPCErrorError> {
+        let AppsContext {
+            config,
+            auth_source,
+            runtime,
+            plugins_manager,
+            mcp_manager,
+            ..
+        } = context;
+        auth_source
+            .validate()
+            .map_err(|error| internal_error(error.to_string()))?;
         let AppsListParams {
             cursor,
             limit,
@@ -188,27 +183,41 @@ impl AppsRequestProcessor {
                 loaded_plugins.capability_summaries(),
             );
         let plugin_apps = connector_snapshot.connector_ids().to_vec();
-        let auth = plugins_manager
-            .auth_manager()
-            .auth()
+        let mut config = config;
+        let auth = match auth_source
+            .credentials()
+            .auth_with_http_client_factory()
             .await
-            .ok_or_else(|| invalid_request("Conversation account is unavailable"))?;
+        {
+            Some((auth, factory)) => {
+                config.application_network_policy = factory.network_policy().clone();
+                Some(auth)
+            }
+            None => None,
+        };
+
         let mut accessible_connectors =
-            connectors::list_cached_accessible_connectors_with_auth(&config, Some(&auth));
+            connectors::list_cached_accessible_connectors_from_mcp_tools(&config, auth.as_ref());
         let mut all_connectors =
-            connectors::list_cached_all_connectors_with_auth(&config, &auth, &plugin_apps);
+            connectors::list_cached_all_connectors(&config, auth.as_ref(), &plugin_apps);
         let cached_all_connectors = all_connectors.clone();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let accessible_config = config.clone();
         let accessible_tx = tx.clone();
+        let accessible_auth = auth.clone();
+        let accessible_auth_manager = auth_source.credentials();
+        let accessible_runtime = runtime.as_ref().map(|(runtime, _)| Arc::clone(runtime));
         tokio::spawn(async move {
-            let result = connectors::list_accessible_connectors_from_mcp_tools_with_mcp_manager(
+            let result = connectors::list_accessible_connectors_from_mcp_tools_with_captured_auth(
                 &accessible_config,
                 force_refetch,
                 Arc::clone(&environment_manager),
                 mcp_manager,
+                accessible_auth_manager,
+                accessible_auth,
+                accessible_runtime,
             )
             .await
             .map_err(|err| format!("failed to load accessible apps: {err}"));
@@ -218,9 +227,10 @@ impl AppsRequestProcessor {
         let all_config = config.clone();
         let all_plugin_apps = plugin_apps.clone();
         tokio::spawn(async move {
-            let result = connectors::list_all_connectors_with_auth(
+            let result = connectors::list_all_connectors_with_options(
                 &all_config,
-                &auth,
+                auth.as_ref(),
+                runtime.as_ref(),
                 force_refetch,
                 &all_plugin_apps,
             )
@@ -357,33 +367,60 @@ impl AppsRequestProcessor {
         &self,
         thread_id: Option<&str>,
     ) -> Result<AppsContext, JSONRPCErrorError> {
-        let Some(thread_id) = thread_id else {
-            self.auth_manager.reload().await;
-            return Ok(AppsContext {
-                config: self.load_latest_config(/*fallback_cwd*/ None).await?,
-                auth_manager: self.auth_manager.clone(),
-                plugins_manager: self.thread_manager.plugins_manager(),
-                mcp_manager: self.thread_manager.mcp_manager(),
-            });
-        };
-        let (_, thread) = self.load_thread(thread_id).await?;
-        let thread_config = thread.config().await;
-        let mut config = self
-            .config_manager
-            .load_latest_config_with_session_layers(
-                &thread_config.config_layer_stack,
-                &thread_config.cwd,
-            )
-            .await
-            .map_err(|err| internal_error(format!("failed to reload config: {err}")))?;
-        let _ = config
-            .features
-            .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
+        let (mut config, mcp_manager, plugins_manager, thread_mcp) =
+            if let Some(thread_id) = thread_id {
+                let (_, thread) = self.load_thread(thread_id).await?;
+                let mut config = thread.config().await.as_ref().clone();
+                let _ = config
+                    .features
+                    .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
+                let mcp_config = thread
+                    .mcp_config_snapshot()
+                    .ok_or_else(|| internal_error("Conversation MCP policy is unavailable"))?;
+                (
+                    config,
+                    thread.mcp_manager(),
+                    thread.plugins_manager(),
+                    Some((thread, mcp_config)),
+                )
+            } else {
+                let config = self.load_latest_config(None).await?;
+                (
+                    config,
+                    self.thread_manager.mcp_manager(),
+                    self.thread_manager.plugins_manager(),
+                    None,
+                )
+            };
+        let auth_manager = mcp_manager.auth_manager();
+        if !auth_manager.has_external_auth() {
+            auth_manager
+                .reload_with_cached_auth()
+                .await
+                .map_err(|error| internal_error(error.to_string()))?;
+        }
+        let runtime = self
+            .thread_manager
+            .runtime_auth_for_mcp_manager(&config, &mcp_manager)
+            .map_err(|error| internal_error(error.to_string()))?;
+        let auth_source = Arc::new(
+            auth_manager
+                .capture_auxiliary_source()
+                .map_err(|error| internal_error(error.to_string()))?,
+        );
+        let credentials = auth_source.credentials();
+        let runtime = runtime
+            .map(|(runtime, mode)| (runtime.for_credentials(Arc::clone(&credentials)), mode));
+        if let Some((_, factory)) = credentials.auth_with_http_client_factory().await {
+            config.application_network_policy = factory.network_policy().clone();
+        }
         Ok(AppsContext {
             config,
-            auth_manager: thread.auth_manager(),
-            plugins_manager: thread.plugins_manager(),
-            mcp_manager: thread.mcp_manager(),
+            auth_source,
+            runtime,
+            plugins_manager,
+            mcp_manager,
+            thread_mcp,
         })
     }
 }

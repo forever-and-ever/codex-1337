@@ -60,6 +60,32 @@ pub struct NetworkPolicy {
     account_scope: Option<Arc<Mutex<AccountScope>>>,
 }
 
+/// Retains policy identity without extending its application or account lifetime.
+#[derive(Clone)]
+pub struct WeakNetworkPolicy {
+    state: Option<Weak<Mutex<State>>>,
+    endpoints: Option<Arc<BTreeSet<Url>>>,
+    account: Option<u64>,
+    account_scope: Option<Weak<Mutex<AccountScope>>>,
+}
+
+impl WeakNetworkPolicy {
+    pub fn upgrade(&self) -> Option<NetworkPolicy> {
+        Some(NetworkPolicy {
+            state: match &self.state {
+                Some(state) => Some(state.upgrade()?),
+                None => None,
+            },
+            endpoints: self.endpoints.clone(),
+            account: self.account,
+            account_scope: match &self.account_scope {
+                Some(scope) => Some(scope.upgrade()?),
+                None => None,
+            },
+        })
+    }
+}
+
 impl fmt::Debug for NetworkPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NetworkPolicy")
@@ -203,6 +229,15 @@ impl NetworkPolicyController {
 }
 
 impl NetworkPolicy {
+    pub fn downgrade(&self) -> WeakNetworkPolicy {
+        WeakNetworkPolicy {
+            state: self.state.as_ref().map(Arc::downgrade),
+            endpoints: self.endpoints.clone(),
+            account: self.account,
+            account_scope: self.account_scope.as_ref().map(Arc::downgrade),
+        }
+    }
+
     pub const fn unmanaged() -> Self {
         Self {
             state: None,
@@ -258,6 +293,13 @@ impl NetworkPolicy {
                 self.state = Some(Arc::clone(state));
             }
         }
+        match (&self.account_scope, &credentials.account_scope) {
+            (Some(caller), Some(credentials)) if !Arc::ptr_eq(caller, credentials) => return None,
+            (Some(_), None) if credentials.account.is_some() => return None,
+            (None, Some(_)) if self.account.is_some() => return None,
+            (None, Some(scope)) => self.account_scope = Some(Arc::clone(scope)),
+            _ => {}
+        }
         if let (Some(caller), Some(credentials)) = (self.account, credentials.account)
             && caller != credentials
         {
@@ -268,6 +310,19 @@ impl NetworkPolicy {
             self = self.restrict_to_endpoints(endpoints.as_ref().clone());
         }
         Some(self)
+    }
+
+    /// Whether this policy carries an independent account-revocation scope.
+    pub fn has_account_scope(&self) -> bool {
+        self.account_scope.is_some()
+    }
+
+    /// Intersect endpoint restrictions without changing the policy's authority.
+    pub fn restrict_to_policy_endpoints(self, restrictions: &Self) -> Self {
+        match &restrictions.endpoints {
+            Some(endpoints) => self.restrict_to_endpoints(endpoints.as_ref().clone()),
+            None => self,
+        }
     }
 
     /// Whether this transport participates in the application policy lifecycle.

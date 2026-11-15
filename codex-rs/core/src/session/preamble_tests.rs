@@ -99,6 +99,7 @@ async fn exec_sections_split_the_rendered_nested_tools_losslessly() {
             text: String::new(),
             provenance: None,
         },
+        prompt_cache_ttl: None,
         output_schema: None,
         output_schema_strict: false,
         cyber_access_program: None,

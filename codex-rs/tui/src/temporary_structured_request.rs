@@ -100,6 +100,7 @@ pub(crate) async fn start_temporary_thread(
                 },
             })
             .await
+            .map_err(color_eyre::Report::from)
     })
     .await
     .map_err(|_| eyre!("temporary structured thread start timed out"))??;

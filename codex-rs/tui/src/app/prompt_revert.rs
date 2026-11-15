@@ -139,11 +139,16 @@ impl App {
             .set_prompt_revert_notice(Some("Reverting…"));
         let original_prompt = prompt.clone();
         let latest = latest_turn_id.clone();
+        let image_origin = if self.app_server_target.uses_remote_workspace() {
+            crate::history_cell::ImagePathOrigin::Remote
+        } else {
+            crate::history_cell::ImagePathOrigin::Local
+        };
         let handle = self.request_server(server, UiRequestScope::Thread(thread_id), UiRequestKind::ReadOnly, "load prompt edit history",
             move |handle| async move {
                 let mut prompt = prompt;
                 let through = start_item.as_ref().map(|(turn, _)| turn).or(loaded_tail.as_ref());
-                let prepared = crate::app_server_session::history_job::load(&handle, thread_id, through.map(String::as_str), None, &|| {}).await;
+                let prepared = crate::app_server_session::history_job::load(&handle, thread_id, through.map(String::as_str), None, &|| {}, image_origin).await;
                 let selection = prepared.result.map_err(|error| error.to_string()).and_then(|mut thread| {
                     if thread.turns.last().map(|turn| &turn.id) != latest.as_ref() {
                         return Err("thread history changed; reload the session before editing this prompt".into());

@@ -54,6 +54,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     assert_eq!(cells.len(), 1);
     let mut view = TranscriptView::default();
@@ -218,6 +219,7 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             None,
             &|_| crate::multi_agents::AgentMetadata::default(),
+            crate::history_cell::ImagePathOrigin::Local,
         )
         .remove(0)
     }

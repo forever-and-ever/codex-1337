@@ -65,6 +65,20 @@ impl App {
         );
     }
 
+    async fn select_adjacent_thread(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) -> Result<()> {
+        if self.side_retention_enabled(tui) {
+            self.select_agent_thread(tui, server, thread_id).await
+        } else {
+            self.select_agent_thread_and_discard_side(tui, server, thread_id)
+                .await
+        }
+    }
+
     pub(in crate::app) async fn navigate_adjacent_thread(
         &mut self,
         tui: &mut tui::Tui,
@@ -73,9 +87,7 @@ impl App {
     ) -> Result<()> {
         let from = self.current_displayed_thread_id();
         if let Some(id) = self.agent_navigation.adjacent_thread_id(from, direction) {
-            return self
-                .select_agent_thread_and_discard_side(tui, server, id)
-                .await;
+            return self.select_adjacent_thread(tui, server, id).await;
         }
         let Some(root) = self.primary_thread_id else {
             return Ok(());
@@ -201,8 +213,7 @@ impl App {
                         }
                         if let Some(id) = self.agent_navigation.adjacent_thread_id(from, direction)
                         {
-                            self.select_agent_thread_and_discard_side(tui, server, id)
-                                .await?;
+                            self.select_adjacent_thread(tui, server, id).await?;
                         }
                     }
                     Err(error) => tracing::warn!(%error, "failed to discover adjacent agents"),
@@ -287,7 +298,8 @@ impl App {
 
         let selected = self
             .chat_widget
-            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID);
+            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID)
+            .and_then(|index| self.agent_navigation.picker_row_ids.get(index).copied());
         let params = self.agent_picker_selection_view_params(selected);
         if !self
             .chat_widget

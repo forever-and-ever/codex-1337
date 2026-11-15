@@ -27,6 +27,7 @@ pub(super) struct Normalizer {
     prompt_cache_keys: Vec<String>,
     uuids: Vec<String>,
     instruction_revisions: Vec<String>,
+    recovery_artifacts: Vec<String>,
 }
 
 impl Normalizer {
@@ -69,6 +70,7 @@ impl Normalizer {
         let text = self.normalize_values(&text);
         if options.rewrite_known_segments
             && let Some(segment) = segment
+            && !(options.preserve_environment_context && segment == "ENVIRONMENT_CONTEXT")
         {
             let marker = format!("<{segment}>");
             if segment == "COMPACTION_SUMMARY"
@@ -148,6 +150,16 @@ impl Normalizer {
         } else {
             text
         };
+        static RECOVERY_PATH: OnceLock<Regex> = OnceLock::new();
+        let text = RECOVERY_PATH
+            .get_or_init(|| {
+                Regex::new(r#"/[^\s"<>]*code-mode-output-[A-Za-z0-9]+/sections-[A-Za-z0-9]+\.txt"#)
+                    .expect("Code Mode recovery path regex")
+            })
+            .replace_all(&text, |captures: &regex_lite::Captures<'_>| {
+                let index = stable_index(&mut self.recovery_artifacts, &captures[0]);
+                format!("<CODE_MODE_OUTPUT {index}>/sections.txt")
+            });
         normalize_skill_references(&self.normalize_uuids(&text))
     }
 

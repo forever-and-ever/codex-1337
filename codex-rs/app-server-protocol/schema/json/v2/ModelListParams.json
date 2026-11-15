@@ -25,7 +25,7 @@
       ]
     },
     "modelProvider": {
-      "description": "Configured provider whose catalog should be read on the server.",
+      "description": "List models for this configured provider instead of the app-server default.",
       "type": [
         "string",
         "null"

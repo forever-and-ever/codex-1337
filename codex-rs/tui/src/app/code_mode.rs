@@ -39,6 +39,11 @@ impl App {
             &self.chat_widget.config_ref().cwd,
             animations,
             &|thread| self.chat_widget.collab_agent_metadata(thread),
+            if self.app_server_target.uses_remote_workspace() {
+                history_cell::ImagePathOrigin::Remote
+            } else {
+                history_cell::ImagePathOrigin::Local
+            },
         ) {
             Ok(projection) => projection,
             Err(error) => {
@@ -77,6 +82,11 @@ impl App {
             &self.chat_widget.config_ref().cwd,
             animations,
             &|thread| self.chat_widget.collab_agent_metadata(thread),
+            if self.app_server_target.uses_remote_workspace() {
+                history_cell::ImagePathOrigin::Remote
+            } else {
+                history_cell::ImagePathOrigin::Local
+            },
         ) {
             Ok(projection) => projection,
             Err(error) => {

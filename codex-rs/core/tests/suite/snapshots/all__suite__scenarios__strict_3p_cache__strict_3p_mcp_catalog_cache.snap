@@ -56,7 +56,7 @@ Settings:
 -- request 3 (turn; turn 2: register MCP with lookup; omit-all, direct-only and excluded) --
 10:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-11:additional_tools/developer (1; hash=39b19e3614aea003):
+11:additional_tools/developer (1; hash=1355172ea2710024):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 12:message/user:
@@ -75,7 +75,7 @@ Settings:
 -- request 5 (turn; turn 3: same MCP name, new endpoint; replace lookup with resolve and search) --
 15:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-16:additional_tools/developer (1; hash=6fc7c5bcb6865301):
+16:additional_tools/developer (1; hash=307bb736590c4c6c):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 17:message/user:
@@ -94,7 +94,7 @@ Settings:
 -- request 7 (turn; turn 4: remove MCP server from config) --
 20:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-21:additional_tools/developer (1; hash=bb2d5b640e6b0b67):
+21:additional_tools/developer (1; hash=464688740f72c196):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 22:message/user:

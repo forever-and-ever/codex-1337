@@ -67,6 +67,8 @@ pub enum InProcessServerEvent {
 )]
 #[derive(Clone)]
 pub struct InProcessClientStartArgs {
+    /// This client collects fresh human decisions for managed command checkpoints.
+    pub required_human_approval: bool,
     /// Resolved argv0 dispatch paths used by command execution internals.
     pub arg0_paths: Arg0DispatchPaths,
     /// Shared config used to initialize app-server runtime.
@@ -113,6 +115,7 @@ impl InProcessClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
+            required_human_approval: self.required_human_approval,
             explicit_gateway_oauth: false,
             experimental_api: self.experimental_api,
             request_attestation: false,

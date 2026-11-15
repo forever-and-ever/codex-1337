@@ -273,7 +273,9 @@ impl ThreadCoordinationService {
             .await
             .map_err(|err| internal_error(format!("failed to deliver message: {err}")))?;
         match submission {
-            TurnInputSubmission::Started { .. } | TurnInputSubmission::Steered { .. } => Ok(()),
+            TurnInputSubmission::Accepted
+            | TurnInputSubmission::Started { .. }
+            | TurnInputSubmission::Steered { .. } => Ok(()),
             TurnInputSubmission::NotSubmitted { reason } => Err(invalid_request(format!(
                 "message was not delivered: {reason:?}"
             ))),

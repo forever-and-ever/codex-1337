@@ -518,6 +518,29 @@ fn structured_tool_cell_renders_raw_plain_text_without_prefix_or_style() {
 }
 
 #[test]
+fn delegated_message_list_spacing_in_scrollback_and_transcript() {
+    let cell = DelegatedMessageCell::new(crate::dynamic_tools::DelegatedMessage {
+        source_thread_id: "other".into(),
+        source_thread_name: None,
+        sent_at: None,
+        input: "- One\n- This item has enough words to wrap\n- Three".into(),
+    });
+    let width = 32;
+    let scrollback = render_lines(&cell.display_lines(width)).join("\n");
+    let transcript = render_lines(&visible_lines(fullscreen_session_lines(
+        &cell,
+        width,
+        /*detailed*/ false,
+        HistoryRenderMode::Rich,
+    )))
+    .join("\n");
+
+    insta::assert_snapshot!(format!(
+        "Scrollback\n{scrollback}\n\nRedrawable transcript\n{transcript}"
+    ));
+}
+
+#[test]
 fn raw_mode_toggle_transcript_snapshot() {
     let mut tool_cell = new_active_mcp_tool_call(
         "call-snapshot".to_string(),
@@ -819,22 +842,27 @@ async fn session_info_preserves_styled_tooltip_links() {
 }
 
 #[tokio::test]
-async fn session_info_first_event_suppresses_tooltips_and_nux() {
+async fn session_info_first_event_respects_tooltip_preference() {
     let config = test_config().await;
-    let cell = new_session_info(
-        &config,
-        &crate::local_settings::LocalSettings::from(&config),
-        "gpt-5",
-        "gpt-5",
-        &session_configured_event("gpt-5"),
-        /*is_first_event*/ true,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-    );
+    let mut local_settings = crate::local_settings::LocalSettings::from(&config);
+    for show_tooltips in [true, false] {
+        local_settings.tui.show_tooltips = show_tooltips;
+        let cell = new_session_info(
+            &config,
+            &local_settings,
+            "requested-model",
+            "gpt-5",
+            &session_configured_event("gpt-5"),
+            /*is_first_event*/ true,
+            Some("Model just became available".to_string()),
+            Some(PlanType::Free),
+        );
 
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(!rendered.contains("Model just became available"));
-    assert!(rendered.contains("To get started"));
+        let rendered = render_transcript(&cell).join("\n");
+        assert_eq!(rendered.contains("To get started"), show_tooltips);
+        assert!(!rendered.contains("Model just became available"));
+        assert!(!rendered.contains("model changed:"));
+    }
 }
 
 #[tokio::test]

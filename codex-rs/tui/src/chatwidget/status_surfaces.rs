@@ -206,7 +206,6 @@ impl ChatWidget {
         self.bottom_pane.set_status_line_enabled(enabled);
         if !enabled {
             self.set_status_line(/*status_line*/ None);
-            self.set_status_line_hyperlink(/*url*/ None);
             return;
         }
 
@@ -217,17 +216,13 @@ impl ChatWidget {
             }
         }
 
-        self.set_status_line(status_line_from_segments(
+        let line = status_line_from_segments(
             segments,
             self.local_settings.tui.status_line_use_colors,
             self.thread_id,
-        ));
-        let hyperlink_url = selections
-            .status_line_items
-            .contains(&StatusLineItem::PullRequestNumber)
-            .then(|| self.status_line_pull_request_url())
-            .flatten();
-        self.set_status_line_hyperlink(hyperlink_url);
+            self.status_line_pull_request_url(),
+        );
+        self.set_status_line(line.map(Into::into));
     }
 
     /// Clears the terminal title Codex most recently wrote, if any.
@@ -333,7 +328,6 @@ impl ChatWidget {
             ProgramStatus::Blocked(kind)
         } else if self.bottom_pane.is_task_running()
             || self.is_user_turn_pending_or_running()
-            || !self.unified_exec_processes.is_empty()
             || (self.status_state.program_status_after_turn == ProgramStatus::Done
                 && self
                     .current_goal_status
@@ -666,7 +660,7 @@ impl ChatWidget {
             .status_line_workspace_headline_pending_request_id
             .is_some()
             || self.status_line_workspace_messages_disabled
-            || !self.has_codex_backend_auth
+            || !self.has_codex_backend_auth()
         {
             return false;
         }
@@ -737,7 +731,9 @@ impl ChatWidget {
             StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
             StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
             StatusLineItem::Reasoning => Some(self.reasoning_display_name()),
-            StatusLineItem::ActiveAccount => self.active_account_label.clone(),
+            StatusLineItem::ActiveAccount => {
+                self.loaded_account().and(self.active_account_label.clone())
+            }
             StatusLineItem::Profile => {
                 let layer = self.config.config_layer_stack.get_active_user_layer()?;
                 let ConfigLayerSource::User { profile, .. } = &layer.name else {
@@ -840,12 +836,12 @@ impl ChatWidget {
             }),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
-                .filter(|_| self.plan_type != Some(PlanType::Ent26))
+                .filter(|_| self.current_plan_type() != Some(PlanType::Ent26))
                 .map(|usage| usage.estimated_usage_credits_micros)
                 .map(|credits| format!("{} credits", format_credit_micros(credits))),
             StatusLineItem::EstimatedThreadCost => self
                 .estimated_thread_usage()
-                .and_then(|usage| thread_cost_micros(usage, self.plan_type))
+                .and_then(|usage| thread_cost_micros(usage, self.current_plan_type()))
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
             StatusLineItem::FastMode => Some(
@@ -874,11 +870,11 @@ impl ChatWidget {
         }
     }
 
-    fn status_line_pull_request_url(&self) -> Option<String> {
+    pub(super) fn status_line_pull_request_url(&self) -> Option<&str> {
         self.status_line_git_summary
             .as_ref()
             .and_then(|summary| summary.pull_request.as_ref())
-            .map(|pull_request| pull_request.url.clone())
+            .map(|pull_request| pull_request.url.as_str())
     }
 
     pub(super) fn status_surface_preview_value_for_item(

@@ -16,10 +16,41 @@ impl App {
     pub(super) fn reseat_history_failures(
         &mut self,
         tui: &mut tui::Tui,
-        cells: &mut [Arc<dyn HistoryCell>],
+        cells: &mut Vec<Arc<dyn HistoryCell>>,
     ) {
+        // A newer page can supply a failure's source before older failures'
+        // sources arrive. Carry those retained metadata witnesses with the prefix
+        // rather than leapfrogging them; their own source page will reseat them.
+        let projected = cells
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::FailedTurnCell>()
+                    .map(|failure| (failure.turn_id.clone(), index))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut insertions = Vec::new();
         let mut removed = Vec::new();
-        for cell in cells {
+        if let Some(boundary) = self.transcript_cells.iter().rposition(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::FailedTurnCell>()
+                .is_some_and(|failure| projected.contains_key(&failure.turn_id))
+        }) {
+            let mut insertion = 0;
+            for (index, cell) in self.transcript_cells[..boundary].iter().enumerate() {
+                if let Some(failure) = cell.as_any().downcast_ref::<history_cell::FailedTurnCell>()
+                {
+                    if let Some(position) = projected.get(&failure.turn_id) {
+                        insertion = position + 1;
+                    } else {
+                        insertions.push((insertion, Arc::clone(cell)));
+                        removed.push(index);
+                    }
+                }
+            }
+        }
+        for cell in cells.iter_mut() {
             let Some(failure) = cell.as_any().downcast_ref::<history_cell::FailedTurnCell>() else {
                 continue;
             };
@@ -45,6 +76,10 @@ impl App {
                 }
                 removed.push(index);
             }
+        }
+        insertions.sort_by_key(|(index, _)| *index);
+        for (index, cell) in insertions.into_iter().rev() {
+            cells.insert(index, cell);
         }
         removed.sort_unstable();
         removed.dedup();

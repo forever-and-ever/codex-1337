@@ -810,6 +810,7 @@ fn titled_image_call_keeps_error_and_full_title_when_narrow() {
             .to_string()
             .contains(title)
     );
+    cell.invocation.arguments = Some(json!({"title": "   "}));
 }
 
 /// Reconstruct only from explicit provenance, checking every displayed source slice on the way.

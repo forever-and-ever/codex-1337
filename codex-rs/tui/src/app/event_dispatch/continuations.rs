@@ -8,6 +8,7 @@ use super::HistoryCell;
 use super::ThreadId;
 use super::tui;
 use super::turn_submissions;
+use crate::app::transcript_splice::TranscriptSplice;
 
 impl App {
     pub(super) async fn dispatch_submission_event(
@@ -44,11 +45,18 @@ impl App {
                 .iter()
                 .position(|cell| Arc::ptr_eq(cell, selected_cell))
             {
-                self.transcript_cells.truncate(index);
+                self.commit_transcript_splice(
+                    tui,
+                    TranscriptSplice::Members {
+                        range: index..self.transcript_cells.len(),
+                        cells: Vec::new(),
+                        retained: Vec::new(),
+                    },
+                );
                 self.code_mode_transcript.retain(&self.transcript_cells);
                 self.native_history.retain(&self.transcript_cells);
             }
-            self.transcript_view.reset();
+            self.transcript_view.jump_to_latest();
             self.scrollback_has_older_history = app_server.has_older_history(thread_id);
             self.deferred_history_lines.clear();
             self.last_rendered_history_tail = None;

@@ -16,7 +16,10 @@ impl UndeclaredTool {
     }
 }
 
-pub(crate) fn render_roster_for(tools: &[UndeclaredTool], dialect: ToolDialect) -> Option<String> {
+pub(crate) fn definitions_for(
+    tools: &[UndeclaredTool],
+    dialect: ToolDialect,
+) -> Vec<crate::ExecDefinition> {
     let entries: BTreeMap<_, _> = tools
         .iter()
         .map(|tool| {
@@ -26,19 +29,36 @@ pub(crate) fn render_roster_for(tools: &[UndeclaredTool], dialect: ToolDialect) 
             } else {
                 &definition.summary
             };
-            (dialect.heading(definition), compact_tool_summary(purpose))
+            (
+                dialect.heading(definition),
+                (
+                    crate::normalize_code_mode_identifier(&definition.name),
+                    compact_tool_summary(purpose),
+                ),
+            )
         })
         .collect();
+    entries
+        .into_iter()
+        .map(|(name, (member, summary))| crate::ExecDefinition {
+            key: format!("Tool: tools.{member}"),
+            description: format!("- {name}: {summary}"),
+        })
+        .collect()
+}
+
+pub(crate) fn render_definitions(entries: &[crate::ExecDefinition]) -> Option<String> {
     (!entries.is_empty()).then(|| {
-        std::iter::once(HEADER.to_string())
-            .chain(
-                entries
-                    .into_iter()
-                    .map(|(name, summary)| format!("- {name}: {summary}")),
-            )
+        std::iter::once(HEADER)
+            .chain(entries.iter().map(|entry| entry.description.as_str()))
             .collect::<Vec<_>>()
             .join("\n")
     })
+}
+
+#[cfg(test)]
+pub(crate) fn render_roster_for(tools: &[UndeclaredTool], dialect: ToolDialect) -> Option<String> {
+    render_definitions(&definitions_for(tools, dialect))
 }
 
 #[cfg(test)]

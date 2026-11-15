@@ -15,7 +15,6 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::ThreadId;
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
@@ -29,6 +28,16 @@ use tokio::time::Instant;
 pub(super) const OPENROUTER_REVIEW_LOGIN_REQUIRED: &str =
     "Auto-review for OpenRouter conversations needs a ChatGPT login; choose one with /account.";
 
+#[derive(Clone, Debug)]
+pub(crate) struct CapturedReviewer(pub(super) Arc<crate::CapturedProvider>);
+
+impl PartialEq for CapturedReviewer {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_authority(&other.0)
+    }
+}
+impl Eq for CapturedReviewer {}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ReviewerRoute {
     #[default]
@@ -36,6 +45,7 @@ pub(crate) enum ReviewerRoute {
     OpenRouterUnavailable,
     ChatgptAutoReview {
         account_id: String,
+        captured: CapturedReviewer,
     },
 }
 
@@ -84,11 +94,10 @@ impl ReviewerRoute {
         Box::pin(tokio::time::timeout(
             Duration::from_secs(/*secs*/ 5),
             async {
-                let (candidate, auth, manager) =
-                    Box::pin(crate::chatgpt_delegate::borrow_chatgpt(session, config))
-                        .await
-                        .ok()?;
-                let account_id = auth.selected_account_id()?;
+                let borrowed = Box::pin(crate::chatgpt_delegate::borrow_chatgpt(session, config))
+                    .await
+                    .ok()?;
+                let account_id = borrowed.account_id?;
                 if session
                     .services
                     .local_agent_runtime
@@ -98,16 +107,20 @@ impl ReviewerRoute {
                 {
                     return None;
                 }
-                let models = manager
+                let models = borrowed
+                    .manager
                     .list_models(
                         RefreshStrategy::OnlineIfUncached,
-                        candidate.http_client_factory(),
+                        borrowed.config.http_client_factory(),
                     )
                     .await;
                 models
                     .iter()
                     .any(|model| model.model == DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL)
-                    .then_some(Self::ChatgptAutoReview { account_id })
+                    .then_some(Self::ChatgptAutoReview {
+                        account_id,
+                        captured: CapturedReviewer(Arc::new(borrowed.captured)),
+                    })
             },
         ))
         .await
@@ -122,18 +135,45 @@ impl ReviewerRoute {
         }
     }
 
+    pub(crate) fn credentials(
+        &self,
+        turn: &crate::session::turn_context::TurnContext,
+    ) -> anyhow::Result<crate::CapturedProvider> {
+        let captured = match self {
+            Self::ChatgptAutoReview { captured, .. } => captured.0.as_ref().clone(),
+            Self::ParentProvider => turn
+                .extension_data
+                .get::<crate::CapturedProvider>()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Guardian review requires the issuing turn's admitted provider")
+                })?
+                .as_ref()
+                .clone(),
+            Self::OpenRouterUnavailable => anyhow::bail!(OPENROUTER_REVIEW_LOGIN_REQUIRED),
+        };
+        captured.validate()?;
+        Ok(captured)
+    }
+
     pub(crate) async fn resolve_chatgpt_model(
-        session: &Session,
+        &self,
         context: &GuardianReviewContext,
-    ) -> anyhow::Result<(ReviewModel, Arc<ModelInfo>)> {
+    ) -> anyhow::Result<(ReviewModel, Arc<codex_models_manager::CatalogModel>)> {
         let mut config = context.turn().config.as_ref().clone();
         switch_agent_provider(&mut config, OPENAI_PROVIDER_ID);
-        let manager = session
-            .agent_models_manager(&config)
-            .await
-            .map_err(|error| anyhow::Error::new(ReviewerRouteUnavailable(error)))?;
+        let Self::ChatgptAutoReview { captured, .. } = self else {
+            anyhow::bail!("ChatGPT review requires a captured route");
+        };
+        captured
+            .0
+            .validate()
+            .map_err(|error| ReviewerRouteUnavailable(error.to_string()))?;
+        let manager = captured
+            .0
+            .models_manager(&config)
+            .map_err(|error| ReviewerRouteUnavailable(error.to_string()))?;
         let available_models = manager
-            .list_models(RefreshStrategy::Offline, config.http_client_factory())
+            .model_catalog_with_origins(RefreshStrategy::InMemory, config.http_client_factory())
             .await;
         let mut model = manager
             .get_model_info(
@@ -141,14 +181,14 @@ impl ReviewerRoute {
                 &config.to_models_manager_config(),
             )
             .await;
-        model.auto_review_model_override = None;
-        let review_model = codex_guardian_reviewer::select_review_model(
+        Arc::make_mut(&mut model.model).auto_review_model_override = None;
+        let (review_model, reviewer) = codex_guardian_reviewer::select_review_model(
             &model,
             context.reasoning_effort.as_ref(),
             DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL,
-            &available_models,
+            available_models,
         );
-        Ok((review_model, Arc::new(model)))
+        Ok((review_model, Arc::new(reviewer.unwrap_or(model))))
     }
 
     pub(crate) fn guard(
@@ -159,7 +199,10 @@ impl ReviewerRoute {
         if matches!(self, Self::OpenRouterUnavailable) {
             anyhow::bail!(OPENROUTER_REVIEW_LOGIN_REQUIRED);
         }
-        if let Self::ChatgptAutoReview { account_id } = self
+        if let Self::ChatgptAutoReview { captured, .. } = self {
+            captured.0.validate()?;
+        }
+        if let Self::ChatgptAutoReview { account_id, .. } = self
             && (!uses_chatgpt_login(provider)
                 || session.provider_id != OPENAI_PROVIDER_ID
                 || session.services.auth_manager.selected_account_id().as_ref() != Some(account_id)
@@ -179,7 +222,7 @@ impl ReviewerRoute {
         session: &Session,
         outcome: &GuardianReviewOutcome,
     ) -> Option<&'static str> {
-        let Self::ChatgptAutoReview { account_id } = self else {
+        let Self::ChatgptAutoReview { account_id, .. } = self else {
             return None;
         };
         let GuardianReviewOutcome::Error(error) = outcome else {

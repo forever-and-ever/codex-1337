@@ -85,9 +85,15 @@ fn gated_response_chunks(
 
 fn next_user_turn_event(
     app_event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    expected_thread: ThreadId,
 ) -> AppCommand {
     while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::CodexOp(turn @ AppCommand::UserTurn { .. }) = event {
+        if let AppEvent::SubmitThreadOp {
+            thread_id,
+            op: turn @ AppCommand::UserTurn { .. },
+        } = event
+        {
+            assert_eq!(thread_id, expected_thread);
             return turn;
         }
     }
@@ -139,7 +145,7 @@ async fn next_turn_started(
     }
 }
 
-async fn wait_for_turn_completed(
+pub(super) async fn wait_for_turn_completed(
     app: &mut App,
     app_server: &mut AppServerSession,
     thread_id: ThreadId,
@@ -236,12 +242,22 @@ async fn safety_recourse_handles_a_policy_block() -> Result<()> {
         let selected_model = "gpt-5.1";
         app.chat_widget.set_model(selected_model);
         submit_prompt(&mut app, "Blocked original prompt");
-        app.submit_thread_op(&mut server, source_id, next_user_turn_event(&mut events))
-            .await?;
+        app.submit_thread_op(
+            &mut server,
+            source_id,
+            next_user_turn_event(&mut events, source_id),
+        )
+        .await?;
         app.chat_widget
             .apply_external_edit(UNSENT_DRAFT.to_string());
         loop {
-            let event = server.next_event().await.expect("moderation metadata");
+            let event =
+                tokio::time::timeout(std::time::Duration::from_secs(5), server.next_event())
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("timed out waiting for {domain} moderation metadata")
+                    })
+                    .expect("moderation metadata");
             let is_metadata = matches!(&event.event, AppServerEvent::ServerNotification(notification)
             if matches!(notification.as_ref(), ServerNotification::TurnModerationMetadata(_)));
             app.handle_backend_event(&server, event).await;
@@ -251,7 +267,11 @@ async fn safety_recourse_handles_a_policy_block() -> Result<()> {
             }
         }
         let loading = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-        let loading = loading.split(" (").next().unwrap_or_default();
+        let loading = loading
+            .split(" (")
+            .next()
+            .unwrap_or_default()
+            .replace('◦', "•");
         while let Ok(event) = events.try_recv() {
             if let AppEvent::InsertHistoryCell(cell) = event {
                 assert!(!cell.as_any().is::<history_cell::SafetyAccessBlockCell>());
@@ -267,7 +287,10 @@ async fn safety_recourse_handles_a_policy_block() -> Result<()> {
             continue;
         }
         if domain == "bio" {
-            assert!(loading.contains("Finding an explanation and safer ways to continue…"));
+            assert!(
+                loading
+                    .contains("I can’t help with this request. Preparing alternative suggestions…")
+            );
             assert!(notice.contains("research and safety considerations."));
             continue;
         }
@@ -285,6 +308,144 @@ async fn active_turn_interrupt_is_nonblocking_and_coalesces_repeated_requests() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agents_overview_acknowledges_inactive_steer_before_interrupt() -> Result<()> {
     Box::pin(interrupt_after_inactive_steer(SteerSwitch::BetweenTasks)).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn embedded_session_switch_routes_background_approval_and_restores_draft() -> Result<()> {
+    use app_test_support::MockResponsesConfig;
+
+    core_test_support::skip_if_no_network!(Ok(()));
+    let (release_command, gate) = oneshot::channel();
+    let (model, _) = start_streaming_sse_server(vec![
+        vec![StreamingSseChunk {
+            gate: Some(gate),
+            body: responses::sse(vec![
+                responses::ev_response_created("first"),
+                responses::ev_function_call("command", "exec_command",
+                    r#"{"cmd":"echo embedded","sandbox_permissions":"require_escalated","justification":"Test background approval"}"#),
+                responses::ev_completed("first"),
+            ]),
+        }],
+        response_chunks("finished"),
+    ]).await;
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    let folder = tempdir()?;
+    let cwd = folder.path().canonicalize()?;
+    MockResponsesConfig::new(model.uri())
+        .with_approval_policy("on-request")
+        .with_extra_config(&format!(
+            "[projects.{}]\ntrust_level = 'trusted'",
+            serde_json::to_string(&cwd)?
+        ))
+        .write(&app.config.codex_home)?;
+    app.config = app.rebuild_config_for_cwd(cwd.clone()).await?;
+    let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.pause_events();
+    app.start_agents_overview_session(
+        &mut tui,
+        &mut server,
+        Some(cwd.clone().abs()),
+        &mut crate::startup_draft::tests::quiet_startup_test_pump(),
+    )
+    .await?;
+    let first = app.chat_widget.thread_id().expect("first session");
+    submit_prompt(&mut app, "Run the command");
+    app.submit_thread_op(&mut server, first, next_user_turn_event(&mut events, first))
+        .await?;
+    next_turn_started(&mut app, &mut server, first).await;
+
+    app.open_agents_overview(&server);
+    app.start_agents_overview_session(
+        &mut tui,
+        &mut server,
+        Some(cwd.abs()),
+        &mut crate::startup_draft::tests::quiet_startup_test_pump(),
+    )
+    .await?;
+    let second = app.chat_widget.thread_id().expect("second session");
+    assert_ne!(first, second);
+    app.chat_widget.insert_str("Draft for the second session");
+    release_command.send(()).unwrap();
+    loop {
+        let event = server.next_event().await.expect("connected");
+        let approval = match &event.event {
+            AppServerEvent::ServerRequest(request) => matches!(
+                request.as_ref(),
+                ServerRequest::CommandExecutionRequestApproval { .. }
+            ),
+            AppServerEvent::ServerNotification(n) if matches!(n.as_ref(), ServerNotification::TurnCompleted(done) if done.thread_id == first.to_string()) =>
+            {
+                panic!("turn ended before approval")
+            }
+            _ => false,
+        };
+        app.handle_backend_event(&server, event).await;
+        if approval {
+            break;
+        }
+    }
+    let quit = AppEvent::Exit(ExitMode::ShutdownFirst);
+    assert!(matches!(
+        boxed_future!(app.handle_event(&mut tui, &mut server, quit)).await?,
+        AppRunControl::Continue
+    ));
+    assert!(render_bottom_popup(&app.chat_widget, /*width*/ 90).contains("Stop sessions and quit"));
+    app.chat_widget.handle_key_event(KeyCode::Esc.into());
+    app.settle_turn_submissions(&mut server).await?;
+    app.select_agents_overview_thread(&mut tui, &mut server, first)
+        .await?;
+    app.settle_navigation(&mut tui, &mut server).await?;
+    drain_active_thread_events(&mut app);
+    assert_eq!(
+        app.chat_widget.thread_id(),
+        Some(first),
+        "navigation={:?}; visible={:?}; popup={}",
+        app.pending_navigation_admission(),
+        app.transcript_cells,
+        render_bottom_popup(&app.chat_widget, /*width*/ 90)
+    );
+    let approval = render_bottom_popup(&app.chat_widget, /*width*/ 90);
+    assert!(
+        approval.contains("echo embedded"),
+        "expected the background approval:\n{approval}"
+    );
+    app.chat_widget.handle_key_event(KeyCode::Esc.into());
+    while let Ok(event) = events.try_recv() {
+        boxed_future!(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    boxed_future!(app.handle_server_completion(
+                        &mut tui, &mut server, completion.expect("approval response receipt")
+                    )).await?;
+                }
+                event = server.next_event() => {
+                    let event = event.expect("connected while responding to approval");
+                    let completed = matches!(&event.event,
+                        AppServerEvent::ServerNotification(notification)
+                            if matches!(notification.as_ref(), ServerNotification::TurnCompleted(done)
+                                if done.thread_id == first.to_string()));
+                    app.handle_backend_event(&server, event).await;
+                    drain_active_thread_events(&mut app);
+                    if completed { break; }
+                }
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
+    app.select_agents_overview_thread(&mut tui, &mut server, second)
+        .await?;
+    app.settle_navigation(&mut tui, &mut server).await?;
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "Draft for the second session"
+    );
+    server.shutdown().await?;
+    model.shutdown().await;
+    Ok(())
 }
 
 enum SteerSwitch {
@@ -344,7 +505,7 @@ stream_max_retries = 0
     while app_event_rx.try_recv().is_ok() {}
 
     submit_prompt(&mut app, COMMITTED_STEER);
-    let turn = next_user_turn_event(&mut app_event_rx);
+    let turn = next_user_turn_event(&mut app_event_rx, thread_id);
     app.submit_thread_op(&mut app_server, thread_id, turn)
         .await?;
     app.settle_turn_submissions(&mut app_server).await?;
@@ -358,7 +519,7 @@ stream_max_retries = 0
 
     let acknowledged_input = app.chat_widget.capture_thread_input_state();
     submit_prompt(&mut app, COMMITTED_STEER);
-    let steer = next_user_turn_event(&mut app_event_rx);
+    let steer = next_user_turn_event(&mut app_event_rx, thread_id);
     let AppCommand::UserTurn {
         client_user_message_id,
         ..
@@ -373,7 +534,7 @@ stream_max_retries = 0
     let appended = "appended instructions";
     let merged_steer = format!("{COMMITTED_STEER}\n{appended}");
     submit_prompt(&mut app, appended);
-    let replacement = next_user_turn_event(&mut app_event_rx);
+    let replacement = next_user_turn_event(&mut app_event_rx, thread_id);
     app.submit_thread_op(&mut app_server, thread_id, replacement)
         .await?;
     app.settle_turn_submissions(&mut app_server).await?;
@@ -481,7 +642,14 @@ stream_max_retries = 0
         app.handle_backend_event(&app_server, event).await;
         if let Some(client_id) = committed_id {
             let saved_input = if via_overview {
-                assert!(!app.thread_event_channels.contains_key(&thread_id));
+                let channel = &app.thread_event_channels[&thread_id];
+                assert_eq!(channel.attachment(), ThreadEventAttachment::Live);
+                assert!(!channel.store.lock().await.active);
+                assert!(
+                    app.agents_overview
+                        .dispatched_requests
+                        .contains_key(&thread_id)
+                );
                 app.agents_overview.input_states.get(&thread_id).cloned()
             } else {
                 let store = app.thread_event_channels[&thread_id].store.lock().await;
@@ -563,8 +731,13 @@ stream_max_retries = 0
 
     insta::assert_snapshot!(app.chat_widget.composer_text_with_pending(), @"");
     assert!(
-        std::iter::from_fn(|| app_event_rx.try_recv().ok())
-            .all(|event| !matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
+        std::iter::from_fn(|| app_event_rx.try_recv().ok()).all(|event| !matches!(
+            event,
+            AppEvent::SubmitThreadOp {
+                op: AppCommand::UserTurn { .. },
+                ..
+            } | AppEvent::CodexOp(AppCommand::UserTurn { .. })
+        ))
     );
     let source = app_server
         .thread_read(thread_id, /*include_turns*/ true)
@@ -786,7 +959,7 @@ goals = true
 
     if let Some(previous_prompt) = previous_prompt {
         submit_prompt(&mut app, previous_prompt);
-        let previous_turn = next_user_turn_event(&mut app_event_rx);
+        let previous_turn = next_user_turn_event(&mut app_event_rx, source_thread_id);
         app.submit_thread_op(&mut app_server, source_thread_id, previous_turn)
             .await?;
         app.settle_turn_submissions(&mut app_server).await?;
@@ -844,7 +1017,7 @@ goals = true
         .expect("source goal usage should be recorded");
 
     submit_prompt(&mut app, RETRY_PROMPT);
-    let mut active_turn = next_user_turn_event(&mut app_event_rx);
+    let mut active_turn = next_user_turn_event(&mut app_event_rx, source_thread_id);
     app.submit_thread_op(&mut app_server, source_thread_id, active_turn.clone())
         .await?;
     app.settle_turn_submissions(&mut app_server).await?;
@@ -859,7 +1032,7 @@ goals = true
 
     if let Some(committed_steer) = committed_steer {
         submit_prompt(&mut app, committed_steer);
-        let steer = next_user_turn_event(&mut app_event_rx);
+        let steer = next_user_turn_event(&mut app_event_rx, source_thread_id);
         app.submit_thread_op(&mut app_server, source_thread_id, steer)
             .await?;
         app.settle_turn_submissions(&mut app_server).await?;
@@ -951,10 +1124,18 @@ goals = true
         let mut settings = next_thread_settings_updated(&mut app_server, source_thread_id).await;
         settings.thread_settings.model_provider = "openai".to_string();
         app.chat_widget.on_thread_settings_updated(settings);
-        app.chat_widget.update_account_state(
-            /*status_account_display*/ None, /*plan_type*/ None,
-            /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ false,
-        );
+        app.chat_widget
+            .update_backend_authority(crate::app_server_session::BackendAuthority::Reported(None));
+        app.chat_widget
+            .update_account_state(crate::app_server_session::SessionAccount {
+                display: Some(crate::status::StatusAccountDisplay::ChatGpt {
+                    email: None,
+                    plan: None,
+                    workspace: None,
+                }),
+                requires_openai_auth: app.chat_widget.requires_openai_auth(),
+                ..Default::default()
+            });
         app.chat_widget
             .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
         app.chat_widget.set_daybreak_enabled(/*enabled*/ true);
@@ -1366,10 +1547,21 @@ goals = true
         retry_request_index + 1
     };
     assert!(
-        user_input_texts(&request_bodies[goal_continuation_request_index])
+        request_bodies[goal_continuation_request_index]["input"]
+            .as_array()
+            .expect("goal continuation model input")
             .iter()
-            .any(|text| text.contains(RETRY_GOAL)),
-        "inherited goal continuation should resume after the explicit retry"
+            .any(|item| {
+                item["type"] == "message"
+                    && item["role"] == "user"
+                    && item["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|part| part["text"].as_str().is_some_and(|text| {
+                            text.contains(&format!("<external_goal_objective>{RETRY_GOAL}</external_goal_objective>"))
+                        }))
+                    })
+            }),
+        "inherited goal continuation should resume after the explicit retry: {}",
+        request_bodies[goal_continuation_request_index]
     );
 
     if let Some(release_active_response) = release_active_response.take() {

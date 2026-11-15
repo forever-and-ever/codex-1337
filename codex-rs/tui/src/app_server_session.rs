@@ -4,6 +4,8 @@
 //! request/response plumbing out of `App` and `ChatWidget`.
 
 mod account;
+pub(crate) use account::SessionAccount;
+mod background_terminals;
 mod daybreak_api_key_compat;
 mod events;
 pub(crate) mod fork_preparation;
@@ -11,10 +13,13 @@ pub(crate) mod fs;
 mod history;
 pub(crate) mod history_job;
 mod models;
+mod title_requests;
+pub(crate) use title_requests::ManualThreadName;
 pub(crate) mod provider_selection;
 #[cfg(test)]
 #[path = "app_server_session/provider_selection_tests.rs"]
 mod provider_selection_tests;
+mod read_state;
 mod realtime;
 mod rollout_history;
 pub(crate) mod session_preparation;
@@ -25,6 +30,12 @@ pub(crate) mod typed_requests;
 pub(crate) use turn_submissions::turn_start_params;
 
 mod operation_capabilities;
+pub(crate) use read_state::unread_revision;
+mod side_chat_history;
+mod thread_deletion;
+pub(crate) use thread_deletion::ThreadDeletion;
+pub(crate) use thread_deletion::ThreadDeletionError;
+pub(crate) mod user_message_submission;
 mod web_search;
 
 #[cfg(test)]
@@ -40,7 +51,9 @@ pub(crate) use history::HistoryHydrationScope;
 pub(crate) use history::HistoryPage;
 pub(crate) use history::HistoryResponse;
 pub(crate) use history::INITIAL_HISTORY_TURN_LIMIT;
-
+pub(crate) use history::thread_items_page_params;
+pub(crate) use side_chat_history::SideChat;
+pub(crate) use side_chat_history::side_chat_prompt_preview;
 pub(crate) use startup_launch::StartupLaunchChoices;
 
 use crate::app_event::PermissionProfileSelection;
@@ -66,8 +79,6 @@ use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::Model as ApiModel;
-use codex_app_server_protocol::ModelListParams;
-use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::NewThreadModelDefaults;
 use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RequestId;
@@ -75,16 +86,15 @@ use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
-use codex_app_server_protocol::ThreadDeleteParams;
-use codex_app_server_protocol::ThreadDeleteResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
-use codex_app_server_protocol::ThreadInjectItemsParams;
-use codex_app_server_protocol::ThreadInjectItemsResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
-
+#[cfg(test)]
+use codex_app_server_protocol::ThreadLoadedListParams;
+#[cfg(test)]
+use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSource;
@@ -100,6 +110,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
+use codex_context_fragments::SideConversationPolicy;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -115,9 +126,11 @@ use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::protocol::SubAgentSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
-use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
+use futures::FutureExt;
+use futures::future::Either;
+use futures::future::RemoteHandle;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -126,7 +139,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-const JSONRPC_INVALID_REQUEST: i64 = -32600;
+pub(crate) const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
 const THREAD_SETTINGS_UPDATE_METHOD: &str = "thread/settings/update";
@@ -146,12 +159,38 @@ pub(crate) enum ForkPermissionMode {
 enum EmptyCatalogFallback {
     Error,
     ManagedNewThread,
+    DeferredThread(Option<String>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ForkPresentation {
     Regular,
-    SideConversation,
+    SideConversation(SideChatStorage),
+}
+
+pub(crate) const ATTACHED_SIDE_CHAT_SOURCE: &str = "tui_side_chat";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SideChatStorage {
+    Temporary,
+    Attached,
+}
+
+impl SideChatStorage {
+    fn policy(self) -> SideConversationPolicy {
+        match self {
+            Self::Temporary => SideConversationPolicy::Temporary,
+            Self::Attached => SideConversationPolicy::Attached,
+        }
+    }
+
+    pub(crate) fn configure_fork(self, config: &mut Config) {
+        config.ephemeral = self == Self::Temporary;
+        config.developer_instructions = Some(
+            self.policy()
+                .instructions(config.developer_instructions.as_deref()),
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -175,6 +214,18 @@ pub(crate) struct ForkName {
 fn bootstrap_request_error(context: &'static str, err: TypedRequestError) -> color_eyre::Report {
     let message = format!("{context}: {err}");
     color_eyre::Report::new(err).wrap_err(message)
+}
+
+pub(crate) fn is_method_not_found(error: &TypedRequestError) -> bool {
+    let TypedRequestError::Server { method, source } = error else {
+        return false;
+    };
+    // Older servers report an unknown method as an invalid request during deserialization.
+    source.code == JSONRPC_METHOD_NOT_FOUND
+        || (source.code == JSONRPC_INVALID_REQUEST
+            && source.message.contains(method.as_str())
+            && (source.message.contains("unknown variant")
+                || source.message.contains("unknown method")))
 }
 
 pub(crate) fn is_history_pagination_unsupported(source: &JSONRPCErrorError) -> bool {
@@ -260,9 +311,40 @@ pub(crate) async fn request_thread_start_with_history_fallback(
 }
 
 pub(crate) fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) -> bool {
+    is_method_unsupported(source, THREAD_SETTINGS_UPDATE_METHOD)
+}
+
+pub(crate) fn is_method_unsupported(source: &JSONRPCErrorError, method: &str) -> bool {
     source.code == JSONRPC_METHOD_NOT_FOUND
-        || (source.code == JSONRPC_INVALID_REQUEST
-            && source.message.contains(THREAD_SETTINGS_UPDATE_METHOD))
+        || (source.code == JSONRPC_INVALID_REQUEST && source.message.contains(method))
+}
+
+#[derive(Clone)]
+pub(crate) enum BootstrapAccount {
+    AwaitingResume,
+    Loaded(SessionAccount),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum BackendAuthority {
+    #[default]
+    Unreported,
+    Reported(Option<AuthMode>),
+}
+
+impl BackendAuthority {
+    pub(crate) fn has_codex_backend_auth(self) -> bool {
+        matches!(
+            self,
+            Self::Reported(Some(
+                AuthMode::Chatgpt
+                    | AuthMode::ChatgptAuthTokens
+                    | AuthMode::Headers
+                    | AuthMode::AgentIdentity
+                    | AuthMode::PersonalAccessToken
+            ))
+        )
+    }
 }
 
 /// Data collected during the TUI bootstrap phase that the main event loop
@@ -273,26 +355,39 @@ pub(crate) fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) 
 /// its first frame without waiting for the rate-limit round-trip.
 pub(crate) struct AppServerBootstrap {
     pub(crate) duration: Duration,
-    pub(crate) account_email: Option<String>,
-    pub(crate) auth_mode: Option<TelemetryAuthMode>,
-    pub(crate) status_account_display: Option<StatusAccountDisplay>,
-    pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
-    /// Whether the configured model provider needs OpenAI-style auth. Combined
-    /// with `has_chatgpt_account` to decide if a startup rate-limit prefetch
-    /// should be fired.
-    pub(crate) requires_openai_auth: bool,
-    pub(crate) default_model: String,
-    pub(crate) has_chatgpt_account: bool,
+    pub(crate) account: BootstrapAccount,
+    /// Saved threads can defer model discovery until their pinned provider is loaded.
+    pub(crate) default_model: Option<String>,
     pub(crate) available_models: Vec<ModelPreset>,
     pub(crate) collaboration_modes: Vec<codex_protocol::config_types::CollaborationModeMask>,
     pub(crate) allowed_approval_policies: Option<Vec<AskForApproval>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct AttachmentMetadata {
+    pagination: Option<history::ThreadHistoryPagination>,
+    unread_revision: Option<String>,
+    history_support: ThreadHistorySupport,
+    pub(crate) subscribed: bool,
+}
+
 pub(crate) struct AppServerSession {
     backend_id: crate::backend_id::BackendId,
-    client: AppServerClient,
+    /// Owns events and the connection lifetime for live sessions. Request-only views share the
+    /// request handle below and have no connection owner.
+    connection_owner: Option<AppServerClient>,
+    request_handle: AppServerRequestHandle,
+    request_id_namespace: Option<Uuid>,
     next_request_id: i64,
+    automatic_name_writes: std::sync::Mutex<HashMap<ThreadId, Arc<title_requests::NameGate>>>,
+    /// The newest docked replay refresh on this connection.
+    pub(crate) pending_side_skills_refresh: Option<Uuid>,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
+    pub(crate) attachment_subscribed: Option<bool>,
+    pub(crate) focused_conversation: Option<ThreadId>,
+    pub(crate) attempted_revision: Option<String>,
+    pub(crate) frozen_receipt: Option<(ThreadId, String)>,
+    pub(crate) unread_revisions: HashMap<ThreadId, String>,
     task_search_generation: Arc<AtomicU64>,
     remote_cwd_override: Option<PathBuf>,
     thread_params_mode: ThreadParamsMode,
@@ -302,6 +397,7 @@ pub(crate) struct AppServerSession {
     pub(crate) thread_settings_update_supported: bool,
     default_model: Option<String>,
     available_models: Vec<ModelPreset>,
+    prefetched_model_list: Option<RemoteHandle<Result<Vec<ModelPreset>>>>,
     daybreak_api_key_compat: Arc<tokio::sync::Semaphore>,
     managed_new_thread_defaults: Option<NewThreadModelDefaults>,
 }
@@ -310,17 +406,6 @@ pub(crate) struct AppServerSession {
 pub(crate) enum ThreadParamsMode {
     Embedded,
     Remote,
-    /// Native hosted sessions own their execution settings and workspace.
-    Cloud,
-}
-
-/// Identifies which side supplies execution settings for a conversation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ThreadSettingsOwner {
-    /// The client may send its configured settings as request overrides.
-    Client,
-    /// The server retains its settings unless changed through a dedicated API.
-    Server,
 }
 
 /// Determines where model settings come from when resuming a thread.
@@ -332,22 +417,17 @@ pub(crate) enum ResumeModelSettings {
     RestoreFromThread,
     /// Rejoins a loaded thread without changing any of its existing settings.
     PreserveExistingThread,
+    /// Restore the saved settings and reapply the side-chat instructions on cold resume.
+    PreserveSideConversation,
 }
 
 impl ThreadParamsMode {
-    pub(crate) fn settings_owner(self) -> ThreadSettingsOwner {
-        match self {
-            Self::Embedded | Self::Remote => ThreadSettingsOwner::Client,
-            Self::Cloud => ThreadSettingsOwner::Server,
-        }
-    }
-
     fn workspace_roots_from_config(self, config: &Config) -> Option<Vec<AbsolutePathBuf>> {
         match self {
             Self::Embedded => Some(config.workspace_roots.clone()),
             // Client config paths belong to the client host. Let the server resolve its
             // defaults or restore the saved roots, then adopt the roots in its response.
-            Self::Remote | Self::Cloud => None,
+            Self::Remote => None,
         }
     }
 }
@@ -360,6 +440,20 @@ pub(crate) struct AppServerStartedThread {
     pub(crate) can_accept_text_input: bool,
     pub(crate) task_tools_available: bool,
     pub(crate) history_notice: Option<String>,
+}
+
+/// Recognize typed server errors without depending on wording or an older server's behavior.
+pub(crate) fn model_provider_error(
+    error: &color_eyre::eyre::Report,
+) -> Option<codex_app_server_protocol::ModelProviderError> {
+    error.chain().find_map(|cause| {
+        let codex_app_server_client::TypedRequestError::Server { source, .. } =
+            cause.downcast_ref::<codex_app_server_client::TypedRequestError>()?
+        else {
+            return None;
+        };
+        serde_json::from_value(source.data.clone()?).ok()
+    })
 }
 
 pub(crate) fn is_active_writer_error(err: &color_eyre::eyre::Report) -> bool {
@@ -414,11 +508,15 @@ pub(crate) struct UnsupportedLegacyPermissionProfile;
 impl AppServerSession {
     /// Platform of the app-server process, not necessarily its executor.
     pub(crate) fn app_server_platform_family(&self) -> Option<&str> {
-        self.client.platform_family()
+        self.connection_owner
+            .as_ref()
+            .and_then(AppServerClient::platform_family)
     }
 
     pub(crate) fn app_server_platform_os(&self) -> Option<&str> {
-        self.client.platform_os()
+        self.connection_owner
+            .as_ref()
+            .and_then(AppServerClient::platform_os)
     }
 
     pub(crate) fn new(
@@ -426,11 +524,30 @@ impl AppServerSession {
         client: AppServerClient,
         thread_params_mode: ThreadParamsMode,
     ) -> Self {
+        let request_handle = client.request_handle();
+        Self::from_parts(backend_id, Some(client), request_handle, thread_params_mode)
+    }
+
+    fn from_parts(
+        backend_id: crate::backend_id::BackendId,
+        connection_owner: Option<AppServerClient>,
+        request_handle: AppServerRequestHandle,
+        thread_params_mode: ThreadParamsMode,
+    ) -> Self {
         Self {
             backend_id,
-            client,
+            connection_owner,
+            request_handle,
+            request_id_namespace: None,
             next_request_id: 1,
+            automatic_name_writes: std::sync::Mutex::new(HashMap::new()),
+            pending_side_skills_refresh: None,
+            attachment_subscribed: None,
             history_pagination: HashMap::new(),
+            focused_conversation: None,
+            attempted_revision: None,
+            frozen_receipt: None,
+            unread_revisions: HashMap::new(),
             task_search_generation: Arc::new(AtomicU64::new(0)),
             remote_cwd_override: None,
             thread_params_mode,
@@ -439,13 +556,72 @@ impl AppServerSession {
             thread_settings_update_supported: true,
             default_model: None,
             available_models: Vec::new(),
+            prefetched_model_list: None,
             daybreak_api_key_compat: Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
             managed_new_thread_defaults: None,
         }
     }
 
+    pub(crate) fn attachment_view(&self, id: ThreadId) -> Self {
+        let mut view = self.request_view();
+        view.attachment_subscribed = Some(false);
+        if let Some(page) = self.history_pagination.get(&id) {
+            view.history_pagination.insert(id, page.clone());
+        }
+        view
+    }
+
+    pub(crate) fn take_attachment_metadata(&mut self, id: ThreadId) -> AttachmentMetadata {
+        AttachmentMetadata {
+            pagination: self.history_pagination.remove(&id),
+            unread_revision: self.unread_revisions.remove(&id),
+            history_support: self.history_support,
+            subscribed: self.attachment_subscribed == Some(true),
+        }
+    }
+
+    pub(crate) fn install_attachment_metadata(
+        &mut self,
+        id: ThreadId,
+        metadata: AttachmentMetadata,
+        observed_receipt: bool,
+    ) {
+        if let Some(page) = metadata.pagination {
+            self.history_pagination.insert(id, page);
+        } else {
+            self.history_pagination.remove(&id);
+        }
+        if metadata.history_support == ThreadHistorySupport::LegacyOnly {
+            self.history_support = ThreadHistorySupport::LegacyOnly;
+        }
+        if !observed_receipt {
+            self.unread_revisions.remove(&id);
+            if let Some(revision) = metadata.unread_revision {
+                self.unread_revisions.insert(id, revision);
+            }
+        }
+    }
+
     pub(crate) fn backend_id(&self) -> crate::backend_id::BackendId {
         self.backend_id
+    }
+
+    /// Creates a request-only view without transferring the live connection's events.
+    pub(crate) fn request_view(&self) -> Self {
+        let mut view = Self::from_parts(
+            self.backend_id,
+            /*connection_owner*/ None,
+            self.request_handle(),
+            self.thread_params_mode,
+        );
+        view.request_id_namespace = Some(Uuid::new_v4());
+        view.remote_cwd_override = self.remote_cwd_override.clone();
+        view.model_provider_override = self.model_provider_override.clone();
+        view.history_support = self.history_support;
+        view.thread_settings_update_supported = self.thread_settings_update_supported;
+        view.default_model = self.default_model.clone();
+        view.available_models = self.available_models.clone();
+        view
     }
 
     pub(crate) fn with_remote_cwd_override(mut self, remote_cwd_override: Option<PathBuf>) -> Self {
@@ -458,18 +634,15 @@ impl AppServerSession {
     }
 
     pub(crate) fn uses_remote_workspace(&self) -> bool {
-        matches!(
-            self.thread_params_mode,
-            ThreadParamsMode::Remote | ThreadParamsMode::Cloud
-        )
+        matches!(self.thread_params_mode, ThreadParamsMode::Remote)
     }
 
     pub(crate) fn uses_embedded_app_server(&self) -> bool {
-        matches!(&self.client, AppServerClient::InProcess(_))
+        matches!(&self.request_handle, AppServerRequestHandle::InProcess(_))
     }
 
     pub(crate) fn task_tools_available(&self, _thread_id: ThreadId) -> bool {
-        self.client.supports_thread_coordination()
+        self.request_handle.supports_thread_coordination()
     }
 
     pub(crate) fn task_search_generation(&self) -> Arc<AtomicU64> {
@@ -480,21 +653,49 @@ impl AppServerSession {
         &self,
         local_codex_home: &AbsolutePathBuf,
     ) -> Option<AppServerPath> {
-        self.client.codex_home(local_codex_home)
+        self.connection_owner
+            .as_ref()
+            .and_then(|client| client.codex_home(local_codex_home))
     }
 
     pub(crate) fn server_version(&self) -> Option<&str> {
-        let AppServerClient::Remote(client) = &self.client else {
+        let Some(AppServerClient::Remote(client)) = &self.connection_owner else {
             return None;
         };
         client.server_version()
     }
 
     pub(crate) fn server_codex_home(&self) -> Option<&str> {
-        let AppServerClient::Remote(client) = &self.client else {
+        let Some(AppServerClient::Remote(client)) = &self.connection_owner else {
             return None;
         };
         client.codex_home()
+    }
+
+    pub(crate) fn prefetch_model_list(&mut self) {
+        let (request, models) = self.request_model_list(None, None, true).remote_handle();
+        tokio::spawn(request);
+        self.prefetched_model_list = Some(models);
+    }
+
+    fn request_model_list(
+        &mut self,
+        model_provider: Option<String>,
+        thread_id: Option<ThreadId>,
+        discover: bool,
+    ) -> impl Future<Output = Result<Vec<ModelPreset>>> + use<> {
+        let handle = self.request_handle();
+        let request_id = self.next_request_id();
+        async move {
+            if !discover {
+                return Ok(Vec::new());
+            }
+            models::list(handle, request_id, model_provider, thread_id)
+                .await
+                .map_err(|err| {
+                    bootstrap_request_error("model/list failed during TUI bootstrap", err)
+                })
+        }
     }
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
@@ -510,9 +711,10 @@ impl AppServerSession {
         let mut bootstrap = self
             .bootstrap_with_account_inner(
                 config,
-                account,
+                BootstrapAccount::Loaded(account.into()),
                 self.explicit_model_provider(config),
                 EmptyCatalogFallback::ManagedNewThread,
+                None,
             )
             .await?;
         bootstrap.duration = started_at.elapsed();
@@ -530,9 +732,35 @@ impl AppServerSession {
     ) -> Result<AppServerBootstrap> {
         self.bootstrap_with_account_inner(
             config,
-            account,
+            BootstrapAccount::Loaded(account.into()),
             model_provider,
             EmptyCatalogFallback::Error,
+            None,
+        )
+        .await
+    }
+
+    pub(super) async fn bootstrap_with_account_for_thread(
+        &mut self,
+        config: &Config,
+        account: BootstrapAccount,
+        thread: Thread,
+    ) -> Result<AppServerBootstrap> {
+        let thread_id = ThreadId::from_string(&thread.id)?;
+        let fallback = if matches!(
+            thread.status,
+            codex_app_server_protocol::ThreadStatus::NotLoaded
+        ) {
+            EmptyCatalogFallback::DeferredThread(thread.model)
+        } else {
+            EmptyCatalogFallback::Error
+        };
+        self.bootstrap_with_account_inner(
+            config,
+            account,
+            Some(thread.model_provider),
+            fallback,
+            Some(thread_id),
         )
         .await
     }
@@ -540,37 +768,35 @@ impl AppServerSession {
     async fn bootstrap_with_account_inner(
         &mut self,
         config: &Config,
-        account: GetAccountResponse,
+        account: BootstrapAccount,
         model_provider: Option<String>,
         fallback: EmptyCatalogFallback,
+        catalog_thread: Option<ThreadId>,
     ) -> Result<AppServerBootstrap> {
         let started_at = Instant::now();
-        // `hooks/list` holds the global config queue during startup. Submit models and config
-        // requirements together so an uncached model fetch can overlap both config requests.
-        let model_request_id = self.next_request_id();
+        // A saved thread's account catalog does not exist until resume captures its provider.
+        let discover = !matches!(fallback, EmptyCatalogFallback::DeferredThread(_));
+        let models = match self.prefetched_model_list.take() {
+            Some(models) if discover && model_provider.is_none() && catalog_thread.is_none() => {
+                Either::Left(models)
+            }
+            Some(_) => Either::Right(self.request_model_list(
+                model_provider.clone(),
+                catalog_thread,
+                discover,
+            )),
+            None => Either::Right(self.request_model_list(
+                model_provider.clone(),
+                catalog_thread,
+                discover,
+            )),
+        };
         let requirements_request_id = self.next_request_id();
-        let (models, requirements, collaboration_modes) = tokio::try_join!(
-            async {
-                self.client
-                    .request_typed::<ModelListResponse>(ClientRequest::ModelList {
-                        request_id: model_request_id,
-                        params: ModelListParams {
-                            model_provider,
-                            cursor: None,
-                            limit: None,
-                            include_hidden: Some(true),
-                            // A resumed conversation may not be loaded yet; its picker refetches.
-                            thread_id: None,
-                        },
-                    })
-                    .await
-                    .map_err(|err| {
-                        bootstrap_request_error("model/list failed during TUI bootstrap", err)
-                    })
-            },
+        let (mut available_models, requirements, collaboration_modes) = tokio::try_join!(
+            models,
             async {
                 match self
-                    .client
+                    .request_handle
                     .request_typed::<ConfigRequirementsReadResponse>(
                         ClientRequest::ConfigRequirementsRead {
                             request_id: requirements_request_id,
@@ -580,15 +806,6 @@ impl AppServerSession {
                     .await
                 {
                     Ok(requirements) => Ok(Some(requirements)),
-                    // A native transport may expose resolved thread permissions without
-                    // exposing the conventional requirements catalog. Keep that absence
-                    // distinct from an authoritative response with no requirements.
-                    Err(TypedRequestError::Server { source, .. })
-                        if self.thread_params_mode == ThreadParamsMode::Cloud
-                            && source.code == -32601 =>
-                    {
-                        Ok(None)
-                    }
                     Err(error) => Err(bootstrap_request_error(
                         "configRequirements/read failed during TUI bootstrap",
                         error,
@@ -597,22 +814,20 @@ impl AppServerSession {
             },
             async { Ok(crate::collaboration_modes::list(self.request_handle()).await) },
         )?;
-        let mut available_models = models
-            .data
-            .into_iter()
-            .map(model_preset_from_api_model)
-            .collect::<Vec<_>>();
         if let Some(requirements) = &requirements {
             crate::service_tier_resolution::constrain_server_service_tiers(
                 &mut available_models,
                 requirements,
             );
         }
-        if matches!(account.account, Some(Account::ApiKey {})) {
+        if !available_models.is_empty()
+            && matches!(&account, BootstrapAccount::Loaded(account)
+                if matches!(&account.display, Some(StatusAccountDisplay::ApiKey)))
+        {
             available_models = self
                 .constrain_api_key_models(
                     config,
-                    /*thread_id*/ None,
+                    catalog_thread,
                     requirements
                         .as_ref()
                         .and_then(|response| response.requirements.as_ref()),
@@ -628,70 +843,36 @@ impl AppServerSession {
             .and_then(|response| response.requirements)
             .and_then(|requirements| requirements.models)
             .and_then(|models| models.new_thread);
-        let default_model = (self.thread_params_mode.settings_owner()
-            == ThreadSettingsOwner::Client)
-            .then(|| config.model.clone())
-            .flatten()
-            .or_else(|| {
-                available_models
-                    .iter()
-                    .find(|model| model.is_default)
-                    .map(|model| model.model.clone())
-            })
-            .or_else(|| available_models.first().map(|model| model.model.clone()))
-            .or_else(|| match fallback {
-                EmptyCatalogFallback::Error => None,
-                EmptyCatalogFallback::ManagedNewThread => self
-                    .managed_new_thread_defaults
-                    .as_ref()
-                    .and_then(|defaults| defaults.model.clone()),
-            })
-            .wrap_err("No models are available. Set `model` explicitly or check your model catalog configuration.")?;
-        self.default_model = Some(default_model.clone());
+        let default_model = match &fallback {
+            EmptyCatalogFallback::DeferredThread(model) => model.clone(),
+            _ => config.model.clone(),
+        }
+        .or_else(|| {
+            available_models
+                .iter()
+                .find(|model| model.is_default)
+                .map(|model| model.model.clone())
+        })
+        .or_else(|| available_models.first().map(|model| model.model.clone()))
+        .or_else(|| match fallback {
+            EmptyCatalogFallback::Error | EmptyCatalogFallback::DeferredThread(_) => None,
+            EmptyCatalogFallback::ManagedNewThread => self
+                .managed_new_thread_defaults
+                .as_ref()
+                .and_then(|defaults| defaults.model.clone()),
+        });
+        if discover && default_model.is_none() {
+            color_eyre::eyre::bail!(
+                "No models are available. Set `model` explicitly or check your model catalog configuration."
+            );
+        }
+        self.default_model.clone_from(&default_model);
         self.available_models = available_models.clone();
 
-        let (account_email, auth_mode, status_account_display, plan_type, has_chatgpt_account) =
-            match account.account {
-                Some(Account::ApiKey {}) => (
-                    None,
-                    Some(TelemetryAuthMode::ApiKey),
-                    Some(StatusAccountDisplay::ApiKey),
-                    None,
-                    false,
-                ),
-                Some(Account::Chatgpt {
-                    email,
-                    plan_type,
-                    workspace_name,
-                }) => (
-                    email.clone(),
-                    Some(TelemetryAuthMode::Chatgpt),
-                    Some(StatusAccountDisplay::ChatGpt {
-                        email,
-                        plan: Some(plan_type_display_name(plan_type)),
-                        workspace: workspace_display(workspace_name, account.workspace_routing),
-                    }),
-                    Some(plan_type),
-                    true,
-                ),
-                Some(Account::ClaudeSubscription { email }) => (
-                    email.clone(),
-                    None,
-                    Some(StatusAccountDisplay::ClaudeSubscription { email }),
-                    None,
-                    false,
-                ),
-                None => (None, None, None, None, false),
-            };
         Ok(AppServerBootstrap {
             duration: started_at.elapsed(),
-            account_email,
-            auth_mode,
-            status_account_display,
-            plan_type,
-            requires_openai_auth: account.requires_openai_auth,
+            account,
             default_model,
-            has_chatgpt_account,
             available_models,
             collaboration_modes,
             allowed_approval_policies,
@@ -712,7 +893,7 @@ impl AppServerSession {
     /// the same account selection as a fresh root conversation.
     pub(crate) async fn read_account(&mut self) -> Result<GetAccountResponse> {
         let account_request_id = self.next_request_id();
-        self.client
+        self.request_handle
             .request_typed(ClientRequest::GetAccount {
                 request_id: account_request_id,
                 params: GetAccountParams {
@@ -722,17 +903,22 @@ impl AppServerSession {
                 },
             })
             .await
-            .map_err(|err| bootstrap_request_error("account/read failed during TUI bootstrap", err))
+            .map_err(|err| bootstrap_request_error("account/read failed", err))
     }
 
     pub(crate) async fn next_event(&mut self) -> Option<AppServerSessionEvent> {
-        self.client
-            .next_event()
-            .await
-            .map(|event| AppServerSessionEvent {
-                backend_id: self.backend_id,
-                event,
-            })
+        let event = self.connection_owner.as_mut()?.next_event().await?;
+        if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = &event
+            && let codex_app_server_protocol::ServerNotification::ThreadReadStateChanged(change) =
+                notification.as_ref()
+            && let Ok(id) = ThreadId::from_string(&change.thread_id)
+        {
+            self.remember_read_state(id, Some(change.read_state.clone()));
+        }
+        Some(AppServerSessionEvent {
+            backend_id: self.backend_id,
+            event,
+        })
     }
 
     #[cfg(test)]
@@ -755,13 +941,6 @@ impl AppServerSession {
         remote_cwd_override: Option<&std::path::Path>,
         selected_profile: Option<&PermissionProfileSelection>,
     ) -> Result<AppServerStartedThread> {
-        if self.thread_params_mode.settings_owner() == ThreadSettingsOwner::Server
-            && selected_profile.is_some()
-        {
-            color_eyre::eyre::bail!(
-                "Cloud conversations currently use server-selected permissions."
-            );
-        }
         let session_config = self.session_config_with_effective_service_tier(config);
         let mut params = thread_start_params_from_config(
             &session_config,
@@ -769,12 +948,9 @@ impl AppServerSession {
             remote_cwd_override.or(self.remote_cwd_override.as_deref()),
             session_start_source,
         );
-        if self.thread_params_mode.settings_owner() == ThreadSettingsOwner::Client {
-            params.model_provider = self.explicit_model_provider(config);
-            params.daybreak_enabled =
-                (config.daybreak_enabled && !config.ephemeral).then_some(true);
-            session_preparation::apply_selected_start_permissions(&mut params, selected_profile);
-        }
+        params.model_provider = self.explicit_model_provider(config);
+        params.daybreak_enabled = (config.daybreak_enabled && !config.ephemeral).then_some(true);
+        session_preparation::apply_selected_start_permissions(&mut params, selected_profile);
         self.start_thread_with_params(local_settings, config, params)
             .await
     }
@@ -789,7 +965,7 @@ impl AppServerSession {
             .prepare_start_with_params(local_settings, config, params)
             .run()
             .await;
-        self.apply_session_observations(prepared.observations);
+        self.apply_session_observations(prepared.observations)?;
         prepared.result
     }
 
@@ -850,9 +1026,6 @@ impl AppServerSession {
         config_source: ForkConfigSource,
         name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
-        if self.thread_params_mode == ThreadParamsMode::Cloud {
-            color_eyre::eyre::bail!("Cloud conversations cannot be forked in the TUI yet.");
-        }
         let prepared = self
             .prepare_fork_with_presentation(
                 session_preparation::RequestPolicy::Unbounded,
@@ -870,7 +1043,7 @@ impl AppServerSession {
             )
             .run()
             .await;
-        self.apply_session_observations(prepared.observations);
+        self.apply_session_observations(prepared.observations)?;
         prepared.result
     }
 
@@ -906,24 +1079,45 @@ impl AppServerSession {
         session_config
     }
 
+    /// Lists thread ids that the app server currently holds in memory.
+    ///
+    /// Used by `App::backfill_loaded_subagent_threads` to discover subagent threads that were
+    /// spawned before the TUI connected. The caller then fetches full metadata per thread via
+    /// `thread_read` and walks the spawn tree.
+    #[cfg(test)]
+    pub(crate) async fn thread_loaded_list(
+        &mut self,
+        params: ThreadLoadedListParams,
+    ) -> Result<ThreadLoadedListResponse> {
+        let request_id = self.next_request_id();
+        self.request_handle
+            .request_typed(ClientRequest::ThreadLoadedList { request_id, params })
+            .await
+            .wrap_err("failed to list loaded threads from app server")
+    }
+
     pub(crate) async fn thread_read(
         &mut self,
         thread_id: ThreadId,
         include_turns: bool,
     ) -> Result<Thread> {
-        history::preparation::read_thread(
+        let (thread, receipt) = history::preparation::read_thread_with_receipt(
             session_preparation::RequestPolicy::Unbounded,
             &self.request_handle(),
             thread_id,
             include_turns,
         )
-        .await
+        .await?;
+        if !include_turns {
+            self.remember_read_state(thread_id, receipt);
+        }
+        Ok(thread)
     }
 
     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {
         let request_id = self.next_request_id();
         let _: ThreadArchiveResponse = self
-            .client
+            .request_handle
             .request_typed(ClientRequest::ThreadArchive {
                 request_id,
                 params: ThreadArchiveParams {
@@ -936,24 +1130,23 @@ impl AppServerSession {
     }
 
     pub(crate) async fn thread_delete(&mut self, thread_id: ThreadId) -> Result<()> {
+        let deletion = self.prepare_thread_delete(thread_id);
         let request_id = self.next_request_id();
-        let _: ThreadDeleteResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadDelete {
-                request_id,
-                params: ThreadDeleteParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
+        deletion
+            .run(request_id)
             .await
-            .wrap_err("failed to delete session")?;
-        Ok(())
+            .map(drop)
+            .map_err(|error| match error {
+                ThreadDeletionError::Preflight(error) => error,
+                ThreadDeletionError::Request(error) => error.into(),
+            })
+            .wrap_err("failed to delete session")
     }
 
     pub(crate) async fn thread_unarchive(&mut self, thread_id: ThreadId) -> Result<Thread> {
         let request_id = self.next_request_id();
         let response: ThreadUnarchiveResponse = self
-            .client
+            .request_handle
             .request_typed(ClientRequest::ThreadUnarchive {
                 request_id,
                 params: ThreadUnarchiveParams {
@@ -967,7 +1160,7 @@ impl AppServerSession {
 
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn turn_start(
+    async fn turn_start(
         &mut self,
         thread_id: ThreadId,
         turn_trigger: &str,
@@ -986,7 +1179,6 @@ impl AppServerSession {
         output_schema: Option<serde_json::Value>,
         cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
     ) -> Result<TurnStartResponse> {
-        let request_id = self.next_request_id();
         let mut params = TurnStartParams {
             thread_id: thread_id.to_string(),
             turn_trigger: Some(turn_trigger.to_string()),
@@ -996,39 +1188,44 @@ impl AppServerSession {
             cyber_access_program,
             ..TurnStartParams::default()
         };
-        if self.thread_params_mode.settings_owner() == ThreadSettingsOwner::Client {
-            let (sandbox_policy, permissions) =
-                turn_permissions_overrides(permissions_override, cwd.as_path())?;
-            params.cwd = Some(cwd);
-            params.runtime_workspace_roots = Some(workspace_roots.to_vec());
-            params.approval_policy = approval_policy;
-            params.approvals_reviewer = approvals_reviewer;
-            params.sandbox_policy = sandbox_policy;
-            params.permissions = permissions;
-            params.model = Some(model);
-            params.service_tier = service_tier;
-            params.effort = effort;
-            params.summary = summary;
-            params.collaboration_mode = collaboration_mode;
-        }
-        self.client
+        let (sandbox_policy, permissions) =
+            turn_permissions_overrides(permissions_override, cwd.as_path())?;
+        params.cwd = Some(cwd);
+        params.runtime_workspace_roots = Some(workspace_roots.to_vec());
+        params.approval_policy = approval_policy;
+        params.approvals_reviewer = approvals_reviewer;
+        params.sandbox_policy = sandbox_policy;
+        params.permissions = permissions;
+        params.model = Some(model);
+        params.service_tier = service_tier;
+        params.effort = effort;
+        params.summary = summary;
+        params.collaboration_mode = collaboration_mode;
+        let request_id = self.next_request_id();
+        self.request_handle
             .request_typed(ClientRequest::TurnStart { request_id, params })
             .await
             .wrap_err("turn/start failed in TUI")
     }
 
     pub(crate) async fn shutdown(self) -> std::io::Result<()> {
-        self.client.shutdown().await
+        match self.connection_owner {
+            Some(client) => client.shutdown().await,
+            None => Ok(()),
+        }
     }
 
     pub(crate) fn request_handle(&self) -> AppServerRequestHandle {
-        self.client.request_handle()
+        self.request_handle.clone()
     }
 
     pub(crate) fn next_request_id(&mut self) -> RequestId {
         let request_id = self.next_request_id;
         self.next_request_id += 1;
-        RequestId::Integer(request_id)
+        self.request_id_namespace.map_or_else(
+            || RequestId::Integer(request_id),
+            |namespace| RequestId::String(format!("picker-{namespace}-{request_id}")),
+        )
     }
 }
 
@@ -1050,11 +1247,9 @@ pub(crate) async fn start_thread_with_request_handle(
         launch_choices.approvals_reviewer,
         &launch_choices.approval_policy,
     );
-    if thread_params_mode.settings_owner() == ThreadSettingsOwner::Client {
-        launch_choices.configure(&mut params);
-        params.model_provider = model_provider_override.or(params.model_provider);
-        params.daybreak_enabled = (config.daybreak_enabled && !config.ephemeral).then_some(true);
-    }
+    launch_choices.configure(&mut params);
+    params.model_provider = model_provider_override.or(params.model_provider);
+    params.daybreak_enabled = (config.daybreak_enabled && !config.ephemeral).then_some(true);
     let (response, _history_support, task_tools_available) =
         request_thread_start_with_history_fallback(&request_handle, request_id, params)
             .await
@@ -1079,25 +1274,6 @@ pub(crate) fn workspace_display(
     match (name, id) {
         (Some(name), Some(id)) => Some(format!("{name} ({id})")),
         (name, id) => name.or(id),
-    }
-}
-
-pub(crate) fn status_account_display_from_auth_mode(
-    auth_mode: Option<AuthMode>,
-    plan_type: Option<codex_protocol::account::PlanType>,
-) -> Option<StatusAccountDisplay> {
-    match auth_mode {
-        Some(AuthMode::ApiKey) => Some(StatusAccountDisplay::ApiKey),
-        Some(AuthMode::Chatgpt)
-        | Some(AuthMode::ChatgptAuthTokens)
-        | Some(AuthMode::AgentIdentity)
-        | Some(AuthMode::PersonalAccessToken) => Some(StatusAccountDisplay::ChatGpt {
-            email: None,
-            plan: plan_type.map(plan_type_display_name),
-            workspace: None,
-        }),
-        Some(AuthMode::Headers) => None,
-        None => None,
     }
 }
 
@@ -1402,9 +1578,6 @@ fn thread_start_params_with_reviewer(
     reviewer_source: startup_launch::StartupApprovalsReviewer,
     policy_source: &startup_launch::StartupApprovalPolicy,
 ) -> ThreadStartParams {
-    if thread_params_mode.settings_owner() == ThreadSettingsOwner::Server {
-        return ThreadStartParams::default();
-    }
     let permissions = permissions_selection_from_config(config, thread_params_mode);
     let sandbox = permissions
         .is_none()
@@ -1456,11 +1629,22 @@ fn thread_resume_params_from_config(
     model_settings: ResumeModelSettings,
     permission_overrides: crate::resume_permissions::ResumePermissions,
 ) -> ThreadResumeParams {
-    if thread_params_mode.settings_owner() == ThreadSettingsOwner::Server
-        || model_settings == ResumeModelSettings::PreserveExistingThread
-    {
+    if matches!(
+        model_settings,
+        ResumeModelSettings::PreserveExistingThread | ResumeModelSettings::PreserveSideConversation
+    ) {
         return ThreadResumeParams {
             thread_id: thread_id.to_string(),
+            developer_instructions: if model_settings
+                == ResumeModelSettings::PreserveSideConversation
+            {
+                with_terminal_visualization_instructions(
+                    &config,
+                    config.developer_instructions.clone(),
+                )
+            } else {
+                None
+            },
             ..ThreadResumeParams::default()
         };
     }
@@ -1488,9 +1672,9 @@ fn thread_resume_params_from_config(
             config.model.clone(),
             provider_selection::explicit_provider(&config),
         ),
-        ResumeModelSettings::RestoreFromThread | ResumeModelSettings::PreserveExistingThread => {
-            (None, None)
-        }
+        ResumeModelSettings::RestoreFromThread
+        | ResumeModelSettings::PreserveExistingThread
+        | ResumeModelSettings::PreserveSideConversation => (None, None),
     };
     let mut params = ThreadResumeParams {
         thread_id: thread_id.to_string(),
@@ -1577,7 +1761,7 @@ fn thread_cwd_from_config(
 ) -> Option<String> {
     match thread_params_mode {
         ThreadParamsMode::Embedded => Some(config.cwd.to_string_lossy().to_string()),
-        ThreadParamsMode::Remote | ThreadParamsMode::Cloud => {
+        ThreadParamsMode::Remote => {
             remote_cwd_override.map(|cwd| cwd.to_string_lossy().to_string())
         }
     }
@@ -1789,7 +1973,7 @@ fn display_permission_profile_from_thread_response(
             PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox.to_core(), cwd)
         }
         ThreadParamsMode::Embedded => config.permissions.effective_permission_profile(),
-        ThreadParamsMode::Remote | ThreadParamsMode::Cloud => {
+        ThreadParamsMode::Remote => {
             PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox.to_core(), cwd)
         }
     }
@@ -1933,6 +2117,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn picker_views_use_distinct_request_id_namespaces() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let config = build_config(&home).await;
+        let mut session = crate::start_embedded_app_server_for_picker(&config)
+            .await
+            .unwrap();
+        let mut first = session.request_view();
+        let mut second = session.request_view();
+
+        let first_id = first.next_request_id();
+        assert_ne!(session.next_request_id(), first_id);
+        assert_ne!(first_id, second.next_request_id());
+        session.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn picker_view_shutdown_preserves_live_event_stream() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let config = build_config(&home).await;
+        let mut session = crate::start_embedded_app_server_for_picker(&config)
+            .await
+            .unwrap();
+        let backend_id = session.backend_id();
+
+        session.request_view().shutdown().await.unwrap();
+        let started = session.start_thread(&config).await.unwrap();
+        let thread_id = started.session.thread_id.to_string();
+        let event = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = session.next_event().await.expect("original connection stays live");
+            if matches!(&event.event,
+                codex_app_server_client::AppServerEvent::ServerNotification(notification)
+                    if matches!(notification.as_ref(), codex_app_server_protocol::ServerNotification::ThreadStarted(started)
+                        if started.thread.id == thread_id))
+            {
+                break event;
+            }
+        }
+    }).await.expect("thread-start notification must reach the original connection");
+        assert_eq!(event.backend_id, backend_id);
+        assert!(matches!(
+            event.event,
+            codex_app_server_client::AppServerEvent::ServerNotification(_)
+        ));
+        session.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn bootstrap_projects_resolved_account_without_another_account_read() -> Result<()> {
         let codex_home = tempfile::tempdir()?;
         let mut config = build_config(&codex_home).await;
@@ -1958,13 +2190,14 @@ mod tests {
         let account = GetAccountResponse {
             display_name: None,
             account_id: None,
+            user_id: None,
+            workspace_routing: None,
             account: Some(Account::Chatgpt {
                 email: Some("teammate@openai.com".to_string()),
                 plan_type: codex_protocol::account::PlanType::Plus,
                 workspace_name: None,
             }),
             requires_openai_auth: true,
-            workspace_routing: None,
         };
 
         let bootstrap = app_server
@@ -1972,12 +2205,15 @@ mod tests {
             .await?;
 
         assert_eq!(app_server.next_request_id, next_request_id + 2);
+        let BootstrapAccount::Loaded(account) = bootstrap.account else {
+            panic!("loaded bootstrap account expected");
+        };
         assert_eq!(
             (
-                bootstrap.account_email.as_deref(),
-                bootstrap.auth_mode,
-                bootstrap.plan_type,
-                bootstrap.has_chatgpt_account,
+                account.email(),
+                account.auth_mode(),
+                account.plan,
+                account.has_chatgpt_account(),
             ),
             (
                 Some("teammate@openai.com"),
@@ -2024,6 +2260,7 @@ mod tests {
                     GetAccountResponse {
                         account_id: None,
                         display_name: None,
+                        user_id: None,
                         account: Some(Account::ApiKey {}),
                         requires_openai_auth: true,
                         workspace_routing: None,
@@ -2064,72 +2301,6 @@ mod tests {
 
         assert_eq!(app_server.next_request_id, next_request_id + 3);
         app_server.shutdown().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn cloud_bootstrap_uses_server_models_without_config_requirements() -> Result<()> {
-        let codex_home = tempfile::tempdir()?;
-        let config = build_config(&codex_home).await;
-        let (client, mut commands, _events) =
-            codex_app_server_client::CloudClient::channel(/*capacity*/ 3);
-        let mut app_server = AppServerSession::new(
-            crate::backend_id::BackendId::new(),
-            AppServerClient::Cloud(client),
-            ThreadParamsMode::Cloud,
-        );
-        let account = GetAccountResponse {
-            account_id: None,
-            display_name: None,
-            account: Some(Account::Chatgpt {
-                email: Some("teammate@openai.com".to_string()),
-                plan_type: codex_protocol::account::PlanType::Plus,
-                workspace_name: None,
-            }),
-            requires_openai_auth: true,
-            workspace_routing: None,
-        };
-
-        let (bootstrap, ()) = tokio::join!(
-            app_server.bootstrap_with_account(&config, account, /*model_provider*/ None),
-            async {
-                for _ in 0..3 {
-                    let command = commands.recv().await.expect("bootstrap request");
-                    let codex_app_server_client::CloudOperation::Request(request) =
-                        command.operation
-                    else {
-                        panic!("expected bootstrap request")
-                    };
-                    let result = match *request {
-                        ClientRequest::ModelList { .. } => {
-                            Ok(serde_json::to_value(ModelListResponse {
-                                model_provider: None,
-                                providers: Vec::new(),
-                                data: vec![api_model_with_upgrade_retirement_at(
-                                    /*retirement_at*/ None,
-                                )],
-                                next_cursor: None,
-                            })
-                            .expect("model response should serialize"))
-                        }
-                        ClientRequest::ConfigRequirementsRead { .. } => Err(JSONRPCErrorError {
-                            code: JSONRPC_METHOD_NOT_FOUND,
-                            message: "method not found".to_string(),
-                            data: None,
-                        }),
-                        ClientRequest::CollaborationModeList { .. } => {
-                            Ok(serde_json::json!({"data": []}))
-                        }
-                        request => panic!("unexpected bootstrap request: {request:?}"),
-                    };
-                    command.response.send(Ok(result)).unwrap();
-                }
-            }
-        );
-        let bootstrap = bootstrap?;
-
-        assert_ne!(config.model.as_deref(), Some("current-model"));
-        assert_eq!(bootstrap.default_model, "current-model");
         Ok(())
     }
 
@@ -2311,7 +2482,7 @@ mod tests {
                 message: message.to_string(),
             };
             assert_eq!(
-                is_thread_settings_update_unsupported(&source),
+                is_method_unsupported(&source, THREAD_SETTINGS_UPDATE_METHOD),
                 expected,
                 "{message}"
             );
@@ -2385,149 +2556,6 @@ mod tests {
 
         assert_eq!(params.ephemeral, Some(true));
         assert_eq!(params.history_mode, None);
-    }
-
-    #[tokio::test]
-    async fn cloud_start_resume_and_turn_leave_settings_server_owned() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let mut config = build_config(&temp_dir).await;
-        config.base_instructions = Some("local base instructions".to_string());
-        config.developer_instructions = Some("local developer instructions".to_string());
-        config.daybreak_enabled = true;
-        config.ephemeral = true;
-        let thread_id = ThreadId::new();
-        let (client, mut commands, _events) =
-            codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
-        let request_handle = AppServerClient::Cloud(client).request_handle();
-        let mut launch_choices = StartupLaunchChoices::default();
-        launch_choices.model = Some("local-model".to_string());
-        launch_choices.effort = Some(serde_json::json!("high"));
-        let local_settings = LocalSettings::from(&config);
-
-        let (start, sent_params) = tokio::join!(
-            start_thread_with_request_handle(
-                request_handle,
-                &local_settings,
-                config.clone(),
-                ThreadParamsMode::Cloud,
-                Some(std::path::PathBuf::from("/local/workspace")),
-                /*model_provider_override*/ Some("local-provider".to_owned()),
-                launch_choices,
-            ),
-            async {
-                let command = commands.recv().await.expect("cloud thread start");
-                let codex_app_server_client::CloudOperation::Request(request) = command.operation
-                else {
-                    panic!("expected cloud request")
-                };
-                let ClientRequest::ThreadStart { params, .. } = *request else {
-                    panic!("expected thread/start request")
-                };
-                command
-                    .response
-                    .send(Ok(Err(JSONRPCErrorError {
-                        code: JSONRPC_INVALID_PARAMS,
-                        data: None,
-                        message: "stop after recording request".to_string(),
-                    })))
-                    .expect("startup should still be waiting for its response");
-                params
-            },
-        );
-        let _ = start.expect_err("recording response should stop startup");
-        let resume = thread_resume_params_from_config(
-            config,
-            thread_id,
-            ThreadParamsMode::Cloud,
-            Some(std::path::Path::new("/local/workspace")),
-            ResumeModelSettings::OverrideFromCurrentConfig,
-            crate::resume_permissions::ResumePermissions::CURRENT_CONFIG,
-        );
-
-        assert_eq!(sent_params, ThreadStartParams::default());
-        assert_eq!(
-            resume,
-            ThreadResumeParams {
-                thread_id: thread_id.to_string(),
-                ..ThreadResumeParams::default()
-            }
-        );
-
-        let (client, mut commands, _events) =
-            codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
-        let mut app_server = AppServerSession::new(
-            crate::backend_id::BackendId::new(),
-            AppServerClient::Cloud(client),
-            ThreadParamsMode::Cloud,
-        );
-        let client_user_message_id = "local-message-id".to_string();
-        let input = vec![UserInput::Text {
-            text: "hello from the TUI".to_string(),
-            text_elements: Vec::new(),
-        }];
-        let output_schema = serde_json::json!({"type": "string"});
-        let workspace_roots = vec![test_path_buf("/local/workspace").abs()];
-        let (turn, sent_params) = tokio::join!(
-            app_server.turn_start(
-                thread_id,
-                "user",
-                client_user_message_id.clone(),
-                input.clone(),
-                test_path_buf("/local/workspace"),
-                Some(codex_app_server_protocol::AskForApproval::Never),
-                Some(codex_app_server_protocol::ApprovalsReviewer::User),
-                TurnPermissionsOverride::ActiveProfile(ActivePermissionProfile::new(
-                    "local-permission-profile".to_string(),
-                )),
-                &workspace_roots,
-                "local-model".to_string(),
-                Some(ReasoningEffort::High),
-                Some(ReasoningSummary::Detailed),
-                Some(Some("local-service-tier".to_string())),
-                Some(codex_protocol::config_types::CollaborationMode {
-                    mode: codex_protocol::config_types::ModeKind::Plan,
-                    settings: codex_protocol::config_types::Settings {
-                        model: "local-plan-model".to_string(),
-                        reasoning_effort: Some(ReasoningEffort::High),
-                        developer_instructions: Some("local plan instructions".to_string()),
-                    },
-                }),
-                Some(output_schema.clone()),
-                Some(CyberAccessProgram::DaybreakBlue.into()),
-            ),
-            async {
-                let command = commands.recv().await.expect("cloud turn start");
-                let codex_app_server_client::CloudOperation::Request(request) = command.operation
-                else {
-                    panic!("expected cloud request")
-                };
-                let ClientRequest::TurnStart { params, .. } = *request else {
-                    panic!("expected turn/start request")
-                };
-                command
-                    .response
-                    .send(Ok(Err(JSONRPCErrorError {
-                        code: JSONRPC_INVALID_PARAMS,
-                        data: None,
-                        message: "stop after recording request".to_string(),
-                    })))
-                    .expect("turn start should still be waiting for its response");
-                params
-            },
-        );
-        let _ = turn.expect_err("recording response should stop turn start");
-        assert_eq!(
-            sent_params,
-            TurnStartParams {
-                thread_id: thread_id.to_string(),
-                client_user_message_id: Some(client_user_message_id),
-                input,
-                turn_trigger: Some("user".to_string()),
-                output_schema: Some(output_schema),
-                cyber_access_program: Some(CyberAccessProgram::DaybreakBlue.into()),
-                ..TurnStartParams::default()
-            }
-        );
     }
 
     #[tokio::test]
@@ -3377,6 +3405,7 @@ mod tests {
                 ephemeral_config,
                 source_thread_id,
                 /*selected_profile*/ None,
+                crate::app_server_session::SideChatStorage::Temporary,
             )
             .await?;
 
@@ -3425,6 +3454,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn side_fork_uses_one_request_for_long_paginated_history() -> Result<()> {
+        let codex_home = tempfile::tempdir().expect("tempdir");
+        let mut config = build_config(&codex_home).await;
+        config.terminal_resize_reflow.max_rows =
+            crate::legacy_core::config::TerminalResizeReflowMaxRows::Limit(100);
+        let filename_ts = "2025-01-05T12-00-00";
+        let source_id = create_fake_paginated_rollout(
+            codex_home.path(),
+            filename_ts,
+            "2025-01-05T12:00:00Z",
+            "Saved user message",
+            Some(config.model_provider_id.as_str()),
+            /*git_info*/ None,
+        )
+        .expect("create long paginated source rollout");
+        let source_path =
+            app_test_support::rollout_path(codex_home.path(), filename_ts, source_id.as_str());
+        let mut contents = std::fs::read_to_string(&source_path)?;
+        let rollout_line = |ordinal: usize, payload: serde_json::Value| {
+            serde_json::json!({
+                "timestamp": "2025-01-05T12:00:00Z",
+                "type": "event_msg",
+                "payload": payload,
+                "ordinal": ordinal,
+            })
+        };
+        let started = rollout_line(
+            /*ordinal*/ 3,
+            serde_json::json!({
+                "type": "task_started",
+                "turn_id": "long-history-turn",
+                "model_context_window": null,
+            }),
+        );
+        contents.push_str(&format!("{started}\n"));
+        for index in 0..256 {
+            let item = rollout_line(
+                index + 4,
+                serde_json::json!({
+                    "type": "item_completed",
+                    "thread_id": source_id,
+                    "turn_id": "long-history-turn",
+                    "item": {
+                        "type": "UserMessage",
+                        "id": format!("long-history-user-{index}"),
+                        "content": [{
+                            "type": "text",
+                            "text": format!("long history message {index}"),
+                        }],
+                    },
+                }),
+            );
+            contents.push_str(&format!("{item}\n"));
+        }
+        std::fs::write(source_path, contents)?;
+
+        let source_thread_id = ThreadId::from_string(source_id.as_str())?;
+        let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+        let resumed = app_server
+            .resume_thread(
+                &LocalSettings::from(&config),
+                config.clone(),
+                source_thread_id,
+                ResumeModelSettings::RestoreFromThread,
+            )
+            .await?;
+        let loaded_items: usize = resumed.turns.iter().map(|turn| turn.items.len()).sum();
+        assert!(loaded_items <= HISTORY_ITEM_PAGE_LIMIT as usize);
+        assert!(app_server.has_older_history(source_thread_id));
+
+        let mut side_config = config;
+        side_config.ephemeral = true;
+        let side = app_server
+            .fork_side_thread(
+                &LocalSettings::from(&side_config),
+                side_config,
+                source_thread_id,
+                /*selected_profile*/ None,
+                crate::app_server_session::SideChatStorage::Temporary,
+            )
+            .await?;
+
+        assert_eq!(side.session.forked_from_id, Some(source_thread_id));
+        assert_eq!(side.turns, Vec::<Turn>::new());
+        assert!(app_server.has_older_history(source_thread_id));
+        assert!(
+            !app_server
+                .history_pagination
+                .contains_key(&side.session.thread_id)
+        );
+
+        app_server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn thread_fork_params_forward_instruction_overrides() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let mut config = build_config(&temp_dir).await;
@@ -3460,30 +3585,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cloud_fork_is_rejected_before_sending_local_settings() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let config = build_config(&temp_dir).await;
-        let (client, mut commands, _events) =
-            codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
-        let mut app_server = AppServerSession::new(
-            crate::backend_id::BackendId::new(),
-            AppServerClient::Cloud(client),
-            ThreadParamsMode::Cloud,
-        );
-
-        let error = app_server
-            .fork_thread(&LocalSettings::from(&config), config, ThreadId::new())
-            .await
-            .expect_err("cloud fork should be unavailable");
-
-        assert_eq!(
-            error.to_string(),
-            "Cloud conversations cannot be forked in the TUI yet."
-        );
-        assert!(commands.try_recv().is_err());
-    }
-
-    #[tokio::test]
     async fn side_fork_excludes_turns_without_clearing_regular_ephemeral_fork() -> Result<()> {
         let codex_home = tempfile::tempdir().expect("tempdir");
         let mut config = build_config(&codex_home).await;
@@ -3510,6 +3611,7 @@ mod tests {
                 config,
                 thread_id,
                 /*selected_profile*/ None,
+                crate::app_server_session::SideChatStorage::Temporary,
             )
             .await?;
 
@@ -3621,6 +3723,7 @@ mod tests {
                 extra: None,
                 session_id: ThreadId::new().to_string(),
                 forked_from_id: Some(forked_from_id.to_string()),
+                attached_to_thread_id: None,
                 parent_thread_id: None,
                 preview: "hello".to_string(),
                 ephemeral: false,
@@ -3667,6 +3770,7 @@ mod tests {
                         ),
                         ThreadItem::untimed(
                             codex_app_server_protocol::ThreadItemPayload::AgentMessage {
+                                moderation: None,
                                 id: "assistant-1".to_string(),
                                 text: "assistant reply".to_string(),
                                 phase: None,
@@ -3915,44 +4019,36 @@ mod tests {
     }
 
     #[test]
-    fn status_account_display_from_auth_mode_uses_remapped_plan_labels() {
-        let business = status_account_display_from_auth_mode(
-            Some(AuthMode::Chatgpt),
-            Some(codex_protocol::account::PlanType::EnterpriseCbpUsageBased),
-        );
-        assert!(matches!(
-            business,
-            Some(StatusAccountDisplay::ChatGpt {
-                email: None,
-                plan: Some(ref plan),
-                ..
-            }) if plan == "Enterprise"
-        ));
-
-        let team = status_account_display_from_auth_mode(
-            Some(AuthMode::Chatgpt),
-            Some(codex_protocol::account::PlanType::SelfServeBusinessUsageBased),
-        );
-        assert!(matches!(
-            team,
-            Some(StatusAccountDisplay::ChatGpt {
-                email: None,
-                plan: Some(ref plan),
-                ..
-            }) if plan == "Business"
-        ));
-
-        let business_prolite = status_account_display_from_auth_mode(
-            Some(AuthMode::Chatgpt),
-            Some(codex_protocol::account::PlanType::SelfServeBusinessProLite),
-        );
-        assert!(matches!(
-            business_prolite,
-            Some(StatusAccountDisplay::ChatGpt {
-                email: None,
-                plan: Some(ref plan),
-                ..
-            }) if plan == "Business Premium"
-        ));
+    fn session_account_uses_remapped_plan_labels() {
+        for (plan, label) in [
+            (
+                codex_protocol::account::PlanType::EnterpriseCbpUsageBased,
+                "Enterprise",
+            ),
+            (
+                codex_protocol::account::PlanType::SelfServeBusinessUsageBased,
+                "Business",
+            ),
+            (
+                codex_protocol::account::PlanType::SelfServeBusinessProLite,
+                "Business Premium",
+            ),
+        ] {
+            let account = SessionAccount::from(GetAccountResponse {
+                account_id: None,
+                account: Some(codex_app_server_protocol::Account::Chatgpt {
+                    email: None,
+                    plan_type: plan,
+                    workspace_name: None,
+                }),
+                display_name: None,
+                user_id: None,
+                requires_openai_auth: true,
+                workspace_routing: None,
+            });
+            assert!(
+                matches!(account.display, Some(StatusAccountDisplay::ChatGpt { email: None, plan: Some(ref name), .. }) if name == label)
+            );
+        }
     }
 }

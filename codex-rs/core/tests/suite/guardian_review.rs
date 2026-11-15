@@ -91,6 +91,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::TempDir;
 use test_case::test_case;
+use tokio_util::sync::CancellationToken;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
 use wiremock::http::Method;
@@ -396,14 +397,9 @@ async fn guardian_custom_gateway_selects_reviewer_by_catalog_origin(
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config.model = Some("gateway-main".to_string());
-            config.model_catalog = match origin {
-                ModelOrigin::ExplicitConfig => Some(catalog),
-                ModelOrigin::Bundled | ModelOrigin::Provider => None,
-            };
-            config.model_provider.model_catalog_url = match origin {
-                ModelOrigin::Provider => Some(catalog_url.into()),
-                ModelOrigin::Bundled | ModelOrigin::ExplicitConfig => None,
-            };
+            config.model_catalog = (origin == ModelOrigin::ExplicitConfig).then_some(catalog);
+            config.model_provider.model_catalog_url =
+                (origin == ModelOrigin::Provider).then(|| catalog_url.into());
             config.model_provider.name = "Gateway".to_string();
             config.model_provider.supports_websockets = false;
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
@@ -1963,6 +1959,202 @@ async fn guardian_reviews_delayed_and_new_actions_after_catalog_refresh() -> Res
                 .to_string()
                 .contains("action-b")
         );
+        // An isolated recorded review admits A without owning the parent's next turn.
+        // Switching the idle conversation to B must not retarget that admitted catalog.
+        let home = Arc::new(tempfile::TempDir::new()?);
+        let claims = codex_login::token_data::parse_chatgpt_jwt_claims(
+            "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfdXNlcl9pZCI6ICJndWFyZGlhbi11c2VyIiwgImNoYXRncHRfcGxhbl90eXBlIjogInBybyJ9fQ.signature",
+        )?;
+        for account in ["a", "b"] {
+            codex_login::save_auth(
+                home.path(),
+                &codex_login::AuthDotJson {
+                    auth_mode: Some(codex_protocol::auth::AuthMode::Chatgpt),
+                    tokens: Some(codex_login::TokenData {
+                        id_token: claims.clone(),
+                        access_token: format!("guardian-{account}"),
+                        refresh_token: format!("refresh-{account}"),
+                        account_id: Some(account.into()),
+                        ..Default::default()
+                    }),
+                    last_refresh: Some(chrono::Utc::now()),
+                    openai_api_key: None,
+                    agent_identity: None,
+                    personal_access_token: None,
+                },
+                codex_login::AuthCredentialsStoreMode::File,
+                codex_login::AuthKeyringBackendKind::Direct,
+            )?;
+        }
+        codex_login::auth::activate_account(
+            home.path(), "guardian-user:a",
+            codex_login::AuthCredentialsStoreMode::File,
+            codex_login::AuthKeyringBackendKind::Direct,
+        )?;
+        let accounts = Arc::new(codex_login::AuthManager::new(
+            home.path().to_path_buf(), false,
+            codex_login::AuthCredentialsStoreMode::File, None, None,
+            codex_login::AuthKeyringBackendKind::Direct,
+            codex_login::test_support::transport_default_auth_route_config(),
+        ).await);
+        let account_parent = guardian_parent_catalog();
+        let mut recoveries = Vec::new();
+        for (account, window) in [("a", 111_111), ("b", 222_222)] {
+            let initial = Mock::given(method("GET"))
+                .and(path_regex(".*/models$"))
+                .and(wiremock::matchers::header("chatgpt-account-id", account))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&account_parent))
+                .up_to_n_times(1).with_priority(1)
+                .mount_as_scoped(&server).await;
+            let mut recovered = account_parent.clone();
+            let mut reviewer = recovered.models[0].clone();
+            reviewer.slug = "codex-auto-review".to_string();
+            reviewer.context_window = Some(window);
+            reviewer.supported_in_api = false;
+            reviewer.model_messages.as_mut().unwrap().auto_review = Some(AutoReviewMessages {
+                policy: Some(format!("account-{account}-policy")),
+                policy_template: Some(format!("account-{account}-template: {{{{ tenant_policy_config }}}}")),
+                node_repl_policy: None,
+                rejection_instructions: None,
+                timeout_instructions: None
+            });
+            recovered.models.push(reviewer);
+            let recovery = Mock::given(method("GET"))
+                .and(path_regex(".*/models$"))
+                .and(wiremock::matchers::header("chatgpt-account-id", account))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&recovered))
+                .with_priority(2).mount_as_scoped(&server).await;
+            recoveries.push((initial, recovery));
+        }
+        let account_test = test_codex()
+            .with_home(home)
+            .with_auth_manager(accounts)
+            .with_model("guardian-parent-a")
+            .with_config(|config| {
+                config.model_provider.requires_openai_auth = true;
+                config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::User;
+            })
+            .build_with_auto_env(&server).await?;
+        account_test.codex.inject_response_items(vec![
+            serde_json::from_value(ev_function_call(
+                "recorded-account-action", "exec_command",
+                &json!({"cmd":"printf account-action", "sandbox_permissions":"require_escalated",
+                        "justification":"Review without executing."}).to_string(),
+            )["item"].clone())?
+        ]).await?;
+        let admitted = account_test.codex.capture_provider().await?;
+        assert_eq!(admitted.request_auth().await?.unwrap().get_account_id().as_deref(), Some("a"));
+        let admitted_catalog = admitted.clone();
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::clone(&gate);
+        let parent = Arc::clone(&account_test.codex);
+        let paused_review = tokio::spawn(async move {
+            gate.notified().await;
+            codex_core::test_support::guardian_review_with_admission(
+                &parent, admitted, &CancellationToken::new(),
+            ).await
+        });
+        account_test.codex.select_account("guardian-user:b").await?;
+        let selected_b = account_test.codex.capture_provider().await?;
+        assert_eq!(selected_b.request_auth().await?.unwrap().get_account_id().as_deref(), Some("b"));
+        selected_b.models_manager(&account_test.config)?.list_models(
+            codex_models_manager::manager::RefreshStrategy::Online,
+            account_test.config.http_client_factory(),
+        ).await;
+        let isolated = mount_sse_sequence(&server, vec![
+            sse(vec![ev_assistant_message("review-a", r#"{"outcome":"allow"}"#), ev_completed("review-a")]),
+            sse(vec![ev_assistant_message("review-b", r#"{"outcome":"allow"}"#), ev_completed("review-b")]),
+            sse(vec![ev_assistant_message("review-live-a", r#"{"outcome":"allow"}"#), ev_completed("review-live-a")]),
+            sse(vec![ev_assistant_message("review-retained-a", r#"{"outcome":"allow"}"#), ev_completed("review-retained-a")]),
+        ]).await;
+        release.notify_one();
+        assert!(paused_review.await??.assessment.is_some());
+        let model_a = codex_core::test_support::guardian_catalog_model(&account_test.codex, &admitted_catalog, &account_test.config, "codex-auto-review").await?;
+        let request_a = isolated.requests().remove(0);
+        assert_eq!(request_a.header("chatgpt-account-id").as_deref(), Some("a"));
+        assert_eq!(request_a.header("authorization").as_deref(), Some("Bearer guardian-a"));
+        assert_eq!(request_a.body_json()["model"], "codex-auto-review");
+        assert!(request_a.instructions_text().starts_with("account-a-template: account-a-policy\n"),
+            "admitted A must not use B's policy: {}", request_a.instructions_text());
+        assert_eq!(model_a.context_window, Some(111_111));
+        assert_eq!(recoveries[0].1.received_requests().await.len(), 1,
+            "the missing-reviewer refresh must belong to admitted A");
+
+        // A's completed refresh must not consume B's independent recovery attempt.
+        assert!(account_test.codex.guardian_review(&CancellationToken::new()).await?.assessment.is_some());
+        let request_b = isolated.requests().remove(1);
+        assert_eq!(request_b.header("chatgpt-account-id").as_deref(), Some("b"));
+        assert_eq!(request_b.body_json()["model"], "codex-auto-review");
+        assert!(request_b.instructions_text().starts_with("account-b-template: account-b-policy\n"));
+        assert_eq!(recoveries[1].1.received_requests().await.len(), 1);
+
+        // Publish a newer A catalog in memory while its disk cache is unwritable.
+        // M0 still advertises the reviewer, so the missing-reviewer retry cannot mask this.
+        account_test.codex.select_account("guardian-user:a").await?;
+        let cache_path = account_test.config.codex_home.join("models_cache.json");
+        let cached_before = fs::read(&cache_path)?;
+        let mut permissions = fs::metadata(&cache_path)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&cache_path, permissions)?;
+        assert!(fs::OpenOptions::new().write(true).open(&cache_path).is_err());
+
+        let mut live_catalog = account_parent.clone();
+        let mut live_reviewer = live_catalog.models[0].clone();
+        live_reviewer.slug = "codex-auto-review".to_string();
+        live_reviewer.context_window = Some(333_333);
+        live_reviewer.supported_in_api = false;
+        live_reviewer.model_messages.as_mut().unwrap().auto_review = Some(AutoReviewMessages {
+            policy: Some("account-a-live-policy".to_string()),
+            policy_template: Some("account-a-live-template: {{ tenant_policy_config }}".to_string()),
+            node_repl_policy: None,
+            rejection_instructions: None,
+            timeout_instructions: None,
+        });
+        live_catalog.models.push(live_reviewer);
+        let live_a = Mock::given(method("GET"))
+            .and(path_regex(".*/models$"))
+            .and(wiremock::matchers::header("chatgpt-account-id", "a"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&live_catalog))
+            .with_priority(1).mount_as_scoped(&server).await;
+        let parent_catalog = codex_core::test_support::thread_models_manager(&account_test.codex);
+        assert_eq!(
+            parent_catalog.raw_model_catalog(RefreshStrategy::Online, account_test.config.http_client_factory()).await,
+            live_catalog,
+        );
+        assert_eq!(fs::read(&cache_path)?, cached_before, "M1 must be memory-only");
+
+        assert!(codex_core::test_support::guardian_review_with_admission(
+            &account_test.codex, admitted_catalog.clone(), &CancellationToken::new(),
+        ).await?.assessment.is_some());
+        let live_review = isolated.requests().remove(2);
+        assert_eq!(live_review.header("chatgpt-account-id").as_deref(), Some("a"));
+        assert!(live_review.instructions_text().starts_with("account-a-live-template: account-a-live-policy\n"));
+        assert_eq!(
+            codex_core::test_support::guardian_catalog_model(&account_test.codex, &admitted_catalog, &account_test.config, "codex-auto-review").await?.context_window,
+            Some(333_333),
+        );
+
+        // A later B publication must neither replace A's live metadata nor cause another fetch.
+        account_test.codex.select_account("guardian-user:b").await?;
+        let published_b = parent_catalog.raw_model_catalog(RefreshStrategy::Online, account_test.config.http_client_factory()).await;
+        assert_eq!(published_b.models.iter().find(|model| model.slug == "codex-auto-review").unwrap().context_window, Some(222_222));
+        assert!(codex_core::test_support::guardian_review_with_admission(
+            &account_test.codex, admitted_catalog.clone(), &CancellationToken::new(),
+        ).await?.assessment.is_some());
+        let retained_a = isolated.requests().remove(3);
+        let live_a_requests = live_a.received_requests().await.len();
+        let b_recovery_requests = recoveries[1].1.received_requests().await.len();
+        assert_eq!(retained_a.header("chatgpt-account-id").as_deref(), Some("a"));
+        assert!(retained_a.instructions_text().starts_with("account-a-live-template: account-a-live-policy\n"));
+        assert_eq!(
+            codex_core::test_support::guardian_catalog_model(&account_test.codex, &admitted_catalog, &account_test.config, "codex-auto-review").await?.context_window,
+            Some(333_333),
+        );
+        assert_eq!(live_a.received_requests().await.len(), live_a_requests, "metadata adoption must not fetch");
+        assert_eq!(recoveries[1].1.received_requests().await.len(), b_recovery_requests, "metadata adoption must not fetch B");
+        assert_eq!(fs::read(&cache_path)?, cached_before);
+        account_test.codex.shutdown_and_wait().await?;
         Ok(())
     })
     .await

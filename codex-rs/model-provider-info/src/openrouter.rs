@@ -16,6 +16,7 @@ pub(crate) fn provider() -> ModelProviderInfo {
         capabilities: Some(ModelProviderCapabilities {
             external_web_access: Some(false),
             remote_compaction: Some(RemoteCompactionSupport::Unsupported),
+            cyber_access_programs: None,
         }),
         ..Default::default()
     }

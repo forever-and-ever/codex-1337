@@ -18,6 +18,7 @@ use crate::terminal_palette::stdout_color_level;
 use crate::warpaint::Figure;
 use crate::warpaint::Ground;
 use ratatui::style::Color;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 
 const LIGHT_BG_ACCENT_RGB: (u8, u8, u8) = (28, 100, 200);
@@ -30,6 +31,33 @@ pub(crate) const CHATGPT_BLUE_200: (u8, u8, u8) = (99, 168, 248);
 
 /// Shared accent for picker selection backgrounds and transcript foreground emphasis.
 pub(crate) const UI_ACCENT: (u8, u8, u8) = CHATGPT_BLUE_200;
+
+/// The result marker inherits the row fill, including the reverse-video selection fallback.
+pub(crate) fn task_marker(unread: bool, row: Style) -> ratatui::text::Span<'static> {
+    let (symbol, rgb, ansi) = if unread {
+        ("●", (0x3b, 0x82, 0xf6), Color::Blue)
+    } else {
+        ("○", (128, 128, 128), Color::DarkGray)
+    };
+    let color = match effective_stdout_color_level() {
+        StdoutColorLevel::Ansi16 => ansi,
+        StdoutColorLevel::Ansi256 => best_color(rgb),
+        StdoutColorLevel::TrueColor | StdoutColorLevel::Unknown => rgb_color(rgb),
+    };
+    // TELOS(warpaint): task state uses pack accents, including reverse-video rows.
+    let color = if unread {
+        Figure::Accent.repaint(color)
+    } else {
+        Figure::InkMuted.repaint(color)
+    };
+    // In reverse video the terminal paints glyphs with the background color.
+    let style = if row.add_modifier.contains(Modifier::REVERSED) {
+        row.bg(color)
+    } else {
+        row.fg(color)
+    };
+    ratatui::text::Span::styled(symbol, style)
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum StatusTone {
@@ -71,6 +99,21 @@ pub(crate) fn formatted_output_style() -> Style {
         rgb_color(blend((90, 165, 180), foreground, /*alpha*/ 0.25))
     });
     Style::default().fg(Figure::Info.repaint(readable_color_on(preferred, /*background*/ None)))
+}
+
+/// Blend the floating HUD slightly away from the terminal background in either theme.
+const SHORTCUT_HUD_TINT: f32 = 0.052;
+
+pub(crate) fn shortcut_hud_style() -> Style {
+    default_bg().map_or_else(Style::default, |bg| {
+        let shade = if is_light(bg) { 0 } else { 255 };
+        // TELOS(warpaint): a raised shortcut guide wears the active pack.
+        Style::default().bg(Ground::Dais.repaint(best_color(blend(
+            (shade, shade, shade),
+            bg,
+            SHORTCUT_HUD_TINT,
+        ))))
+    })
 }
 
 pub fn proposed_plan_style() -> Style {
@@ -163,11 +206,44 @@ pub(crate) fn secondary_text_style() -> Style {
         .not_bold()
 }
 
+/// Bring a focusable surface closer to the terminal background while keeping its text readable.
+pub(crate) fn quiet_workspace_style() -> Style {
+    let base = Style::default().not_bold().not_reversed().not_underlined();
+    let Some(bg) = default_bg() else {
+        return base.fg(Color::Reset).bg(Color::Reset).dim();
+    };
+    let fill = best_color(blend(user_message_bg_rgb(bg), bg, /*alpha*/ 0.40));
+    let foreground = default_fg().map_or(Color::Reset, |fg| {
+        best_color(blend(fg, bg, /*alpha*/ 0.66))
+    });
+    // TELOS(warpaint): quiet panes retain semantic pack colors, not resolved RGB.
+    base.bg(Ground::Prompt.repaint(fill))
+        .fg(Figure::InkMuted.repaint(readable_color_on(foreground, Some(fill))))
+}
+
 pub(crate) fn selection_style() -> Style {
     let style = contrast::selection_style(default_bg(), effective_stdout_color_level());
     style
         .fg(Figure::InkSelected.repaint(style.fg.unwrap_or_default()))
         .bg(Ground::Selection.repaint(style.bg.unwrap_or_default()))
+}
+
+/// Strengthen a control's fill using the terminal's surface tint and readable foreground.
+pub(crate) fn hover_style(style: Style) -> Style {
+    let (Some(terminal_bg), Some(surface)) = (default_bg(), background_rgb(style.bg)) else {
+        return style.underlined();
+    };
+    let fill = best_color(shade_rgb(shade_rgb(surface, terminal_bg), terminal_bg));
+    if fill == Color::Reset || Some(fill) == style.bg {
+        return style.underlined();
+    }
+    // TELOS(warpaint): a hovered control uses the pack's proven highlighted pair.
+    style
+        .bg(Ground::Selection.repaint(fill))
+        .fg(Figure::InkSelected.repaint(readable_color_on(
+            style.fg.unwrap_or(Color::Reset),
+            Some(fill),
+        )))
 }
 
 /// Resolve emphasis on the shaded prompt surface, including its quantized background.
@@ -280,6 +356,15 @@ pub fn user_message_bg(terminal_bg: (u8, u8, u8)) -> Color {
 pub(crate) fn user_message_bg_rgb(_terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
     // TELOS(warpaint): effects blend toward the fill the pack paints.
     crate::warpaint::ground_rgb(Ground::Prompt)
+}
+
+fn shade_rgb(surface: (u8, u8, u8), terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
+    let (top, alpha) = if is_light(terminal_bg) {
+        ((0, 0, 0), 0.04)
+    } else {
+        ((255, 255, 255), 0.12)
+    };
+    blend(top, surface, alpha)
 }
 
 #[allow(clippy::disallowed_methods)]

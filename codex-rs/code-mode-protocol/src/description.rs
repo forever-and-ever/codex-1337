@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::PUBLIC_TOOL_NAME;
 use crate::UndeclaredTool;
@@ -71,6 +72,15 @@ pub struct ToolDefinition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolNamespaceDescription {
     pub name: String,
+    pub description: String,
+}
+
+/// One complete tool definition or namespace instruction and its identity in an update.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecDefinition {
+    /// Stable identity (`Tool: tools.<name>` or `Namespace instructions: <name>`) used for diffing.
+    pub key: String,
+    /// Complete rendered entry, including its heading, used to replace an earlier definition.
     pub description: String,
 }
 
@@ -241,6 +251,58 @@ pub fn build_exec_tool_description_for(
     deferred_tool_discovery: DeferredToolDiscovery,
     messages: Option<&CodeModeToolMessages>,
 ) -> String {
+    build_exec_tool_description_and_definitions_for(
+        dialect,
+        enabled_tools,
+        undeclared_tools,
+        namespace_descriptions,
+        max_yield_time_ms,
+        code_mode_only,
+        media_helpers,
+        deferred_tool_discovery,
+        false,
+        messages,
+    )
+    .0
+}
+
+pub fn build_exec_tool_description_and_definitions(
+    enabled_tools: &[ToolDefinition],
+    undeclared_tools: &[UndeclaredTool],
+    namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
+    max_yield_time_ms: u64,
+    code_mode_only: bool,
+    media_helpers: MediaHelpers,
+    deferred_tool_discovery: DeferredToolDiscovery,
+    incremental_exec_enabled: bool,
+    messages: Option<&CodeModeToolMessages>,
+) -> (String, Vec<ExecDefinition>) {
+    build_exec_tool_description_and_definitions_for(
+        crate::presentation::ToolDialect::default(),
+        enabled_tools,
+        undeclared_tools,
+        namespace_descriptions,
+        max_yield_time_ms,
+        code_mode_only,
+        media_helpers,
+        deferred_tool_discovery,
+        incremental_exec_enabled,
+        messages,
+    )
+}
+
+pub fn build_exec_tool_description_and_definitions_for(
+    dialect: crate::presentation::ToolDialect,
+    enabled_tools: &[ToolDefinition],
+    undeclared_tools: &[UndeclaredTool],
+    namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
+    max_yield_time_ms: u64,
+    code_mode_only: bool,
+    media_helpers: MediaHelpers,
+    deferred_tool_discovery: DeferredToolDiscovery,
+    incremental_exec_enabled: bool,
+    messages: Option<&CodeModeToolMessages>,
+) -> (String, Vec<ExecDefinition>) {
     let mut sections = Vec::new();
     let description = messages
         .and_then(|messages| messages.exec.as_ref())
@@ -286,9 +348,11 @@ pub fn build_exec_tool_description_for(
         sections.push(guidance.to_string());
     }
     sections.extend(dialect.notes().map(str::to_owned));
-    sections.extend(crate::roster::render_roster_for(undeclared_tools, dialect));
+    // TELOS(mcp-roster): every inventory change participates in incremental context.
+    let roster = crate::roster::definitions_for(undeclared_tools, dialect);
+    sections.extend(crate::roster::render_definitions(&roster));
     if !code_mode_only {
-        return sections.join("\n\n");
+        return (sections.join("\n\n"), Vec::new());
     }
 
     // Preserve explicit caller guidance without injecting the old shared TypeScript manual.
@@ -299,8 +363,14 @@ pub fn build_exec_tool_description_for(
         sections.push(preamble.to_owned());
     }
 
+    let mut entries = if incremental_exec_enabled {
+        roster
+    } else {
+        Vec::new()
+    };
     if !enabled_tools.is_empty() {
         let mut current_namespace: Option<&str> = None;
+        let mut seen_namespaces = BTreeSet::new();
         let mut nested_tool_sections = Vec::with_capacity(enabled_tools.len());
 
         for tool in enabled_tools {
@@ -312,32 +382,54 @@ pub fn build_exec_tool_description_for(
                 .and_then(|namespace| namespace_descriptions.get(namespace));
             let next_namespace = namespace_description
                 .map(|namespace_description| namespace_description.name.as_str());
-            if next_namespace != current_namespace {
-                if let Some(namespace_description) = namespace_description {
-                    let namespace_description_text = namespace_description.description.trim();
-                    if !namespace_description_text.is_empty() {
-                        nested_tool_sections.push(format!(
+            if let Some(namespace_description) = namespace_description {
+                let namespace_description_text = namespace_description.description.trim();
+                if !namespace_description_text.is_empty() {
+                    let new_entry = incremental_exec_enabled
+                        && seen_namespaces.insert(&namespace_description.name);
+                    let new_group = next_namespace != current_namespace;
+                    if new_entry || new_group {
+                        let description = format!(
                             "## {}\n{namespace_description_text}",
                             namespace_description.name
-                        ));
+                        );
+                        if new_entry {
+                            entries.push(ExecDefinition {
+                                key: format!(
+                                    "Namespace instructions: {}",
+                                    namespace_description.name
+                                ),
+                                description: description.clone(),
+                            });
+                        }
+                        if new_group {
+                            nested_tool_sections.push(description);
+                        }
                     }
                 }
-                current_namespace = next_namespace;
             }
+            current_namespace = next_namespace;
 
             let heading = dialect.contract_heading(tool);
             let nested_description = nested_description.trim();
-            if nested_description.is_empty() {
-                nested_tool_sections.push(heading);
+            let description = if nested_description.is_empty() {
+                heading
             } else {
-                nested_tool_sections.push(format!("{heading}\n{nested_description}"));
+                format!("{heading}\n{nested_description}")
+            };
+            if incremental_exec_enabled {
+                entries.push(ExecDefinition {
+                    key: format!("Tool: tools.{}", normalize_code_mode_identifier(&tool.name)),
+                    description: description.clone(),
+                });
             }
+            nested_tool_sections.push(description);
         }
 
         sections.push(nested_tool_sections.join("\n\n"));
     }
 
-    sections.join("\n\n")
+    (sections.join("\n\n"), entries)
 }
 
 pub fn build_wait_tool_description(max_yield_time_ms: u64) -> String {
@@ -396,6 +488,7 @@ mod tests {
     use super::UndeclaredTool;
     use super::augment_tool_definition;
     use super::build_exec_tool_description;
+    use super::build_exec_tool_description_and_definitions;
     use super::normalize_code_mode_identifier;
     use super::parse_exec_source;
     use crate::enabled_tool_metadata;
@@ -658,7 +751,7 @@ mod tests {
 
     #[test]
     fn code_mode_only_description_includes_nested_tools() {
-        let description = build_exec_tool_description(
+        let (description, entries) = build_exec_tool_description_and_definitions(
             &[ToolDefinition {
                 summary: String::new(),
                 name: "foo".to_string(),
@@ -674,8 +767,10 @@ mod tests {
             /*code_mode_only*/ true,
             ALL_MEDIA,
             DeferredToolDiscovery::Catalog,
+            /*incremental_exec_enabled*/ false,
             /*messages*/ None,
         );
+        assert!(entries.is_empty());
         assert!(description.contains(
             "### `foo`\nCall: await tools.foo(args).\nReturns: no declared shape.\n\nbar"
         ));
@@ -712,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn code_mode_only_description_groups_namespace_instructions_once() {
+    fn code_mode_only_definitions_match_full_description() {
         let namespace_descriptions = BTreeMap::from([(
             "mcp__sample__".to_string(),
             ToolNamespaceDescription {
@@ -720,42 +815,90 @@ mod tests {
                 description: "Shared namespace guidance.".to_string(),
             },
         )]);
-        let description = build_exec_tool_description(
+        let enabled_tools = [
+            ToolDefinition {
+                summary: String::new(),
+                name: "mcp__sample__alpha-tool".to_string(),
+                tool_name: ToolName::namespaced("mcp__sample__", "alpha-tool"),
+                description: "First tool".to_string(),
+                kind: CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "properties": { "city": { "type": "string" } },
+                    "required": ["city"],
+                    "additionalProperties": false
+                })),
+                output_schema: Some(mcp_call_tool_result_schema(json!({
+                    "type": "object",
+                    "properties": { "ok": { "type": "boolean" } },
+                    "required": ["ok"],
+                    "additionalProperties": false
+                }))),
+            },
+            ToolDefinition {
+                summary: String::new(),
+                name: "mcp__sample__beta".to_string(),
+                tool_name: ToolName::namespaced("mcp__sample__", "beta"),
+                description: "Second tool".to_string(),
+                kind: CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                })),
+                output_schema: Some(mcp_call_tool_result_schema(json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }))),
+            },
+        ];
+        let (description, entries) = build_exec_tool_description_and_definitions(
+            &enabled_tools,
+            &[],
+            &namespace_descriptions,
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*code_mode_only*/ true,
+            ALL_MEDIA,
+            DeferredToolDiscovery::Catalog,
+            /*incremental_exec_enabled*/ true,
+            /*messages*/ None,
+        );
+        assert_eq!(description.matches("## mcp__sample").count(), 1);
+        assert!(description.contains("## mcp__sample\nShared namespace guidance."));
+        assert!(description.contains("Call: await tools.mcp__sample__alpha_tool(args)."));
+        assert!(description.contains("Call: await tools.mcp__sample__beta(args)."));
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Namespace instructions: mcp__sample",
+                "Tool: tools.mcp__sample__alpha_tool",
+                "Tool: tools.mcp__sample__beta",
+            ]
+        );
+        let catalog_start = description.find("## mcp__sample\n").unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.description.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            &description[catalog_start..]
+        );
+
+        // Full descriptions repeat a returning namespace heading; update entries keep one identity.
+        let mut plain_tool = enabled_tools[1].clone();
+        plain_tool.name = "plain".to_string();
+        plain_tool.tool_name = ToolName::plain("plain");
+        let (description, interleaved_entries) = build_exec_tool_description_and_definitions(
             &[
-                ToolDefinition {
-                    summary: String::new(),
-                    name: "mcp__sample__alpha".to_string(),
-                    tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
-                    description: "First tool".to_string(),
-                    kind: CodeModeToolKind::Function,
-                    input_schema: Some(json!({
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": false
-                    })),
-                    output_schema: Some(mcp_call_tool_result_schema(json!({
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": false
-                    }))),
-                },
-                ToolDefinition {
-                    summary: String::new(),
-                    name: "mcp__sample__beta".to_string(),
-                    tool_name: ToolName::namespaced("mcp__sample__", "beta"),
-                    description: "Second tool".to_string(),
-                    kind: CodeModeToolKind::Function,
-                    input_schema: Some(json!({
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": false
-                    })),
-                    output_schema: Some(mcp_call_tool_result_schema(json!({
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": false
-                    }))),
-                },
+                enabled_tools[0].clone(),
+                plain_tool,
+                enabled_tools[1].clone(),
             ],
             &[],
             &namespace_descriptions,
@@ -763,18 +906,17 @@ mod tests {
             /*code_mode_only*/ true,
             ALL_MEDIA,
             DeferredToolDiscovery::Catalog,
+            /*incremental_exec_enabled*/ true,
             /*messages*/ None,
         );
+        assert_eq!(description.matches("## mcp__sample").count(), 2);
         assert_eq!(
-            description
-                .lines()
-                .filter(|line| *line == "## mcp__sample")
-                .count(),
-            1
+            interleaved_entries
+                .iter()
+                .filter(|entry| entry.key.starts_with("Namespace instructions:"))
+                .collect::<Vec<_>>(),
+            vec![&entries[0]],
         );
-        assert!(description.contains("## mcp__sample\nShared namespace guidance."));
-        assert!(description.contains("Call: await tools.mcp__sample__alpha(args)."));
-        assert!(description.contains("Call: await tools.mcp__sample__beta(args)."));
     }
 
     #[test]
@@ -786,7 +928,7 @@ mod tests {
                 description: String::new(),
             },
         )]);
-        let description = build_exec_tool_description(
+        let (description, _) = build_exec_tool_description_and_definitions(
             &[ToolDefinition {
                 summary: String::new(),
                 name: "mcp__sample__alpha".to_string(),
@@ -810,6 +952,7 @@ mod tests {
             /*code_mode_only*/ true,
             ALL_MEDIA,
             DeferredToolDiscovery::Catalog,
+            /*incremental_exec_enabled*/ false,
             /*messages*/ None,
         );
 
@@ -846,7 +989,7 @@ mod tests {
                     DeferredToolDiscovery::Catalog => Vec::new(),
                     DeferredToolDiscovery::RankedSearch => vec![search_tool.clone()],
                 };
-                let description = build_exec_tool_description(
+                let (description, _) = build_exec_tool_description_and_definitions(
                     &enabled_tools,
                     &deferred_tools
                         .iter()
@@ -858,6 +1001,7 @@ mod tests {
                     code_mode_only,
                     ALL_MEDIA,
                     discovery,
+                    /*incremental_exec_enabled*/ false,
                     /*messages*/ None,
                 );
                 assert!(description.contains("inventory names every"));
@@ -867,7 +1011,7 @@ mod tests {
                     usize::from(discovery == DeferredToolDiscovery::RankedSearch),
                 );
 
-                let empty_catalog_description = build_exec_tool_description(
+                let (empty_catalog_description, _) = build_exec_tool_description_and_definitions(
                     &enabled_tools,
                     &[],
                     &BTreeMap::new(),
@@ -875,6 +1019,7 @@ mod tests {
                     code_mode_only,
                     ALL_MEDIA,
                     discovery,
+                    /*incremental_exec_enabled*/ false,
                     /*messages*/ None,
                 );
                 assert!(description.contains("tools.deferred_tool: Deferred tool"));

@@ -39,9 +39,7 @@ impl App {
             (AppServerTarget::Remote { .. }, None) => {
                 "Not connected to the remote shared service.".to_string()
             }
-            (AppServerTarget::LocalDaemon { .. }, None) | (AppServerTarget::Embedded, _) => {
-                "Not connected to the local shared service.".to_string()
-            }
+            _ => "Not connected to the local shared service.".to_string(),
         };
         let header = vec![Line::from("Daemon".bold()), Line::from(status.dim())];
         self.chat_widget.show_selection_view(SelectionViewParams {

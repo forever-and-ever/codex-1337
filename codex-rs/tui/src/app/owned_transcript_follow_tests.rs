@@ -64,6 +64,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                         &app.config.cwd,
                         /*animations*/ false,
                         &|_| crate::multi_agents::AgentMetadata::default(),
+                        crate::history_cell::ImagePathOrigin::Local,
                     )
                     .unwrap()
                     .block
@@ -140,7 +141,47 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
             .scroll(&app.transcript_cells, /*rows*/ -10);
         tui.screen_size_for_event(&TuiEvent::Resize(size))?;
         app.render_owned_transcript(&mut tui, size)?;
-        assert_eq!(tui.terminal.last_known_cursor_pos, cursor);
+        let scrolled_cursor = tui.terminal.last_known_cursor_pos;
+        assert_eq!(scrolled_cursor, cursor);
+        let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+        let scrolled = super::tests::buffer_text(buffer);
+        let first_row = scrolled
+            .lines()
+            .find(|row| row.contains("transcript row"))
+            .expect("visible transcript row");
+        // Keep history visible above the native ruled composer in the inset, too.
+        let inset_size = Size::new(width.max(38), 24);
+        tui.screen_size_for_event(&TuiEvent::Resize(inset_size))?;
+        let area = Rect::new(
+            /*x*/ 4, /*y*/ 1, /*width*/ 34, /*height*/ 22,
+        );
+        let frames = tui.frame_requester();
+        let mut painted = Default::default();
+        tui.draw(inset_size.height, |frame| {
+            let prepared = app.prepare_conversation(frame.area(), Some(area), &frames);
+            painted = app.paint_conversation(frame, &prepared);
+        })?;
+        app.finish_conversation(&mut tui, painted)?;
+        let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+        let resized = super::tests::buffer_text(buffer);
+        assert_eq!(
+            resized
+                .lines()
+                .find(|row| row.contains("transcript row"))
+                .map(str::trim),
+            Some(first_row.trim()),
+            "offset conversation: {resized}"
+        );
+        assert!(resized.contains("draft stays here"));
+        tui.screen_size_for_event(&TuiEvent::Resize(size))?;
+        let mut painted = Default::default();
+        tui.screen_size_for_event(&TuiEvent::Resize(size))?;
+        tui.draw(size.height, |frame| {
+            let prepared =
+                app.prepare_conversation(frame.area(), /*conversation_inset*/ None, &frames);
+            painted = app.paint_conversation(frame, &prepared);
+        })?;
+        app.finish_conversation(&mut tui, painted)?;
         for height in [24, 9, 8, size.height] {
             let resized = Size::new(width, height);
             tui.screen_size_for_event(&TuiEvent::Resize(resized))?;
@@ -156,7 +197,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                 (
                     "draft stays here".to_string(),
                     cursor.x,
-                    size.height - cursor.y,
+                    size.height - scrolled_cursor.y,
                     false
                 )
             );
@@ -247,7 +288,9 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
             }
             insta::assert_snapshot!(
                 "running_copy_feedback_spacing",
-                crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapshots.join("\n\n")),
+                crate::chatwidget::tests::helpers::normalize_working_snapshot(
+                    snapshots.join("\n\n")
+                ),
             );
         }
     }

@@ -48,7 +48,23 @@ async fn heartbeat_keeps_user_restriction_after_status_questions(
         ]),
     )
     .await;
-    mount_completion(&server, root_id, SPAWN_CALL_ID).await;
+    if let Some(question) = restriction_question {
+        // A real model question is recorded before its turn completes; a history-only
+        // injection can instead queue behind an active child-notification turn.
+        mount_sse_once_match(
+            &server,
+            move |request: &wiremock::Request| {
+                is_root_request(request, root_id) && has_call_output(request, SPAWN_CALL_ID)
+            },
+            sse(vec![
+                ev_assistant_message("restriction-question", question),
+                ev_completed("restriction-question-completed"),
+            ]),
+        )
+        .await;
+    } else {
+        mount_completion(&server, root_id, SPAWN_CALL_ID).await;
+    }
     mount_sse_once_match(
         &server,
         move |request: &wiremock::Request| is_worker_request(request, root_id),
@@ -74,12 +90,7 @@ async fn heartbeat_keeps_user_restriction_after_status_questions(
             .await?;
         ThreadIdle::wait(&test.codex).await;
     }
-    let restriction = if let Some(question) = restriction_question {
-        test.codex
-            .inject_response_items(vec![serde_json::from_value(
-                ev_assistant_message("restriction-question", question)["item"].clone(),
-            )?])
-            .await?;
+    let restriction = if restriction_question.is_some() {
         "Yes, do that."
     } else {
         "Do not restart until the current batch finishes."

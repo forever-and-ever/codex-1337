@@ -23,6 +23,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
                 mention: "audit".into(),
                 path: "skill:///tmp/audit/SKILL.md".into(),
             }],
+            crate::bottom_pane::ShellPrefixHandling::Literal,
         );
         chat.set_remote_image_urls(vec!["data:image/png;base64,inline".into()]);
         let before = chat.bottom_pane.composer_draft_snapshot();

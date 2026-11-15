@@ -137,13 +137,13 @@ impl AuthStorageBackend for ObservedStorage {
         result
     }
 
-    fn delete(&self) -> std::io::Result<bool> {
+    fn delete_unlocked(&self) -> std::io::Result<bool> {
         let store = match self.mode {
             AuthCredentialsStoreMode::File | AuthCredentialsStoreMode::Ephemeral => self.store(),
             AuthCredentialsStoreMode::Auto | AuthCredentialsStoreMode::Keyring => Store::Multiple,
         };
         let mut telemetry = telemetry(self.mode, self.kind, Operation::Delete);
-        let result = self.inner.delete();
+        let result = self.inner.delete_unlocked();
         telemetry.record_delete_attempt(store, &result);
         result
     }

@@ -12,14 +12,18 @@ use crate::server::ConnectionProcessor;
 
 #[test]
 fn local_decode_starts_request_span_before_queueing() -> Result<()> {
+    // TELOS(removed-stacks): local span timing remains; there is no SDK exporter.
     let _subscriber = tracing::subscriber::set_default(tracing_subscriber::registry());
     tracing::callsite::rebuild_interest_cache();
 
     let request = JSONRPCRequest {
         id: RequestId::Integer(1),
         method: "test/queued".to_string(),
-        params: None,
-        trace: None,
+        params: Some(serde_json::json!({"secret": "SYNTHETIC_PRIVATE_PAYLOAD"})),
+        trace: Some(codex_protocol::protocol::W3cTraceContext {
+            traceparent: Some("00-00000000000000000000000000000001-0000000000000002-01".to_owned()),
+            tracestate: None,
+        }),
     };
     let before_decode = Instant::now();
     let event = <ConnectionProcessor as NoiseStreamHandler>::decode(

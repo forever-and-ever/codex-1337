@@ -118,7 +118,12 @@ impl Diagnostics {
             ApiError::ResponseIncomplete(_) => {
                 json!({"kind":"response_incomplete","message":self.text(&error.to_string())})
             }
-            ApiError::ContextWindowExceeded
+            ApiError::SessionBudgetExceeded
+            | ApiError::AccessProgramNotEnabled { .. }
+            | ApiError::InvalidAudioInput { .. }
+            | ApiError::InferenceHookDenied { .. }
+            | ApiError::ContentPolicyViolation { .. }
+            | ApiError::ContextWindowExceeded
             | ApiError::ContentFilter
             | ApiError::QuotaExceeded
             | ApiError::ModelNotFound { .. }

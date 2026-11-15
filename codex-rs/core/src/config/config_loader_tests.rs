@@ -1163,6 +1163,14 @@ async fn managed_preferences_expand_home_directory_in_workspace_write_roots() ->
     };
     let tmp = tempdir()?;
 
+    std::fs::write(
+        tmp.path().join(CONFIG_TOML_FILE),
+        r#"
+default_permissions = ":read-only"
+[sandbox_workspace_write]
+network_access = true
+"#,
+    )?;
     let mut loader_overrides =
         LoaderOverrides::with_managed_config_path_for_tests(tmp.path().join("managed_config.toml"));
     loader_overrides.managed_preferences_base64 = Some(
@@ -1180,12 +1188,20 @@ writable_roots = ["~/code"]
         .codex_home(tmp.path().to_path_buf())
         .fallback_cwd(Some(tmp.path().to_path_buf()))
         .loader_overrides(loader_overrides)
+        .cloud_config_bundle(CloudConfigBundleFixture::loader_with_enterprise_config(
+            "[sandbox_workspace_write]\nexclude_tmpdir_env_var = true",
+        ))
         .build()
         .await?;
 
     let expected_root = AbsolutePathBuf::from_absolute_path(home.join("code"))?;
     match &config.legacy_sandbox_policy() {
-        SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
+        SandboxPolicy::WorkspaceWrite {
+            writable_roots,
+            network_access: true,
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: false,
+        } => {
             assert_eq!(
                 writable_roots
                     .iter()
@@ -1197,6 +1213,7 @@ writable_roots = ["~/code"]
         other => panic!("expected workspace-write policy, got {other:?}"),
     }
 
+    assert_eq!(config.permissions.active_permission_profile(), None);
     Ok(())
 }
 
@@ -1396,6 +1413,7 @@ personality = true
             .map(|requirements| requirements.value.clone()),
         Some(codex_config::FeatureRequirementsToml {
             entries: BTreeMap::from([("personality".to_string(), true)]),
+            ..Default::default()
         })
     );
     let config_requirements: ConfigRequirements = config_requirements_toml.try_into()?;
@@ -1436,6 +1454,7 @@ personality = true
             .map(|requirements| requirements.value.clone()),
         Some(codex_config::FeatureRequirementsToml {
             entries: BTreeMap::from([("personality".to_string(), true)]),
+            ..Default::default()
         })
     );
     Ok(())
@@ -1900,7 +1919,11 @@ async fn network_requirements_reject_removed_proxy_for_legacy_and_permission_con
         "default_permissions = 'dev'\n[permissions.dev]\nextends = ':workspace'\n[permissions.dev.network]\nenabled = true\n",
         "default_permissions = 'network'\n[permissions.network]\nextends = ':workspace'\n[permissions.network.network]\nenabled = true\n",
     ] {
-        for table in ["network_proxy", "experimental_network"] {
+        for table in [
+            "network_proxy",
+            "experimental_network",
+            "permissions.network",
+        ] {
             let requirements_toml = format!(
                 "[{table}]\nenabled = true\n[{table}.domains]\n'api.example.com' = 'allow'\n"
             );
@@ -4355,6 +4378,7 @@ prefix_rules = [
             parsed,
             RequirementsExecPolicyToml {
                 prefix_rules: vec![RequirementsExecPolicyPrefixRuleToml {
+                    canonical_matching: false,
                     pattern: vec![RequirementsExecPolicyPatternTokenToml {
                         token: Some("rm".to_string()),
                         any_of: None,
@@ -4384,6 +4408,7 @@ prefix_rules = [
             RequirementsExecPolicyToml {
                 prefix_rules: vec![
                     RequirementsExecPolicyPrefixRuleToml {
+                        canonical_matching: false,
                         pattern: vec![RequirementsExecPolicyPatternTokenToml {
                             token: Some("rm".to_string()),
                             any_of: None,
@@ -4392,6 +4417,7 @@ prefix_rules = [
                         justification: None,
                     },
                     RequirementsExecPolicyPrefixRuleToml {
+                        canonical_matching: false,
                         pattern: vec![
                             RequirementsExecPolicyPatternTokenToml {
                                 token: Some("git".to_string()),

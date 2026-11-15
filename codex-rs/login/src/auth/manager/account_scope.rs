@@ -3,6 +3,7 @@ mod captured_source;
 
 pub(super) use captured_source::AuthPublication;
 pub use captured_source::CapturedAuthSource;
+pub(super) use captured_source::SourceRequirement;
 
 use super::Arc;
 use super::AuthConfig;
@@ -14,6 +15,76 @@ use super::create_auth_storage;
 use super::validate_auth_restrictions;
 use crate::auth::SavedAccount;
 use crate::auth::accounts::identity;
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(super) enum AccountSelection {
+    #[default]
+    Login,
+    Selected(Arc<AccountRoute>),
+}
+
+#[derive(PartialEq, Eq)]
+pub(super) struct AccountRoute {
+    id: String,
+    routes: crate::AuthRouteConfig,
+}
+
+impl AccountSelection {
+    pub(super) fn id(&self) -> Option<&str> {
+        match self {
+            Self::Login => None,
+            Self::Selected(route) => Some(&route.id),
+        }
+    }
+
+    pub(super) fn routes<'a>(
+        &'a self,
+        login: &'a crate::AuthRouteConfig,
+    ) -> &'a crate::AuthRouteConfig {
+        match self {
+            Self::Login => login,
+            Self::Selected(route) => &route.routes,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub(super) struct AccountRoutes(
+    Arc<std::sync::Mutex<std::collections::HashMap<String, codex_http_client::WeakNetworkPolicy>>>,
+);
+
+impl AccountRoutes {
+    fn select(
+        &self,
+        id: &str,
+        routes: &crate::AuthRouteConfig,
+    ) -> std::io::Result<Arc<AccountRoute>> {
+        let mut scopes = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("account policy registry is unavailable"))?;
+        // Factories retain the scope, not this route wrapper. A weak route
+        // would forget a still-live account when the selector moves away.
+        let retained = scopes
+            .get(id)
+            .and_then(codex_http_client::WeakNetworkPolicy::upgrade);
+        scopes.retain(|_, policy| policy.upgrade().is_some());
+        let route = Arc::new(AccountRoute {
+            id: id.to_owned(),
+            routes: routes.for_personal_account(retained)?,
+        });
+        scopes.insert(
+            id.to_owned(),
+            route.routes.application_network_policy().downgrade(),
+        );
+        Ok(route)
+    }
+}
+
+pub(super) enum AuthTransition {
+    Credential,
+    Selection,
+}
 
 // Failure to observe the store is not evidence that the selected identity was removed.
 pub(super) enum SavedAccountLoadError {
@@ -32,42 +103,41 @@ impl From<SavedAccountLoadError> for std::io::Error {
 /// Validated selection, held until its caller has durably recorded the conversation binding.
 pub struct PreparedAccount<'a> {
     manager: &'a AuthManager,
-    id: String,
+    route: Arc<AccountRoute>,
     auth: CodexAuth,
     _refresh: tokio::sync::SemaphorePermit<'a>,
 }
 
 impl PreparedAccount<'_> {
     pub fn commit(self) {
-        let mut scope = self.manager.write_account_scope();
-        *scope = Some(self.id);
-        self.manager.set_cached_auth(Some(self.auth));
+        let mut cache = self
+            .manager
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.account = AccountSelection::Selected(self.route);
+        self.manager
+            .set_cached_auth_locked(&mut cache, Some(self.auth), AuthTransition::Selection);
     }
 }
 
 impl AuthManager {
-    #[expect(
-        clippy::expect_used,
-        reason = "A poisoned selector cannot safely choose credentials."
-    )]
-    pub(super) fn read_account_scope(&self) -> std::sync::RwLockReadGuard<'_, Option<String>> {
-        self.account_scope
+    pub(super) fn account_selection(&self) -> AccountSelection {
+        self.inner
             .read()
-            .expect("account selector lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .account
+            .clone()
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "A poisoned selector cannot safely choose credentials."
-    )]
-    pub(super) fn write_account_scope(&self) -> std::sync::RwLockWriteGuard<'_, Option<String>> {
-        self.account_scope
-            .write()
-            .expect("account selector lock poisoned")
+    pub(super) fn current_auth_routes(&self) -> crate::AuthRouteConfig {
+        self.account_selection()
+            .routes(&self.auth_route_config)
+            .clone()
     }
 
     pub fn is_account_scoped(&self) -> bool {
-        self.read_account_scope().is_some()
+        matches!(self.account_selection(), AccountSelection::Selected(_))
     }
     pub fn saved_accounts(&self) -> std::io::Result<Vec<SavedAccount>> {
         Ok(create_auth_storage(
@@ -83,18 +153,21 @@ impl AuthManager {
         if self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
             return None;
         }
-        self.read_account_scope().clone().or_else(|| {
-            let auth = self.auth_cached()?;
-            if auth.is_workspace_account() {
-                return None;
-            }
-            match auth {
-                CodexAuth::Chatgpt(auth) if !auth.storage().is_ephemeral() => {
-                    auth.current_auth_json().as_ref().and_then(identity)
+        self.account_selection()
+            .id()
+            .map(str::to_owned)
+            .or_else(|| {
+                let auth = self.auth_cached()?;
+                if auth.is_workspace_account() {
+                    return None;
                 }
-                _ => None,
-            }
-        })
+                match auth {
+                    CodexAuth::Chatgpt(auth) if !auth.storage().is_ephemeral() => {
+                        auth.current_auth_json().as_ref().and_then(identity)
+                    }
+                    _ => None,
+                }
+            })
     }
 
     /// The active login's personal account, read from storage rather than any manager's cache or
@@ -170,16 +243,90 @@ impl AuthManager {
             Err(error) => return Err(error.into()),
         };
         self.ensure_personal_account_selection(auth.as_ref())?;
+        let route = self.account_routes.select(id, &self.auth_route_config)?;
         let mut config = self.saved_account_config();
-        config.auth_route_config = config.auth_route_config.for_personal_account()?;
-        let manager = Self::from_auth_state(config, /*enable_codex_api_key_env*/ false, None);
+        config.auth_route_config = route.routes.clone();
+        let mut manager =
+            Self::from_auth_state(config, /*enable_codex_api_key_env*/ false, auth);
+        manager.account_routes = self.account_routes.clone();
+        manager.credential_origin = std::sync::RwLock::new(self.credential_origin());
+        manager.allowed_auth_modes = std::sync::RwLock::new(
+            self.allowed_auth_modes
+                .read()
+                .map_err(|_| std::io::Error::other("credential policy is unavailable"))?
+                .clone(),
+        );
         if let Some(resolver) = self.workspace_routing_resolver.get() {
             manager.set_workspace_routing_resolver(resolver.clone());
         }
-        {
-            let mut scope = manager.write_account_scope();
-            *scope = Some(id.to_owned());
-            manager.set_cached_auth(auth);
+        manager
+            .inner
+            .get_mut()
+            .map_err(|_| std::io::Error::other("credential cache is unavailable"))?
+            .account = AccountSelection::Selected(route);
+        Ok(Arc::new(manager))
+    }
+
+    pub(super) fn frozen_account_owner(&self) -> std::io::Result<Arc<Self>> {
+        let cache = self
+            .inner
+            .read()
+            .map_err(|_| std::io::Error::other("credential cache is unavailable"))?
+            .clone();
+        let id = self.selected_account_id();
+        let workspace = cache
+            .auth
+            .as_ref()
+            .is_some_and(CodexAuth::is_workspace_account);
+        if id.is_none() && !workspace {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "saved account is unavailable",
+            ));
+        }
+        let routes = cache.account.routes(&self.auth_route_config).clone();
+        let mut config = self.saved_account_config();
+        config.auth_route_config = routes.clone();
+        if workspace {
+            config.forced_chatgpt_workspace_id = Some(vec![
+                cache
+                    .auth
+                    .as_ref()
+                    .and_then(CodexAuth::get_account_id)
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "workspace is unavailable",
+                        )
+                    })?,
+            ]);
+        }
+        let mut manager = Self::from_auth_state(config, false, cache.auth.clone());
+        manager.account_routes = self.account_routes.clone();
+        manager
+            .inner
+            .get_mut()
+            .map_err(|_| std::io::Error::other("credential cache is unavailable"))?
+            .account = match cache.account {
+            AccountSelection::Selected(route) => AccountSelection::Selected(route),
+            AccountSelection::Login => match id {
+                Some(id) => AccountSelection::Selected(Arc::new(AccountRoute { id, routes })),
+                None => AccountSelection::Login,
+            },
+        };
+        manager.refresh_lock = Arc::clone(&self.refresh_lock);
+        manager.credential_origin = std::sync::RwLock::new(self.credential_origin());
+        manager.allowed_auth_modes = std::sync::RwLock::new(
+            self.allowed_auth_modes
+                .read()
+                .map_err(|_| std::io::Error::other("credential policy is unavailable"))?
+                .clone(),
+        );
+        manager
+            .auth_change_state_tx
+            .send_replace(*self.auth_change_state_receiver().borrow());
+        if let Some(resolver) = self.workspace_routing_resolver.get() {
+            manager.set_workspace_routing_resolver(resolver.clone());
         }
         Ok(Arc::new(manager))
     }
@@ -208,7 +355,7 @@ impl AuthManager {
         self.ensure_personal_account_selection(Some(&auth))?;
         Ok(PreparedAccount {
             manager: self,
-            id: id.to_owned(),
+            route: self.account_routes.select(id, &self.auth_route_config)?,
             auth,
             _refresh: refresh,
         })
@@ -231,7 +378,26 @@ impl AuthManager {
         &self,
         id: &str,
     ) -> Result<CodexAuth, SavedAccountLoadError> {
-        self.saved_account_config().read_saved_account(id).await
+        let cached = self.auth_cached();
+        let auth = self
+            .saved_account_config()
+            .read_saved_account(id, cached.as_ref())
+            .await?;
+        let modes = self.allowed_auth_modes.read().map_err(|_| {
+            SavedAccountLoadError::Storage(std::io::Error::other(
+                "credential policy is unavailable",
+            ))
+        })?;
+        if modes
+            .as_ref()
+            .is_some_and(|modes| !modes.contains(&auth.api_auth_mode()))
+        {
+            return Err(SavedAccountLoadError::Rejected(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "selected account authentication mode is not allowed",
+            )));
+        }
+        Ok(auth)
     }
 
     fn saved_account_config(&self) -> AuthConfig {
@@ -243,7 +409,7 @@ impl AuthManager {
             chatgpt_base_url: self.chatgpt_base_url.clone(),
             forced_chatgpt_workspace_id: self.effective_chatgpt_workspaces(),
             managed_auth_policy: self.managed_auth_policy.clone(),
-            auth_route_config: self.auth_route_config.clone(),
+            auth_route_config: self.current_auth_routes(),
         }
     }
 }
@@ -251,16 +417,24 @@ impl AuthManager {
 impl AuthConfig {
     /// Reads one saved identity without changing the selected account or refreshing tokens.
     pub async fn load_saved_account(&self, id: &str) -> std::io::Result<CodexAuth> {
-        self.read_saved_account(id).await.map_err(Into::into)
+        self.read_saved_account(id, None).await.map_err(Into::into)
     }
 
-    async fn read_saved_account(&self, id: &str) -> Result<CodexAuth, SavedAccountLoadError> {
-        let document = create_auth_storage(
+    async fn read_saved_account(
+        &self,
+        id: &str,
+        cached_auth: Option<&CodexAuth>,
+    ) -> Result<CodexAuth, SavedAccountLoadError> {
+        let backend = create_auth_storage(
             self.codex_home.clone(),
             self.auth_credentials_store_mode,
             self.keyring_backend_kind,
-        )
-        .load_account(id)
+        );
+        let document = super::load_stored_auth(Arc::new(crate::auth::accounts::AccountStorage {
+            backend,
+            id: id.to_owned(),
+        }))
+        .await
         .map_err(SavedAccountLoadError::Storage)?
         .ok_or_else(|| {
             SavedAccountLoadError::Rejected(std::io::Error::new(
@@ -278,6 +452,7 @@ impl AuthConfig {
                 .ok()
                 .as_deref(),
             &self.auth_route_config,
+            cached_auth,
         )
         .await
         .map_err(SavedAccountLoadError::Rejected)?;

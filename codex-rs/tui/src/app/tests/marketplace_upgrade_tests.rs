@@ -84,6 +84,19 @@ async fn automatic_marketplace_upgrade_failure_shows_warning() -> Result<()> {
     while let Ok(event) = events.try_recv() {
         Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
     }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while app.account_ui.displayed.is_none() {
+            tokio::select! {
+                Some(completion) = app.server_operations.control_rx.recv() => {
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
+                }
+                Some(event) = events.recv() => {
+                    Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+                }
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
     let size = Size::new(/*width*/ 80, /*height*/ 16);
     tui.screen_size_for_event(&TuiEvent::Resize(size))?;
     app.render_owned_transcript(&mut tui, size)?;

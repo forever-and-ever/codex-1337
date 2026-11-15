@@ -156,6 +156,22 @@ impl StreamItems {
         consumer.consume_diff(turn, call_id.unwrap_or_else(|| expected.clone()), delta)
     }
 
+    pub(super) fn recover_completion_id(&self, item: &mut ResponseItem) -> CodexResult<()> {
+        if item.id().is_some_and(|id| !id.is_empty()) {
+            return Ok(());
+        }
+        let mut open = self.items.keys();
+        if let Some(id) = open.next() {
+            if open.next().is_some() {
+                return Err(CodexErr::Stream(
+                    "response completion has no ID and several items are open".into(),
+                ));
+            }
+            item.set_id(Some(id.clone()));
+        }
+        Ok(())
+    }
+
     pub(super) fn completed(&mut self, item: &ResponseItem) -> ItemCompletion {
         let removed = item.id().and_then(|id| self.items.remove(id));
         match removed {

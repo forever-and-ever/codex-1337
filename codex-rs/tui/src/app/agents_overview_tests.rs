@@ -8,15 +8,27 @@ mod command_center;
 use super::super::agents_overview_view::AgentsOverviewGroup;
 use super::super::agents_overview_view::AgentsOverviewGrouping;
 use super::*;
+use crate::app::owned_transcript::tests::attach_thread;
 use crate::app::tests::make_test_app_with_channels;
 use crate::chatwidget::tests::helpers::normalize_agent_center_snapshot;
+
+async fn make_test_app_with_chat() -> Box<App> {
+    let mut app = make_test_app().await;
+    attach_thread(&mut app, ThreadId::new());
+    app
+}
 
 #[tokio::test]
 async fn overview_thread_colors_match_footer_and_respect_color_suppression() {
     let mut app = make_test_app().await;
     let id = ThreadId::from_u128(/*value*/ 42);
+    let selected_id = ThreadId::from_u128(/*value*/ 43);
     let mut snapshot = Vec::new();
-    for enabled in [true, false] {
+    for (enabled, unread) in [(true, false), (true, true), (false, false), (false, true)] {
+        app.agents_overview.unread.clear();
+        if unread {
+            app.agents_overview.unread.extend([id, selected_id]);
+        }
         app.local_settings.tui.status_line_use_colors = enabled;
         let mut thread = overview_thread(
             id,
@@ -26,12 +38,9 @@ async fn overview_thread_colors_match_footer_and_respect_color_suppression() {
         );
         thread.name = Some("Named task".into());
         let mut selected = thread.clone();
-        selected.id = ThreadId::from_u128(/*value*/ 43).to_string();
+        selected.id = selected_id.to_string();
         selected.name = Some("Selected task".into());
-        let view = app.agents_overview_view(
-            vec![thread, selected],
-            Some(ThreadId::from_u128(/*value*/ 43)),
-        );
+        let view = app.agents_overview_view(vec![thread, selected], Some(selected_id));
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal
             .draw(|frame| view.render(frame.area(), frame.buffer_mut()))
@@ -39,6 +48,18 @@ async fn overview_thread_colors_match_footer_and_respect_color_suppression() {
         let buffer = terminal.backend().buffer();
         for row in buffer.content.chunks(100) {
             let text: String = row.iter().map(ratatui::buffer::Cell::symbol).collect();
+            if let Some(x) = text.find("■ Selected task") {
+                let x = text[..x].chars().count();
+                assert_eq!(
+                    row[x + 2].modifier.contains(ratatui::style::Modifier::BOLD),
+                    unread
+                );
+                snapshot.push(format!(
+                    "selected dot {:?} | title {:?}",
+                    row[x].style(),
+                    row[x + 2].style(),
+                ));
+            }
             if let Some(x) = text.find("Named task") {
                 let x = text[..x].chars().count();
                 let marker = crate::agent_status::marker(Some(&ThreadStatus::Idle));
@@ -51,9 +72,14 @@ async fn overview_thread_colors_match_footer_and_respect_color_suppression() {
                     .set_symbol(marker.content.as_ref())
                     .set_style(marker.style);
                 assert_eq!(dot, &expected);
+                assert_eq!(
+                    row[x].modifier.contains(ratatui::style::Modifier::BOLD),
+                    unread
+                );
                 snapshot.push(format!(
-                    "{} | title style: {:?}",
+                    "{} | unread: {:?} | title style: {:?}",
                     normalize_agent_center_snapshot(&text),
+                    unread,
                     row[x].style()
                 ));
             }
@@ -240,6 +266,7 @@ pub(in crate::app) fn overview_thread(
         context_role: None,
         session_id: parent_thread_id.unwrap_or(thread_id).to_string(),
         forked_from_id: None,
+        attached_to_thread_id: None,
         parent_thread_id: None,
         preview: name.to_string(),
         ephemeral: false,
@@ -755,11 +782,12 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
         &app_server,
         request_id,
         Ok(AgentsOverviewThreadRefresh {
+            cleared_unread: Vec::new(),
             last_messages: HashMap::new(),
             threads: HashMap::from([
-                (retained, Some(retained_thread.clone())),
-                (archived, Some(archived_thread)),
-                (deleted, Some(deleted_thread)),
+                (retained, Some((retained_thread.clone(), false, None))),
+                (archived, Some((archived_thread, false, None))),
+                (deleted, Some((deleted_thread, false, None))),
             ]),
             recent_seed_complete: true,
             discovery: None,
@@ -780,6 +808,7 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
         &app_server,
         request_id,
         Ok(AgentsOverviewThreadRefresh {
+            cleared_unread: Vec::new(),
             last_messages: HashMap::new(),
             threads: HashMap::from([(retained, None)]),
             recent_seed_complete: true,
@@ -830,6 +859,7 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
                 &app_server,
                 request_id,
                 Ok(AgentsOverviewThreadRefresh {
+                    cleared_unread: Vec::new(),
                     threads: HashMap::new(),
                     last_messages,
                     recent_seed_complete: true,
@@ -1166,7 +1196,7 @@ async fn check_hidden_thread_does_not_refresh_shared_overview(source: &str) {
 
 #[tokio::test]
 async fn agents_overview_details_show_available_attention_without_expanding_rows() -> Result<()> {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let [root, failed_agent, child, unloaded] = std::array::from_fn(|_| ThreadId::new());
     let waiting = ThreadStatus::Active {
@@ -1290,7 +1320,7 @@ fn reasoning_delta(thread_id: ThreadId, item_id: &str, delta: &str) -> ServerNot
 
 #[tokio::test]
 async fn agents_overview_details_render_markdown() {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let thread_id = ThreadId::new();
     let mut thread = overview_thread(
         thread_id,
@@ -1326,6 +1356,7 @@ async fn agents_overview_details_render_markdown() {
                 thread.id.clone(),
                 "turn".into(),
                 ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "answer".into(),
                     text: message.into(),
                     phase: None,
@@ -1431,7 +1462,7 @@ fn agents_overview_markdown_preview_preserves_layout_and_bounds() {
 
 #[tokio::test]
 async fn agents_overview_reasoning_uses_existing_events_and_expires_with_attachment() {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let thread_id = ThreadId::new();
     let mut thread = overview_thread(
         thread_id,
@@ -1479,6 +1510,7 @@ async fn agents_overview_reasoning_uses_existing_events_and_expires_with_attachm
             parent.id.clone(),
             "previous-turn".into(),
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "answer".into(),
                 text: "Previous answer".into(),
                 phase: None,
@@ -1530,7 +1562,7 @@ async fn agents_overview_reasoning_uses_existing_events_and_expires_with_attachm
 
 #[tokio::test]
 async fn overview_model_grouping_shows_details_and_preserves_selection() {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let threads = [
         ("Older task", Some("model-a"), 1),
         ("Other model", Some("model-b"), 2),
@@ -1591,6 +1623,7 @@ async fn shared_overview_shows_only_root_sessions() {
     let first_root = ThreadId::from_string("00000000-0000-0000-0000-000000000101").unwrap();
     let unloaded_root = ThreadId::from_string("00000000-0000-0000-0000-000000000102").unwrap();
     let [child, second_root, side_thread] = std::array::from_fn(|_| ThreadId::new());
+    attach_thread(&mut app, first_root);
     app.primary_thread_id = Some(first_root);
 
     let mut threads = vec![
@@ -1655,6 +1688,10 @@ async fn shared_overview_shows_only_root_sessions() {
     );
     action_view.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
     assert!(action_view.handle_paste("Repair authentication".into()));
+    assert!(matches!(
+        event_rx.try_recv(),
+        Ok(AppEvent::SearchAgentsOverview(..))
+    ));
     action_view.handle_key_event(KeyCode::Enter.into());
     assert!(
         matches!(event_rx.try_recv(), Ok(AppEvent::SelectAgentsOverviewThread { thread_id }) if thread_id == second_root)
@@ -1744,66 +1781,6 @@ async fn shared_overview_shows_only_root_sessions() {
     assert!(app.last_rendered_history_tail.is_some());
 }
 
-#[cfg(any(unix, windows))]
-#[tokio::test]
-async fn embedded_sessions_offer_to_start_a_background_server_without_migrating() {
-    let mut app = make_test_app().await;
-    let app_server = crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
-        .await
-        .expect("embedded app server");
-
-    app.open_agents_overview(&app_server);
-
-    insta::with_settings!({snapshot_path => "../snapshots"}, {
-        insta::assert_snapshot!(
-            "agents_overview_embedded",
-            render_bottom_popup(&app.chat_widget, /*width*/ 96)
-        );
-    });
-    app_server.shutdown().await.expect("shutdown app server");
-}
-
-#[cfg(any(unix, windows))]
-#[tokio::test]
-async fn daemon_start_result_snapshots() -> Result<()> {
-    let (mut app, mut app_event_rx, _op_rx) =
-        crate::app::tests::make_test_app_with_channels().await;
-    let mut app_server =
-        crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-
-    for (name, result) in [
-        ("agents_daemon_started", Ok(())),
-        (
-            "agents_daemon_start_failed",
-            Err("The host does not allow detached processes".to_string()),
-        ),
-    ] {
-        app.handle_event(
-            &mut tui,
-            &mut app_server,
-            AppEvent::AgentsDaemonStarted { result },
-        )
-        .await?;
-        let cell = match app_event_rx.try_recv()? {
-            AppEvent::InsertHistoryCell(cell) => cell,
-            other => panic!("expected daemon result history, got {other:?}"),
-        };
-        let rendered = cell
-            .display_lines(/*width*/ 80)
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        insta::with_settings!({snapshot_path => "../snapshots"}, {
-            insta::assert_snapshot!(name, rendered);
-        });
-    }
-
-    app_server.shutdown().await?;
-    Ok(())
-}
-
 #[tokio::test]
 async fn filtered_dashboard_actions_use_configured_shortcuts() {
     let mut app = make_test_app().await;
@@ -1856,6 +1833,10 @@ async fn filtered_dashboard_actions_use_configured_shortcuts() {
 
     view.handle_key_event(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
     assert!(view.handle_paste("Second task".to_string()));
+    assert!(matches!(
+        event_rx.try_recv(),
+        Ok(AppEvent::SearchAgentsOverview(..))
+    ));
     view.handle_key_event(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE));
     assert!(matches!(
         event_rx.try_recv(),
@@ -3031,6 +3012,7 @@ async fn command_center_refresh_failure_is_inline_and_clears_on_success() -> Res
     for result in [
         Err("unavailable".into()),
         Ok(AgentsOverviewThreadRefresh {
+            cleared_unread: Vec::new(),
             threads: HashMap::new(),
             last_messages: HashMap::new(),
             recent_seed_complete: false,
@@ -3063,6 +3045,7 @@ async fn command_center_refresh_failure_is_inline_and_clears_on_success() -> Res
         &server,
         request_id,
         Ok(AgentsOverviewThreadRefresh {
+            cleared_unread: Vec::new(),
             threads: HashMap::new(),
             last_messages: HashMap::new(),
             recent_seed_complete: true,
@@ -3246,6 +3229,10 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
             assert!(!matches!(
                 event,
                 AppEvent::CodexOp(AppCommand::UserTurn { .. })
+                    | AppEvent::SubmitThreadOp {
+                        op: AppCommand::UserTurn { .. },
+                        ..
+                    }
             ));
         }
         let retained = app.agents_overview.input_states[&source].clone();
@@ -3390,4 +3377,67 @@ async fn command_center_new_actions_use_selection_and_leave_metadata_text_alone(
         rx.try_recv(),
         Ok(AppEvent::NewAgentsOverviewSession { cwd: None })
     ));
+}
+
+#[tokio::test]
+async fn daemon_start_result_snapshots() -> Result<()> {
+    let (mut app, mut events, _ops) = crate::app::tests::make_test_app_with_channels().await;
+    let mut server =
+        crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let thread = ThreadId::new();
+    app.enqueue_primary_thread_session(
+        crate::app::tests::test_thread_session(thread, app.config.cwd.to_path_buf()),
+        Vec::new(),
+    )
+    .await?;
+    app.chat_widget.insert_str("Retained embedded draft");
+    while events.try_recv().is_ok() {}
+    app.request_agents_overview(&server);
+    assert!(
+        crate::chatwidget::tests::helpers::render_bottom_popup(&app.chat_widget, 80)
+            .contains("Shared agents unavailable")
+    );
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::StartAgentsDaemon))
+    );
+
+    for (name, result) in [
+        ("agents_daemon_started", Ok(())),
+        (
+            "agents_daemon_start_failed",
+            Err("The host does not allow detached processes".into()),
+        ),
+    ] {
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::AgentsDaemonStarted { result },
+        )
+        .await?;
+        let cell = match events.try_recv()? {
+            AppEvent::InsertHistoryCell(cell) => cell,
+            other => panic!("expected daemon result history, got {other:?}"),
+        };
+        let rendered = cell
+            .display_lines(80)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::with_settings!({snapshot_path => "../snapshots"}, {
+            insta::assert_snapshot!(name, rendered);
+        });
+        assert_eq!(app.active_thread_id, Some(thread));
+        assert_eq!(app.primary_thread_id, Some(thread));
+        assert_eq!(app.chat_widget.thread_id(), Some(thread));
+        assert_eq!(
+            app.chat_widget.composer_text_with_pending(),
+            "Retained embedded draft"
+        );
+    }
+    server.shutdown().await?;
+    Ok(())
 }

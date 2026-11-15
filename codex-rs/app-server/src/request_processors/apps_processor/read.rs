@@ -28,11 +28,19 @@ impl AppsRequestProcessor {
             .collect::<Vec<_>>();
         let AppsContext {
             mut config,
-            auth_manager,
+            auth_source,
+            runtime,
             plugins_manager,
             ..
         } = self.load_apps_context(thread_id.as_deref()).await?;
-        let auth = match auth_manager.auth_with_http_client_factory().await {
+        auth_source
+            .validate()
+            .map_err(|error| internal_error(error.to_string()))?;
+        let auth = match auth_source
+            .credentials()
+            .auth_with_http_client_factory()
+            .await
+        {
             Some((auth, factory)) => {
                 config.application_network_policy = factory.network_policy().clone();
                 Some(auth)
@@ -57,9 +65,15 @@ impl AppsRequestProcessor {
         let connectors::ConnectorMetadataReadResult {
             apps,
             missing_app_ids,
-        } = connectors::read_connector_metadata(&config, auth, &app_ids, include_tools)
-            .await
-            .map_err(|err| internal_error(format!("failed to read app metadata: {err}")))?;
+        } = connectors::read_connector_metadata(
+            &config,
+            auth,
+            runtime.as_ref(),
+            &app_ids,
+            include_tools,
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to read app metadata: {err}")))?;
         let loaded_plugins = plugins_manager
             .plugins_for_config(&config.plugins_config_input())
             .await;

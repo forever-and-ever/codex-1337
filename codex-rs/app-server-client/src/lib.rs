@@ -21,14 +21,9 @@
 //! runtime remain bounded; the local consumer event queue is unbounded so
 //! unread notifications cannot prevent request responses from being delivered.
 
-mod cloud;
 mod path;
 mod remote;
 mod remote_websocket;
-pub use cloud::CloudClient;
-pub use cloud::CloudCommand;
-pub use cloud::CloudOperation;
-pub use cloud::CloudRequestHandle;
 mod server_request;
 pub use server_request::AppServerReplyHandle;
 
@@ -238,13 +233,20 @@ pub struct InProcessAppServerRequestHandle {
 
 #[derive(Clone)]
 pub enum AppServerRequestHandle {
-    Cloud(CloudRequestHandle),
     InProcess(InProcessAppServerRequestHandle),
     Remote(crate::remote::RemoteAppServerRequestHandle),
 }
 
+impl std::fmt::Debug for AppServerRequestHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InProcess(_) => "AppServerRequestHandle::InProcess",
+            Self::Remote(_) => "AppServerRequestHandle::Remote",
+        })
+    }
+}
+
 pub enum AppServerClient {
-    Cloud(CloudClient),
     InProcess(InProcessAppServerClient),
     Remote(RemoteAppServerClient),
 }
@@ -598,8 +600,6 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(_) => true,
             Self::Remote(handle) => handle.supports_thread_coordination(),
-            // The channel adapter has no initialize capability negotiation.
-            Self::Cloud(_) => false,
         }
     }
     pub async fn resolve_server_request(
@@ -610,7 +610,6 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.resolve_server_request(request_id, result).await,
             Self::Remote(handle) => handle.resolve_server_request(request_id, result).await,
-            Self::Cloud(handle) => handle.resolve_server_request(request_id, result).await,
         }
     }
 
@@ -622,7 +621,6 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.reject_server_request(request_id, error).await,
             Self::Remote(handle) => handle.reject_server_request(request_id, error).await,
-            Self::Cloud(handle) => handle.reject_server_request(request_id, error).await,
         }
     }
 
@@ -630,7 +628,6 @@ impl AppServerRequestHandle {
         match self {
             Self::InProcess(handle) => handle.request(request).await,
             Self::Remote(handle) => handle.request(request).await,
-            Self::Cloud(handle) => handle.request(request).await,
         }
     }
 
@@ -650,8 +647,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(_) => true,
             Self::Remote(client) => client.supports_thread_coordination(),
-            // A cloud command channel does not advertise native coordination ownership.
-            Self::Cloud(_) => false,
         }
     }
     /// App-server platform family, which can differ from the executor's platform.
@@ -660,7 +655,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(_) => Some(std::env::consts::FAMILY),
             Self::Remote(client) => client.platform_family(),
-            Self::Cloud(_) => None,
         }
     }
 
@@ -669,7 +663,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(_) => Some(std::env::consts::OS),
             Self::Remote(client) => client.platform_os(),
-            Self::Cloud(_) => None,
         }
     }
 
@@ -679,7 +672,6 @@ impl AppServerClient {
                 local_codex_home.display().to_string(),
             )),
             Self::Remote(client) => client.codex_home().map(AppServerPath::from_app_server),
-            Self::Cloud(_) => None,
         }
     }
 
@@ -687,7 +679,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.request(request).await,
             Self::Remote(client) => client.request(request).await,
-            Self::Cloud(client) => client.request(request).await,
         }
     }
 
@@ -704,7 +695,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.notify(notification).await,
             Self::Remote(client) => client.notify(notification).await,
-            Self::Cloud(client) => client.notify(notification).await,
         }
     }
 
@@ -716,7 +706,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.resolve_server_request(request_id, result).await,
             Self::Remote(client) => client.resolve_server_request(request_id, result).await,
-            Self::Cloud(client) => client.resolve_server_request(request_id, result).await,
         }
     }
 
@@ -728,7 +717,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.reject_server_request(request_id, error).await,
             Self::Remote(client) => client.reject_server_request(request_id, error).await,
-            Self::Cloud(client) => client.reject_server_request(request_id, error).await,
         }
     }
 
@@ -736,7 +724,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.next_event().await.map(Into::into),
             Self::Remote(client) => client.next_event().await,
-            Self::Cloud(client) => client.next_event().await,
         }
     }
 
@@ -744,7 +731,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => client.shutdown().await,
             Self::Remote(client) => client.shutdown().await,
-            Self::Cloud(client) => client.shutdown().await,
         }
     }
 
@@ -752,7 +738,6 @@ impl AppServerClient {
         match self {
             Self::InProcess(client) => AppServerRequestHandle::InProcess(client.request_handle()),
             Self::Remote(client) => AppServerRequestHandle::Remote(client.request_handle()),
-            Self::Cloud(client) => AppServerRequestHandle::Cloud(client.request_handle()),
         }
     }
 }
@@ -851,6 +836,7 @@ mod tests {
             .expect("state db should initialize for in-process test");
         codex_app_server::install_embedded_runtime();
         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
+            required_human_approval: false,
             arg0_paths: Arg0DispatchPaths::default(),
             config,
             cli_overrides: Vec::new(),
@@ -1042,6 +1028,7 @@ mod tests {
                 "thread".to_string(),
                 "turn".to_string(),
                 codex_app_server_protocol::ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "item".to_string(),
                     text: text.to_string(),
                     phase: None,
@@ -1074,6 +1061,7 @@ mod tests {
 
     fn test_remote_connect_args(websocket_url: String) -> RemoteAppServerConnectArgs {
         RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url,
                 auth_token: None,
@@ -1385,6 +1373,7 @@ mod tests {
                     JSONRPCMessage::Response(JSONRPCResponse {
                         id: request.id,
                         result: serde_json::to_value(GetAccountResponse {
+                            user_id: None,
                             display_name: None,
                             account_id: None,
                             account: None,
@@ -1446,6 +1435,7 @@ mod tests {
                 JSONRPCMessage::Response(JSONRPCResponse {
                     id: request.id,
                     result: serde_json::to_value(GetAccountResponse {
+                        user_id: None,
                         display_name: None,
                         account_id: None,
                         account: None,
@@ -1459,6 +1449,7 @@ mod tests {
             websocket.close(None).await.expect("close should succeed");
         });
         let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
             client_name: "codex-app-server-client-test".to_string(),
             client_version: "0.0.0-test".to_string(),
@@ -1529,6 +1520,7 @@ mod tests {
         assert_eq!(
             response,
             GetAccountResponse {
+                user_id: None,
                 display_name: None,
                 account_id: None,
                 account: None,
@@ -1552,6 +1544,7 @@ mod tests {
         )
         .await;
         let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url,
                 auth_token: Some(auth_token),
@@ -1572,6 +1565,7 @@ mod tests {
     #[tokio::test]
     async fn remote_connect_rejects_non_loopback_ws_when_auth_configured() {
         let result = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url: "ws://example.com:4500".to_string(),
                 auth_token: Some("remote-bearer-token".to_string()),
@@ -1635,6 +1629,7 @@ mod tests {
                 JSONRPCMessage::Response(JSONRPCResponse {
                     id: request.id,
                     result: serde_json::to_value(GetAccountResponse {
+                        user_id: None,
                         display_name: None,
                         account_id: None,
                         account: None,
@@ -1695,6 +1690,7 @@ mod tests {
         assert_eq!(
             first_response,
             GetAccountResponse {
+                user_id: None,
                 display_name: None,
                 account_id: None,
                 account: None,

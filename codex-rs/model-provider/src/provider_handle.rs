@@ -8,8 +8,22 @@ use codex_protocol::error::CodexErr;
 use std::ops::Deref;
 use std::sync::Arc;
 
+/// Resolve configured bearer bytes once when admitting auxiliary work.
+pub fn configured_bearer_credentials(
+    info: &codex_model_provider_info::ModelProviderInfo,
+) -> codex_protocol::error::Result<Option<codex_login::CodexAuth>> {
+    Ok(crate::auth::bearer_auth_for_provider(info)?
+        .and_then(|bearer| bearer.token)
+        .map(|token| codex_login::CodexAuth::from_api_key(&token)))
+}
+
 pub trait ProviderCredentialGuard: std::fmt::Debug + Send + Sync {
     fn validate(&self, auth: Option<&codex_login::CodexAuth>) -> codex_protocol::error::Result<()>;
+
+    /// A configured bearer can be captured without inventing a storage owner.
+    fn configured_bearer(&self) -> Option<codex_login::CodexAuth> {
+        None
+    }
 }
 
 pub trait ForkModelProvider: ModelProvider {
@@ -52,6 +66,17 @@ pub trait ForkModelProvider: ModelProvider {
             "provider cannot bind captured credential validation".into(),
         ))
     }
+
+    fn for_transport(
+        &self,
+        _request_max_retries: Option<u64>,
+        _stream_max_retries: Option<u64>,
+        _supports_websockets: bool,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        Err(CodexErr::UnsupportedOperation(
+            "provider cannot derive captured transport settings".into(),
+        ))
+    }
 }
 impl ForkModelProvider for ConfiguredModelProvider {
     fn credential_runtime(
@@ -60,9 +85,7 @@ impl ForkModelProvider for ConfiguredModelProvider {
         Arc<codex_runtime_agent_instance::RuntimeAuthManager>,
         codex_features::RuntimeAuthMode,
     )> {
-        self.runtime_auth
-            .as_ref()
-            .or(self.catalog_runtime_auth.as_ref())
+        self.credential_runtime_auth.as_ref()
     }
     fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
         self.anthropic_auth_context
@@ -89,7 +112,7 @@ impl ForkModelProvider for ConfiguredModelProvider {
     ) -> codex_protocol::error::Result<SharedModelProvider> {
         let mut provider = self.clone();
         if let Some((runtime, _)) = &context.runtime_auth {
-            crate::validate_runtime_provider(&self.info, Some(&context.credentials), runtime)?;
+            crate::select_runtime_provider(&self.info, Some(&context.credentials), runtime)?;
         }
         let select_runtime = |destination: Option<&str>| {
             context.runtime_auth.clone().filter(|_| {
@@ -100,25 +123,17 @@ impl ForkModelProvider for ConfiguredModelProvider {
                     })
             })
         };
-        // A catalog-only runtime must retain its original credential pair too.
-        if self.runtime_auth.is_none()
-            && let Some((runtime, _)) = &self.catalog_runtime_auth
-        {
-            crate::validate_runtime_provider(&self.info, Some(&context.credentials), runtime)?;
-        }
-        provider.runtime_auth.clone_from(&context.runtime_auth);
-        provider.catalog_runtime_auth =
-            if self.runtime_auth.is_none() && context.runtime_auth.is_none() {
-                self.catalog_runtime_auth.clone()
-            } else {
-                select_runtime(
-                    self.info
-                        .model_catalog_url
-                        .as_deref()
-                        .map(String::as_str)
-                        .or(self.info.base_url.as_deref()),
-                )
-            };
+        provider
+            .credential_runtime_auth
+            .clone_from(&context.runtime_auth);
+        provider.runtime_auth = select_runtime(self.info.base_url.as_deref());
+        provider.catalog_runtime_auth = select_runtime(
+            self.info
+                .model_catalog_url
+                .as_deref()
+                .map(String::as_str)
+                .or(self.info.base_url.as_deref()),
+        );
         provider.auth_manager = Some(context.credentials);
         Ok(ProviderHandle::configured(provider))
     }
@@ -134,9 +149,28 @@ impl ForkModelProvider for ConfiguredModelProvider {
         provider.credential_guard = Some(guard);
         Ok(ProviderHandle::configured(provider))
     }
+
+    fn for_transport(
+        &self,
+        request_max_retries: Option<u64>,
+        stream_max_retries: Option<u64>,
+        supports_websockets: bool,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        let mut provider = self.clone();
+        provider.info.request_max_retries = request_max_retries;
+        provider.info.stream_max_retries = stream_max_retries;
+        provider.info.supports_websockets = supports_websockets;
+        Ok(ProviderHandle::configured(provider))
+    }
 }
 #[derive(Clone, Debug)]
 pub struct ProviderHandle(Arc<dyn ForkModelProvider>);
+
+impl AsRef<dyn ModelProvider> for ProviderHandle {
+    fn as_ref(&self) -> &(dyn ModelProvider + 'static) {
+        self.0.as_ref()
+    }
+}
 impl ProviderHandle {
     pub(super) fn configured(provider: ConfiguredModelProvider) -> SharedModelProvider {
         Self::custom(Arc::new(provider))
@@ -194,6 +228,16 @@ impl ProviderHandle {
         guard: Arc<dyn ProviderCredentialGuard>,
     ) -> codex_protocol::error::Result<SharedModelProvider> {
         self.0.with_credential_guard(guard)
+    }
+
+    pub fn for_transport(
+        &self,
+        request_max_retries: Option<u64>,
+        stream_max_retries: Option<u64>,
+        supports_websockets: bool,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        self.0
+            .for_transport(request_max_retries, stream_max_retries, supports_websockets)
     }
 }
 // Configured/discovery state, never captured execution authority.

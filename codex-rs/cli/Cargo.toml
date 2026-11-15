@@ -42,7 +42,6 @@ codex-api = { workspace = true }
 codex-backend-client = { workspace = true }
 codex-chatgpt = { workspace = true }
 codex-cloud-config = { workspace = true }
-codex-cloud-tasks = { path = "../cloud-tasks" }
 codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
@@ -135,6 +134,7 @@ app_test_support = { workspace = true }
 assert_cmd = { workspace = true }
 assert_matches = { workspace = true }
 codex-app-server-client = { workspace = true }
+codex-uds = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }
 codex-utils-pty = { workspace = true }
 core_test_support = { workspace = true }

@@ -205,4 +205,10 @@ async fn owned_screen_lifecycle_child() {
     tui.set_owned_screen(/*owned*/ false)
         .expect("release session screen");
     assert_eq!(tui.terminal.viewport_area, inline);
+
+    // A fresh fullscreen launch defers terminal entry until its first frame.
+    tui.prepare_owned_screen(/*owned*/ true)
+        .expect("prepare fullscreen");
+    tui.set_owned_screen(/*owned*/ false)
+        .expect("return to scrollback");
 }

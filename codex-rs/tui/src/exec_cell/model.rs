@@ -28,6 +28,30 @@ pub(crate) struct CommandOutput {
 }
 
 impl CommandOutput {
+    pub(crate) fn from_execution(
+        status: codex_app_server_protocol::CommandExecutionStatus,
+        exit_code: Option<i32>,
+        source: ExecCommandSource,
+        output: Option<String>,
+    ) -> Self {
+        let exit_code = if status == codex_app_server_protocol::CommandExecutionStatus::Completed {
+            exit_code.unwrap_or_default()
+        } else {
+            exit_code.filter(|code| *code != 0).unwrap_or(1)
+        };
+        let output = if source == ExecCommandSource::UnifiedExecInteraction {
+            String::new()
+        } else {
+            output.unwrap_or_default()
+        };
+        // TELOS(fullscreen-only): a declined invocation is not an executed failure.
+        if status == codex_app_server_protocol::CommandExecutionStatus::Declined {
+            Self::new(CommandOutcome::Declined, output)
+        } else {
+            Self::new(exit_code, output)
+        }
+    }
+
     pub(crate) fn new(outcome: impl Into<CommandOutcome>, aggregated_output: String) -> Self {
         Self {
             outcome: outcome.into(),

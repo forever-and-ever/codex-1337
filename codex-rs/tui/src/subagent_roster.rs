@@ -162,8 +162,10 @@ impl RosterView {
             [(StatusLineItem::ModelWithReasoning, label)],
             self.use_theme_colors,
             Some(row.id),
+            None,
         )
         .unwrap_or_default()
+        .line
     }
 }
 

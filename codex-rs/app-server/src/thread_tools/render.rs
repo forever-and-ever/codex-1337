@@ -67,7 +67,10 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
                         ..
                     } => json!({"type": "image", "fileId": file_id}),
                     UserInput::LocalImage { path, .. } => json!({"type": "localImage", "path": path}),
-                    UserInput::Audio { url } => json!({"type": "audio", "url": url}),
+                    UserInput::Audio { audio } => match audio {
+                        codex_app_server_protocol::AudioReference::Inline { url } => json!({"type": "audio", "url": url}),
+                        codex_app_server_protocol::AudioReference::File { file_id } => json!({"type": "audio", "fileId": file_id}),
+                    },
                     UserInput::LocalAudio { path } => json!({"type": "localAudio", "path": path}),
                     UserInput::Skill { name, path } => json!({"type": "skill", "name": name, "path": path}),
                     UserInput::Mention { name, path } => json!({"type": "mention", "name": name, "path": path}),

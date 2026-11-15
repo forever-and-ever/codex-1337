@@ -55,7 +55,7 @@ impl LocalAgentControl {
     ) -> CodexResult<Option<OwnedRwLockReadGuard<()>>> {
         let manager = self.runtime.upgrade()?;
         if let Ok(thread) = manager.get_thread(recipient).await {
-            return self.runtime.pin_v2_residency(&manager, &thread).await;
+            return self.runtime.pin_v2_residency(&thread).await;
         }
         let sender = self
             .runtime

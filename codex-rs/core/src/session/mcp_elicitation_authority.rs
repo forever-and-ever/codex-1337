@@ -292,21 +292,26 @@ async fn review_bound_elicitation(
             .config
             .features
             .enabled(Feature::GuardianApproval)
-            || turn_context
-                .config
-                .config_layer_stack
-                .requirements()
-                .approvals_reviewer
-                .can_set(&ApprovalsReviewer::AutoReview)
-                .is_err()
-            || crate::connectors::mcp_approvals_reviewer_from_layers(
+            || [
                 &turn_context.config.config_layer_stack,
-                ApprovalsReviewer::AutoReview,
-                Some(model_info.slug.as_str()),
-                request.server_name.as_str(),
-                connector_id,
-                /*link_id*/ None,
-            ) != ApprovalsReviewer::AutoReview
+                &mcp_config.config_layer_stack,
+            ]
+            .into_iter()
+            .any(|layers| {
+                layers
+                    .requirements()
+                    .approvals_reviewer
+                    .can_set(&ApprovalsReviewer::AutoReview)
+                    .is_err()
+                    || crate::connectors::mcp_approvals_reviewer_from_layers(
+                        layers,
+                        ApprovalsReviewer::AutoReview,
+                        Some(model_info.slug.as_str()),
+                        request.server_name.as_str(),
+                        connector_id,
+                        /*link_id*/ None,
+                    ) != ApprovalsReviewer::AutoReview
+            })
             || request
                 .elicitation
                 .meta()
@@ -370,8 +375,20 @@ async fn review_bound_elicitation(
             elicitation_connector_id(&request.elicitation),
             /*link_id*/ None,
         );
+        let mcp_reviewer = crate::connectors::mcp_approvals_reviewer_from_layers(
+            &mcp_config.config_layer_stack,
+            review_context.approvals_reviewer,
+            Some(model_info.slug.as_str()),
+            request.server_name.as_str(),
+            elicitation_connector_id(&request.elicitation),
+            /*link_id*/ None,
+        );
         review_context.approval_policy = approval_policy;
-        review_context.approvals_reviewer = approvals_reviewer;
+        review_context.approvals_reviewer = if approvals_reviewer == mcp_reviewer {
+            approvals_reviewer
+        } else {
+            ApprovalsReviewer::User
+        };
         match guardian_elicitation_review_request(&request, originating_call_id) {
             GuardianElicitationReview::NotRequested => return Ok(None),
             GuardianElicitationReview::Decline(reason) => {
@@ -403,6 +420,14 @@ async fn review_bound_elicitation(
         }
     };
     guardian_request.category = guardian_scope;
+    if let Ok(crate::guardian::GuardianApprovalRequest::McpToolCall {
+        prompt_permissions, ..
+    }) = &mut guardian_request.request
+        && let Some(permissions) =
+            approval_context.and_then(|context| context.environment_permissions)
+    {
+        *prompt_permissions = Some(permissions);
+    }
     let declined_reason = guardian_request.request.as_ref().err().cloned();
     let decision = crate::guardian::decide_approval(
         session,

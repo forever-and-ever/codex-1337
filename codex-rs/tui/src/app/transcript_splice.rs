@@ -6,6 +6,11 @@ use super::tui;
 use std::ops::Range;
 
 pub(super) enum TranscriptSplice {
+    Companion {
+        thread_id: super::ThreadId,
+        range: Range<usize>,
+        cells: Vec<Arc<dyn HistoryCell>>,
+    },
     Revision {
         range: Range<usize>,
         cell: Arc<dyn HistoryCell>,
@@ -28,6 +33,18 @@ impl App {
         splice: TranscriptSplice,
     ) {
         match splice {
+            TranscriptSplice::Companion {
+                thread_id,
+                range,
+                cells,
+            } => {
+                if let Some(companion) = self.side_companions.get_mut(&thread_id) {
+                    companion
+                        .view
+                        .replace_group_members(&companion.cells, range.clone(), &cells);
+                    companion.cells.splice(range, cells);
+                }
+            }
             TranscriptSplice::Revision { range, cell } => {
                 self.native_history
                     .consolidate(&self.transcript_cells[range.clone()], &cell);

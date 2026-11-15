@@ -44,9 +44,9 @@ macro_rules! typed_requests {
 }
 
 typed_requests! {
+    thread_prepare_approved_plan(api::ThreadPrepareApprovedPlanParams) -> api::ThreadPrepareApprovedPlanResponse = ThreadPrepareApprovedPlan;
     thread_read(api::ThreadReadParams) -> api::ThreadReadResponse = ThreadRead;
     thread_loaded_list(api::ThreadLoadedListParams) -> api::ThreadLoadedListResponse = ThreadLoadedList;
-    thread_set_name(api::ThreadSetNameParams) -> api::ThreadSetNameResponse = ThreadSetName;
     thread_allocate_name(api::ThreadSetNameParams) -> api::ThreadSetNameResponse = ThreadSetName;
     thread_metadata_update(api::ThreadMetadataUpdateParams) -> api::ThreadMetadataUpdateResponse = ThreadMetadataUpdate;
     thread_memory_mode_set(api::ThreadMemoryModeSetParams) -> api::ThreadMemoryModeSetResponse = ThreadMemoryModeSet;

@@ -24,9 +24,6 @@ pub fn encode_anthropic_request(
     prompt: &AnthropicPrompt<'_>,
     options: &AnthropicRequestOptions<'_>,
 ) -> Result<AnthropicRequest, ApiError> {
-    if options.model.used_fallback_model_metadata {
-        return Err(invalid("Anthropic requires declared model metadata"));
-    }
     let capabilities = options
         .model
         .anthropic

@@ -4,7 +4,7 @@
 
 export type ModelListParams = {
 /**
- * Configured provider whose catalog should be read on the server.
+ * List models for this configured provider instead of the app-server default.
  */
 modelProvider?: string | null,
 /**

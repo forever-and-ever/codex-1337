@@ -205,6 +205,7 @@ async fn build_and_install_compaction(
         (attempt, compaction_turn_context, None)
     };
     let RemoteCompactV2Attempt {
+        rejected_audio_file_ids,
         input_goal_ids,
         trace_input_history,
         prompt_input,
@@ -230,6 +231,7 @@ async fn build_and_install_compaction(
         } else {
             RetainedImageBudget::Disabled
         },
+        crate::session::file_audio::snapshot(sess).await.as_ref(),
     );
     let reviewer_compaction_hash = reviewer_compaction_hash(sess, turn_context).await;
     let installed = if let Some((prefix, model_info, cutoff_world_state)) = prefix {
@@ -245,10 +247,15 @@ async fn build_and_install_compaction(
             compacted_history,
             replacement_step_context.to_turn_context_item(),
             world_state_baseline,
+            rejected_audio_file_ids,
             CompactedHistoryInstallation::Prefix {
                 prefix,
                 prefix_context,
                 initial_context,
+                reset_world_state_sections: world_state
+                    .full_context_excluded_section_ids()
+                    .chain(cutoff_world_state.full_context_excluded_section_ids())
+                    .collect(),
                 model_info: &model_info,
                 compaction_response_id,
                 reviewer_compaction_hash,
@@ -284,6 +291,7 @@ async fn build_and_install_compaction(
             new_history,
             replacement_step_context.to_turn_context_item(),
             world_state_baseline,
+            rejected_audio_file_ids,
             installation,
         )
         .await
@@ -327,7 +335,9 @@ async fn reviewer_compaction_hash(sess: &Session, turn_context: &TurnContext) ->
         // reviewer, including model changes accepted while compaction was running.
         let mut review_context = crate::guardian::GuardianReviewContext::from(&review_turn);
         review_context.model_info = review_turn.capture_current_model_info();
-        let (_, reviewer) = crate::guardian::resolve_review_model(sess, &review_context).await;
+        let (_, reviewer) = crate::guardian::resolve_review_model(sess, &review_context)
+            .await
+            .ok()?;
         reviewer.comp_hash.clone()
     } else {
         None

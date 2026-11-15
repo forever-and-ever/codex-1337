@@ -347,7 +347,13 @@ async fn backend_banner_fallback_handles_settings_failure_and_queued_manual_sele
                 .handle_key_event(KeyEvent::from(KeyCode::Enter));
             Some(
                 std::iter::from_fn(|| events.try_recv().ok())
-                    .find(|event| matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
+                    .find(|event| {
+                        matches!(
+                            event,
+                            AppEvent::SubmitThreadOp { thread_id, op: AppCommand::UserTurn { .. } }
+                                if Some(*thread_id) == app.active_thread_id
+                        )
+                    })
                     .expect("turn already queued before the failed switch"),
             )
         } else {
@@ -442,8 +448,13 @@ async fn backend_banner_fallback_handles_settings_failure_and_queued_manual_sele
                 vec!["queued before usage reply", "after recovery"]
             );
             assert!(
-                !std::iter::from_fn(|| events.try_recv().ok())
-                    .any(|event| matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
+                !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                    event,
+                    AppEvent::SubmitThreadOp {
+                        op: AppCommand::UserTurn { .. },
+                        ..
+                    } | AppEvent::CodexOp(AppCommand::UserTurn { .. })
+                ))
             );
         }
         server.shutdown().await?;

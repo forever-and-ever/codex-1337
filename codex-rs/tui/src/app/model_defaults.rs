@@ -7,7 +7,6 @@ mod continuations;
 
 use super::App;
 use crate::app_server_session::AppServerSession;
-use crate::app_server_session::ThreadSettingsOwner;
 use crate::service_tier_resolution;
 use codex_app_server_protocol::ConfigEdit;
 use codex_app_server_protocol::WriteStatus;
@@ -61,13 +60,7 @@ impl App {
         } else {
             self.active_thread_reasoning_setting_update_params(effort.clone())
         };
-        let server_owned =
-            app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server;
         let Some(mut params) = params else {
-            if server_owned {
-                self.reject_cloud_model_fallback();
-                return;
-            }
             self.model_selection_generation.advance();
             self.apply_selected_session_model(
                 model,
@@ -103,10 +96,6 @@ impl App {
         let generation = self.model_selection_generation;
         let origin = self.active_thread_id;
         if !app_server.operation_settings_supported() {
-            if server_owned {
-                self.reject_cloud_model_fallback();
-                return;
-            }
             if unsupported_speed {
                 self.chat_widget.add_error_message(
                     "Model selection requires an app server with thread/settings/update support."
@@ -135,10 +124,6 @@ impl App {
                 }
                 match result {
                     Ok(true) => {}
-                    Ok(false) if server_owned => {
-                        app.reject_cloud_model_fallback();
-                        return;
-                    }
                     Ok(false) if !unsupported_speed => {}
                     Ok(false) => {
                         app.chat_widget.add_error_message(

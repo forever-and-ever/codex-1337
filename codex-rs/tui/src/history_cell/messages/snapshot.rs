@@ -8,6 +8,7 @@ impl Clone for AgentMarkdownCell {
         Self {
             timestamp: self.timestamp,
             item_id: self.item_id.clone(),
+            interrupted_item: self.interrupted_item.clone(),
             markdown_source: self.markdown_source.clone(),
             copy_source: self.copy_source.clone(),
             cwd: self.cwd.clone(),

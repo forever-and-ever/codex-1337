@@ -271,6 +271,7 @@ impl Reducers {
         cwd: &AbsolutePathBuf,
         animations: bool,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+        image_origin: crate::history_cell::ImagePathOrigin,
     ) -> Result<Projection, AdmissionFault> {
         let Admission {
             owner,
@@ -308,6 +309,7 @@ impl Reducers {
                     &mut wait,
                     &mut tokens,
                     metadata,
+                    image_origin,
                 )?;
             }
             ServerNotification::ItemCompleted(completed) => {
@@ -318,6 +320,7 @@ impl Reducers {
                     &mut wait,
                     &mut tokens,
                     metadata,
+                    image_origin,
                 )?;
             }
             ServerNotification::CommandExecutionOutputDelta(delta) => {
@@ -341,6 +344,7 @@ impl Reducers {
                         cwd,
                         source,
                         metadata,
+                        image_origin,
                     );
                     *previous = source;
                     block.admit_children(id, cells);
@@ -362,6 +366,7 @@ impl Reducers {
                         cwd,
                         source,
                         metadata,
+                        image_origin,
                     );
                     *previous = source;
                     block.admit_children(id, cells);
@@ -522,6 +527,7 @@ impl ScopedCodeMode {
         wait: &mut Option<Arc<dyn HistoryCell>>,
         tokens: &mut Option<TokenBill>,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+        image_origin: crate::history_cell::ImagePathOrigin,
     ) -> Result<(), AdmissionFault> {
         match item {
             ThreadItemPayload::CodeModeOwned(_) => return Err(AdmissionFault::NestedItem),
@@ -625,7 +631,13 @@ impl ScopedCodeMode {
                 );
                 self.admit_children(
                     id,
-                    crate::thread_transcript::scoped_item_cells(item, cwd, source, metadata),
+                    crate::thread_transcript::scoped_item_cells(
+                        item,
+                        cwd,
+                        source,
+                        metadata,
+                        image_origin,
+                    ),
                 );
             }
         }

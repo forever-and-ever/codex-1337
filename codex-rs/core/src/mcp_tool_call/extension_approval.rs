@@ -146,6 +146,7 @@ pub(crate) async fn approve_extension_tool(
         metadata.clone(),
         Arc::clone(&call.step_context),
         &call.cancellation_token,
+        /*environment_permissions*/ None,
     );
     let mcp_config = config
         .to_mcp_config(&call.session.services.plugins_manager)
@@ -165,7 +166,7 @@ pub(crate) async fn approve_extension_tool(
         .map_or(codex_exec_server::LOCAL_ENVIRONMENT_ID, |server| {
             server.environment_id.as_str()
         });
-    let decision = maybe_request_mcp_tool_approval(
+    let decision = Box::pin(maybe_request_mcp_tool_approval(
         &call.session,
         &call.step_context,
         &call.cancellation_token,
@@ -174,10 +175,13 @@ pub(crate) async fn approve_extension_tool(
         &call.tool_name,
         &metadata,
         &mcp_config,
-        permission_profile,
+        codex_mcp::McpPermissionSource::Thread {
+            profile: permission_profile,
+            host_cwd: &mcp_config.host_cwd,
+        },
         environment_id,
         policy,
-    )
+    ))
     .await;
     match decision {
         None => Ok(()),

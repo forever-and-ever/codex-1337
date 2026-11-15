@@ -15,6 +15,30 @@ use crate::markdown_render::ListSpacing;
 use crate::streaming::completion::PreparedStream;
 
 impl ChatWidget {
+    pub(crate) fn admit_stream_preparation(
+        &mut self,
+        thread_id: ThreadId,
+        item_id: String,
+    ) -> PreparedStream {
+        let prepared = PreparedStream::pending(thread_id, item_id);
+        self.transcript.preparations.push(prepared.clone());
+        prepared
+    }
+
+    pub(crate) fn take_prepared_stream(
+        &mut self,
+        prepared: &PreparedStream,
+    ) -> Option<crate::streaming::completion::PreparedResponse> {
+        let index = self
+            .transcript
+            .preparations
+            .iter()
+            .position(|pending| pending.same_origin(prepared))?;
+        let response = prepared.take_ready()?;
+        self.transcript.preparations.remove(index);
+        Some(response)
+    }
+
     pub(crate) fn accept_prepared_markdown(
         &mut self,
         thread_id: ThreadId,
@@ -89,7 +113,10 @@ impl ChatWidget {
         let tx = self.app_event_tx.clone();
         self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
+        let prepared = self.admit_stream_preparation(thread_id, item_id.clone());
         let result = controller.finish_background(move |source| {
+            #[cfg(test)]
+            crate::streaming::completion::test_support::wait(thread_id, &item_id);
             let source = completed.unwrap_or(source);
             let parsed = parse_assistant_markdown(&source, &cwd);
             let metadata = authoritative.then(|| crate::streaming::completion::PreparedAssistant {
@@ -106,12 +133,8 @@ impl ChatWidget {
             .with_copy_source(Some(source));
             cell.item_id = Some(item_id.clone());
             cell.timestamp = timestamp;
-            tx.send(AppEvent::PreparedStream(PreparedStream {
-                assistant: metadata,
-                thread_id,
-                item_id,
-                cell: Arc::new(cell),
-            }));
+            prepared.complete(metadata, Arc::new(cell));
+            tx.send(AppEvent::PreparedStream(prepared));
         });
         assert!(result.is_ok(), "background stream was checked");
         None
@@ -138,6 +161,7 @@ impl ChatWidget {
         let tx = self.app_event_tx.clone();
         self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
+        let prepared = self.admit_stream_preparation(thread_id, item_id);
         let result = controller.finish_background(move |source| {
             let authoritative = completed.is_some();
             let source = completed.unwrap_or(source);
@@ -146,12 +170,11 @@ impl ChatWidget {
                 source: source.clone(),
                 branch_cwd: None,
             });
-            tx.send(AppEvent::PreparedStream(PreparedStream {
-                assistant: metadata,
-                thread_id,
-                item_id,
-                cell: Arc::new(history_cell::new_proposed_plan(source, &cwd)),
-            }));
+            prepared.complete(
+                metadata,
+                Arc::new(history_cell::new_proposed_plan(source, &cwd)),
+            );
+            tx.send(AppEvent::PreparedStream(prepared));
         });
         assert!(result.is_ok(), "background stream was checked");
         None

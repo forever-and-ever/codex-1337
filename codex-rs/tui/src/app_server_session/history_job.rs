@@ -31,6 +31,7 @@ pub(crate) async fn load(
     through: Option<&str>,
     tracking: Option<(&Config, &LocalSettings)>,
     progress: &(dyn Fn() + Send + Sync),
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> PreparedHistory {
     let mut update = HistoryPaginationUpdate::Untracked;
     let result = async {
@@ -50,6 +51,8 @@ pub(crate) async fn load(
                     HistoryHydrationScope::ThroughTurn,
                 ),
                 progress,
+                false,
+                image_origin,
             )
             .await;
             update = observation;

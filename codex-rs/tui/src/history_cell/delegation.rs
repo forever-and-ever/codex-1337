@@ -76,6 +76,10 @@ impl HistoryCell for DelegatedMessageCell {
         lines
     }
 
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.display_hyperlink_lines(width)
+    }
+
     fn raw_lines(&self) -> Vec<Line<'static>> {
         sanitize_user_text(self.message.input.as_str().into())
             .lines()

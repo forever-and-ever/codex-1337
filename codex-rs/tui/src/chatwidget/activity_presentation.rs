@@ -9,11 +9,13 @@ mod live_snapshot;
 pub(super) use live_snapshot::LiveSnapshot;
 
 impl ChatWidget {
+    pub(crate) fn active_activity_cell(&self) -> Option<&dyn HistoryCell> {
+        self.transcript.active_cell.as_deref()
+    }
+
     pub(crate) fn active_activity_ids(&self) -> Vec<String> {
-        self.transcript
-            .active_cell
-            .as_ref()
-            .map_or_else(Vec::new, |cell| cell.activity_ids())
+        self.active_activity_cell()
+            .map_or_else(Vec::new, HistoryCell::activity_ids)
     }
 
     pub(crate) fn active_invocation_cell(&self) -> Option<&dyn HistoryCell> {

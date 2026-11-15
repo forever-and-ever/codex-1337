@@ -82,7 +82,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn backend_banner_fallback(&mut self) -> Option<AutomaticModelSwitch> {
-        if !self.has_chatgpt_account || !self.requires_openai_auth {
+        if !self.has_chatgpt_account() || !self.requires_openai_auth() {
             return None;
         }
         if self.current_model() == LUNA_RESERVE_MODEL
@@ -429,6 +429,10 @@ impl ChatWidget {
             if self
                 .bottom_pane
                 .dismiss_view_by_id(super::rate_limits::RATE_LIMIT_SWITCH_PROMPT_VIEW_ID)
+                && matches!(
+                    self.rate_limit_switch_prompt,
+                    super::RateLimitSwitchPromptState::Shown
+                )
             {
                 // Replacing the view is not the user's decision to dismiss the prompt.
                 self.rate_limit_switch_prompt = super::RateLimitSwitchPromptState::Pending;

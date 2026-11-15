@@ -1,4 +1,4 @@
-//! Request-history coverage for incremental tools on Responses Lite.
+//! Request-history coverage for incremental tools on Responses and Responses Lite.
 
 use anyhow::Result;
 use codex_core::ForkSnapshot;
@@ -9,6 +9,7 @@ use codex_features::Feature;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_history::RolloutItem;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_protocol::openai_models::CodeModeToolMessages;
 use codex_protocol::openai_models::IncrementalToolMessages;
 use codex_protocol::openai_models::ToolMessage;
@@ -173,19 +174,39 @@ async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> R
     }).await
 }
 
-#[test_case(true; "responses_lite")]
-#[test_case(false; "responses_api")]
+#[test_case(true, None, true, OPENAI_PROVIDER_ID, &[]; "responses_lite")]
+#[test_case(true, Some(true), true, OPENAI_PROVIDER_ID, &[]; "announcements_suppressed")]
+#[test_case(false, None, false, OPENAI_PROVIDER_ID, &[]; "responses_api")]
+#[test_case(false, None, false, OPENAI_PROVIDER_ID,
+    &[(Feature::IncrementalToolsLegacy, true)]; "responses_ignores_unsupported_legacy_flag")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incremental_tools_append_changed_catalog_without_rewriting_history(
     use_responses_lite: bool,
+    suppress_model_change_announcements: Option<bool>,
+    incremental_tools: bool,
+    provider_id: &'static str,
+    feature_overrides: &'static [(Feature, bool)],
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     mock_server::run(&[&server], async {
     let mock = responses::mount_sse_sequence(
         &server,
-        (1..=if use_responses_lite { 5 } else { 4 })
-            .map(|index| responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))]))
+        (1..=if incremental_tools { 7 } else { 4 })
+            .map(|index| {
+                let mut events = Vec::new();
+                if index == 5 {
+                    events.push(json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "INCREMENTAL_TOOLS_CHECKPOINT",
+                        },
+                    }));
+                }
+                events.push(responses::ev_completed(&format!("resp-{index}")));
+                responses::sse(events)
+            })
             .collect(),
     )
     .await;
@@ -193,7 +214,7 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
         .with_model_info_override("gpt-5.4", move |model| {
             model.use_responses_lite = use_responses_lite;
             model.tool_mode = Some(ToolMode::CodeMode);
-            if use_responses_lite {
+            if incremental_tools {
                 model
                     .model_messages
                     .as_mut()
@@ -203,7 +224,20 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
             }
         })
         .with_config(move |config| {
-            if !use_responses_lite {
+            config.model_provider_id = provider_id.to_string();
+            for &(feature, enabled) in feature_overrides {
+                config
+                    .features
+                    .set_enabled(feature, enabled)
+                    .expect("configure independent provider flags");
+            }
+            if let Some(suppress) = suppress_model_change_announcements {
+                config
+                    .features
+                    .set_enabled(Feature::SuppressModelChangeAnnouncements, suppress)
+                    .expect("configure model announcements");
+            }
+            if !incremental_tools {
                 config.base_instructions =
                     Some("Use the available tools to help the user.".to_string());
             }
@@ -216,7 +250,7 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
                 .expect("source model")
                 .clone();
             updated.slug = "updated-tools-model".to_string();
-            if use_responses_lite {
+            if incremental_tools {
                 updated
                     .model_messages
                     .as_mut()
@@ -256,7 +290,7 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
 
     let requests = mock.requests();
     assert_eq!(requests.len(), 4);
-    if !use_responses_lite {
+    if !incremental_tools {
         for request in &requests {
             let body = request.body_json();
             assert!(
@@ -286,11 +320,14 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
     assert!(requests[1].input().starts_with(&requests[0].input()));
     assert!(requests[2].input().starts_with(&requests[1].input()));
     assert!(requests[3].input().starts_with(&requests[2].input()));
-    assert!(
-        requests
-            .iter()
-            .all(|request| request.body_json().get("tools").is_none())
-    );
+    for request in &requests {
+        if let Some(tools) = request.body_json()["tools"].as_array() {
+            assert!(tools.iter().all(|tool| tool["type"] == "web_search"));
+        }
+        assert!(request.inputs_of_type("additional_tools").iter()
+            .flat_map(|item| item["tools"].as_array().expect("declarations"))
+            .all(|tool| tool["type"] != "web_search"));
+    }
     for request in &requests {
         let input = request.input();
         assert_eq!(input[0]["type"], "additional_tools");
@@ -400,14 +437,45 @@ let changed_tools = diff[0]["tools"].as_array().expect("namespace members");
             .values()
             .all(|hash| hash.as_str().is_some_and(|hash| hash.len() == 40))
     }));
+    // Upstream's new compaction interaction must retain the fork's canonical
+    // instruction projection and rebuild the current catalog in the next window.
+    let requests = if incremental_tools {
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            if let EventMsg::TurnComplete(completed) = event {
+                assert!(completed.error.is_none(), "{completed:?}");
+                true
+            } else {
+                false
+            }
+        }).await;
+        test.submit_text_turn("Continue after compaction.").await?;
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 6);
+        assert!(requests[4].body_contains_text("Review results before responding."));
+        assert!(!requests[4].body_contains_text("<instruction_diff>"));
+        assert!(requests[5].body_contains_text("INCREMENTAL_TOOLS_CHECKPOINT"));
+        assert!(!requests[5].body_contains_text("Use the available tools to help the user."));
+        assert_eq!(requests[5].instructions_text(), "Review results before responding.");
+        assert_eq!(requests[5].inputs_of_type("additional_tools").len(), 1);
+        requests
+    } else {
+        requests
+    };
     insta::assert_snapshot!(
-        if use_responses_lite {
+        if suppress_model_change_announcements == Some(true) {
+            "incremental_tools_suppressed_announcements"
+        } else if incremental_tools && use_responses_lite {
             "incremental_tools"
+        } else if incremental_tools {
+            "incremental_tools_regular_responses"
         } else {
             "incremental_tools_responses_api"
         },
         context_snapshot::format_request_history_snapshot(
-            if use_responses_lite {
+            if suppress_model_change_announcements == Some(true) {
+                "Model-ID notices are suppressed while changed tools and a base-instructions amendment append without rewriting history."
+            } else if incremental_tools {
                 "Tool definitions precede the initial base instructions. A model switch appends a tools notice, changed tools, a base-instructions amendment, and an identity-only model notice without rewriting the prefix; the next unchanged turn appends only user input."
             } else {
                 "Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests."
@@ -458,9 +526,9 @@ let changed_tools = diff[0]["tools"].as_array().expect("namespace members");
         matches!(event, EventMsg::TurnComplete(_))
     }).await;
     let fork_requests = mock.requests();
-    assert_eq!(fork_requests.len(), 5);
-    assert_eq!(fork_requests[4].inputs_of_type("additional_tools"), changed);
-    let fork_input = fork_requests[4].input();
+    assert_eq!(fork_requests.len(), requests.len() + 1);
+    assert_eq!(fork_requests[requests.len()].inputs_of_type("additional_tools"), changed);
+    let fork_input = fork_requests[requests.len()].input();
     assert!(fork_input.starts_with(&requests[3].input()));
     let boundary = fork_input.iter().position(|item|
         item.to_string().contains("<turn_aborted>")
@@ -478,39 +546,22 @@ let changed_tools = diff[0]["tools"].as_array().expect("namespace members");
         codex_protocol::items::TurnItem::Arrival(arrival) => Some(arrival),
         _ => None,
     }).collect::<Vec<_>>();
-    let interruption = arrivals.iter().find(|arrival| match &arrival.source {
-        codex_protocol::step_admission::ArrivalSource::Captured { blocks } =>
-            blocks.iter().any(|block| block.contains("<turn_aborted>")),
-        _ => false,
-    }).expect("fork boundary is announced");
-    let placement = interruption.placement.as_ref().expect("exact prompt anchor");
-    assert_eq!(&placement.user_response_item_id, user_source);
-    assert_eq!(placement.side, codex_protocol::step_admission::ArrivalSide::Before);
+    // No measured child step precedes this first request. The interruption stays in
+    // model history above, but must not borrow the parent's step for an Arrival.
+    assert!(arrivals.is_empty(), "a fresh child cannot emit parent-step arrivals: {arrivals:?}");
 
-    let compaction = responses::mount_sse_sequence(&server, vec![
-        responses::sse(vec![json!({
-            "type": "response.output_item.done",
-            "item": {"type": "compaction", "encrypted_content": "INCREMENTAL_TOOLS_CHECKPOINT"},
-        }), responses::ev_completed("compacted")]),
-        responses::sse(vec![responses::ev_completed("after-compaction")]),
-    ]).await;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    test.submit_text_turn("Continue after compaction.").await?;
-    let compacted_requests = compaction.requests();
-    assert_eq!(compacted_requests.len(), 2);
-    assert!(!compacted_requests[1].body_contains_text("Use the available tools to help the user."));
-    assert_eq!(compacted_requests[1].instructions_text(), "Review results before responding.");
     Ok(())
     })
     .await
 }
 
-#[test_case(false; "bundled")]
-#[test_case(true; "catalog_messages")]
+#[test_case(false, true; "bundled")]
+#[test_case(true, true; "catalog_messages")]
+#[test_case(false, false; "responses_api")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_removal_appends_a_standalone_notice_without_rewriting_history(
     catalog_messages: bool,
+    use_responses_lite: bool,
 ) -> Result<()> {
     skip_if_wine_exec!(
         Ok(()),
@@ -535,7 +586,7 @@ async fn tool_removal_appends_a_standalone_notice_without_rewriting_history(
     let restored_server = server_config(&["echo", "cwd"], "Echo service instructions.")?;
     let test = test_codex()
         .with_model_info_override("gpt-5.5", move |model| {
-            model.use_responses_lite = true;
+            model.use_responses_lite = use_responses_lite;
             model.supports_search_tool = false;
             model.tool_mode = Some(ToolMode::Direct);
             if catalog_messages {
@@ -553,13 +604,21 @@ async fn tool_removal_appends_a_standalone_notice_without_rewriting_history(
                     removed_namespaces_header: Some("Unavailable namespaces:".to_string()),
                     namespace_instructions_prefix: Some("Catalog {name}: ".to_string()),
                     namespace_instructions_cleared: Some("Cleared {name}.".to_string()),
+                    ..Default::default()
                 });
             }
         })
         .with_config(move |config| {
+            if !use_responses_lite {
+                config.model_provider_id = OPENAI_PROVIDER_ID.to_string();
+            }
             config
                 .features
-                .enable(Feature::IncrementalTools)
+                .enable(if use_responses_lite {
+                    Feature::IncrementalTools
+                } else {
+                    Feature::IncrementalToolsLegacy
+                })
                 .expect("enable incremental tools");
             if catalog_messages {
                 config
@@ -716,6 +775,16 @@ async fn tool_removal_appends_a_standalone_notice_without_rewriting_history(
             "incremental_tool_removals",
             "MCP refreshes remove one tool, then its whole namespace, before restoring both tools. Removal notices append alone; restoration appends one developer notice before both namespace declarations. Unchanged turns do not repeat updates.",
         )
+    };
+    let scenario = if use_responses_lite {
+        scenario
+    } else {
+        "Regular Responses retains its full-current-catalog path across MCP removal and restoration. Genuine catalog changes may rebuild the request prefix; unchanged requests retain the same declarations, and unsupported incremental removal notices are never emitted."
+    };
+    let snapshot_name = if use_responses_lite {
+        snapshot_name
+    } else {
+        "incremental_tool_removals_regular_responses"
     };
     insta::assert_snapshot!(
         snapshot_name,

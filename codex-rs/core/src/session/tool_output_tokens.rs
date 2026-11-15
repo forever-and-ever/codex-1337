@@ -153,6 +153,7 @@ impl Session {
                             output: output.body.clone(),
                         }),
                         started_at_ms: None,
+                        content_token_count: None,
                         completed_at_ms: super::now_unix_timestamp_ms(),
                     }),
                     output.owner.clone(),
@@ -213,6 +214,7 @@ impl Session {
                     turn_id: turn_id.clone(),
                     item: TurnItem::ToolOutputTokens(item),
                     started_at_ms: None,
+                    content_token_count: None,
                     completed_at_ms: super::now_unix_timestamp_ms(),
                 });
                 let msg = match owner {

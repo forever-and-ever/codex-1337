@@ -153,7 +153,6 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
     .map(|(_, modality)| modality)
     .collect();
     info.priority = priority;
-    info.used_fallback_model_metadata = false;
     info
 }
 

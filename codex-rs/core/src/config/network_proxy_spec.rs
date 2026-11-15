@@ -13,11 +13,9 @@ use codex_network_proxy::NetworkProxyState;
 use codex_network_proxy::host_and_port_from_network_addr;
 #[cfg(any(target_os = "windows", test))]
 use codex_network_proxy::managed_proxy_ports;
-use codex_network_proxy::normalize_host;
 use codex_network_proxy::validate_policy_against_constraints;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_path_uri::Platform;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,21 +205,6 @@ impl NetworkProxySpec {
         Err(codex_network_proxy::unsupported_error())
     }
 
-    pub(crate) fn with_exec_policy_network_rules(
-        &self,
-        exec_policy: &Policy,
-    ) -> std::io::Result<Self> {
-        let mut spec = self.clone();
-        apply_exec_policy_network_rules(&mut spec.config, exec_policy);
-        validate_policy_against_constraints(&spec.config, &spec.constraints).map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("network proxy constraints are invalid: {err}"),
-            )
-        })?;
-        Ok(spec)
-    }
-
     pub(crate) fn build_state_with_audit_metadata(
         &self,
         audit_metadata: NetworkProxyAuditMetadata,
@@ -230,28 +213,5 @@ impl NetworkProxySpec {
     ) -> std::io::Result<NetworkProxyState> {
         let _ = (audit_metadata, executor_os, local_binding_policy);
         Err(codex_network_proxy::unsupported_error())
-    }
-}
-
-fn apply_exec_policy_network_rules(config: &mut NetworkProxyConfig, exec_policy: &Policy) {
-    let (allowed_domains, denied_domains) = exec_policy.compiled_network_domains();
-    upsert_network_domains(config, allowed_domains, /*allow*/ true);
-    upsert_network_domains(config, denied_domains, /*allow*/ false);
-}
-
-fn upsert_network_domains(config: &mut NetworkProxyConfig, hosts: Vec<String>, allow: bool) {
-    let mut incoming = HashSet::new();
-    for host in hosts {
-        if incoming.insert(host.clone()) {
-            config.upsert_domain_permission(
-                host,
-                if allow {
-                    codex_network_proxy::NetworkDomainPermission::Allow
-                } else {
-                    codex_network_proxy::NetworkDomainPermission::Deny
-                },
-                normalize_host,
-            );
-        }
     }
 }

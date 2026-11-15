@@ -96,6 +96,18 @@ impl LocalAgentControl {
         });
     }
 
+    pub(crate) fn selected_agent_service_tier(&self, mut agent: ThreadId) -> Option<String> {
+        let tiers = self.runtime.service_tiers.load();
+        for _ in 0..=tiers.agents.len() {
+            let binding = tiers.agents.get(&agent)?;
+            if let Some(selected) = &binding.selected {
+                return Some(selected.clone());
+            }
+            agent = binding.parent;
+        }
+        unreachable!("agent tier inheritance contains a cycle")
+    }
+
     pub(crate) fn agent_service_tier(&self, agent: ThreadId) -> Option<String> {
         self.runtime.service_tiers.load().requested(agent)
     }

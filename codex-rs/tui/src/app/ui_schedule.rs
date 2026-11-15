@@ -314,6 +314,13 @@ pub(in crate::app) fn is_interactive(event: &TuiEvent) -> bool {
         || matches!(event, TuiEvent::Mouse(mouse) if mouse.kind != MouseEventKind::Moved)
 }
 
+pub(in crate::app) fn has_pending_ui_events(
+    app: &App,
+    events: &mpsc::UnboundedReceiver<AppEvent>,
+) -> bool {
+    !events.is_empty() || app.saved_openings.has_ready()
+}
+
 #[expect(
     clippy::fn_params_excessive_bools,
     reason = "Admission combines independent queue, draft, configuration, and header observations."
@@ -367,7 +374,7 @@ impl App {
             && !self.reconnect.offline
             && !pending_startup_draft
             && !waiting_for_initial_session_configured
-            && app_event_rx.is_empty()
+            && !has_pending_ui_events(self, app_event_rx)
             && !self.startup_pending_protected_request
             && self
                 .active_thread_rx
@@ -388,8 +395,7 @@ impl App {
 pub(super) async fn drive(
     app: &mut App,
     tui: &mut tui::Tui,
-    backends: &mut super::backend_sessions::BackendSessions,
-    initial_owner: crate::backend_id::BackendId,
+    backend: &mut super::backend_sessions::BackendSession,
     launch_choices: crate::app_server_session::StartupLaunchChoices,
     app_event_rx: &mut mpsc::UnboundedReceiver<AppEvent>,
     tui_events: &mut Pin<Box<dyn Stream<Item = TuiEvent> + Send>>,
@@ -413,24 +419,36 @@ pub(super) async fn drive(
     let mut settled_size_tags = crate::terminal_size_telemetry::tags(last_screen_size);
     let mut pending_resize: Option<(Size, Instant)> = None;
     let mut reconnect = None;
+    let mut scheduled_owner = backend.owner();
     let mut waiting_for_initial_session_header = true;
     let exit_reason_result = 'ui: loop {
-        let Some(displayed_session) = backends.slot(initial_owner) else {
-            break Err(color_eyre::eyre::eyre!(
-                "the displayed backend is not registered"
-            ));
-        };
-        if !backends.is_listening(initial_owner)
+        let displayed_owner = backend.owner();
+        if scheduled_owner != displayed_owner {
+            reconnect = None;
+            scheduled_owner = displayed_owner;
+            waiting_for_initial_session_header = false;
+            waiting_for_initial_session_configured = app.pending_startup_thread_start;
+        }
+        if !backend.is_listening(displayed_owner)
             && !app.pending_startup_thread_start
             && !app.reconnect.offline
         {
             app.begin_reconnect();
         }
+        if !app.reconnect.offline
+            && let Some(event) = backend.take_ready_startup(|event| {
+                !app.defer_side_startup_notification(event, displayed_owner)
+            })
+        {
+            app.handle_polled_backend_event(backend.session(), displayed_owner, event)
+                .await;
+            schedule.event_applied();
+        }
         schedule.drain_ready(tui_events).await;
         for _ in 0..INPUT_BATCH {
             let admitted = input_admitted(
                 app,
-                !app_event_rx.is_empty(),
+                has_pending_ui_events(app, app_event_rx),
                 pending_startup_draft.is_some(),
                 waiting_for_initial_session_configured,
                 waiting_for_initial_session_header,
@@ -446,7 +464,7 @@ pub(super) async fn drive(
             let result = app
                 .apply_scheduled_input(
                     tui,
-                    backends.session_at_mut(displayed_session),
+                    backend.session_mut(),
                     event,
                     pending_startup_draft.is_some(),
                     waiting_for_initial_session_configured,
@@ -470,10 +488,7 @@ pub(super) async fn drive(
             tracing::warn!("terminal input stream closed; shutting down active thread");
             break Ok(
                 match app
-                    .handle_exit_mode(
-                        backends.session_at_mut(displayed_session),
-                        ExitMode::ShutdownFirst,
-                    )
+                    .handle_exit_mode(backend.session_mut(), ExitMode::ShutdownFirst)
                     .await
                 {
                     AppRunControl::Exit(reason) => reason,
@@ -489,11 +504,7 @@ pub(super) async fn drive(
             let requester = tui.frame_requester();
             requester.set_paint_admitted(paint_due);
             let result = app
-                .handle_tui_event(
-                    tui,
-                    backends.session_at_mut(displayed_session),
-                    TuiEvent::Draw,
-                )
+                .handle_tui_event(tui, backend.session_mut(), TuiEvent::Draw)
                 .await;
             requester.set_paint_admitted(true);
             if let Some(started_at) = started_at {
@@ -511,7 +522,7 @@ pub(super) async fn drive(
             tokio::task::yield_now().await;
         }
         let maintenance_stage = enter(Stage::Maintenance);
-        app.drive_server_operations(backends.session_at_mut(displayed_session));
+        app.drive_server_operations(backend.session_mut());
         app.retry_pending_thread_delivery().await;
         // Reconnect can dismiss an overlay from the server-event path.
         if app.overlay.is_none() {
@@ -532,9 +543,7 @@ pub(super) async fn drive(
         }
         if app.pending_open_resume_picker {
             app.pending_open_resume_picker = false;
-            match Box::pin(app.open_resume_picker(tui, backends.session_at_mut(displayed_session)))
-                .await
-            {
+            match Box::pin(app.open_resume_picker_for_backends(tui, backend.session_mut())).await {
                 Ok(AppRunControl::Continue) => {}
                 Ok(AppRunControl::Exit(reason)) => break Ok(reason),
                 Err(err) if app.recover_transport_error(&err) => {}
@@ -543,18 +552,14 @@ pub(super) async fn drive(
             continue;
         }
         if let Some(pending) = app.pending_working_directory_change.take() {
-            Box::pin(app.finish_working_directory_change(
-                tui,
-                backends.session_at_mut(displayed_session),
-                pending,
-            ))
-            .await;
+            Box::pin(app.finish_working_directory_change(tui, backend.session_mut(), pending))
+                .await;
             continue;
         }
         if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
             let presentation = app.reconnect.presentation;
             let wait_for_drain =
-                app.pending_startup_thread_start && backends.is_listening(initial_owner);
+                app.pending_startup_thread_start && backend.is_listening(displayed_owner);
             reconnect = Some(
                 if let reconnect::ReconnectPresentation::Startup(deadline) = presentation
                     && wait_for_drain
@@ -567,13 +572,13 @@ pub(super) async fn drive(
                     }))
                 } else {
                     Either::Right(Box::pin(reconnect::reconnect(
-                        initial_owner,
+                        displayed_owner,
                         app.app_server_target.clone(),
                         app.config.clone(),
                         app.local_settings.clone(),
                         app.current_displayed_thread_id(),
-                        backends
-                            .session_at(displayed_session)
+                        backend
+                            .session()
                             .remote_cwd_override()
                             .map(Path::to_path_buf),
                         presentation,
@@ -583,7 +588,7 @@ pub(super) async fn drive(
         }
         // Replay queues history and operations. A buffered closure must not switch
         // widgets before those app events have been applied.
-        let has_pending_app_events = !app_event_rx.is_empty();
+        let has_pending_app_events = has_pending_ui_events(app, app_event_rx);
         if !has_pending_app_events
             && !app.reconnect.offline
             && !app.thread_delivery.is_blocked()
@@ -629,15 +634,14 @@ pub(super) async fn drive(
             waiting_for_initial_session_configured,
             waiting_for_initial_session_header,
         );
-        let paused_backend = ((app.reconnect.offline && !app.pending_startup_thread_start)
+        let pause_events = (app.reconnect.offline && !app.pending_startup_thread_start)
             || app.thread_delivery.is_blocked()
             || app.thread_delivery.primary_replay_thread.is_some()
             || !(app.primary_thread_id.is_none()
                 && app.pending_primary_events.len() < THREAD_EVENT_CHANNEL_CAPACITY
                 || app.primary_thread_id.is_some() && app.pending_primary_events.is_empty())
             || (!matches!(app.app_server_target, AppServerTarget::Embedded)
-                && has_pending_app_events))
-            .then_some(initial_owner);
+                && has_pending_app_events);
         let size = tui.terminal.last_known_screen_size;
         if !crate::terminal_size_telemetry::enabled(&app.config)
             || app.terminal_size_tags.is_empty()
@@ -718,7 +722,7 @@ pub(super) async fn drive(
                     AppRunControl::Continue
                 }
             }
-            Some(event) = app_event_rx.recv() => {
+            Some(event) = app.saved_openings.next_event(app_event_rx) => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::AppEvent);
                 let is_initial_session_header = matches!(
@@ -727,7 +731,7 @@ pub(super) async fn drive(
                         if cell.as_any().is::<history_cell::SessionInfoCell>()
                 );
                 let had_active_modal = app.chat_widget.has_active_modal();
-                match Box::pin(app.handle_event(tui, backends.session_at_mut(displayed_session), event)).await {
+                match Box::pin(app.handle_event(tui, backend.session_mut(), event)).await {
                     Ok(AppRunControl::Continue) => {
                         if is_initial_session_header {
                             waiting_for_initial_session_header = false;
@@ -755,7 +759,7 @@ pub(super) async fn drive(
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ThreadEvent);
                 if let Some(event) = active {
-                    if let Err(err) = app.handle_active_thread_event(tui, backends.session_at_mut(displayed_session), event).await {
+                    if let Err(err) = app.handle_active_thread_event(tui, backend.session_mut(), event).await {
                         break Err(err);
                     }
                 } else {
@@ -772,7 +776,7 @@ pub(super) async fn drive(
             Some(completion) = app.server_operations.control_rx.recv() => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ServerCompletion);
-                match Box::pin(app.handle_server_completion(tui, backends.session_at_mut(displayed_session), completion)).await {
+                match Box::pin(app.handle_server_completion(tui, backend.session_mut(), completion)).await {
                     Ok(control) => control,
                     Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
                     Err(err) => break Err(err),
@@ -783,7 +787,7 @@ pub(super) async fn drive(
                 drop(select_stage);
                 let _handler_stage = enter(Stage::DeliveryCompletion);
                 if let Some(completion) = completion {
-                    match app.handle_local_thread_completion(backends.session_at_mut(displayed_session), completion).await {
+                    match app.handle_local_thread_completion(backend.session_mut(), completion).await {
                         Ok(()) => {},
                         Err(err) if app.recover_transport_error(&err) => {},
                         Err(err) => break Err(err),
@@ -791,27 +795,28 @@ pub(super) async fn drive(
                 }
                 AppRunControl::Continue
             }
-            (owner, event) = backends.next_event(paused_backend) => {
+            (owner, event) = backend.next_event(pause_events) => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ServerEvent);
                 if let Some(event) = event {
-                        if owner == initial_owner
+                        if owner == displayed_owner
                             && app.reconnect.offline
                             && app.pending_startup_thread_start
                             && matches!(&event.event, codex_app_server_client::AppServerEvent::Disconnected { .. })
                         {
                             reconnect = None;
                         }
-                        let Some(source) = backends.slot(owner) else {
-                            break Err(color_eyre::eyre::eyre!("polled backend is no longer registered"));
-                        };
+                        if app.defer_side_startup_notification(&event, displayed_owner) {
+                            backend.defer_startup(event);
+                        } else {
                         app.handle_polled_backend_event(
-                            backends.session_at(source),
-                            initial_owner,
+                            backend.session(),
+                            displayed_owner,
                             event,
                         ).await;
+                        }
                 } else {
-                        if owner == initial_owner {
+                        if owner == displayed_owner {
                             if app.reconnect.offline && app.pending_startup_thread_start {
                                 reconnect = None;
                             } else if !app.pending_startup_thread_start {
@@ -828,12 +833,12 @@ pub(super) async fn drive(
                 reconnect = None;
                 match result {
                     Ok(connected) => {
-                        app.finish_reconnect(tui, backends.session_at_mut(displayed_session), app_event_rx, connected, CODEX_CLI_VERSION).await?;
-                        backends.resume_events(initial_owner);
+                        app.finish_reconnect(tui, backend.session_mut(), app_event_rx, connected, CODEX_CLI_VERSION).await?;
+                        backend.resume_events(displayed_owner);
                         waiting_for_initial_session_configured = app.pending_startup_thread_start;
                         if app.pending_startup_thread_start {
                             super::spawn_startup_thread_start(
-                                backends.session_at(displayed_session),
+                                backend.session(),
                                 app.local_settings.clone(),
                                 app.config.clone(),
                                 launch_choices.clone(),
@@ -889,10 +894,10 @@ pub(super) async fn drive(
                     }
                     None => std::future::pending().await,
                 }
-            }, if backends.is_listening(initial_owner) => {
+            }, if backend.is_listening(displayed_owner) => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
-                app.refresh_rate_limits(backends.session_at_mut(displayed_session), RateLimitRefreshOrigin::Periodic);
+                app.refresh_rate_limits(backend.session_mut(), RateLimitRefreshOrigin::Periodic);
                 AppRunControl::Continue
             }
             () = async {
@@ -927,7 +932,7 @@ pub(super) async fn drive(
             () = idle_restart.tick(), if !has_pending_app_events => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
-                if app_event_rx.is_empty() {
+                if !has_pending_ui_events(app, app_event_rx) {
                     app.try_idle_restart(tui, idle_restart).await;
                 }
                 AppRunControl::Continue
@@ -954,7 +959,9 @@ pub(super) async fn drive(
                     *pending_startup_submission = false;
                     app.chat_widget.cancel_startup_submission();
                 }
-                if app_event_rx.is_empty() && !app.has_queued_startup_protected_request() {
+                if !has_pending_ui_events(app, app_event_rx)
+                    && !app.has_queued_startup_protected_request()
+                {
                     app.chat_widget.restore_startup_input_when_ready(
                         pending_startup_draft,
                         pending_startup_submission,
@@ -962,7 +969,7 @@ pub(super) async fn drive(
                 }
                 #[cfg(windows)]
                 if terminal_color_probe_pending
-                    && app.ready_for_terminal_color_probe(!app_event_rx.is_empty())
+                    && app.ready_for_terminal_color_probe(has_pending_ui_events(app, app_event_rx))
                 {
                     tui.probe_default_colors_after_protected_startup();
                     terminal_color_probe_pending = false;

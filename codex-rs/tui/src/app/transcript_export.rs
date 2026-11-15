@@ -57,8 +57,11 @@ pub(super) async fn load_export_transcript(
     visible_transcript: Vec<Arc<dyn HistoryCell>>,
     metadata: &(dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata + Sync),
     progress: &(dyn Fn() + Send + Sync),
+    image_origin: crate::history_cell::ImagePathOrigin,
 ) -> Result<Vec<Arc<dyn HistoryCell>>, String> {
-    let Some(thread) = continuations::load_export_thread(handle, thread_id, progress).await? else {
+    let Some(thread) =
+        continuations::load_export_thread(handle, thread_id, progress, image_origin).await?
+    else {
         return Ok(visible_transcript);
     };
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
@@ -73,6 +76,7 @@ pub(super) async fn load_export_transcript(
                 visibility,
                 config,
                 metadata,
+                image_origin,
             ));
         }
     }

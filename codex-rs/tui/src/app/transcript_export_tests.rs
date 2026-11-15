@@ -261,6 +261,7 @@ fn persisted_web_and_image_activity_preserves_full_details() {
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
+        crate::history_cell::ImagePathOrigin::Local,
     );
     insta::assert_snapshot!(render_markdown_transcript(&cells).expect("exported transcript"));
 }

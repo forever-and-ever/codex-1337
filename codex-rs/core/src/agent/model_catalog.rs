@@ -154,6 +154,12 @@ impl Session {
         {
             return Ok(cached.manager.clone());
         }
+        let runtime = crate::runtime_auth::runtime_for_config(
+            &self.services.runtime_auth,
+            config,
+            Arc::clone(&auth),
+            &self.installation_id,
+        );
         let manager = if config.model_provider.adapter.speaks_anthropic_messages() {
             let account = match key.account.as_ref() {
                 Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => Some(id.clone()),
@@ -167,9 +173,9 @@ impl Session {
                 }
                 None => None,
             };
-            build_models_manager_with_anthropic_account(config, auth, account)
+            build_models_manager_with_anthropic_account(config, auth, account, runtime)
         } else {
-            build_models_manager(config, auth)
+            build_models_manager(config, auth, runtime)
         };
         managers.insert(
             config.model_provider_id.clone(),

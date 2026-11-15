@@ -110,7 +110,7 @@ impl ThreadQueueRequestProcessor {
         };
         let queued_item = self
             .service()?
-            .enqueue(thread_id, input)
+            .enqueue_with_metadata(thread_id, input, params.responsesapi_client_metadata)
             .await
             .map_err(queue_error)?;
         Ok(ThreadQueueAddResponse {
@@ -164,10 +164,11 @@ impl ThreadQueueRequestProcessor {
         ensure_direct_input_allowed(loaded_thread.as_deref(), &source)?;
         let queued_item = self
             .service()?
-            .update(
+            .update_with_metadata(
                 thread_id,
                 params.queued_submission_id.clone(),
                 submission_into_turn_input(params.input, /*client_user_message_id*/ None),
+                params.responsesapi_client_metadata,
             )
             .await
             .map_err(queue_error)?
@@ -217,7 +218,7 @@ impl ThreadQueueRequestProcessor {
         let thread = loaded_thread
             .ok_or_else(|| invalid_request("resume the thread before starting a queued message"))?;
         self.config_manager
-            .check_thread_model_provider_for_input(thread.config().await.as_ref())
+            .check_thread_model_provider(thread.config().await.as_ref())
             .await
             .map_err(|error| config_load_error(&error))?;
         let submission = self
@@ -407,5 +408,6 @@ fn api_queued_submission(value: QueuedItem) -> Result<QueuedSubmission, JSONRPCE
         input,
         client_user_message_id,
         tool_output,
+        responsesapi_client_metadata: value.responsesapi_client_metadata,
     })
 }

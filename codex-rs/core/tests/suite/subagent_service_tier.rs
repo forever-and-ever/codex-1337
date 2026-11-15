@@ -1,6 +1,8 @@
 //! Verifies that root service-tier changes reach existing child turns and future work.
 
+use super::agent_control::HostRuntime;
 use anyhow::Result;
+use codex_core::AgentRuntimeOwnership;
 use codex_core::TurnInputRequest;
 use codex_core::config::AgentRoleConfig;
 use codex_core::config::Config;
@@ -25,6 +27,7 @@ use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::sync::Arc;
 use test_case::test_case;
 
 const ROOT_PROMPT: &str = "spawn the service-tier worker";
@@ -361,11 +364,15 @@ async fn root_service_tier_change_updates_existing_subagent(
     Ok(())
 }
 
-#[test_case(None; "inherited tier")]
-#[test_case(Some("priority"); "explicit tier")]
+#[test_case(AgentRuntimeOwnership::Controller, None, None; "controller inherited tier")]
+#[test_case(AgentRuntimeOwnership::Controller, Some("priority"), Some("priority"); "controller explicit tier")]
+#[test_case(AgentRuntimeOwnership::Host, None, Some("priority"); "host independent tier")]
+#[test_case(AgentRuntimeOwnership::Host, Some("priority"), Some("priority"); "host explicit tier")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn evicted_role_subagent_preserves_service_tier_selection(
+    owner: AgentRuntimeOwnership,
     child_tier: Option<&str>,
+    expected: Option<&str>,
 ) -> Result<()> {
     struct FinishingPause;
     struct FinishingBarrier {
@@ -406,11 +413,17 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
     let mut extensions = codex_extension_api::ExtensionRegistryBuilder::<Config>::new();
     extensions.thread_lifecycle_contributor(finishing.clone());
     let server = start_mock_server().await;
+    if owner == AgentRuntimeOwnership::Host {
+        extensions.thread_lifecycle_contributor(Arc::new(HostRuntime));
+    }
     let mut builder = test_codex()
-        .with_extensions(std::sync::Arc::new(extensions.build()))
         .with_model("gpt-5.6-sol")
-        .with_config(|config| {
-            config.service_tier = Some("priority".to_string());
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(move |config| {
+            config.service_tier = Some(match owner {
+                AgentRuntimeOwnership::Controller => "priority".to_string(),
+                AgentRuntimeOwnership::Host => SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string(),
+            });
             config.multi_agent_v2.max_concurrent_threads_per_session = 2;
             configure_priority_role(config);
         });
@@ -425,7 +438,11 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
         json!({
             "message": CHILD_PROMPT,
             "task_name": "original",
-            "service_tier": child_tier.unwrap_or("inherit"),
+            "service_tier": if owner == AgentRuntimeOwnership::Controller {
+                child_tier.or(Some("inherit"))
+            } else {
+                child_tier
+            },
             "agent_type": PRIORITY_ROLE,
             "fork_turns": "none",
         }),
@@ -530,13 +547,17 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
         .ensure_multi_agent_v2_child_loaded(original_thread_id)
         .await?;
     let reloaded_thread = test.thread_manager.get_thread(original_thread_id).await?;
+    let expected_configured_tier = match owner {
+        AgentRuntimeOwnership::Controller => child_tier.map(str::to_string),
+        AgentRuntimeOwnership::Host => expected.map(str::to_string),
+    };
     assert_eq!(
         reloaded_thread
             .config_snapshot()
             .await
             .service_tier
             .as_deref(),
-        child_tier,
+        expected_configured_tier.as_deref(),
         "reload preserves the child's selection rather than its parent's or role's"
     );
 
@@ -548,7 +569,7 @@ async fn evicted_role_subagent_preserves_service_tier_selection(
         }]))
         .await?;
     wait_for_turn_complete(&reloaded_thread).await;
-    assert_request_service_tier(&reloaded_request, child_tier);
+    assert_request_service_tier(&reloaded_request, expected);
     reloaded_thread.shutdown_and_wait().await?;
     test.codex.shutdown_and_wait().await?;
 

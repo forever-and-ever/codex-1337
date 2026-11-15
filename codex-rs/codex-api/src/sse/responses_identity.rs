@@ -113,12 +113,14 @@ impl ResponsesItemIdentity {
                 let added = event.kind == "response.output_item.added";
                 let id = match explicit {
                     Some(id) => id,
-                    None if added => ResponseItemId::new(prefix),
+                    None if added => ResponseItemId::with_suffix(prefix, uuid::Uuid::now_v7()),
                     None => {
                         let mut matches = self.open.iter().filter(|(_, open)| **open == kind);
                         match (matches.next(), matches.next()) {
                             (Some((id, _)), None) => id.clone(),
-                            (None, None) => ResponseItemId::new(prefix),
+                            (None, None) => {
+                                ResponseItemId::with_suffix(prefix, uuid::Uuid::now_v7())
+                            }
                             _ => {
                                 return Err(Self::invalid(
                                     "completion missing ID with multiple compatible open items",

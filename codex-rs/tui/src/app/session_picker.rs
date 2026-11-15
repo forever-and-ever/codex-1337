@@ -3,7 +3,22 @@
 use super::*;
 
 impl App {
-    pub(super) async fn open_resume_picker(
+    pub(super) async fn capture_session_inputs(&mut self) {
+        for (id, channel) in &self.thread_event_channels {
+            if let Some(input_state) = channel.store.lock().await.input_state.clone() {
+                self.agents_overview.input_states.insert(*id, input_state);
+            }
+        }
+        if let Some(current_thread_id) = self.current_displayed_thread_id()
+            && let Some(input_state) = self.chat_widget.capture_thread_input_state()
+        {
+            self.agents_overview
+                .input_states
+                .insert(current_thread_id, input_state);
+        }
+    }
+
+    pub(super) async fn open_resume_picker_for_backends(
         &mut self,
         _tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
@@ -20,28 +35,17 @@ impl App {
     ) -> Result<AppRunControl> {
         match selection {
             SessionSelection::Resume(target_session) => {
-                if let Err(error) = target_session.ensure_backend(app_server.backend_id()) {
-                    self.show_agents_overview_error(
-                        Some("Unable to resume session"),
-                        error.to_string(),
+                if target_session.backend_id != app_server.backend_id() {
+                    self.chat_widget.add_error_message(
+                        "This conversation belongs to another backend. Open it using that backend."
+                            .into(),
                     );
                     return Ok(AppRunControl::Continue);
                 }
                 let thread_id = target_session.thread_id;
                 let switching_threads = self.current_displayed_thread_id() != Some(thread_id);
                 if switching_threads {
-                    for (id, channel) in &self.thread_event_channels {
-                        if let Some(input_state) = channel.store.lock().await.input_state.clone() {
-                            self.agents_overview.input_states.insert(*id, input_state);
-                        }
-                    }
-                    if let Some(current_thread_id) = self.current_displayed_thread_id()
-                        && let Some(input_state) = self.chat_widget.capture_thread_input_state()
-                    {
-                        self.agents_overview
-                            .input_states
-                            .insert(current_thread_id, input_state);
-                    }
+                    self.capture_session_inputs().await;
                 }
                 if let AppRunControl::Exit(reason) = self
                     .resume_target_session(tui, app_server, target_session)

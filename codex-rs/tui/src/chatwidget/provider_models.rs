@@ -55,6 +55,9 @@ impl ChatWidget {
         request_id: uuid::Uuid,
         provider: &ModelProviderOption,
     ) {
+        if self.refuse_pending_account_operation() {
+            return;
+        }
         self.set_model_refresh_request(request_id);
         self.bottom_pane.show_selection_view(SelectionViewParams {
             view_id: Some(PROVIDER_MODELS_VIEW),

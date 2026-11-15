@@ -1,13 +1,13 @@
 ---
 source: core/tests/suite/scenarios.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Astra receives host and handler timings on completed and failed code-mode calls.\",\n&mock.requests(), &ContextSnapshotOptions::default(),)"
+expression: "context_snapshot::format_request_history_snapshot(\"Astra reads code-mode timings and the collector notice even at zero tokens, then a failed wait and a truncated script error.\",\n&mock.requests(), &ContextSnapshotOptions::default(),)"
 ---
-Scenario: Astra receives host and handler timings on completed and failed code-mode calls.
+Scenario: Astra reads code-mode timings and the collector notice even at zero tokens, then a failed wait and a truncated script error.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=460d1989a6473eec):
-        - namespace/functions; hash=597d4ef90fdad8bc
+00:additional_tools/developer (2; hash=d3f0cd8c434c44fd):
+        - namespace/functions; hash=f2da90cf13daa97d
           - custom/exec
           - function/wait
           - custom/python
@@ -86,14 +86,20 @@ Scenario: Astra receives host and handler timings on completed and failed code-m
       <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="disabled"><...e="unrestricted" /></permission_profile></filesystem> [hash=d40b2f45cb028888]
     </environment_context>
 06:message/user:
-    Run a code cell, then inspect its timing and a failed wait.
+    Run a code cell, inspect its timing and a failed wait, then check the diagnostic script.
 07:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-08:custom_tool_call/exec:text('ready');
+08:custom_tool_call/exec:// @exec: {"max_output_tokens": 0}
+        text('ready');
+        text('x'.repeat(2 * 1024 * 1024));
 09:custom_tool_call_output:Script completed
     Wall time <DURATION> seconds (code-mode <DURATION> seconds; overhead <DURATION> seconds)
     Output:
-     | ready
+     | Warning: truncated 2 text sections under a shared 0-byte approximate text budget. Nonempty emitted text ...minimum omission markers are outside the text budget. [hash=96914f14a593eb01]
+    Truncated emitted text: <CODE_MODE_OUTPUT 1>/sections.txt (Codex host filesystem; a remote executor may ...victed first; removed when the thread service closes. [hash=1e333aa8ac2a83eb]
+    Section 1: 5 bytes → 0 bytes (emission-capped demand 5).
+    Section 2: 2097152 bytes → 0 bytes (emission-capped demand 2097152).
+     | … | …
 -- request 3 (turn) --
 10:function_call/functions.wait:{"cell_id":"missing"}
 11:function_call_output:Script failed
@@ -101,3 +107,16 @@ Scenario: Astra receives host and handler timings on completed and failed code-m
     Output:
      | Script error:
     exec cell missing not found
+-- request 4 (turn) --
+12:custom_tool_call/exec:// @exec: {"max_output_tokens": 32}
+        text('before');
+        text('x'.repeat(2 * 1024 * 1024));
+        throw 'boom';
+13:custom_tool_call_output:Script failed
+    Wall time <DURATION> seconds (code-mode <DURATION> seconds; overhead <DURATION> seconds)
+    Output:
+     | Warning: truncated 1 text sections under a shared 128-byte approximate text budget. Nonempty emitted tex...minimum omission markers are outside the text budget. [hash=21c1f8d556c61dcb]
+    Truncated emitted text: <CODE_MODE_OUTPUT 2>/sections.txt (Codex host filesystem; a remote executor may ...victed first; removed when the thread service closes. [hash=cf147c725ea3d306]
+    Section 2: 2097152 bytes → 104 bytes (emission-capped demand 2097152).
+     | before | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | Script error:
+    boom

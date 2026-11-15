@@ -11,7 +11,7 @@ impl ContextManager {
         // TELOS(instruction-amendments): rewritten compaction input has fresh request identities,
         // not the identities of the historical instructions it replaces.
         for envelope in &mut items {
-            crate::session::session::Session::assign_missing_response_item_id(&mut envelope.item);
+            crate::session::assign_missing_item_id(&mut envelope.item, &self.item_id_generator);
         }
         self.items = std::sync::Arc::new(items);
         self

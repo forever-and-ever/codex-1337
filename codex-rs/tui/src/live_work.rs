@@ -435,7 +435,7 @@ impl LiveWorkView {
                 if mouse.kind == MouseEventKind::Moved && self.selection.has_active_interaction() {
                     return Some(crate::transcript_view::ViewAction::Changed);
                 }
-                let action = self.selection.handle_selection_mouse(*mouse, &[]);
+                let action = self.selection.handle_selection_mouse(*mouse, &[], None);
                 if action.is_some() {
                     self.focused = false;
                     if self.selection.has_active_interaction() {

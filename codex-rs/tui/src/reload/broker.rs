@@ -127,6 +127,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                         client_version: env!("CARGO_PKG_VERSION").into(),
                         experimental_api: true,
                         mcp_server_openai_form_elicitation: false,
+                        required_human_approval: true,
                         opt_out_notification_methods: Vec::new(),
                         channel_capacity: MAILBOX,
                     }).await {

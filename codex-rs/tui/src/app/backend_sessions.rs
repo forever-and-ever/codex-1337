@@ -1,152 +1,92 @@
-//! Owns backend sessions independently of the displayed conversation's UI state.
-//! Polling is fair and cancellation-safe; closing one stream never closes another.
+//! One selected backend owns its request handle and cancellation-safe event stream.
 
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::AppServerSessionEvent;
 use crate::backend_id::BackendId;
-use std::future::Future;
-use std::task::Poll;
+use std::collections::VecDeque;
 
-/// The initial conventional session and any additional sessions registered at launch.
-pub(crate) struct InitialBackendSessions {
-    initial: AppServerSession,
-    others: Vec<AppServerSession>,
+enum StreamState {
+    Listening,
+    Closed,
 }
 
-impl InitialBackendSessions {
-    pub(crate) fn singleton(initial: AppServerSession) -> Self {
-        Self {
-            initial,
-            others: Vec::new(),
-        }
-    }
-
-    #[allow(
-        dead_code,
-        reason = "used by the under-development backend registration path"
-    )]
-    pub(crate) fn multiple(initial: AppServerSession, others: Vec<AppServerSession>) -> Self {
-        assert!(
-            others
-                .iter()
-                .all(|session| session.backend_id() != initial.backend_id())
-        );
-        Self { initial, others }
-    }
-
-    pub(super) fn into_parts(self) -> (AppServerSession, Vec<AppServerSession>) {
-        (self.initial, self.others)
-    }
-}
-
-struct SessionEntry {
+pub(super) struct BackendSession {
     session: AppServerSession,
-    listening: bool,
+    stream: StreamState,
+    deferred_startup: VecDeque<AppServerSessionEvent>,
 }
 
-/// A session's stable position in an append-only backend collection.
-#[derive(Clone, Copy)]
-pub(super) struct SessionSlot(usize);
-
-pub(super) struct BackendSessions {
-    entries: Vec<SessionEntry>,
-    next_source: usize,
-}
-
-impl BackendSessions {
-    pub(super) fn from_initial(initial: AppServerSession, others: Vec<AppServerSession>) -> Self {
-        let mut sessions = Self::new(initial);
-        for session in others {
-            sessions.insert(session);
-        }
-        sessions
-    }
-
+impl BackendSession {
     pub(super) fn new(session: AppServerSession) -> Self {
-        let mut sessions = Self {
-            entries: Vec::new(),
-            next_source: 0,
-        };
-        sessions.insert(session);
-        sessions
-    }
-
-    pub(super) fn insert(&mut self, session: AppServerSession) {
-        assert!(self.session(session.backend_id()).is_none());
-        self.entries.push(SessionEntry {
+        Self {
             session,
-            listening: true,
-        });
+            stream: StreamState::Listening,
+            deferred_startup: VecDeque::new(),
+        }
     }
 
-    pub(super) fn session(&self, owner: BackendId) -> Option<&AppServerSession> {
-        self.slot(owner).map(|slot| self.session_at(slot))
+    pub(super) fn owner(&self) -> BackendId {
+        self.session.backend_id()
     }
 
-    pub(super) fn slot(&self, owner: BackendId) -> Option<SessionSlot> {
-        self.entries
-            .iter()
-            .position(|entry| entry.session.backend_id() == owner)
-            .map(SessionSlot)
+    pub(super) fn session(&self) -> &AppServerSession {
+        &self.session
     }
 
-    pub(super) fn session_at(&self, slot: SessionSlot) -> &AppServerSession {
-        &self.entries[slot.0].session
-    }
-
-    pub(super) fn session_at_mut(&mut self, slot: SessionSlot) -> &mut AppServerSession {
-        &mut self.entries[slot.0].session
+    pub(super) fn session_mut(&mut self) -> &mut AppServerSession {
+        &mut self.session
     }
 
     pub(super) fn is_listening(&self, owner: BackendId) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.session.backend_id() == owner && entry.listening)
+        owner == self.owner() && matches!(self.stream, StreamState::Listening)
     }
 
     pub(super) fn resume_events(&mut self, owner: BackendId) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.session.backend_id() == owner)
-        {
-            entry.listening = true;
+        assert_eq!(
+            owner,
+            self.owner(),
+            "reconnect belongs to the selected backend"
+        );
+        // A reconnect installs a new source epoch. Its fresh snapshot supersedes the
+        // old connection's unregistered-child notifications; never replay them into new custody.
+        self.deferred_startup.clear();
+        self.stream = StreamState::Listening;
+    }
+
+    /// Keep pre-registration child notifications with their originating connection.
+    pub(super) fn defer_startup(&mut self, event: AppServerSessionEvent) {
+        if event.backend_id == self.owner() {
+            self.deferred_startup.push_back(event);
+        } else {
+            tracing::warn!("ignoring deferred startup notification from a different backend");
         }
+    }
+
+    pub(super) fn take_ready_startup(
+        &mut self,
+        ready: impl FnMut(&AppServerSessionEvent) -> bool,
+    ) -> Option<AppServerSessionEvent> {
+        let index = self.deferred_startup.iter().position(ready)?;
+        self.deferred_startup.remove(index)
     }
 
     pub(super) async fn next_event(
         &mut self,
-        paused_backend: Option<BackendId>,
+        paused: bool,
     ) -> (BackendId, Option<AppServerSessionEvent>) {
-        std::future::poll_fn(|cx| {
-            for offset in 0..self.entries.len() {
-                let index = (self.next_source + offset) % self.entries.len();
-                let entry = &mut self.entries[index];
-                let owner = entry.session.backend_id();
-                if !entry.listening || paused_backend == Some(owner) {
-                    continue;
-                }
-                // Both client transports receive from cancellation-safe queues. Dropping a
-                // pending receive leaves its event available for the next main-loop poll.
-                let event = std::pin::pin!(entry.session.next_event()).poll(cx);
-                if let Poll::Ready(event) = event {
-                    entry.listening = event.is_some();
-                    self.next_source = (index + 1) % self.entries.len();
-                    return Poll::Ready((owner, event));
-                }
-            }
-            Poll::Pending
-        })
-        .await
+        if paused || matches!(self.stream, StreamState::Closed) {
+            return std::future::pending().await;
+        }
+        let owner = self.owner();
+        // Dropping a pending receive leaves the queued event available to the next poll.
+        let event = self.session.next_event().await;
+        if event.is_none() {
+            self.stream = StreamState::Closed;
+        }
+        (owner, event)
     }
 
     pub(super) async fn shutdown(self) -> std::io::Result<()> {
-        let mut first_error = None;
-        for entry in self.entries {
-            if let Err(error) = entry.session.shutdown().await {
-                first_error.get_or_insert(error);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.session.shutdown().await
     }
 }

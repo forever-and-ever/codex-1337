@@ -235,7 +235,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     client.commit_provider_account(ProviderAccountSelection::ClaudeSubscription {
         id: id_a.to_string(),
     });
-    let admitted_a = client.capture_provider().await?;
+    let admitted_a = client.capture_provider()?;
     let mut model = test_model_info();
     model.slug = "claude-sonnet-5-5".into();
     model
@@ -650,6 +650,7 @@ async fn native_regular_replay_profiles(
                 move |config| {
                     config.model = Some(model_slug);
                     config.model_provider = info;
+                    config.wrangler.default_claude_account = Some(boundary.account_b.clone());
                     config.model_post_turn_compact_threshold_percent = 0;
                     config.update_plan_enabled = true;
                     let _ = config.features.disable(Feature::TokenBudget);

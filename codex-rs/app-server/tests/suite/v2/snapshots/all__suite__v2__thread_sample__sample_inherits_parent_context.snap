@@ -50,7 +50,7 @@ Settings:
         - `r0` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as...l directly in HTML/CSS/canvas. (r0/imagegen/SKILL.md) [hash=b511bafaa0bff9b0]
-        - openai-docs: Use for Codex models/pricing, scheduled tasks, skills, settings, setup, troubleshooting, ... that merely mention Codex. (r0/openai-docs/SKILL.md) [hash=f24fa4a1b1cb6c3a]
+        - openai-docs: API first-timers, Codex/Work Q&A. If the user already has an OpenAI API integration, skip...d by supplied text or data. (r0/openai-docs/SKILL.md) [hash=aa8bc1199f04ba76]
         - skill-creator: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources. (r0/skill-creator/SKILL.md)
         - skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo pat...cluding private repos). (r0/skill-installer/SKILL.md) [hash=c8505f8bccf99219]
         </skills_instructions>
@@ -115,7 +115,7 @@ Settings: same as window 1
         - `r0` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as...l directly in HTML/CSS/canvas. (r0/imagegen/SKILL.md) [hash=b511bafaa0bff9b0]
-        - openai-docs: Use for Codex models/pricing, scheduled tasks, skills, settings, setup, troubleshooting, ... that merely mention Codex. (r0/openai-docs/SKILL.md) [hash=f24fa4a1b1cb6c3a]
+        - openai-docs: API first-timers, Codex/Work Q&A. If the user already has an OpenAI API integration, skip...d by supplied text or data. (r0/openai-docs/SKILL.md) [hash=aa8bc1199f04ba76]
         - skill-creator: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources. (r0/skill-creator/SKILL.md)
         - skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo pat...cluding private repos). (r0/skill-installer/SKILL.md) [hash=c8505f8bccf99219]
         </skills_instructions>
@@ -179,7 +179,7 @@ Settings: same as window 1
         - `r0` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as...l directly in HTML/CSS/canvas. (r0/imagegen/SKILL.md) [hash=b511bafaa0bff9b0]
-        - openai-docs: Use for Codex models/pricing, scheduled tasks, skills, settings, setup, troubleshooting, ... that merely mention Codex. (r0/openai-docs/SKILL.md) [hash=f24fa4a1b1cb6c3a]
+        - openai-docs: API first-timers, Codex/Work Q&A. If the user already has an OpenAI API integration, skip...d by supplied text or data. (r0/openai-docs/SKILL.md) [hash=aa8bc1199f04ba76]
         - skill-creator: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources. (r0/skill-creator/SKILL.md)
         - skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo pat...cluding private repos). (r0/skill-installer/SKILL.md) [hash=c8505f8bccf99219]
         </skills_instructions>

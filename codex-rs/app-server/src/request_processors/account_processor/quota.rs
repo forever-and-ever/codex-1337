@@ -21,6 +21,7 @@ use codex_login::AuthManager;
 use codex_login::anthropic::AccountStore;
 use codex_protocol::goal_boxes::QuotaReading;
 use codex_protocol::protocol::RateLimitWindow;
+use http::HeaderMap;
 use std::sync::Arc;
 
 pub(super) enum QuotaCapability {
@@ -40,14 +41,32 @@ pub(crate) struct QuotaReader {
     auth_manager: Arc<AuthManager>,
     chatgpt_base_url: String,
     quota_cache: Arc<QuotaCache>,
+    runtime_auth: Result<
+        Option<(
+            Arc<codex_runtime_agent_instance::RuntimeAuthManager>,
+            codex_features::RuntimeAuthMode,
+        )>,
+        String,
+    >,
 }
 
 impl AccountRequestProcessor {
     pub(crate) fn quota_reader(&self) -> QuotaReader {
+        self.quota_reader_for_config(&self.config)
+    }
+
+    pub(super) fn quota_reader_for_config(
+        &self,
+        config: &codex_core::config::Config,
+    ) -> QuotaReader {
         QuotaReader {
             auth_manager: Arc::clone(&self.auth_manager),
-            chatgpt_base_url: self.config.chatgpt_base_url.clone(),
+            chatgpt_base_url: config.chatgpt_base_url.clone(),
             quota_cache: Arc::clone(&self.quota_cache),
+            runtime_auth: self
+                .thread_manager
+                .runtime_auth_for_config(config)
+                .map_err(|error| error.to_string()),
         }
     }
 
@@ -123,7 +142,7 @@ impl AccountRequestProcessor {
                 _ => return Err(invalid_request("Account selector is ambiguous; use its ID")),
             }
         }
-        let reader = &self.quota_reader();
+        let reader = &self.quota_reader_for_config(&config);
         let mut accounts =
             futures::future::join_all(accounts.into_iter().map(|account| async move {
                 let result = match params.provider {
@@ -177,6 +196,7 @@ impl QuotaReader {
     ) -> std::io::Result<QuotaRead> {
         let base_url = self.chatgpt_base_url.clone();
         let manager = self.auth_manager.clone();
+        let runtime = self.runtime_auth.clone().map_err(std::io::Error::other)?;
         let reserve = matches!(capability, QuotaCapability::LunaReserve);
         self.quota_cache
             .read(
@@ -189,32 +209,53 @@ impl QuotaReader {
                 move || async move {
                     // Resolving auth can rotate an OAuth grant. Its persistence must finish
                     // even if the quota deadline expires; only the usage GET is disposable.
-                    let (auth, factory) = tokio::spawn(async move {
+                    let (scoped, auth, factory) = tokio::spawn(async move {
                         let scoped = manager.for_account(&id).await.map_err(|_| QuotaFailure {
                             message: "OpenAI account unavailable".into(),
                             retry_after: None,
                         })?;
-                        scoped
+                        let scoped = scoped
+                            .capture_auxiliary_source()
+                            .map_err(|_| QuotaFailure {
+                                message: "OpenAI account capture unavailable".into(),
+                                retry_after: None,
+                            })?
+                            .credentials();
+                        let (auth, factory) = scoped
                             .auth_with_http_client_factory()
                             .await
                             .ok_or_else(|| QuotaFailure {
                                 message: "OpenAI account credentials unavailable".into(),
                                 retry_after: None,
-                            })
+                            })?;
+                        Ok::<_, QuotaFailure>((scoped, auth, factory))
                     })
                     .await
                     .map_err(|_| QuotaFailure {
                         message: "OpenAI credential read task failed".into(),
                         retry_after: None,
                     })??;
-                    let client = Client::from_auth(base_url, &auth, factory);
+                    let runtime =
+                        runtime.map(|(runtime, mode)| (runtime.for_credentials(scoped), mode));
+                    let client = Box::pin(Client::from_auth_with_runtime(
+                        base_url,
+                        &auth,
+                        factory,
+                        runtime.as_ref(),
+                        &HeaderMap::default(),
+                    ))
+                    .await
+                    .map_err(|_| QuotaFailure {
+                        message: "OpenAI quota authentication failed".into(),
+                        retry_after: None,
+                    })?;
                     let usage = if reserve
                         && auth.auth_mode() == codex_protocol::auth::AuthMode::Chatgpt
                         && !auth.is_fedramp_account()
                     {
-                        client.get_rate_limits_with_luna_reserve().await
+                        Box::pin(client.get_rate_limits_with_luna_reserve()).await
                     } else {
-                        client.get_rate_limits_with_reset_credits().await
+                        Box::pin(client.get_rate_limits_with_reset_credits()).await
                     }
                     .map_err(|error| {
                         match error.downcast_ref::<RequestError>() {

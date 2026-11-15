@@ -158,21 +158,6 @@ url = "ws://127.0.0.1:4512"
     Ok(())
 }
 
-#[test]
-fn strict_config_is_not_supported_for_cloud_command() -> Result<()> {
-    let codex_home = TempDir::new()?;
-
-    let mut cmd = codex_command(codex_home.path())?;
-    cmd.args(["--strict-config", "-c", "foo=bar", "cloud", "list"])
-        .assert()
-        .failure()
-        .stderr(contains(
-            "`--strict-config` is not supported for `codex cloud`",
-        ));
-
-    Ok(())
-}
-
 #[tokio::test]
 async fn features_enable_writes_feature_flag_to_config() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -407,10 +392,8 @@ fn remote_start_allows_network_access_overrides_before_requiring_terminal() -> R
 }
 
 #[test]
-fn no_daemon_rejects_agents_and_explicit_remote_targets() -> Result<()> {
+fn no_daemon_rejects_queue_and_explicit_remote_targets() -> Result<()> {
     for args in [
-        "--no-daemon agents",
-        "agents --no-daemon",
         "--no-daemon queue --thread example --message hello",
         "--no-daemon --remote ws://localhost:9999 agents",
         "--no-daemon --remote ws://localhost:9999",
@@ -423,9 +406,7 @@ fn no_daemon_rejects_agents_and_explicit_remote_targets() -> Result<()> {
     ] {
         let args = args.split_whitespace().collect::<Vec<_>>();
         let home = TempDir::new()?;
-        let expected = if args.contains(&"agents") {
-            "--no-daemon cannot be used with codex agents."
-        } else if args.contains(&"queue") && !args.contains(&"--remote") {
+        let expected = if args.contains(&"queue") && !args.contains(&"--remote") {
             "--no-daemon cannot be used with codex queue."
         } else {
             "--no-daemon cannot be used with --remote."

@@ -4,6 +4,7 @@
 //! inheritance, and validation messages remain the same for each multi-agent version.
 
 use crate::agent::control::normalize_agent_service_tier;
+use crate::agent::host::AgentRuntimeServices;
 use crate::agent::model_catalog::ProviderModels;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -17,7 +18,9 @@ use codex_features::Feature;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::BaseInstructionsProvenance;
+use codex_protocol::openai_models::CatalogModel;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -63,7 +66,7 @@ pub(crate) struct PreparedSpawnConfig {
 pub(crate) struct ResolvedSpawnModel {
     pub(crate) provider_id: String,
     model: String,
-    info: ModelInfo,
+    info: CatalogModel,
 }
 
 /// Freeze catalog routing and metadata before a farm chooses whether to inherit history.
@@ -135,6 +138,10 @@ pub(crate) async fn prepare_agent_spawn_config_from_selection(
     let full_history_fork = matches!(options.fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, turn, settings)?;
+    if matches!(&session.agent_runtime, AgentRuntimeServices::Host(services) if services.service_tier.is_none())
+    {
+        config.service_tier = session.thread_settings_snapshot().await.service_tier;
+    }
     if options.version == SpawnConfigVersion::V1 && full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
@@ -263,6 +270,12 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     // Preserve activation for history forks without freezing the parent's model-owned prompts.
     // Fresh child startup restores configured preferences from the retained snapshot.
     config.token_budget = turn.configured_token_budget.clone();
+    if let Some(thread_namespaces) = &turn.overridden_direct_only_tool_namespaces {
+        config
+            .code_mode
+            .direct_only_tool_namespaces
+            .clone_from(thread_namespaces);
+    }
     config.model = Some(turn.model_info().slug.clone());
     config.model_provider = turn.provider.info().clone();
     config.model_reasoning_effort = turn
@@ -366,7 +379,7 @@ async fn apply_requested_spawn_agent_model_overrides(
                 )?;
             }
         } else {
-            config.model_reasoning_effort = selected_model_info.default_reasoning_level;
+            config.model_reasoning_effort = selected_model_info.default_reasoning_level.clone();
         }
         config.model = Some(selected_model_name);
 
@@ -392,8 +405,21 @@ pub(crate) async fn apply_spawn_agent_service_tier(
     config: &mut Config,
     requested: Option<&str>,
 ) -> Result<(), String> {
+    let selected = match (&session.agent_runtime, requested) {
+        (_, Some(requested)) => Some(requested.to_owned()),
+        (AgentRuntimeServices::Controller, None) => {
+            config.service_tier = None;
+            return Ok(());
+        }
+        (AgentRuntimeServices::Host(services), None) if services.service_tier.is_none() => {
+            return Ok(());
+        }
+        (AgentRuntimeServices::Host(_), None) => {
+            crate::agent::host::service_tier(session, config.service_tier.clone()).await
+        }
+    };
     config.service_tier = None;
-    if let Some(requested) = requested {
+    if let Some(requested) = selected.as_deref() {
         let model = config.model.as_deref().ok_or_else(|| {
             "spawn_agent could not resolve the child model for service tier validation".to_owned()
         })?;
@@ -436,7 +462,9 @@ async fn apply_spawn_agent_role(
         .await?
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
-    if clamp_openrouter_reasoning(config, &model_info) || model_info.used_fallback_model_metadata {
+    if clamp_openrouter_reasoning(config, &model_info)
+        || model_info.origin == ModelOrigin::Synthetic
+    {
         return Ok(());
     }
 

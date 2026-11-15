@@ -562,7 +562,7 @@ async fn mcp_image_output_preserves_image_and_no_text_summary() -> Result<()> {
     let output_item = final_mock.single_request().function_call_output(call_id);
     assert_eq!(
         output_item["output"],
-        json!([{"type": "input_image", "image_url": openai_png, "detail": "high"}])
+        json!([{"type": "input_image", "image_url": openai_png, "detail": "original"}])
     );
 
     Ok(())

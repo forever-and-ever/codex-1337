@@ -91,6 +91,9 @@ impl ChatWidget {
         self.set_skills(/*skills*/ None);
         self.session_network_proxy = session.network_proxy.clone();
         let previous_thread_id = self.thread_id;
+        if previous_thread_id != Some(session.thread_id) {
+            self.dismiss_stale_model_picker();
+        }
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
@@ -112,7 +115,7 @@ impl ChatWidget {
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {
             if (previous_thread_id.is_some() || self.config.cwd != session.cwd)
-                && self.status_account_display == Some(StatusAccountDisplay::ApiKey)
+                && self.status_account_display().cloned() == Some(StatusAccountDisplay::ApiKey)
             {
                 self.refresh_account_scoped_models();
             }
@@ -122,7 +125,10 @@ impl ChatWidget {
             self.review.recent_auto_review_denials = RecentAutoReviewDenials::default();
             self.clear_thread_usage_state();
         }
+        let has_turn_history =
+            previous_thread_id == self.thread_id && self.turn_lifecycle.has_turn_history;
         self.turn_lifecycle.reset_thread();
+        self.turn_lifecycle.has_turn_history = has_turn_history;
         self.safety_recourse = None;
         self.clear_safety_buffering();
         self.thread_name = session.thread_name.clone();
@@ -148,6 +154,11 @@ impl ChatWidget {
             && codex_realtime_webrtc::RealtimeWebrtcSession::is_supported();
         self.bottom_pane
             .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
+        if previous_thread_id.is_none()
+            && let Some(event) = crate::app::provider::refresh_list_if_present(self)
+        {
+            self.app_event_tx.send(AppEvent::Provider(event));
+        }
         self.set_daybreak_enabled(self.daybreak_enabled);
         if connector_scope_changed {
             self.invalidate_connector_scope();
@@ -252,7 +263,7 @@ impl ChatWidget {
                 &session,
                 self.show_welcome_banner,
                 startup_tooltip_override,
-                self.plan_type,
+                self.current_plan_type(),
             );
             history_cell::set_fresh_session(
                 &mut session_info_cell,
@@ -359,6 +370,7 @@ impl ChatWidget {
         retained_turns: &[Turn],
     ) {
         self.current_rollout_path = rollout_path;
+        self.clear_background_terminals();
         self.input_queue.clear();
         self.input_queue_frontend.clear();
         self.reset_realtime_conversation();

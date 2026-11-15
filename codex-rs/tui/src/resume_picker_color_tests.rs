@@ -131,24 +131,23 @@ fn compact_picker_keeps_metadata_and_labeled_primary_actions() {
 
 #[test]
 fn reversed_selection_overrides_thread_color() {
-    let line = apply_line_background(
-        Line::from("Title".fg(rgb_color((150, 50, 170)))),
-        Style::default()
-            .fg(Color::Reset)
-            .bg(Color::Reset)
-            .reversed(),
+    let row = Style::default()
+        .fg(Color::Reset)
+        .bg(Color::Reset)
+        .reversed();
+    let line = session_summary_line(
+        vec![],
+        "Title".fg(rgb_color((150, 50, 170))),
+        /*unread*/ true,
+        row,
         /*width*/ 12,
     );
-    assert_eq!(
-        (
-            line.spans[0].style.fg,
-            line.spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        ),
-        (Some(Color::Reset), true)
-    );
+    let dot = &line.spans[0];
+    let title = &line.spans[2];
+    assert_eq!(dot.content, "●");
+    assert_eq!(dot.style, crate::style::task_marker(true, row).style);
+    assert_eq!(title.style.fg, row.fg);
+    assert!(title.style.add_modifier.contains(Modifier::REVERSED));
 }
 
 #[tokio::test]

@@ -24,13 +24,21 @@ pub(super) enum CleanupContinuation {
 }
 
 impl App {
+    pub(in crate::app) fn adopt_navigation_cleanup(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        self.adopt_navigation_cleanup_on(server.request_handle(), thread_id);
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "The operation sequence cannot exhaust u64 within one frontend lifetime."
     )]
-    pub(in crate::app) fn adopt_navigation_cleanup(
+    pub(in crate::app) fn adopt_navigation_cleanup_on(
         &mut self,
-        server: &AppServerSession,
+        handle: AppServerRequestHandle,
         thread_id: ThreadId,
     ) {
         let order = self.server_operations.next_order;
@@ -46,7 +54,7 @@ impl App {
         };
         self.start_navigation_cleanup(
             operation,
-            server.request_handle(),
+            handle,
             thread_id,
             Vec::new(),
             CleanupContinuation::Done,

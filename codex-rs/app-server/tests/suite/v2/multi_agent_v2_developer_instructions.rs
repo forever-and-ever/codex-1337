@@ -1154,6 +1154,8 @@ features.shell_tool = false
             .request(|request_id| ClientRequest::ThreadList {
                 request_id,
                 params: codex_app_server_protocol::ThreadListParams {
+                    include_attached_threads: false,
+                    current_account_only: false,
                     ancestor_thread_id: Some(thread_id.clone()),
                     attached_to_thread_id: None,
                     source_kinds: Some(vec![

@@ -6,6 +6,7 @@ use crate::outgoing_message::AccountNotification;
 use chrono::DateTime;
 use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
+use codex_core::McpRefreshReason;
 use codex_login::LoginOnboardingEntrypoint;
 
 mod account_scope;
@@ -14,13 +15,16 @@ use codex_mcp::ema_auth_scope;
 use codex_otel::auth_storage::AuthStorageOriginator;
 use codex_rmcp_client::EnterpriseOAuthCredentialGuard;
 
+mod backend_client;
 mod enterprise_login;
 mod gateway_oauth;
+mod initial_account;
 mod quota;
 pub(super) use quota::QuotaReader;
 pub(crate) mod account_session_unsupported;
 mod quota_cache;
 mod rate_limit_resets;
+mod security_setup;
 mod workspace_routing;
 
 pub(super) use enterprise_login::EnterpriseLoginCompletion;
@@ -106,7 +110,8 @@ pub(crate) struct AccountRequestProcessor {
     workspace_routing_fetches: Arc<Mutex<workspace_routing::WorkspaceRoutingFetches>>,
     workspace_routing_shutdown: CancellationToken,
     gateway_login: Arc<std::sync::Mutex<Option<gateway_oauth::ActiveGatewayLogin>>>,
-    gateway_client: Arc<std::sync::Mutex<Option<Arc<codex_login::GatewayAuthManager>>>>,
+    gateway_clients:
+        Arc<std::sync::Mutex<HashMap<String, Arc<codex_model_provider::GatewayAuthManager>>>>,
     _gateway_notifications: Arc<tokio_util::task::AbortOnDropHandle<()>>,
     pub(super) enterprise_login: Arc<enterprise_login::EnterpriseLoginState>,
     reset_credit_confirmations: Arc<Mutex<rate_limit_resets::ResetCreditConfirmations>>,
@@ -125,7 +130,10 @@ impl AccountRequestProcessor {
         if let Some(id) = thread_id {
             let id = ThreadId::from_string(id)
                 .map_err(|error| invalid_request(format!("Invalid thread ID: {error}")))?;
-            if let Ok(thread) = self.thread_manager.get_thread(id).await {
+            {
+                let thread = self.thread_manager.get_thread(id).await.map_err(|error| {
+                    invalid_request(format!("Conversation account is unavailable: {error}"))
+                })?;
                 scoped.auth_manager = thread.auth_manager();
                 let config = thread.config().await;
                 scoped.scoped_provider_account =
@@ -173,7 +181,7 @@ impl AccountRequestProcessor {
             quota_cache: Arc::default(),
             reset_credit_confirmations: Arc::default(),
             gateway_login: Arc::new(std::sync::Mutex::new(/*t*/ None)),
-            gateway_client: Arc::new(std::sync::Mutex::new(/*t*/ None)),
+            gateway_clients: Arc::new(std::sync::Mutex::new(HashMap::new())),
             workspace_routing: Arc::new(Mutex::new(None)),
             workspace_routing_fetches: Arc::new(Mutex::new(HashMap::new())),
             workspace_routing_shutdown: CancellationToken::new(),
@@ -315,6 +323,9 @@ impl AccountRequestProcessor {
     }
 
     async fn load_latest_config(&self) -> Config {
+        if let Some(config) = &self.scoped_config {
+            return config.as_ref().clone();
+        }
         match self
             .config_manager
             .load_latest_config(/*fallback_cwd*/ None)
@@ -342,19 +353,25 @@ impl AccountRequestProcessor {
             .await
         {
             Ok(config) => {
+                let runtime_auth = thread_manager.runtime_auth_for_config(&config);
                 Self::spawn_effective_plugins_changed_task(
                     Arc::clone(thread_manager),
                     config_manager.clone(),
+                    McpRefreshReason::AccountPluginCacheChanged,
                 );
                 let plugins_config = config.plugins_config_input();
                 let refresh_thread_manager = Arc::clone(thread_manager);
                 let refresh_config_manager = config_manager.clone();
                 let on_effective_plugins_changed: Arc<
                     dyn Fn(codex_core_plugins::EffectivePluginsChange) + Send + Sync,
-                > = Arc::new(move |_change| {
+                > = Arc::new(move |change| {
                     Self::spawn_effective_plugins_changed_task(
                         Arc::clone(&refresh_thread_manager),
                         refresh_config_manager.clone(),
+                        change.metadata_change_id.map_or(
+                            McpRefreshReason::AccountPluginCacheChanged,
+                            McpRefreshReason::InstalledPluginMetadata,
+                        ),
                     );
                 });
                 thread_manager
@@ -363,12 +380,15 @@ impl AccountRequestProcessor {
                         &plugins_config,
                         Some(Arc::clone(&on_effective_plugins_changed)),
                     );
+                if let Err(err) = runtime_auth {
+                    warn!("failed to initialize runtime auth for remote plugin refresh: {err}");
+                    return;
+                }
                 thread_manager
                     .plugins_manager()
                     .maybe_start_remote_plugin_caches_refresh(
                         &plugins_config,
                         auth,
-                        /*prefetch_recommendations*/ true,
                         Some(on_effective_plugins_changed),
                     );
             }
@@ -383,13 +403,14 @@ impl AccountRequestProcessor {
     fn spawn_effective_plugins_changed_task(
         thread_manager: Arc<ThreadManager>,
         config_manager: ConfigManager,
+        reason: McpRefreshReason,
     ) {
         tokio::spawn(async move {
             thread_manager.plugins_manager().clear_cache();
             thread_manager.skills_service().clear_cache();
             crate::mcp_refresh::reload_mcp_config_best_effort(&thread_manager, &config_manager)
                 .await;
-            thread_manager.invalidate_mcp_runtimes().await;
+            thread_manager.invalidate_mcp_runtimes_for(reason).await;
         });
     }
 
@@ -857,7 +878,9 @@ impl AccountRequestProcessor {
     }
 
     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
-        self.thread_manager.invalidate_mcp_runtimes().await;
+        self.thread_manager
+            .invalidate_mcp_runtimes_for(McpRefreshReason::AccountLoginCompleted)
+            .await;
         self.send_account_login_notifications(AccountLoginCompletedNotification {
             login_id: login_id.map(|id| id.to_string()),
             success: true,
@@ -919,7 +942,9 @@ impl AccountRequestProcessor {
             self.auth_manager.reload().await;
             let auth_changes = self.auth_manager.auth_change_state_receiver();
             let owner_generation = auth_changes.borrow().owner_generation;
-            self.thread_manager.invalidate_mcp_runtimes().await;
+            self.thread_manager
+                .invalidate_mcp_runtimes_for(McpRefreshReason::AccountAuthReloaded)
+                .await;
             self.config_manager
                 .update_managed_config_loader(self.auth_manager.clone(), &self.config);
             self.config_manager
@@ -949,7 +974,9 @@ impl AccountRequestProcessor {
             self.scoped_config.as_deref().unwrap_or(&self.config),
         )
         .await?;
-        self.thread_manager.invalidate_mcp_runtimes().await;
+        self.thread_manager
+            .invalidate_mcp_runtimes_for(McpRefreshReason::AccountLoggedOut)
+            .await;
         self.model_catalog.invalidate().await;
         if self.auth_manager.is_account_scoped() {
             return Ok(None);
@@ -1096,7 +1123,8 @@ impl AccountRequestProcessor {
             .auth_change_state_receiver()
             .borrow()
             .owner_generation;
-        let Some((auth, http_client_factory)) = auth_manager.auth_with_http_client_factory().await
+        let credentials = Self::captured_backend_credentials(&auth_manager)?;
+        let Some((auth, http_client_factory)) = credentials.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(
                 "codex account authentication required to read rate limits",
@@ -1109,11 +1137,10 @@ impl AccountRequestProcessor {
             ));
         }
 
-        let client = BackendClient::from_auth(
-            self.config.chatgpt_base_url.clone(),
-            &auth,
-            http_client_factory,
-        );
+        let config = self.load_latest_config().await;
+        let client = self
+            .backend_client_for_config(&config, &credentials, &auth, http_client_factory)
+            .await?;
 
         let usage_request = async {
             if let Some(id) = auth_manager.selected_account_id() {
@@ -1128,7 +1155,7 @@ impl AccountRequestProcessor {
                     quota_cache::QuotaFreshness::Refresh
                 };
                 let read = self
-                    .quota_reader()
+                    .quota_reader_for_config(&config)
                     .read_openai(id, capability, freshness)
                     .await?;
                 // This older response has no stale/error envelope. Never turn a retained
@@ -1246,8 +1273,8 @@ impl AccountRequestProcessor {
             })
             .transpose()?;
 
-        let Some((auth, http_client_factory)) =
-            self.auth_manager.auth_with_http_client_factory().await
+        let credentials = Self::captured_backend_credentials(&self.auth_manager)?;
+        let Some((auth, http_client_factory)) = credentials.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(
                 "codex account authentication required to read token usage",
@@ -1260,11 +1287,9 @@ impl AccountRequestProcessor {
             ));
         }
 
-        let client = BackendClient::from_auth(
-            self.config.chatgpt_base_url.clone(),
-            &auth,
-            http_client_factory,
-        );
+        let client = self
+            .backend_client(&credentials, &auth, http_client_factory)
+            .await?;
         if let Some(thread_id) = thread_id {
             let thread_id = thread_id.to_string();
             let usage = tokio::time::timeout(
@@ -1334,8 +1359,8 @@ impl AccountRequestProcessor {
     async fn get_workspace_messages_response(
         &self,
     ) -> Result<GetWorkspaceMessagesResponse, JSONRPCErrorError> {
-        let Some((auth, http_client_factory)) =
-            self.auth_manager.auth_with_http_client_factory().await
+        let credentials = Self::captured_backend_credentials(&self.auth_manager)?;
+        let Some((auth, http_client_factory)) = credentials.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(
                 "codex account authentication required to read workspace messages",
@@ -1348,11 +1373,9 @@ impl AccountRequestProcessor {
             ));
         }
 
-        let client = BackendClient::from_auth(
-            self.config.chatgpt_base_url.clone(),
-            &auth,
-            http_client_factory,
-        );
+        let client = self
+            .backend_client(&credentials, &auth, http_client_factory)
+            .await?;
         let messages = tokio::time::timeout(
             ACCOUNT_WORKSPACE_MESSAGES_FETCH_TIMEOUT,
             client.list_workspace_messages(),
@@ -1428,8 +1451,8 @@ impl AccountRequestProcessor {
         &self,
         params: SendAddCreditsNudgeEmailParams,
     ) -> Result<AddCreditsNudgeEmailStatus, JSONRPCErrorError> {
-        let Some((auth, http_client_factory)) =
-            self.auth_manager.auth_with_http_client_factory().await
+        let credentials = Self::captured_backend_credentials(&self.auth_manager)?;
+        let Some((auth, http_client_factory)) = credentials.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(
                 "codex account authentication required to notify workspace owner",
@@ -1442,11 +1465,9 @@ impl AccountRequestProcessor {
             ));
         }
 
-        let client = BackendClient::from_auth(
-            self.config.chatgpt_base_url.clone(),
-            &auth,
-            http_client_factory,
-        );
+        let client = self
+            .backend_client(&credentials, &auth, http_client_factory)
+            .await?;
 
         match client
             .send_add_credits_nudge_email(Self::backend_credit_type(params.credit_type))
@@ -1520,7 +1541,14 @@ pub(crate) async fn logout_configured_account(
 ) -> Result<Config, JSONRPCErrorError> {
     // Another process may have changed the persisted workspace. Reload both
     // account authority and its policy before selecting a grant to remove.
-    auth_manager.reload().await;
+    if auth_manager.is_account_scoped() {
+        auth_manager.reload().await;
+    } else {
+        auth_manager
+            .reload_with_cached_auth()
+            .await
+            .map_err(|err| internal_error(format!("logout failed: {err}")))?;
+    }
     let config = if auth_manager.is_account_scoped() {
         config_manager
             .load_account_policy(Arc::clone(auth_manager), fallback_config)
@@ -1677,6 +1705,7 @@ mod tests {
                 content_type: "application/json".to_string(),
                 body: "{}".to_string(),
                 retry_after: None,
+                identity_error_code: None,
             };
             assert_eq!(workspace_messages_feature_disabled(&err), expected);
         }

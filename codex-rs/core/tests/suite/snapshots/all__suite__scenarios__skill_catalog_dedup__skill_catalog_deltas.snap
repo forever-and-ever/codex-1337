@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=cef93942f523685c):
-        - namespace/functions; hash=16345a77a37a8b3c
+00:additional_tools/developer (2; hash=80f7d137a6875ae9):
+        - namespace/functions; hash=04f871a2cb0f4859
           - custom/exec
           - function/wait
           - custom/python
@@ -57,7 +57,7 @@ Settings:
         - `r1` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as...l directly in HTML/CSS/canvas. (r1/imagegen/SKILL.md) [hash=570b437236174807]
-        - openai-docs: Use for Codex models/pricing, scheduled tasks, skills, settings, setup, troubleshooting, ... that merely mention Codex. (r1/openai-docs/SKILL.md) [hash=35c29bf826402ac3]
+        - openai-docs: API first-timers, Codex/Work Q&A. If the user already has an OpenAI API integration, skip...d by supplied text or data. (r1/openai-docs/SKILL.md) [hash=4e5568cf7feebecf]
         - skill-creator: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources. (r1/skill-creator/SKILL.md)
         - skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo pat...cluding private repos). (r1/skill-installer/SKILL.md) [hash=9ef1bc554dbf57bc]
         - browser-testing: Run browser tests for web applications. (r0/browser-testing/SKILL.md)
@@ -157,8 +157,8 @@ Settings:
 ## Window 2 (after request 7: input diverged at item 02)
 Settings: same as window 1
 -- request 8 (turn) --
-00:additional_tools/developer (2; hash=cef93942f523685c):
-        - namespace/functions; hash=16345a77a37a8b3c
+00:additional_tools/developer (2; hash=80f7d137a6875ae9):
+        - namespace/functions; hash=04f871a2cb0f4859
           - custom/exec
           - function/wait
           - custom/python
@@ -208,7 +208,7 @@ Settings: same as window 1
         - `r1` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as...l directly in HTML/CSS/canvas. (r1/imagegen/SKILL.md) [hash=570b437236174807]
-        - openai-docs: Use for Codex models/pricing, scheduled tasks, skills, settings, setup, troubleshooting, ... that merely mention Codex. (r1/openai-docs/SKILL.md) [hash=35c29bf826402ac3]
+        - openai-docs: API first-timers, Codex/Work Q&A. If the user already has an OpenAI API integration, skip...d by supplied text or data. (r1/openai-docs/SKILL.md) [hash=4e5568cf7feebecf]
         - skill-creator: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources. (r1/skill-creator/SKILL.md)
         - skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo pat...cluding private repos). (r1/skill-installer/SKILL.md) [hash=9ef1bc554dbf57bc]
         - code-review: Review code changes for correctness. (r0/code-review/SKILL.md)
@@ -295,8 +295,8 @@ Settings: same as window 1
 ## Window 3 (after request 11: input diverged at item 07)
 Settings: same as window 1
 -- request 12 (turn) --
-00:additional_tools/developer (2; hash=cef93942f523685c):
-        - namespace/functions; hash=16345a77a37a8b3c
+00:additional_tools/developer (2; hash=80f7d137a6875ae9):
+        - namespace/functions; hash=04f871a2cb0f4859
           - custom/exec
           - function/wait
           - custom/python
@@ -438,8 +438,8 @@ Settings: same as window 1
 ## Window 4 (after request 18: input diverged at item 10)
 Settings: same as window 1
 -- request 19 (turn) --
-00:additional_tools/developer (2; hash=cef93942f523685c):
-        - namespace/functions; hash=16345a77a37a8b3c
+00:additional_tools/developer (2; hash=80f7d137a6875ae9):
+        - namespace/functions; hash=04f871a2cb0f4859
           - custom/exec
           - function/wait
           - custom/python
@@ -507,7 +507,7 @@ Settings: same as window 1
         - `r1` = `<SKILLS_ROOT>/.system`
         ### Available skills
         - imagegen: Generate or edit (r1/imagegen/SKILL.md)
-        - openai-docs: Use for Codex mode (r1/openai-docs/SKILL.md)
+        - openai-docs: API first-timers,  (r1/openai-docs/SKILL.md)
         - skill-creator: Create or upda (r1/skill-creator/SKILL.md)
         - skill-installer: Install Codex  (r1/skill-installer/SKILL.md)
         - documentation: Write project  (r0/documentation/SKILL.md)

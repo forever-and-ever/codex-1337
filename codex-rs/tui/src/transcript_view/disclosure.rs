@@ -10,6 +10,7 @@ use crate::bottom_pane::TranscriptFooter;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::ListAction;
 use crate::keymap::RuntimeKeymap;
+use codex_protocol::ThreadId;
 use crossterm::event::KeyEvent;
 
 use super::*;
@@ -19,6 +20,7 @@ pub(super) struct Disclosure {
     output_modes: HashMap<String, OutputChoice>,
     output_revision: u64,
     pub(super) focused: Option<ActivityFocus>,
+    pub(super) resume_after_approval: Option<(ThreadId, String)>,
     pub(super) live_ids: Vec<String>,
     pub(super) keymap: RuntimeKeymap,
 }
@@ -43,6 +45,7 @@ impl Default for Disclosure {
             output_modes: HashMap::new(),
             output_revision: 0,
             focused: None,
+            resume_after_approval: None,
             live_ids: Vec::new(),
             keymap: RuntimeKeymap::defaults(),
         }
@@ -62,6 +65,14 @@ impl Disclosure {
 }
 
 impl TranscriptView {
+    pub(crate) fn sync_patch_approval(&mut self, current: Option<(ThreadId, &str)>) {
+        if let Some((thread_id, id)) = &self.disclosure.resume_after_approval
+            && current != Some((*thread_id, id.as_str()))
+        {
+            self.jump_to_latest();
+        }
+    }
+
     pub(crate) fn is_activity_focused(&self) -> bool {
         self.disclosure.focused.is_some() && !self.detailed && self.mode == HistoryRenderMode::Rich
     }

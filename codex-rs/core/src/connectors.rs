@@ -22,7 +22,7 @@ use tracing::warn;
 use crate::config::Config;
 use crate::mcp::McpManager;
 use crate::plugins::list_tool_suggest_discoverable_plugins;
-use crate::plugins::plugins_manager_for_config;
+use crate::plugins::plugins_manager_for_config_with_runtime;
 use crate::session::INITIAL_SUBMIT_ID;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::ToolSuggestDiscoverableType;
@@ -112,18 +112,7 @@ pub(crate) async fn list_tool_suggest_discoverable_tools_with_auth(
         .collect())
 }
 
-pub async fn list_cached_accessible_connectors_from_mcp_tools(
-    config: &Config,
-) -> Option<Vec<AppInfo>> {
-    let auth_manager =
-        AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false)
-            .await
-            .ok()?;
-    let auth = auth_manager.auth().await;
-    list_cached_accessible_connectors_with_auth(config, auth.as_ref())
-}
-
-pub fn list_cached_accessible_connectors_with_auth(
+pub fn list_cached_accessible_connectors_from_mcp_tools(
     config: &Config,
     auth: Option<&CodexAuth>,
 ) -> Option<Vec<AppInfo>> {
@@ -194,10 +183,8 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_environment_manager(
 ) -> anyhow::Result<AccessibleConnectorsStatus> {
     let auth_manager =
         AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false).await?;
-    let plugins_manager = Arc::new(plugins_manager_for_config(
-        config,
-        Arc::clone(&auth_manager),
-    ));
+    let plugins_manager =
+        Arc::new(plugins_manager_for_config_with_runtime(config, Arc::clone(&auth_manager)).await?);
     let mcp_manager = Arc::new(McpManager::new(plugins_manager));
     list_accessible_connectors_from_mcp_tools_with_mcp_manager(
         config,
@@ -216,6 +203,32 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_mcp_manager(
 ) -> anyhow::Result<AccessibleConnectorsStatus> {
     let auth_manager = mcp_manager.auth_manager();
     let auth = auth_manager.auth().await;
+    let runtime_auth = mcp_manager
+        .runtime_auth_for_config(config)
+        .and_then(|(slot, _)| slot.get().cloned());
+    list_accessible_connectors_from_mcp_tools_with_captured_auth(
+        config,
+        force_refetch,
+        environment_manager,
+        mcp_manager,
+        auth_manager,
+        auth,
+        runtime_auth,
+    )
+    .await
+}
+
+/// Discovers connectors using the principal and runtime captured at admission.
+#[expect(clippy::too_many_arguments)]
+pub async fn list_accessible_connectors_from_mcp_tools_with_captured_auth(
+    config: &Config,
+    force_refetch: bool,
+    environment_manager: Arc<EnvironmentManager>,
+    mcp_manager: Arc<McpManager>,
+    auth_manager: Arc<AuthManager>,
+    auth: Option<CodexAuth>,
+    runtime_auth: Option<Arc<codex_runtime_agent_instance::RuntimeAuthManager>>,
+) -> anyhow::Result<AccessibleConnectorsStatus> {
     if !config
         .features
         .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend))
@@ -256,6 +269,12 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_mcp_manager(
             .then(|| Arc::clone(&auth_manager));
     let mcp_runtime = McpRuntime::new(McpRuntimeInput {
         network_policy_metadata: None,
+        runtime_auth: runtime_auth.map(|runtime| {
+            (
+                Arc::new(std::sync::OnceLock::from(runtime)),
+                config.runtime_auth_mode,
+            )
+        }),
         startup_policy: McpStartupPolicy::Eager,
         config: Arc::clone(&mcp_config),
         plugins_available: false,

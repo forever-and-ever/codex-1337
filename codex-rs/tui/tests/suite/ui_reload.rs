@@ -74,7 +74,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
                             "enabled": true, "defaultEnabled": true
                         }))), "nextCursor": null}),
                         "account/read" => json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": false}),
-                        "model/list" => json!({"data": [], "nextCursor": null}),
+                        "model/list" => json!({"data": [], "nextCursor": null, "modelProvider": "openai"}),
                         "config/read" => json!({"config": {"model": "gpt-5.6-terra", "model_provider": "openai",
                             "tui": {"status_line": ["thread-id"]}, "projects": {
                                 cwd.to_string_lossy(): {"trust_level": "trusted"}

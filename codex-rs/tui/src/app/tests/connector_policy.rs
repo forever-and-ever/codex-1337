@@ -14,10 +14,21 @@ async fn installed_connector_mentions_ignore_stale_thread_workspace_and_account(
     app.chat_widget
         .handle_thread_session(test_thread_session(thread_id, cwd.clone()));
     let previous_generation = app.chat_widget.connector_scope_generation();
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Chatgpt,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: Some(crate::status::StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            requires_openai_auth: app.chat_widget.requires_openai_auth(),
+            ..Default::default()
+        });
     app.chat_widget.insert_str("$");
 
     let generation = app.chat_widget.connector_scope_generation();
@@ -70,17 +81,39 @@ async fn queued_connector_fetches_are_bound_to_their_original_account() -> Resul
         .handle_thread_session(test_thread_session(ThreadId::new(), cwd));
     while app_event_rx.try_recv().is_ok() {}
 
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Chatgpt,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: Some(crate::status::StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            requires_openai_auth: app.chat_widget.requires_openai_auth(),
+            ..Default::default()
+        });
     let stale_fetch = std::iter::from_fn(|| app_event_rx.try_recv().ok())
         .find(|event| matches!(event, AppEvent::FetchInstalledConnectorMentions { .. }))
         .expect("installed connector request");
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Chatgpt,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: Some(crate::status::StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            requires_openai_auth: app.chat_widget.requires_openai_auth(),
+            ..Default::default()
+        });
     let current_fetch = std::iter::from_fn(|| app_event_rx.try_recv().ok())
         .find(|event| matches!(event, AppEvent::FetchInstalledConnectorMentions { .. }))
         .expect("refreshed installed connector request");
@@ -110,10 +143,21 @@ async fn app_list_notifications_revalidate_installed_mentions_and_the_current_di
     let cwd = app.chat_widget.config_ref().cwd.to_path_buf();
     app.chat_widget
         .handle_thread_session(test_thread_session(thread_id, cwd.clone()));
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
+    app.chat_widget.update_backend_authority(
+        crate::app_server_session::BackendAuthority::Reported(Some(
+            codex_app_server_protocol::AuthMode::Chatgpt,
+        )),
     );
+    app.chat_widget
+        .update_account_state(crate::app_server_session::SessionAccount {
+            display: Some(crate::status::StatusAccountDisplay::ChatGpt {
+                email: None,
+                plan: None,
+                workspace: None,
+            }),
+            requires_openai_auth: app.chat_widget.requires_openai_auth(),
+            ..Default::default()
+        });
     let scoped_snapshot = ConnectorsSnapshot {
         connectors: vec![serde_json::from_str(
             r#"{"id":"scoped-app","name":"Scoped App","isAccessible":true}"#,

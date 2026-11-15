@@ -9,11 +9,12 @@ use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::RequestId;
 
 impl App {
-    pub(super) fn persist_daybreak_selection_continuation(
+    pub(in crate::app) fn persist_daybreak_selection_continuation(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
         enabled: bool,
+        after_save: impl FnOnce(&mut App) + Send + 'static,
     ) {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
@@ -61,7 +62,9 @@ impl App {
                     Err(error) => app.chat_widget.add_error_message(format!(
                         "Failed to read the thread to save Daybreak: {error}"
                     )),
-                    Ok(true) => app.commit_daybreak_selection(server, thread_id, enabled, cwd),
+                    Ok(true) => {
+                        app.commit_daybreak_selection(server, thread_id, enabled, cwd, after_save);
+                    }
                     Ok(false) => {
                         app.request_server(
                             server,
@@ -94,8 +97,9 @@ impl App {
                             },
                             move |app, server, result| {
                                 match result {
-                                    Ok(()) => app
-                                        .commit_daybreak_selection(server, thread_id, enabled, cwd),
+                                    Ok(()) => app.commit_daybreak_selection(
+                                        server, thread_id, enabled, cwd, after_save,
+                                    ),
                                     Err(error) => app.chat_widget.add_error_message(format!(
                                         "Failed to save Daybreak for this thread: {error}"
                                     )),
@@ -116,6 +120,7 @@ impl App {
         thread_id: ThreadId,
         enabled: bool,
         cwd: String,
+        after_save: impl FnOnce(&mut App) + Send + 'static,
     ) {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
@@ -135,6 +140,7 @@ impl App {
                 None,
             );
         }
+        after_save(self);
         self.queue_model_defaults(
             server,
             vec![crate::config_update::replace_config_value(

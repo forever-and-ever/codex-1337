@@ -1,12 +1,11 @@
 //! Pipes bounded rollout batches into short SQLite transactions, committing each checkpoint.
 
-use std::path::Path;
-
 use codex_protocol::ThreadId;
 
 use super::super::LocalThreadStore;
 use super::super::thread_history::RolloutProjectionStep;
 use super::super::thread_history::apply_projection;
+use super::ProjectionRollout;
 use super::read_projection_batches;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
@@ -25,7 +24,7 @@ pub(super) enum ProjectionMessage {
 pub(super) async fn read_and_apply(
     store: &LocalThreadStore,
     thread_id: ThreadId,
-    rollout_path: &Path,
+    rollout: ProjectionRollout,
     start_offset: u64,
     expected_ordinal: u64,
     initial_ordinal: u64,
@@ -35,12 +34,11 @@ pub(super) async fn read_and_apply(
     // source bytes and step count; an oversized individual record remains indivisible.
     let (sender, receiver) = tokio::sync::mpsc::channel(QUEUED_BATCHES);
     let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
-    let path = rollout_path.to_path_buf();
     let span = tracing::Span::current();
     let worker = tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
         let read = read_projection_batches(
-            &path,
+            &rollout,
             start_offset,
             expected_ordinal,
             thread_id,
@@ -72,6 +70,13 @@ pub(super) async fn read_and_apply(
     result
 }
 
+pub(super) async fn finish_projection(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> ThreadStoreResult<()> {
+    super::super::history_pruning::finish_rebuild(store, thread_id).await
+}
+
 pub(super) async fn apply_batches(
     store: &LocalThreadStore,
     thread_id: ThreadId,
@@ -97,7 +102,10 @@ pub(super) async fn apply_batches(
                 .await?;
                 start_offset = next_offset;
             }
-            ProjectionMessage::Complete => return Ok(()),
+            ProjectionMessage::Complete => {
+                // TELOS(history-pruning): publish readiness only after the last committed batch.
+                return finish_projection(store, thread_id).await;
+            }
             ProjectionMessage::Failed(error) => return Err(error),
         }
     }

@@ -56,6 +56,7 @@ fn wire_projection_hides_custom_tools_and_tool_images() {
         stream_options: None,
         include: Vec::new(),
         prompt_cache_key: None,
+        prompt_cache_options: None,
         text: None,
         client_metadata: None,
         access_programs: None,

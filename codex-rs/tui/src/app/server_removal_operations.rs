@@ -12,7 +12,6 @@ use super::ConnectionMutation;
 use super::ControlCompletion;
 use super::DetachScope;
 use super::DraftDisposition;
-use super::ExitReason;
 use super::HashSet;
 use super::LaneState;
 use super::OperationLane;
@@ -30,6 +29,8 @@ use super::Uuid;
 use super::detach;
 use super::tui;
 use crate::app_event::AgentsOverviewAction;
+use crate::app_server_session::ThreadDeletion;
+use crate::app_server_session::ThreadDeletionError;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -45,9 +46,24 @@ enum RemovalSource {
 }
 
 #[derive(Clone)]
+enum RemovalMutation {
+    Archive,
+    Delete(ThreadDeletion),
+}
+
+impl RemovalMutation {
+    fn action(&self) -> AgentsOverviewAction {
+        match self {
+            Self::Archive => AgentsOverviewAction::Archive,
+            Self::Delete(_) => AgentsOverviewAction::Delete,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(in crate::app) struct RemovalRequest {
     thread_id: ThreadId,
-    action: AgentsOverviewAction,
+    mutation: RemovalMutation,
     source: RemovalSource,
     generation: u64,
 }
@@ -93,7 +109,7 @@ impl super::ServerOperations {
                 };
                 match &**operation {
                     ServerOperation::Connection(ConnectionMutation::Removal(removal)) => {
-                        Some(removal.request().action)
+                        Some(removal.request().mutation.action())
                     }
                     _ => None,
                 }
@@ -109,6 +125,7 @@ pub(in crate::app) enum RemovalReceipt {
     },
     Detached(detach::DetachReceipt),
     Mutated(Result<(), Arc<TypedRequestError>>),
+    Refused(String),
     PrimaryLoaded(bool),
     Finished,
 }
@@ -154,7 +171,7 @@ impl RemovalOperation {
     }
 
     pub(super) fn label(&self) -> &'static str {
-        match self.request().action {
+        match self.request().mutation.action() {
             AgentsOverviewAction::Archive => "Archiving task",
             AgentsOverviewAction::Delete => "Deleting task",
         }
@@ -218,8 +235,8 @@ pub(super) async fn send(
         }
         RemovalOperation::Mutate(target) => {
             let request_id = api::RequestId::String(format!("tui-removal-{id}-mutate"));
-            let result = match target.request.action {
-                AgentsOverviewAction::Archive => handle
+            let result = match target.request.mutation {
+                RemovalMutation::Archive => handle
                     .request_typed::<api::ThreadArchiveResponse>(ClientRequest::ThreadArchive {
                         request_id,
                         params: api::ThreadArchiveParams {
@@ -227,24 +244,20 @@ pub(super) async fn send(
                         },
                     })
                     .await
-                    .map(|_| ()),
-                AgentsOverviewAction::Delete => handle
-                    .request_typed::<api::ThreadDeleteResponse>(ClientRequest::ThreadDelete {
-                        request_id,
-                        params: api::ThreadDeleteParams {
-                            thread_id: target.request.thread_id.to_string(),
-                        },
-                    })
-                    .await
-                    .map(|_| ()),
+                    .map(|_| ())
+                    .map_err(ThreadDeletionError::Request),
+                RemovalMutation::Delete(deletion) => deletion.run(request_id).await.map(|_| ()),
             };
             // A definite rejection can still follow server-side shutdown. Reconcile that
             // fact before restoring the old view. A lost reply is never a safe retry.
             match result {
-                Err(error @ TypedRequestError::Server { .. }) => {
+                Err(ThreadDeletionError::Preflight(error)) => {
+                    RemovalReceipt::Refused(error.to_string())
+                }
+                Err(ThreadDeletionError::Request(error @ TypedRequestError::Server { .. })) => {
                     RemovalReceipt::Mutated(Err(Arc::new(error)))
                 }
-                Err(error) => return Err(error),
+                Err(ThreadDeletionError::Request(error)) => return Err(error),
                 Ok(()) => RemovalReceipt::Mutated(Ok(())),
             }
         }
@@ -323,7 +336,12 @@ impl App {
         self.supersede_pending_navigation();
         let request = RemovalRequest {
             thread_id,
-            action,
+            mutation: match action {
+                AgentsOverviewAction::Archive => RemovalMutation::Archive,
+                AgentsOverviewAction::Delete => {
+                    RemovalMutation::Delete(server.prepare_thread_delete(thread_id))
+                }
+            },
             source,
             generation: self.server_operations.navigation.generation(),
         };
@@ -377,10 +395,10 @@ impl App {
     fn present_removal_failure(&mut self, target: &RemovalTarget, error: &impl std::fmt::Display) {
         match target.request.source {
             RemovalSource::Overview => {
-                self.show_thread_removal_failure(target.request.action, error);
+                self.show_thread_removal_failure(target.request.mutation.action(), error);
             }
             RemovalSource::Current => {
-                let verb = match target.request.action {
+                let verb = match target.request.mutation.action() {
                     AgentsOverviewAction::Archive => "archive",
                     AgentsOverviewAction::Delete => "delete",
                 };
@@ -401,16 +419,17 @@ impl App {
         }
     }
 
-    async fn prepare_removal_detach(&mut self) -> detach::DetachPlan {
+    async fn prepare_removal_detach(&mut self, removed: &HashSet<ThreadId>) -> detach::DetachPlan {
         let mut plan = self
             .prepare_detach_plan(DetachScope::Navigation { destination: None })
             .await;
         plan.targets.retain(|target| {
-            matches!(target.kind, detach::DetachKind::Side { .. })
-                || self
-                    .thread_event_channels
-                    .get(&target.thread_id)
-                    .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live)
+            removed.contains(&target.thread_id)
+                && (matches!(target.kind, detach::DetachKind::Side { .. })
+                    || self
+                        .thread_event_channels
+                        .get(&target.thread_id)
+                        .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live))
         });
         plan
     }
@@ -438,7 +457,7 @@ impl App {
             unreachable!()
         };
         let operation = operation.clone();
-        let mut control = AppRunControl::Continue;
+        let control = AppRunControl::Continue;
         let outcome = match completion.outcome {
             SubmissionOutcome::Operation(Ok(OperationReceipt::Removal(receipt))) => {
                 match (operation, receipt) {
@@ -464,6 +483,7 @@ impl App {
                             return Ok(control);
                         }
                         let target = RemovalTarget { request, primary };
+                        let removed = self.removal_threads(&target);
                         let mut plan = self
                             .prepare_detach_plan(DetachScope::Navigation { destination: None })
                             .await;
@@ -473,6 +493,7 @@ impl App {
                                 || matches!(target.request.source, RemovalSource::Overview)
                                     && target.primary.is_some())
                                 && matches!(entry.kind, detach::DetachKind::Side { .. })
+                                && removed.contains(&entry.thread_id)
                         });
                         if let Some(voice) = voice {
                             plan.voice = self
@@ -513,6 +534,11 @@ impl App {
                             ),
                         }
                     }
+                    (RemovalOperation::Mutate(target), RemovalReceipt::Refused(error)) => {
+                        self.invalidate_removal_overview_refresh();
+                        self.present_removal_failure(&target, &error);
+                        self.refresh_agents_overview_threads(server);
+                    }
                     (RemovalOperation::Mutate(target), RemovalReceipt::Mutated(result)) => {
                         self.invalidate_removal_overview_refresh();
                         if let Err(failure) = result {
@@ -527,34 +553,23 @@ impl App {
                             self.present_removal_failure(&target, &failure);
                             self.refresh_agents_overview_threads(server);
                         } else {
-                            self.project_removed_task(&target).await;
+                            let removed = self.removal_threads(&target);
+                            self.project_removed_task(&target, &removed).await;
                             if self.removal_view_matches(&target) {
-                                if matches!(target.request.source, RemovalSource::Current)
-                                    && matches!(self.app_server_target, AppServerTarget::Embedded)
-                                {
-                                    control = AppRunControl::Exit(match target.request.action {
-                                        AgentsOverviewAction::Archive => {
-                                            ExitReason::Archived(target.request.thread_id)
-                                        }
-                                        AgentsOverviewAction::Delete => ExitReason::ThreadRemoved,
-                                    });
-                                } else {
-                                    let plan = self.prepare_removal_detach().await;
-                                    self.continue_removal(
-                                        server,
-                                        lane,
-                                        RemovalOperation::After {
-                                            target,
-                                            failure: None,
-                                            plan,
-                                        },
-                                    );
-                                    return Ok(control);
-                                }
-                            } else {
-                                self.repaint_agents_overview();
-                                self.refresh_agents_overview_threads(server);
+                                let plan = self.prepare_removal_detach(&removed).await;
+                                self.continue_removal(
+                                    server,
+                                    lane,
+                                    RemovalOperation::After {
+                                        target,
+                                        failure: None,
+                                        plan,
+                                    },
+                                );
+                                return Ok(control);
                             }
+                            self.repaint_agents_overview();
+                            self.refresh_agents_overview_threads(server);
                         }
                     }
                     (
@@ -565,7 +580,8 @@ impl App {
                             self.pause_removed_primary(&target);
                         }
                         if !loaded && self.removal_view_matches(&target) {
-                            let plan = self.prepare_removal_detach().await;
+                            let removed = self.removal_threads(&target);
+                            let plan = self.prepare_removal_detach(&removed).await;
                             self.continue_removal(
                                 server,
                                 lane,
@@ -678,8 +694,10 @@ impl App {
         Box::pin(tokio::time::timeout(Duration::from_secs(5), async {
             while self.server_operations.lanes.get(&OperationLane::Connection).is_some_and(|lane| {
                 !matches!(lane.state, LaneState::Uncertain)
-                    && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                        if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(_))))
+                    && std::iter::once(&lane.active).chain(lane.waiting.iter()).any(|pending| {
+                        matches!(&pending.request, SubmissionRequest::Operation(operation)
+                            if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(_))))
+                    })
             }) {
                 tokio::select! {
                     completion = self.thread_delivery.completion_rx.recv() => {
@@ -720,8 +738,9 @@ impl App {
         self.agents_overview.refresh_notifications.clear();
     }
 
-    async fn project_removed_task(&mut self, target: &RemovalTarget) {
+    fn removal_threads(&self, target: &RemovalTarget) -> HashSet<ThreadId> {
         let mut removed = HashSet::from([target.request.thread_id]);
+        removed.extend(target.primary);
         loop {
             let count = removed.len();
             for (id, thread) in &self.agents_overview.threads {
@@ -743,14 +762,22 @@ impl App {
                     removed.insert(*id);
                 }
             }
+            for (id, side) in &self.side_threads {
+                if removed.contains(&side.parent_thread_id) {
+                    removed.insert(*id);
+                }
+            }
             if removed.len() == count {
                 break;
             }
         }
-        removed.extend(target.primary);
-        self.prepare_agents_overview_removal(&removed);
+        removed
+    }
+
+    async fn project_removed_task(&mut self, target: &RemovalTarget, removed: &HashSet<ThreadId>) {
+        self.prepare_agents_overview_removal(removed);
         self.pause_removed_primary(target);
-        for id in removed {
+        for &id in removed {
             if let Some(channel) = self.thread_event_channels.get_mut(&id) {
                 channel.mark_replay_only();
                 let store = Arc::clone(&channel.store);

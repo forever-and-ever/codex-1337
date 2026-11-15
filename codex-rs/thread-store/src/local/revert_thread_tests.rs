@@ -24,6 +24,7 @@ use crate::ArchiveThreadParams;
 use crate::CreateThreadParams;
 use crate::DeleteThreadParams;
 use crate::ListTurnsParams;
+use crate::LocalHistoryAccount;
 use crate::RevertThreadParams;
 use crate::SortDirection;
 use crate::StoredTurnItemsView;
@@ -60,7 +61,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
             content.to_string(),
             false,
         );
-        let id = ResponseItemId::new("amsg_mail");
+        let id = ResponseItemId::with_suffix("amsg_mail", uuid::Uuid::now_v7());
         let payload = serde_json::to_string(&communication).expect("serialize accepted mail");
         state_db
             .thread_queue()
@@ -214,10 +215,11 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     assert_eq!(replacement_meta.id, thread_id);
     assert_eq!(
         (
+            replacement_meta.account_scoped,
             replacement_meta.creator_user_id.as_deref(),
             replacement_meta.creator_account_id.as_deref()
         ),
-        (Some("creator-user"), Some("creator-account")),
+        (true, Some("creator-user"), Some("creator-account")),
     );
     assert_eq!(replacement_meta.memory_mode, None);
     assert_eq!(
@@ -269,6 +271,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     let payload = meta_line["payload"]
         .as_object_mut()
         .expect("metadata payload");
+    payload.remove("account_scoped");
     payload.remove("creator_user_id");
     payload.remove("creator_account_id");
     tokio::fs::write(
@@ -288,6 +291,25 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     )
     .await
     .expect("drop replacement projection");
+
+    for (user, expected) in [("creator-user", true), ("other-user", false)] {
+        let account = LocalHistoryAccount {
+            user_id: Some(user.to_string()),
+            account_id: Some("creator-account".to_string()),
+        };
+        assert_eq!(
+            account
+                .includes(
+                    home.path(),
+                    thread_id,
+                    Some(&first_replacement_path),
+                    &[thread_id],
+                    /*original_paths*/ &mut None,
+                )
+                .await,
+            expected
+        );
+    }
 
     store
         .revert_thread(RevertThreadParams {
@@ -363,7 +385,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
 }
 
 #[tokio::test]
-async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
+async fn revert_preserves_legacy_scope_and_resolved_multi_agent_version() {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
     let state_db = codex_state::StateRuntime::init(
@@ -373,6 +395,11 @@ async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
     .await
     .expect("initialize state database");
     let store = LocalThreadStore::new(config, Some(state_db.clone()));
+    let other_account = LocalHistoryAccount {
+        user_id: Some("other-user".to_string()),
+        account_id: Some("other-account".to_string()),
+    };
+    let mut archived_threads = Vec::new();
 
     for version in [
         MultiAgentVersion::V1,
@@ -401,6 +428,14 @@ async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
             .shutdown_thread(thread_id)
             .await
             .expect("close source writer");
+        let contents = codex_rollout::test_support::read_rollout(&path).expect("read rollout");
+        // Preserve indexed offsets while turning the fixture into pre-enforcement history.
+        let marker = "\"account_scoped\":true,";
+        codex_rollout::test_support::rewrite_rollout(
+            &path,
+            &contents.replacen(marker, &" ".repeat(marker.len()), 1),
+        )
+        .expect("write legacy rollout");
         codex_rollout::state_db::reconcile_rollout(
             Some(state_db.as_ref()),
             path.as_path(),
@@ -431,8 +466,48 @@ async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
             let meta = codex_rollout::read_session_meta_line(&path)
                 .await
                 .expect("read replacement metadata");
-            assert_eq!(meta.meta.multi_agent_version, Some(version));
+            assert_eq!(
+                (meta.meta.multi_agent_version, meta.meta.account_scoped),
+                (Some(version), false)
+            );
+            assert!(
+                other_account
+                    .includes(
+                        home.path(),
+                        thread_id,
+                        Some(&path),
+                        &[thread_id],
+                        /*original_paths*/ &mut None,
+                    )
+                    .await
+            );
         }
+        store
+            .archive_thread(ArchiveThreadParams { thread_id })
+            .await
+            .expect("archive reverted legacy thread");
+        let path = state_db
+            .get_thread(thread_id)
+            .await
+            .expect("read archived metadata")
+            .expect("archived thread")
+            .rollout_path;
+        archived_threads.push((thread_id, path));
+    }
+    let page_thread_ids: Vec<_> = archived_threads.iter().map(|(id, _)| *id).collect();
+    let mut original_paths = None;
+    for (thread_id, path) in archived_threads {
+        assert!(
+            other_account
+                .includes(
+                    home.path(),
+                    thread_id,
+                    Some(&path),
+                    &page_thread_ids,
+                    &mut original_paths,
+                )
+                .await
+        );
     }
 }
 
@@ -469,7 +544,7 @@ async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) 
             history_mode: ThreadHistoryMode::Paginated,
             history_base: None,
             subagent_history_start_ordinal: None,
-            initial_window_id: "window-1".to_string(),
+            initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
             runtime_workspace_roots: Some(vec![store.config.codex_home.join("workspace").abs()]),
             metadata: ThreadPersistenceMetadata {
                 cwd: Some(std::env::current_dir().expect("cwd")),

@@ -64,7 +64,11 @@ impl ThreadManager {
         let Ok(gate) = Arc::clone(&thread.residency_gate).try_write_owned() else {
             return Ok(ThreadEvictionOutcome::Contended);
         };
-        match self.state.seal_idle_thread(&thread, &eligibility) {
+        match self.state.seal_idle_thread(
+            &thread,
+            &eligibility,
+            &crate::session::IdleMailboxPolicy::Empty,
+        ) {
             crate::runtime_holds::IdleSeal::Sealed => {}
             crate::runtime_holds::IdleSeal::Busy => return Ok(ThreadEvictionOutcome::Busy),
             crate::runtime_holds::IdleSeal::Contended => {
@@ -96,6 +100,7 @@ impl ThreadManagerState {
         &self,
         thread: &Arc<CodexThread>,
         eligibility: &IdleCloseEligibility,
+        mailbox: &crate::session::IdleMailboxPolicy,
     ) -> crate::runtime_holds::IdleSeal {
         use crate::runtime_holds::IdleSeal;
         let Ok(threads) = self.threads.try_read() else {
@@ -108,6 +113,8 @@ impl ThreadManagerState {
         {
             return IdleSeal::Busy;
         }
-        thread.session.seal_idle_runtime(eligibility.revision)
+        thread
+            .session
+            .seal_idle_runtime(eligibility.revision, mailbox)
     }
 }

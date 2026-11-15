@@ -32,6 +32,7 @@ use codex_protocol::protocol::SessionSource;
 use once_cell::sync::Lazy;
 
 use crate::ThreadManager;
+pub use crate::code_mode_host::ProcessOwnedGrpcCodeModeSessionProvider;
 use crate::config::Config;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
@@ -39,6 +40,31 @@ use crate::responses_metadata::subagent_header_value;
 use crate::responses_metadata::subagent_metadata_kind;
 use crate::thread_manager;
 use crate::unified_exec;
+
+/// Supply fixed model metadata to tests without implementing a provider.
+pub fn fixed_model_catalog(
+    manager: SharedModelsManager,
+) -> Arc<dyn codex_model_provider::ModelCatalogFactory> {
+    struct FixedCatalog(SharedModelsManager);
+
+    impl codex_model_provider::ModelCatalogFactory for FixedCatalog {
+        fn build(
+            &self,
+            _provider: codex_model_provider::SharedModelProvider,
+            _provider_id: &str,
+            _config_model_catalog: Option<codex_protocol::openai_models::ModelsResponse>,
+            _api_key_model_discovery_default: bool,
+        ) -> SharedModelsManager {
+            Arc::clone(&self.0)
+        }
+
+        fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
+            self.0.set_api_key_model_discovery_enabled(enabled);
+        }
+    }
+
+    Arc::new(FixedCatalog(manager))
+}
 
 static TEST_MODEL_PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     let mut response = bundled_models_response()
@@ -82,6 +108,27 @@ pub async fn history_with_tool_call_metadata(
         .executed_tool_calls
         .attach_to_prompt(&mut items, &mut Default::default());
     items
+}
+
+pub async fn guardian_review_with_admission(
+    thread: &crate::CodexThread,
+    captured: crate::CapturedProvider,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> codex_protocol::error::Result<crate::guardian_review::GuardianReviewResult> {
+    crate::guardian::review_admitted(&thread.session, captured, cancellation).await
+}
+
+pub async fn guardian_catalog_model(
+    thread: &crate::CodexThread,
+    captured: &crate::CapturedProvider,
+    config: &Config,
+    model: &str,
+) -> anyhow::Result<codex_protocol::openai_models::CatalogModel> {
+    crate::guardian::model_for_admission(&thread.session, captured, config, model).await
+}
+
+pub fn thread_models_manager(thread: &crate::CodexThread) -> SharedModelsManager {
+    Arc::clone(&thread.session.services.models_manager)
 }
 
 /// Returns the recorder state used by the next session metadata snapshot.
@@ -134,7 +181,7 @@ pub async fn observe_turn_timing(
         timing.snapshot_path(end).map(|path| {
             let totals = path.durations(start, end);
             [
-                totals.inference,
+                totals.sampling.saturating_add(totals.compaction),
                 totals.auto_review,
                 totals.tools,
                 totals.overhead,
@@ -176,6 +223,14 @@ pub fn with_code_mode_host_program(
     config: &crate::config::Config,
 ) -> ThreadManager {
     thread_manager.with_code_mode_host_program_for_tests(host_program, config)
+}
+
+/// Supplies the runtime before the manager admits its first thread.
+pub fn with_runtime_auth_manager(
+    thread_manager: ThreadManager,
+    runtime: Arc<codex_runtime_agent_instance::RuntimeAuthManager>,
+) -> ThreadManager {
+    thread_manager.with_runtime_auth_manager_for_tests(runtime)
 }
 
 pub fn thread_manager_with_models_provider(
@@ -260,7 +315,9 @@ pub fn get_model_offline(model: Option<&str>) -> String {
 }
 
 pub fn construct_model_info_offline(model: &str, config: &Config) -> ModelInfo {
-    construct_model_info_offline_for_tests(model, &config.to_models_manager_config())
+    Arc::unwrap_or_clone(
+        construct_model_info_offline_for_tests(model, &config.to_models_manager_config()).model,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -312,4 +369,45 @@ pub fn all_model_presets() -> &'static Vec<ModelPreset> {
 
 pub fn builtin_collaboration_mode_presets() -> Vec<CollaborationModeMask> {
     collaboration_mode_presets::builtin_collaboration_mode_presets()
+}
+
+/// Test-only handle to the fork's validated transported-child capture.
+pub struct PreparedTransportedChild(
+    crate::thread_manager::transported_child::PreparedTransportedChild,
+);
+
+impl PreparedTransportedChild {
+    pub fn agent_path(&self) -> &codex_protocol::AgentPath {
+        self.0.agent_path()
+    }
+}
+
+/// Capture the child while its source invocation is still live.
+pub async fn prepare_transported_child(
+    parent: &crate::CodexThread,
+    invocation: &crate::ToolInvocationContext,
+    request: crate::ThreadCreateRequest,
+) -> Result<PreparedTransportedChild, crate::ThreadSpawnError> {
+    crate::thread_manager::transported_child::prepare(parent, invocation, request)
+        .await
+        .map(PreparedTransportedChild)
+}
+
+/// Start the captured child after its source manager has shut down.
+pub async fn start_transported_child(
+    destination: &ThreadManager,
+    prepared: PreparedTransportedChild,
+    reservation: crate::HostThreadSpawnReservation,
+) -> Result<crate::ThreadSpawnResult, crate::ThreadSpawnError> {
+    crate::thread_manager::transported_child::start(destination, prepared.0, reservation).await
+}
+
+/// Flush this actor's queue rather than the embedding host's unscoped client.
+pub async fn flush_thread_analytics(thread: &crate::CodexThread) {
+    thread
+        .session
+        .services
+        .analytics_events_client
+        .flush()
+        .await;
 }

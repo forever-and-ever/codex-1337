@@ -29,6 +29,7 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
         &app.config.codex_home,
         ChatGptAuthFixture::new("test-token")
             .email("user@example.com")
+            .plan_type("pro")
             .account_id("account")
             .chatgpt_user_id("user"),
         AuthCredentialsStoreMode::File,
@@ -109,6 +110,7 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
     // Reconnect can emit AccountUpdated for the same identity more than once.
     for _ in 0..2 {
         let stale_request_id = app.chat_widget.security_setup_request_id;
+        let stale_account_serial = app.account_ui.serial;
         app.handle_app_server_event(
             &server,
             AppServerEvent::ServerNotification(Box::new(ServerNotification::AccountUpdated(
@@ -144,43 +146,50 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
         app.replace_chat_widget(ChatWidget::new_with_app_event(init));
         let event = tokio::time::timeout(Duration::from_secs(5), async {
             let mut security_notice = None;
-            let mut email_loaded = false;
+            let mut account_read_completed = false;
             loop {
-                let event = events.recv().await.unwrap();
-                if matches!(event, AppEvent::AccountEmailLoaded { .. }) {
-                    app.handle_event(&mut tui, &mut server, event).await?;
-                    email_loaded = true;
-                } else if let AppEvent::SecuritySetupLoaded {
-                    request_id: actual,
-                    identity: actual_identity,
-                    ..
-                } = &event
-                {
-                    assert_eq!(*actual, request_id);
-                    assert_eq!(actual_identity, &identity);
-                    security_notice = Some(event);
+                tokio::select! {
+                    event = events.recv() => {
+                        let event = event.expect("security notice");
+                        if let AppEvent::SecuritySetupLoaded {
+                            request_id: actual, identity: actual_identity, ..
+                        } = &event {
+                            assert_eq!(*actual, request_id);
+                            assert_eq!(actual_identity, &identity);
+                            security_notice = Some(event);
+                        } else {
+                            app.handle_event(&mut tui, &mut server, event).await?;
+                        }
+                    }
+                    completion = app.server_operations.control_rx.recv() => {
+                        Box::pin(app.handle_server_completion(&mut tui, &mut server,
+                            completion.expect("captured account read completion"))).await?;
+                        account_read_completed = true;
+                    }
                 }
-                if email_loaded && let Some(event) = security_notice.take() {
+                let account_loaded = matches!(app.chat_widget.status_account_display(),
+                    Some(StatusAccountDisplay::ChatGpt { email: Some(email), .. }) if email == "user@example.com");
+                if account_read_completed && account_loaded && let Some(event) = security_notice.take() {
                     break Result::<AppEvent>::Ok(event);
                 }
             }
         })
         .await??;
-        app.handle_event(
-            &mut tui,
-            &mut server,
-            AppEvent::AccountEmailLoaded {
-                request_id: uuid::Uuid::new_v4(),
-                email: Some("stale@example.com".into()),
-                workspace: Some("stale-account".into()),
-            },
-        )
-        .await?;
+        app.apply_displayed_account(
+            &server,
+            app.current_displayed_thread_id(),
+            stale_account_serial,
+            Ok(serde_json::from_value(json!({
+                "account": {"type": "chatgpt", "email": "stale@example.com", "planType": "pro",
+                    "workspaceName": "stale-account"},
+                "requiresOpenaiAuth": true
+            }))?),
+        );
         assert_eq!(
             app.chat_widget.status_account_display(),
             Some(&StatusAccountDisplay::ChatGpt {
                 email: Some("user@example.com".into()),
-                plan: None,
+                plan: Some("Pro 200".into()),
                 workspace: Some("account".to_string()),
             })
         );
@@ -193,16 +202,15 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
 }
 
 #[tokio::test]
-async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login() -> Result<()> {
-    for (auth_method, auth_token) in [
-        (
-            Some(AuthMode::ChatgptAuthTokens),
-            Some("other-account-token"),
-        ),
-        (Some(AuthMode::ChatgptAuthTokens), Some("saved-token")),
-        (Some(AuthMode::Chatgpt), Some("other-account-token")),
-        (Some(AuthMode::Chatgpt), None),
-        (None, None),
+async fn security_setup_skips_unavailable_or_mismatched_server_notice() -> Result<()> {
+    for response in [
+        json!({"result": {"notice": null}}),
+        json!({"error": {"code": -32601, "message": "Method not found"}}),
+        json!({"result": {"notice": {
+            "accountId": "other-account", "userId": "other-user",
+            "title": "Keep using Daybreak mode", "description": "Set up security.",
+            "action": {"label": "Set up security", "url": "https://chatgpt.com/cyber"}
+        }}}),
     ] {
         let (mut app, _events, _ops) = make_test_app_with_channels().await;
         let backend = wiremock::MockServer::start().await;
@@ -232,15 +240,8 @@ async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login(
         let daemon = tokio::spawn(async move {
             let (stream, _) = listener.accept().await?;
             serve_reconnect_requests(tokio_tungstenite::accept_async(stream).await?, |request| {
-                assert_eq!(request.method, "getAuthStatus");
-                assert_eq!(
-                    request.params,
-                    Some(json!({"includeToken": true, "refreshToken": false}))
-                );
-                std::future::ready(Some(json!({"result": {
-                    "authMethod": auth_method, "authToken": auth_token,
-                    "requiresOpenaiAuth": true
-                }})))
+                assert_eq!(request.method, "account/securitySetup/read");
+                std::future::ready(Some(response.clone()))
             })
             .await
         });
@@ -265,7 +266,11 @@ async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login(
         backend.verify().await;
         server.shutdown().await?;
         let methods = daemon.await??;
-        assert!(methods.iter().any(|method| method == "getAuthStatus"));
+        assert!(
+            methods
+                .iter()
+                .any(|method| method == "account/securitySetup/read")
+        );
     }
     Ok(())
 }

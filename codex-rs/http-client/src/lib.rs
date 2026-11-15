@@ -50,6 +50,7 @@ pub use crate::network_policy::NetworkPolicy;
 pub use crate::network_policy::NetworkPolicyController;
 pub use crate::network_policy::NetworkPolicyDenied;
 pub use crate::network_policy::NetworkPolicyRevision;
+pub use crate::network_policy::WeakNetworkPolicy;
 pub use crate::openai_endpoints::OpenAiDestination;
 pub use crate::openai_endpoints::classify_openai_api_url;
 pub use crate::openai_endpoints::is_openai_api_url;
@@ -84,6 +85,7 @@ pub use crate::transport::ByteStream;
 pub use crate::transport::HttpTransport;
 pub use crate::transport::ReqwestTransport;
 pub use crate::transport::StreamResponse;
+pub use crate::transport::bounded_response_bytes;
 
 #[cfg(windows)]
 mod windows_proxy_auth;
@@ -118,4 +120,12 @@ pub fn validate_endpoint_url(value: &str, field: &str) -> Result<Url, String> {
         ));
     }
     Ok(url)
+}
+
+/// Validates a credential-bearing HTTPS endpoint without including the URL in errors.
+pub fn validate_https_endpoint_url(value: &str, field: &str) -> Result<Url, String> {
+    validate_endpoint_url(value, field)
+        .ok()
+        .filter(|url| url.scheme() == "https")
+        .ok_or_else(|| format!("{field} URLs must use HTTPS without userinfo or fragments"))
 }
