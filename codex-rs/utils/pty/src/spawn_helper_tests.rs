@@ -83,19 +83,25 @@ fn initialize_spawn_helper() {
                     unsafe { libc::fcntl(cleanup.as_raw_fd(), libc::F_SETFD, 0) },
                     0
                 );
-                let mut child = spawn_pipe_process_no_stdin(
-                    "/proc/self/exe",
-                    &[
-                        CHILD_FIXTURE.to_string(),
-                        cleanup.as_raw_fd().to_string(),
-                        String::new(),
-                    ],
-                    Path::new("/"),
-                    &HashMap::new(),
-                    &None,
-                    &[cleanup.as_raw_fd()],
-                )
-                .await?;
+                let fd = cleanup.as_raw_fd();
+                // Fork from a thread that exits at once: the child must outlive
+                // it, because PR_SET_PDEATHSIG follows the forking thread.
+                let handle = tokio::runtime::Handle::current();
+                let (spawned, spawn) = tokio::sync::oneshot::channel();
+                let spawner = std::thread::spawn(move || {
+                    let _ = spawned.send(handle.block_on(spawn_pipe_process_no_stdin(
+                        "/proc/self/exe",
+                        &[CHILD_FIXTURE.to_string(), fd.to_string(), String::new()],
+                        Path::new("/"),
+                        &HashMap::new(),
+                        &None,
+                        &[fd],
+                    )));
+                });
+                let mut child = spawn.await??;
+                spawner
+                    .join()
+                    .map_err(|_| io::Error::other("fixture spawner thread panicked"))?;
                 let ready = child
                     .stdout_rx
                     .recv()
@@ -163,6 +169,13 @@ async fn helper_target_dies_when_parent_is_killed() -> anyhow::Result<()> {
         .parse::<libc::pid_t>()?;
     // The fixture child waits on the cleanup pipe while its parent is alive.
     let child = tokio::io::unix::AsyncFd::new(open_pidfd(pid)?)?;
+    // The fixture forked it from a thread that has since exited.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), child.readable())
+            .await
+            .is_err(),
+        "the parent-death signal followed the exited forking thread"
+    );
     parent.kill().await?;
     let stopped = tokio::time::timeout(Duration::from_secs(5), child.readable()).await;
     drop(cleanup);

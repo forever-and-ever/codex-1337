@@ -6,6 +6,7 @@ pub use child_command::Command;
 pub use child_command::DescriptorPolicy;
 pub use child_command::ProcessMode;
 pub use child_command::SpawnFallback;
+pub mod death_anchor;
 #[cfg(target_os = "linux")]
 mod linux_fds;
 pub mod pipe;

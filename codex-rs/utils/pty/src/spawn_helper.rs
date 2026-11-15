@@ -145,11 +145,13 @@ pub(crate) async fn spawn(
     };
     // Call the shared native backend directly: the helper needs no child callbacks.
     // Unsupported libc/platform setup falls back at the original target boundary.
-    let child = match crate::child::posix::NativeChild::spawn(&helper) {
+    // The pipe helper arms PR_SET_PDEATHSIG, so helpers fork from the anchor thread.
+    let child = match crate::death_anchor::anchored(move || {
+        crate::child::posix::NativeChild::spawn(&helper)
+    }) {
         Ok(Some(child)) => child,
         Ok(None) | Err(_) => return Ok(None),
     };
-    drop(helper);
     drop(helper_control);
     // All inherited descriptors were passed to the helper synchronously, before
     // the first suspension. The caller can now close its copies safely.

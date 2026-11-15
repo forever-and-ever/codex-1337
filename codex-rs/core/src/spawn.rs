@@ -141,7 +141,9 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
         }
     }
 
-    cmd.kill_on_drop(true).spawn()
+    cmd.kill_on_drop(true);
+    // On Linux the child arms PR_SET_PDEATHSIG, so it forks from the anchor thread.
+    codex_utils_pty::death_anchor::anchored(move || cmd.spawn())
 }
 
 #[cfg(test)]

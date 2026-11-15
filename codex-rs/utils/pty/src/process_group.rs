@@ -24,6 +24,9 @@ use tokio::process::Child;
 #[cfg(target_os = "linux")]
 /// Ensure the child receives SIGTERM when the original parent dies.
 ///
+/// The kernel ties the signal to the forking thread, so such children fork
+/// through [`crate::death_anchor::anchored`].
+///
 /// This should run in `pre_exec` and uses `parent_pid` captured before spawn to
 /// avoid a race where the parent exits between fork and exec.
 pub fn set_parent_death_signal(parent_pid: libc::pid_t) -> io::Result<()> {

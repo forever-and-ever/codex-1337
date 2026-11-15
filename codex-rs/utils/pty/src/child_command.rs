@@ -353,6 +353,15 @@ impl Command {
             ChildDropPolicy::KillAndReap => None,
             ChildDropPolicy::ReapOnly => Some(crate::child::reaper::sender()?),
         };
+        // A child that arms PR_SET_PDEATHSIG must fork from the anchor thread.
+        #[cfg(target_os = "linux")]
+        let mut child = if self.parent_pid.is_some() {
+            let mut inner = self.inner;
+            crate::death_anchor::anchored(move || inner.spawn())?
+        } else {
+            self.inner.spawn()?
+        };
+        #[cfg(not(target_os = "linux"))]
         let mut child = self.inner.spawn()?;
         Ok(Child {
             stdin: child.stdin.take(),
