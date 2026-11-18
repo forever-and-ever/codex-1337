@@ -237,6 +237,11 @@ impl ChatWidget {
             return;
         }
 
+        if cmd == SlashCommand::Yolo {
+            self.dispatch_yolo("", source);
+            return;
+        }
+
         if source == SlashCommandDispatchSource::Live && cmd.requires_dispatch_validation() {
             self.bottom_pane
                 .set_composer_text(String::new(), Vec::new(), Vec::new());
@@ -480,6 +485,7 @@ impl ChatWidget {
             SlashCommand::MultiAgents => {
                 self.app_event_tx.send(AppEvent::OpenAgentPicker);
             }
+            SlashCommand::Yolo => unreachable!("handled above"),
             SlashCommand::Permissions => {
                 // Hold queued prompts while the app checks whether it can open the menu.
                 self.set_queue_autosend_suppressed(/*suppressed*/ true);
@@ -757,6 +763,10 @@ impl ChatWidget {
         if !self.ensure_side_command_allowed_outside_review(cmd) {
             return;
         }
+        if cmd == SlashCommand::Yolo {
+            self.dispatch_yolo(&args, SlashCommandDispatchSource::Live);
+            return;
+        }
         if !cmd.supports_inline_args() {
             self.dispatch_command(cmd);
             return;
@@ -893,6 +903,7 @@ impl ChatWidget {
             return;
         }
         match cmd {
+            SlashCommand::Yolo => self.dispatch_yolo(trimmed, source),
             SlashCommand::Comms => self.dispatch_comms(trimmed),
             SlashCommand::ContextRole => self.dispatch_context_role(trimmed),
             SlashCommand::Account => {
@@ -1339,6 +1350,7 @@ impl ChatWidget {
             | SlashCommand::Agents
             | SlashCommand::MultiAgents
             | SlashCommand::Permissions
+            | SlashCommand::Yolo
             | SlashCommand::ElevateSandbox
             | SlashCommand::Experimental
             | SlashCommand::AutoReview

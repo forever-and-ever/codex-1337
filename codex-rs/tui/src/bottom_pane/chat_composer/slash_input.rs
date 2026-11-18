@@ -1,4 +1,5 @@
 //! Slash-command input parsing, cursor detection, and completion helpers.
+//! Full Access requires submitting the exact `/yolo` command; completion never selects it.
 
 use std::ops::Range;
 
@@ -768,5 +769,22 @@ mod tests {
             InputResult::Command(SlashCommand::Review)
         );
         assert_eq!(composer.draft.textarea.text(), "/review ");
+        let mut composer = composer_with_text_at_cursor("/yo", "/yo".len());
+        assert_eq!(press(&mut composer, KeyCode::Tab), InputResult::None);
+        assert_eq!(composer.draft.textarea.text(), "/yo");
+        let mut composer = composer_with_text_at_cursor("/yolo", "/yolo".len());
+        composer.set_task_running(/*running*/ true);
+        assert_eq!(
+            press(&mut composer, KeyCode::Enter),
+            InputResult::Command(SlashCommand::Yolo)
+        );
+        for text in ["/yolo stray", "/yolo\nstray"] {
+            let mut composer = composer_with_text_at_cursor(text, text.len());
+            assert_eq!(
+                press(&mut composer, KeyCode::Enter),
+                InputResult::CommandWithArgs(SlashCommand::Yolo, "stray".to_string(), Vec::new())
+            );
+            assert_eq!(composer.draft.textarea.text(), text);
+        }
     }
 }

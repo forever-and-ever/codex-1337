@@ -1,8 +1,57 @@
-//! Cycle ordinary built-in modes using the last permission catalog received from the server.
+//! Session-only permission shortcuts: ordinary cycling uses the server catalog;
+//! explicit `/yolo` selects Full Access without opening the permission picker.
 
+use super::slash_dispatch::SlashCommandDispatchSource;
 use super::*;
 
 impl ChatWidget {
+    pub(super) fn dispatch_yolo(&mut self, args: &str, source: SlashCommandDispatchSource) {
+        if !args.trim().is_empty() {
+            self.add_error_message("Usage: /yolo".to_string());
+            return;
+        }
+        if self.blocks_direct_input {
+            self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
+            return;
+        }
+        let Some(thread_id) = self.thread_id else {
+            self.add_error_message("Wait for the session to connect before using /yolo.".into());
+            return;
+        };
+        if !matches!(
+            self.permission_popup,
+            PermissionPopupState::Idle | PermissionPopupState::BackgroundDiscovery { .. }
+        ) || self.input_queue_frontend.suppress_queue_autosend
+            || self.input_queue.turn.is_pending()
+            || self.pending_image_submission.is_some()
+        {
+            self.add_error_message("Wait for the pending operation before using /yolo.".into());
+            return;
+        }
+        let Some(preset) = builtin_approval_presets()
+            .into_iter()
+            .find(|preset| preset.id == "full-access")
+        else {
+            self.add_error_message("Full Access is unavailable.".into());
+            return;
+        };
+        if source == SlashCommandDispatchSource::Live {
+            self.bottom_pane
+                .set_composer_text(String::new(), Vec::new(), Vec::new());
+            self.bottom_pane.drain_pending_submission_state();
+        }
+        self.permission_popup = PermissionPopupState::ApplyingShortcut;
+        self.app_event_tx.send(AppEvent::ApplyPermissionShortcut {
+            thread_id,
+            selection: PermissionProfileSelection {
+                profile_id: preset.active_permission_profile.id,
+                approval_policy: Some(preset.approval.into()),
+                approvals_reviewer: Some(ApprovalsReviewer::User),
+                display_label: preset.label.to_string(),
+            },
+        });
+    }
+
     pub(super) fn handle_permission_shortcut(&mut self, key_event: KeyEvent) -> bool {
         let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event) {
             true

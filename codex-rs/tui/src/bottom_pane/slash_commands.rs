@@ -92,6 +92,10 @@ pub(crate) fn commands_for_input(
     let mut commands = Vec::new();
     let tiers_enabled = flags.service_tier_commands_enabled;
     for (_, cmd) in builtins_for_input(flags) {
+        // Full Access can only be requested by its exact command, never selected by completion.
+        if cmd == SlashCommand::Yolo {
+            continue;
+        }
         commands.push(SlashCommandItem::Builtin(cmd));
         if cmd == SlashCommand::Model && tiers_enabled {
             commands.extend(

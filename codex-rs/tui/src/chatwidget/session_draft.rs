@@ -20,6 +20,7 @@ pub(crate) enum SessionDraft {
 impl ChatWidget {
     pub(super) fn defer_draft_command(&mut self, command: SlashCommand) -> bool {
         if self.session_draft.is_none()
+            || command == SlashCommand::Yolo
             || command.available_when_thread_unavailable()
                 && (command != SlashCommand::Account
                     || matches!(self.session_draft, Some(SessionDraft::AwaitingSignIn(_))))

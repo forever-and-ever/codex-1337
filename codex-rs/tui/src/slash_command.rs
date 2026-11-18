@@ -18,6 +18,7 @@ pub enum SlashCommand {
     Presets,
     Daybreak,
     Permissions,
+    Yolo,
     Keymap,
     Vim,
     #[strum(serialize = "setup-default-sandbox")]
@@ -160,6 +161,7 @@ impl SlashCommand {
             SlashCommand::MultiAgents => "switch between this session's subagents",
             SlashCommand::Side | SlashCommand::Btw => "start a side conversation",
             SlashCommand::Permissions => "choose what Codex is allowed to do",
+            SlashCommand::Yolo => "enable Full Access without approvals for this session",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
             SlashCommand::ElevateSandbox => "set up elevated agent sandbox",
@@ -191,6 +193,7 @@ impl SlashCommand {
                 | SlashCommand::Account
                 | SlashCommand::Model
                 | SlashCommand::Permissions
+                | SlashCommand::Yolo
                 | SlashCommand::Title
                 | SlashCommand::Statusline
                 | SlashCommand::Rename
@@ -241,7 +244,8 @@ impl SlashCommand {
     pub(crate) fn requires_dispatch_validation(self) -> bool {
         matches!(
             self,
-            SlashCommand::Fork
+            SlashCommand::Yolo
+                | SlashCommand::Fork
                 | SlashCommand::Review
                 | SlashCommand::Farm
                 | SlashCommand::FarmFresh
@@ -301,6 +305,7 @@ impl SlashCommand {
             | SlashCommand::Presets
             | SlashCommand::Daybreak
             | SlashCommand::Permissions
+            | SlashCommand::Yolo
             | SlashCommand::Copy
             | SlashCommand::Raw
             | SlashCommand::Rename

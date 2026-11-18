@@ -75,6 +75,14 @@ async fn permission_shortcuts_cycle_builtin_modes() {
         );
         chat.complete_permission_shortcut(thread_id);
     }
+    chat.dispatch_command_with_args(SlashCommand::Yolo, "stray".to_string(), Vec::new());
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
+    assert!(rx.try_recv().is_err());
+    chat.blocks_direct_input = true;
+    chat.dispatch_command(SlashCommand::Yolo);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
+    assert!(rx.try_recv().is_err());
+    chat.blocks_direct_input = false;
     #[cfg(target_os = "windows")]
     {
         chat.set_windows_sandbox_mode(/*mode*/ None);

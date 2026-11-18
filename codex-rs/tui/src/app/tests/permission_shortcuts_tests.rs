@@ -1,4 +1,5 @@
 use super::*;
+use crate::slash_command::SlashCommand;
 use codex_arg0::Arg0DispatchPaths;
 use pretty_assertions::assert_eq;
 
@@ -99,7 +100,20 @@ async fn permission_shortcut_confirms_without_persisting() -> Result<()> {
     while events.try_recv().is_ok() {}
 
     let before = RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref());
-    app.apply_permission_shortcut(&mut app_server, thread_id, read_only_selection())
+    app.chat_widget.dispatch_command(SlashCommand::Yolo);
+    let AppEvent::ApplyPermissionShortcut {
+        thread_id: target,
+        selection,
+    } = events.try_recv().expect("explicit Full Access selection")
+    else {
+        panic!("expected the session-only permission selection");
+    };
+    assert_eq!(target, thread_id);
+    assert_eq!(selection.profile_id, ":danger-full-access");
+    assert_eq!(selection.approval_policy, Some(AskForApproval::Never));
+    assert_eq!(selection.approvals_reviewer, Some(ApprovalsReviewer::User));
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    app.apply_permission_shortcut(&mut app_server, target, selection)
         .await;
     app.settle_turn_submissions(&mut app_server).await?;
 
@@ -114,7 +128,7 @@ async fn permission_shortcut_confirms_without_persisting() -> Result<()> {
     );
     insta::assert_snapshot!(
         next_history_message(&mut events),
-        @"• Permission selection requested: Read Only"
+        @"• Permission selection requested: Full Access"
     );
 
     let notification = next_thread_settings_updated(&mut app_server, thread_id).await;
@@ -134,8 +148,19 @@ async fn permission_shortcut_confirms_without_persisting() -> Result<()> {
         settings.active_permission_profile,
         profile.clone().map(Into::into)
     );
-    assert_eq!(profile, Some(ActivePermissionProfile::new(":read-only")));
+    assert_eq!(
+        profile,
+        Some(ActivePermissionProfile::new(":danger-full-access"))
+    );
     assert_eq!(app.config.approvals_reviewer, ApprovalsReviewer::User);
+    assert_eq!(
+        app.chat_widget
+            .config_ref()
+            .permissions
+            .approval_policy
+            .value(),
+        codex_protocol::protocol::AskForApproval::Never
+    );
     assert_eq!(std::fs::read_to_string(config_path)?, contents);
     app_server.shutdown().await?;
     Ok(())
