@@ -1,6 +1,7 @@
 //! The TUI's own shimmer: one per process, fed by the displayed thread and drawn by its live rows.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -34,6 +35,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Span;
 
 use super::ears::Ears;
+use super::playback;
 use crate::motion::MotionMode;
 use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::default_bg;
@@ -65,6 +67,7 @@ struct Live {
     act: Act,
     /// The status row painted last, whose backdrop `shade_status` lays beneath the rendered row.
     row: Row,
+    pending_roll: Option<Arc<()>>,
 }
 
 #[derive(Default)]
@@ -93,6 +96,29 @@ impl Live {
         self.frames
             .as_ref()
             .is_some_and(|frames| frames.mode().glints())
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "Codex-tui engages only the stock recipes it offers, which fit its wide captions and octants."
+    )]
+    fn engage(&mut self, recipe: &'static Recipe, ears: Option<Ears>) {
+        let shimmer = Shimmer::new(recipe, rand::random(), GLYPHS)
+            .expect("the selected stock recipe fits codex-tui");
+        self.act = Act::Running {
+            shimmer: Box::new(shimmer),
+            drawn: Instant::now(),
+            ears,
+        };
+        self.feed.forget();
+        self.row = Row::default();
+    }
+
+    fn engaged(&self) -> Option<&'static Recipe> {
+        match &self.act {
+            Act::Classic => None,
+            Act::Running { shimmer, .. } => Some(shimmer.recipe()),
+        }
     }
 
     /// Tells the shimmer its bout ended.
@@ -152,36 +178,66 @@ pub(crate) fn follow_presentation(frames: FrameRequester) {
     live().frames = Some(frames);
 }
 
-/// Engages a random stock shimmer other than the engaged one. Until something does, as in tests,
-/// the classic sweep runs.
-pub(crate) fn engage_random() {
-    let engaged = engaged();
-    if let Some(recipe) = ROSTER
-        .iter()
-        .filter(|recipe| offered(recipe))
-        .filter(|recipe| !engaged.is_some_and(|engaged| std::ptr::eq(*recipe, engaged)))
-        .choose(&mut rand::rng())
-    {
-        engage(recipe);
+/// Begins a new roll immediately so that later selections can supersede it during the probe.
+pub(crate) fn engage_random() -> impl Future<Output = ()> {
+    let ticket = Arc::new(());
+    let current = {
+        let mut live = live();
+        live.pending_roll = Some(Arc::clone(&ticket));
+        live.engaged()
+    };
+    async move {
+        let candidates = ROSTER.iter().filter(|recipe| {
+            offered(recipe) && !current.is_some_and(|current| std::ptr::eq(*recipe, current))
+        });
+        let drawn = candidates.clone().choose(&mut rand::rng());
+        let recipe = if let Some(drawn) = drawn {
+            resolve_roll(drawn, candidates, playback::playing()).await
+        } else {
+            None
+        };
+        let ears = if recipe.is_some_and(Recipe::listens) {
+            tokio::task::spawn_blocking(Ears::open).await.ok().flatten()
+        } else {
+            None
+        };
+        let mut live = live();
+        if live
+            .pending_roll
+            .as_ref()
+            .is_some_and(|pending| Arc::ptr_eq(pending, &ticket))
+        {
+            live.pending_roll = None;
+            if let Some(recipe) = recipe {
+                live.engage(recipe, ears);
+                if let Some(frames) = &live.frames {
+                    frames.schedule_frame();
+                }
+            }
+        }
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "Codex-tui engages only the stock recipes it offers, which fit its wide captions and octants."
-)]
+async fn resolve_roll(
+    recipe: &'static Recipe,
+    candidates: impl Iterator<Item = &'static Recipe>,
+    playback: impl Future<Output = bool>,
+) -> Option<&'static Recipe> {
+    if recipe.listens() && !playback.await {
+        // Redrawing uniformly from the remaining recipes preserves their relative odds.
+        candidates
+            .filter(|recipe| !recipe.listens())
+            .choose(&mut rand::rng())
+    } else {
+        Some(recipe)
+    }
+}
+
 pub(super) fn engage(recipe: &'static Recipe) {
-    let shimmer = Shimmer::new(recipe, rand::random(), GLYPHS)
-        .expect("the selected stock recipe fits codex-tui");
     let ears = recipe.listens().then(Ears::open).flatten();
     let mut live = live();
-    live.act = Act::Running {
-        shimmer: Box::new(shimmer),
-        drawn: Instant::now(),
-        ears,
-    };
-    live.feed.forget();
-    live.row = Row::default();
+    live.pending_roll = None;
+    live.engage(recipe, ears);
 }
 
 /// Whether codex-tui offers `recipe`: it fits the terminal, and it listens only where `PipeWire`
@@ -196,7 +252,9 @@ pub(crate) struct Earplug;
 
 impl Drop for Earplug {
     fn drop(&mut self) {
-        if let Act::Running { ears, .. } = &mut live().act {
+        let mut live = live();
+        live.pending_roll = None;
+        if let Act::Running { ears, .. } = &mut live.act {
             *ears = None;
         }
     }
@@ -204,10 +262,7 @@ impl Drop for Earplug {
 
 /// The recipe engaged, if any.
 pub(super) fn engaged() -> Option<&'static Recipe> {
-    match &live().act {
-        Act::Classic => None,
-        Act::Running { shimmer, .. } => Some(shimmer.recipe()),
-    }
+    live().engaged()
 }
 
 /// Feeds the shimmer from a live notification, which bears on it only from the displayed thread.
@@ -657,6 +712,38 @@ fn waits(item: &ThreadItemPayload) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn random_probes_playback_only_for_a_listening_recipe() {
+        let playback = std::future::ready;
+        let Some(hi_fi) = ROSTER.iter().find(|recipe| recipe.listens()) else {
+            unreachable!("the stock roster contains a listener");
+        };
+        let Some(silent) = ROSTER.iter().find(|recipe| !recipe.listens()) else {
+            unreachable!("the stock roster contains a non-listener");
+        };
+        let candidates = [hi_fi, silent];
+        assert!(
+            resolve_roll(hi_fi, candidates.into_iter(), playback(false))
+                .await
+                .is_some_and(|recipe| std::ptr::eq(recipe, silent))
+        );
+        assert!(
+            resolve_roll(hi_fi, candidates.into_iter(), playback(true))
+                .await
+                .is_some_and(|recipe| std::ptr::eq(recipe, hi_fi))
+        );
+        let mut queried = false;
+        assert!(
+            resolve_roll(silent, candidates.into_iter(), async {
+                queried = true;
+                false
+            })
+            .await
+            .is_some_and(|recipe| std::ptr::eq(recipe, silent))
+        );
+        assert!(!queried);
+    }
 
     #[test]
     fn inactive_windows_do_not_start_or_catch_up_the_shimmer_clock() {

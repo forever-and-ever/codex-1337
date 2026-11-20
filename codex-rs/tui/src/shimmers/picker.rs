@@ -83,7 +83,9 @@ pub(crate) fn picker(
             actions: vec![Box::new(move |_: &AppEventSender| live::engage(recipe))],
             secondary_action: Some(SelectionSecondaryAction {
                 key: roll,
-                action: Box::new(|_: &AppEventSender| live::engage_random()),
+                action: Box::new(|_: &AppEventSender| {
+                    tokio::spawn(live::engage_random());
+                }),
                 footer_hint: hint.clone(),
             }),
             ..Default::default()

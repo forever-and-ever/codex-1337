@@ -1097,7 +1097,7 @@ pub async fn run_main(
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
     system_motion::initialize().await;
-    shimmers::engage_random();
+    shimmers::engage_random().await;
     let _earplug = shimmers::Earplug;
     startup_recovery::scope(async move {
         // Startup retains a large future for the whole session. Keep it off callers' stacks,
