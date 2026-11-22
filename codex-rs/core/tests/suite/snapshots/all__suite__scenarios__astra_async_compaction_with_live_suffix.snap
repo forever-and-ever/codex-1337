@@ -6,8 +6,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (2; hash=80f7d137a6875ae9):
-        - namespace/functions; hash=04f871a2cb0f4859
+00:additional_tools/developer (2; hash=2c9af3dc99abf842):
+        - namespace/functions; hash=d17415e4b1d663e8
           - custom/exec
           - function/wait
           - custom/python
@@ -42,8 +42,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 2 (after request 2: input diverged at item 10)
 -- request 3 (request) --
-00:additional_tools/developer (2; hash=80f7d137a6875ae9):
-        - namespace/functions; hash=04f871a2cb0f4859
+00:additional_tools/developer (2; hash=2c9af3dc99abf842):
+        - namespace/functions; hash=d17415e4b1d663e8
           - custom/exec
           - function/wait
           - custom/python
@@ -98,8 +98,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 3 (after request 3: input diverged at item 02)
 -- request 4 (request) --
-00:additional_tools/developer (2; hash=80f7d137a6875ae9):
-        - namespace/functions; hash=04f871a2cb0f4859
+00:additional_tools/developer (2; hash=2c9af3dc99abf842):
+        - namespace/functions; hash=d17415e4b1d663e8
           - custom/exec
           - function/wait
           - custom/python

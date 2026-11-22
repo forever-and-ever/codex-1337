@@ -56,3 +56,11 @@ fn startup_replay_omits_terminal_color_replies_interleaved_with_bracketed_paste(
         response_after_paste
     );
 }
+
+#[test]
+fn alternate_scroll_probe_response_is_not_replayed_as_input() {
+    assert_eq!(
+        startup_replay_input(b"before\x1b[?1007;1$yafter"),
+        b"beforeafter"
+    );
+}

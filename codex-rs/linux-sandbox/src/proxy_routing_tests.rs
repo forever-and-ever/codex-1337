@@ -11,6 +11,7 @@ use super::parse_loopback_proxy_endpoint;
 use super::plan_proxy_routes;
 use super::proxy_bidirectional;
 use super::rewrite_proxy_env_value;
+use async_lock::Semaphore;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Read;
@@ -22,7 +23,6 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Semaphore;
 
 #[tokio::test]
 async fn a_reset_on_either_side_releases_the_bridge_permit() {
@@ -49,8 +49,7 @@ async fn a_reset_on_either_side_releases_the_bridge_permit() {
 
         let _permit = tokio::time::timeout(Duration::from_secs(5), slots.0.acquire())
             .await
-            .expect("bridge must release its permit while the other peer is still open")
-            .unwrap();
+            .expect("bridge must release its permit while the other peer is still open");
         assert!(result.await.unwrap().is_err());
         drop(idle_peer);
     }

@@ -56,6 +56,10 @@ impl CodeModeToolOutput {
 impl codex_tools::HookToolOutput for CodeModeToolOutput {}
 
 impl ToolOutput for CodeModeToolOutput {
+    fn output_budget_applied(&self) -> bool {
+        true
+    }
+
     fn log_output(&self) -> String {
         format!(
             "{}{}",

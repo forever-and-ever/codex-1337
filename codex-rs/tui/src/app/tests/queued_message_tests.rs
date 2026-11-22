@@ -267,10 +267,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         ]
     };
     let recovered_message = |app: &mut App| {
-        let input = serde_json::to_value(app.chat_widget.capture_thread_input_state()).unwrap();
-        let mut composer = input["composer"].clone();
-        composer.as_object_mut().unwrap().remove("pending_pastes");
-        serde_json::from_value::<UserMessage>(composer).unwrap()
+        let draft = app.chat_widget.composer_draft_snapshot();
+        UserMessage {
+            text: draft.text,
+            local_images: draft.local_images,
+            remote_image_urls: draft.remote_image_urls,
+            text_elements: draft.text_elements,
+            mention_bindings: draft.mention_bindings,
+        }
     };
     let rich_prompt = ChatWidget::submission_draft_from_inputs(
         "fixture".into(),

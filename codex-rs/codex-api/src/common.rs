@@ -73,6 +73,40 @@ pub struct MemorySummarizeOutput {
 #[derive(Clone, Debug)]
 pub struct ResponseId(pub String);
 
+/// A bounded reason for removing a replayed reasoning item from model input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasoningRemovalReason {
+    OrganizationMismatch,
+    EndUserMismatch,
+    ModelMismatch,
+    PrefixMismatch,
+    TurnBoundary,
+    Other,
+}
+
+impl ReasoningRemovalReason {
+    /// Every metric category, including unrecognized API reasons.
+    pub const ALL: [Self; 6] = [
+        Self::OrganizationMismatch,
+        Self::EndUserMismatch,
+        Self::ModelMismatch,
+        Self::PrefixMismatch,
+        Self::TurnBoundary,
+        Self::Other,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OrganizationMismatch => "organization_mismatch",
+            Self::EndUserMismatch => "end_user_mismatch",
+            Self::ModelMismatch => "model_mismatch",
+            Self::PrefixMismatch => "prefix_mismatch",
+            Self::TurnBoundary => "turn_boundary",
+            Self::Other => "other",
+        }
+    }
+}
+
 #[path = "response_event.rs"]
 mod response_event;
 pub use response_event::ResponseEvent;
@@ -257,6 +291,8 @@ pub struct ResponsesApiRequest {
     pub client_metadata: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_programs: Option<AccessPrograms>,
+    #[serde(skip_serializing_if = "codex_protocol::RequestCountry::is_omitted")]
+    pub request_country: codex_protocol::RequestCountry,
 }
 
 impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
@@ -280,6 +316,7 @@ impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
             generate: None,
             client_metadata: request.client_metadata.clone(),
             access_programs: request.access_programs,
+            request_country: &request.request_country,
         }
     }
 }
@@ -316,6 +353,8 @@ pub struct ResponseCreateWsRequest<'a> {
     pub client_metadata: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_programs: Option<AccessPrograms>,
+    #[serde(skip_serializing_if = "codex_protocol::RequestCountry::is_omitted")]
+    pub request_country: &'a codex_protocol::RequestCountry,
 }
 
 pub fn response_create_client_metadata(

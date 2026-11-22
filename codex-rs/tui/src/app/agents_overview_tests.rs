@@ -136,7 +136,6 @@ use crate::test_support::PathBufExt;
 use crate::test_support::test_path_buf;
 use crate::test_support::test_path_display;
 use codex_app_server_client::AppServerEvent;
-use codex_app_server_protocol::CurrentTimeReadParams;
 use codex_app_server_protocol::ReasoningSummaryTextDeltaNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
@@ -344,6 +343,7 @@ async fn agents_navigation_spawn_admission_separates_family_from_mcp_transport()
     let mcp = |id: ThreadId| {
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
             thread_id: Some(id.to_string()),
+            environment_id: None,
             name: "eager".into(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -960,10 +960,7 @@ async fn shared_overview_seeds_once_and_retains_locally_resumed_history() -> Res
     expected.insert(ids[0]);
     let retained: HashSet<_> = app.agents_overview.threads.keys().copied().collect();
     assert_eq!(retained, expected);
-    assert_eq!(
-        app.agents_overview.last_messages,
-        HashMap::from([(ids[10], "Found the regression in the parser.".to_string())])
-    );
+    assert!(app.agents_overview.last_messages.is_empty());
     let thread = app.agents_overview.threads[&ids[10]].as_ref().unwrap();
     assert_eq!(thread.status, ThreadStatus::NotLoaded);
 
@@ -2052,10 +2049,15 @@ async fn root_switch_preserves_idle_root_with_running_subagent() -> Result<()> {
     );
     app.handle_app_server_event(
         &app_server,
-        AppServerEvent::ServerRequest(Box::new(ServerRequest::CurrentTimeRead {
+        AppServerEvent::ServerRequest(Box::new(ServerRequest::DynamicToolCall {
             request_id: RequestId::Integer(99),
-            params: CurrentTimeReadParams {
+            params: codex_app_server_protocol::DynamicToolCallParams {
                 thread_id: idle_child_id.to_string(),
+                turn_id: "turn".into(),
+                call_id: "legacy-client-tool".into(),
+                namespace: None,
+                tool: "legacy-client-tool".into(),
+                arguments: serde_json::json!({}),
             },
         })),
     )

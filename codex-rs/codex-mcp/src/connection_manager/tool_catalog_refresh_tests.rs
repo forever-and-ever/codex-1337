@@ -102,7 +102,7 @@ impl MutableCatalog {
         );
         connections
             .servers
-            .get_mut("docs")
+            .get_mut(&McpServerKey::unscoped("docs"))
             .expect("docs view")
             .tool_filter = ToolFilter {
             enabled: None,
@@ -148,7 +148,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 2);
     let old_tools = before.tools().to_vec();
     let stale_call = before
-        .prepare_call("docs", "search")
+        .prepare_call(&McpServerKey::unscoped("docs"), "search")
         .expect("initial search");
     let reconnected = MutableCatalog::new().await?;
     assert!(!Arc::ptr_eq(&fixture.client, &reconnected.client));
@@ -201,7 +201,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     );
     for tool in after.tools() {
         let call = after
-            .prepare_call("docs", &tool.tool.name)
+            .prepare_call(&McpServerKey::unscoped("docs"), &tool.tool.name)
             .expect("listed call");
         assert_eq!(call.tool_info(), tool);
         assert!(
@@ -220,8 +220,16 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
             vec![serde_json::json!({"type": "text", "text": tool.tool.name})],
         );
     }
-    assert!(after.prepare_call("docs", "removed").is_none());
-    assert!(after.prepare_call("docs", "disabled").is_none());
+    assert!(
+        after
+            .prepare_call(&McpServerKey::unscoped("docs"), "removed")
+            .is_none()
+    );
+    assert!(
+        after
+            .prepare_call(&McpServerKey::unscoped("docs"), "disabled")
+            .is_none()
+    );
     let error = Box::pin(
         stale_call.call_with_preparation(/*requested_timeout*/ None, || async {
             panic!("stale call must reject before preparation")
@@ -241,7 +249,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
             .prepare_call_for_tool(
                 Arc::clone(after.config()),
                 after
-                    .prepare_call("docs", "search")
+                    .prepare_call(&McpServerKey::unscoped("docs"), "search")
                     .expect("search")
                     .tool_info(),
             )
@@ -260,7 +268,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
             .prepare_call_for_tool(
                 Arc::clone(after.config()),
                 after
-                    .prepare_call("docs", "search")
+                    .prepare_call(&McpServerKey::unscoped("docs"), "search")
                     .expect("search")
                     .tool_info(),
             )
@@ -271,8 +279,16 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     assert_eq!(failed.tools(), after.tools());
     fixture.control.fail.store(false, Ordering::Release);
     let recovered = capture_binding(&fixture.connections).await;
-    assert!(recovered.prepare_call("docs", "recovered").is_some());
-    assert!(recovered.prepare_call("docs", "added").is_none());
+    assert!(
+        recovered
+            .prepare_call(&McpServerKey::unscoped("docs"), "recovered")
+            .is_some()
+    );
+    assert!(
+        recovered
+            .prepare_call(&McpServerKey::unscoped("docs"), "added")
+            .is_none()
+    );
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 7);
 
     // Capture the response before pausing: a second notification during the fetch
@@ -288,16 +304,28 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     fixture.control.pause.store(false, Ordering::Release);
     fixture.control.release.notify_one();
     let first = fetching.await?;
-    assert!(first.prepare_call("docs", "first_revision").is_some());
+    assert!(
+        first
+            .prepare_call(&McpServerKey::unscoped("docs"), "first_revision")
+            .is_some()
+    );
     let second = capture_binding(&fixture.connections).await;
-    assert!(second.prepare_call("docs", "second_revision").is_some());
-    assert!(second.prepare_call("docs", "first_revision").is_none());
+    assert!(
+        second
+            .prepare_call(&McpServerKey::unscoped("docs"), "second_revision")
+            .is_some()
+    );
+    assert!(
+        second
+            .prepare_call(&McpServerKey::unscoped("docs"), "first_revision")
+            .is_none()
+    );
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 9);
 
     // Publication must defer rather than wait for a live call that a future step
     // may need to release. Dirty catalogs must also deny newly prepared invocations.
     let old_call = second
-        .prepare_call("docs", "second_revision")
+        .prepare_call(&McpServerKey::unscoped("docs"), "second_revision")
         .expect("second revision");
     fixture.control.pause_call.store(true, Ordering::Release);
     let running_call = old_call.clone();
@@ -337,14 +365,22 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     fixture.control.release_call.notify_one();
     running.await??;
     let published = capture_binding(&fixture.connections).await;
-    assert!(published.prepare_call("docs", "after_call").is_some());
-    assert!(published.prepare_call("docs", "second_revision").is_none());
+    assert!(
+        published
+            .prepare_call(&McpServerKey::unscoped("docs"), "after_call")
+            .is_some()
+    );
+    assert!(
+        published
+            .prepare_call(&McpServerKey::unscoped("docs"), "second_revision")
+            .is_none()
+    );
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 10);
 
     // Preparation may have side effects, but a notification during its awaits
     // must still prevent the subsequent MCP request without replaying preparation.
     let call = published
-        .prepare_call("docs", "after_call")
+        .prepare_call(&McpServerKey::unscoped("docs"), "after_call")
         .expect("after call");
     let entered = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());

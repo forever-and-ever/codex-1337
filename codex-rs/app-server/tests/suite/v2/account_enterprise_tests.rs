@@ -151,6 +151,7 @@ client_id = "enterprise-client""#
         assert_eq!(
             account,
             AccountUpdatedNotification {
+                reason: None,
                 auth_mode: Some(AuthMode::Chatgpt),
                 plan_type: Some(AccountPlanType::Business),
             }

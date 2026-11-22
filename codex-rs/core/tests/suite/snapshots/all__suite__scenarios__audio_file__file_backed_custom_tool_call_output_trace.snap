@@ -1,0 +1,142 @@
+---
+source: core/tests/suite/scenarios_audio_file_tests.rs
+expression: "context_snapshot::format_request_history_snapshot(\"The tool returns file-backed audio. Follow-up and cold resume omit the expired clip, then use the original file again when it is available.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+---
+Scenario: The tool returns file-backed audio. Follow-up and cold resume omit the expired clip, then use the original file again when it is available.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-5.5"
+  parallel_tool_calls: false
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"context":"all_turns","effort":"medium"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+-- request 1 (turn) --
+00:additional_tools/developer (2; hash=9d80ccc42c37aead):
+        - namespace/functions; hash=e91463a504ac65c5
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/exec_command
+          - function/write_stdin
+          - function/update_work_status
+          - function/request_user_input
+          - custom/apply_patch
+          - function/view_image
+          - function/recording
+          - function/fence
+        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+03:message/user:
+    <ENVIRONMENT_CONTEXT>
+04:message/user:
+    Listen to the recording.
+-- request 2 (turn) --
+05:custom_tool_call/exec:audio(await tools.recording({})); text("caption ".repeat(400));
+06:custom_tool_call_output:Script completed
+    Output:
+     | Warning: truncated 1 text sections under a shared 200-byte approximate text budget. Nonempty emitted tex...minimum omission markers are outside the text budget. [hash=e6096d7da16127d0]
+    Truncated emitted text: <CODE_MODE_OUTPUT 1>/sections.txt (Codex host filesystem; a remote executor may ...victed first; removed when the thread service closes. [hash=1e333aa8ac2a83eb]
+    Section 1: 3200 bytes → 200 bytes (emission-capped demand 3200).
+     | <input_audio> | caption caption caption caption caption caption caption caption caption caption caption caption ca…on ca...ption caption caption caption caption caption caption [hash=faa8ace4f7514958]
+
+## Window 2 (after request 2: input diverged at item 06)
+Settings: same as window 1
+-- request 3 (turn) --
+00:additional_tools/developer (2; hash=9d80ccc42c37aead):
+        - namespace/functions; hash=e91463a504ac65c5
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/exec_command
+          - function/write_stdin
+          - function/update_work_status
+          - function/request_user_input
+          - custom/apply_patch
+          - function/view_image
+          - function/recording
+          - function/fence
+        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+03:message/user:
+    <ENVIRONMENT_CONTEXT>
+04:message/user:
+    Listen to the recording.
+05:custom_tool_call/exec:audio(await tools.recording({})); text("caption ".repeat(400));
+06:custom_tool_call_output:Script completed
+    Output:
+     | Warning: truncated 1 text sections under a shared 200-byte approximate text budget. Nonempty emitted tex...minimum omission markers are outside the text budget. [hash=e6096d7da16127d0]
+    Truncated emitted text: <CODE_MODE_OUTPUT 1>/sections.txt (Codex host filesystem; a remote executor may ...victed first; removed when the thread service closes. [hash=1e333aa8ac2a83eb]
+    Section 1: 3200 bytes → 200 bytes (emission-capped demand 3200).
+     | audio content omitted because its file is unavailable | caption caption caption caption caption caption caption caption caption caption caption caption ca…on ca...ption caption caption caption caption caption caption [hash=faa8ace4f7514958]
+07:message/assistant:
+    I received the clip.
+08:message/user:
+    Check the recording again.
+-- request 4 (turn) --
+09:message/assistant:
+    The recording is unavailable.
+10:message/user:
+    <ENVIRONMENT_CONTEXT>
+11:message/user:
+    Listen after restart.
+
+## Window 3 (after request 4: input diverged at item 06)
+Settings: same as window 1
+-- request 5 (turn) --
+00:additional_tools/developer (2; hash=9d80ccc42c37aead):
+        - namespace/functions; hash=e91463a504ac65c5
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/exec_command
+          - function/write_stdin
+          - function/update_work_status
+          - function/request_user_input
+          - custom/apply_patch
+          - function/view_image
+          - function/recording
+          - function/fence
+        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+03:message/user:
+    <ENVIRONMENT_CONTEXT>
+04:message/user:
+    Listen to the recording.
+05:custom_tool_call/exec:audio(await tools.recording({})); text("caption ".repeat(400));
+06:custom_tool_call_output:Script completed
+    Output:
+     | Warning: truncated 1 text sections under a shared 200-byte approximate text budget. Nonempty emitted tex...minimum omission markers are outside the text budget. [hash=e6096d7da16127d0]
+    Truncated emitted text: <CODE_MODE_OUTPUT 1>/sections.txt (Codex host filesystem; a remote executor may ...victed first; removed when the thread service closes. [hash=1e333aa8ac2a83eb]
+    Section 1: 3200 bytes → 200 bytes (emission-capped demand 3200).
+     | <input_audio> | caption caption caption caption caption caption caption caption caption caption caption caption ca…on ca...ption caption caption caption caption caption caption [hash=faa8ace4f7514958]
+07:message/assistant:
+    I received the clip.
+08:message/user:
+    Check the recording again.
+09:message/assistant:
+    The recording is unavailable.
+10:message/user:
+    <ENVIRONMENT_CONTEXT>
+11:message/user:
+    Listen after restart.
+12:message/assistant:
+    The recording is still unavailable.
+13:message/user:
+    Listen after the file is restored.

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::session::Session;
@@ -20,6 +21,7 @@ use crate::context::world_state::ModelIdentityState;
 use crate::context::world_state::ModelInstructionsState;
 use crate::context::world_state::MultiAgentModeState;
 use crate::context::world_state::MultiAgentUsageHintState;
+use crate::context::world_state::PermissionDescription;
 use crate::context::world_state::PermissionsState;
 use crate::context::world_state::PersistentModeState;
 use crate::context::world_state::PluginsInstructionsState;
@@ -34,6 +36,7 @@ use codex_connectors::AppToolPolicyEvaluator;
 use codex_extension_api::WorldStateContributionInput;
 use codex_features::Feature;
 use codex_file_system::FileSystemSandboxContext;
+use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_prompts::ApprovalPromptContext;
 use codex_prompts::ResolvedModelMessages;
 use codex_prompts::render_model_instructions;
@@ -274,9 +277,8 @@ impl Session {
                     .session_source
                     .get_agent_path()
                     .unwrap_or_else(codex_protocol::AgentPath::root),
-                window_ids.first_window_id,
-                window_ids.previous_window_id,
-                window_ids.window_id,
+                window_ids,
+                step_context.context_window_as_tool_output(),
             ));
         }
         let guidance = step_context
@@ -304,41 +306,83 @@ impl Session {
         world_state
             .add_instruction_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
         if turn_context.config.include_permissions_instructions {
-            let environment = step_context.environments.primary();
-            let sandbox = environment
-                .filter(|environment| environment.environment().is_remote())
-                .map(|environment| {
-                    environment.sandbox_context(/*additional_permissions*/ None)
-                });
-            let paths = sandbox
-                .as_ref()
-                .map(FileSystemSandboxContext::policy_context);
-            let permission_profile =
-                turn_context.permission_profile_for_environments(&step_context.environments);
-            #[allow(deprecated)]
-            let cwd = environment
-                .and_then(|environment| environment.cwd().to_abs_path().ok())
-                .unwrap_or_else(|| turn_context.cwd.clone());
+            let per_environment = turn_context
+                .config
+                .features
+                .enabled(Feature::PerEnvironmentContext);
+            let mut environments = if per_environment {
+                step_context
+                    .environments
+                    .turn_environments()
+                    .map(Some)
+                    .collect::<Vec<_>>()
+            } else {
+                vec![step_context.environments.primary()]
+            };
+            if environments.is_empty() {
+                environments.push(None);
+            }
+            let mut descriptions = BTreeMap::new();
             let approval_context =
                 ApprovalPromptContext::new(settings.approvals_reviewer(), model_messages);
-            world_state.add_instruction_section(PermissionsState::new(
-                &permission_profile,
-                settings.approval_policy(),
-                match effective_tool_mode(turn_context, model_info) {
-                    ToolMode::CodeModeOnly => approval_context.for_cells(),
-                    ToolMode::Direct | ToolMode::CodeMode => approval_context,
-                },
-                &cwd,
-                paths.as_ref(),
-                turn_context
-                    .config
-                    .features
-                    .enabled(Feature::ExecPermissionApprovals),
-                turn_context
-                    .config
-                    .features
-                    .enabled(Feature::RequestPermissionsTool),
-            ));
+            let approval_context = match effective_tool_mode(turn_context, model_info) {
+                ToolMode::CodeModeOnly => approval_context.for_cells(),
+                ToolMode::Direct | ToolMode::CodeMode => approval_context,
+            };
+            for environment in environments {
+                let sandbox = environment
+                    .filter(|environment| per_environment || environment.environment().is_remote())
+                    .map(|environment| {
+                        environment.sandbox_context(/*additional_permissions*/ None)
+                    });
+                let paths = sandbox
+                    .as_ref()
+                    .map(FileSystemSandboxContext::policy_context);
+                let permission_profile = environment.map_or_else(
+                    || turn_context.permission_profile_for_environments(&step_context.environments),
+                    |environment| {
+                        if per_environment {
+                            environment.permission_profile_with_workspace_roots()
+                        } else {
+                            turn_context
+                                .permission_profile_for_environments(&step_context.environments)
+                        }
+                    },
+                );
+                #[allow(deprecated)]
+                let cwd = environment
+                    .and_then(|environment| environment.cwd().to_abs_path().ok())
+                    .unwrap_or_else(|| turn_context.cwd.clone());
+                let id = if per_environment {
+                    environment.map(|environment| environment.selection.environment_id.clone())
+                } else {
+                    None
+                };
+                descriptions.insert(
+                    id,
+                    PermissionDescription::new(
+                        &permission_profile,
+                        settings.approval_policy(),
+                        approval_context,
+                        &cwd,
+                        paths.as_ref(),
+                        turn_context
+                            .config
+                            .features
+                            .enabled(Feature::ExecPermissionApprovals),
+                        turn_context
+                            .config
+                            .features
+                            .enabled(Feature::RequestPermissionsTool),
+                    ),
+                );
+            }
+            let permissions = PermissionsState::new(descriptions, per_environment);
+            if per_environment {
+                world_state.add_section(permissions);
+            } else {
+                world_state.add_instruction_section(permissions);
+            }
         }
         if turn_context.config.include_collaboration_mode_instructions {
             world_state.add_instruction_section(CollaborationModeState::from_collaboration_mode(
@@ -374,10 +418,18 @@ impl Session {
                 self.read_clock_for_context(turn_context, "environment_date")
                     .await?
                     .map(|current_time| {
-                        current_time
-                            .with_timezone(&chrono::Local)
-                            .format("%Y-%m-%d")
-                            .to_string()
+                        if turn_context
+                            .config
+                            .features
+                            .enabled(Feature::UtcEnvironmentDate)
+                        {
+                            current_time.format("%Y-%m-%d").to_string()
+                        } else {
+                            current_time
+                                .with_timezone(&chrono::Local)
+                                .format("%Y-%m-%d")
+                                .to_string()
+                        }
                     })
             } else {
                 None
@@ -412,8 +464,18 @@ impl Session {
             };
         let apps_usage_instructions_available =
             apps_available && model_info.include_apps_usage_instructions;
+        let apps_messages = if turn_context
+            .config
+            .features
+            .enabled(Feature::CatalogAppsInstructions)
+        {
+            model_messages
+        } else {
+            ResolvedModelMessages::bundled()
+        };
         world_state.add_instruction_section(AppsInstructionsState::new(
             apps_usage_instructions_available,
+            apps_messages.apps_usage_instructions(CODEX_APPS_MCP_SERVER_NAME),
         ));
         let plugins_usage_instructions_available =
             step_context.mcp.plugins_available() && model_info.include_plugin_usage_instructions;

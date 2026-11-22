@@ -75,7 +75,8 @@ qualified forms.
   `tui.keymap.global.rewind`; arrows choose, Enter confirms, Esc leaves) in the
   dialogue lens, which stays on afterwards; the revert is the thread operation the confirmed
   rewind requests, which drops that prompt's turn and everything after it and returns the
-  prompt to the composer. Upstream's Esc-Esc backtracking is retired.
+  prompt to the composer. Draft undo (F7) and redo (Shift+F7) edit only the unsent
+  prompt; neither changes the conversation. Upstream's Esc-Esc backtracking is retired.
 - beat, glint, peripheral: the beat is the clock every TUI animation shares
   (`libshimmer::TICK`, 32 ms), so concurrent motion paints in one frame; it is no
   heartbeat. A glint repaints only the status row over the last full frame and writes the
@@ -168,10 +169,10 @@ handoff and advertised UTF-8 aliases. Provenance, local changes, validation and
 removal condition live in `codex-rs/vendor/arboard/DOWNSTREAM.md`. Do not replace
 this patch with build-time edits to Cargo's shared registry cache.
 
-The workspace vendors zip 9.0.0 for one dependency-feature forwarding fix,
+The workspace vendors zip 9.0.5 for one dependency-feature forwarding fix,
 retaining its C bzip2 backend without compiling the unused Rust backend.
 Provenance, the exact metadata delta and removal condition live in
-`codex-rs/vendor/zip/DOWNSTREAM.md`; compiler source and codecs are unchanged.
+`codex-rs/vendor/zip/DOWNSTREAM.md`; the library has no functional changes.
 
 ## Current X11 clipboard keeper
 

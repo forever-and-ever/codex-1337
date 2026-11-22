@@ -1095,6 +1095,7 @@ async fn auto_declined_mcp_elicitations_do_not_leave_startup_quarantine_armed() 
                 params: McpServerElicitationRequestParams {
                     thread_id: thread_id.to_string(),
                     turn_id: Some("turn-auth".to_string()),
+                    environment_id: None,
                     server_name: "payments".to_string(),
                     request: elicitation,
                 },
@@ -1602,6 +1603,7 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
     app.enqueue_primary_thread_notification(ServerNotification::McpServerStatusUpdated(
         McpServerStatusUpdatedNotification {
             thread_id: Some(other_thread_id.to_string()),
+            environment_id: None,
             name: "other".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -1820,6 +1822,7 @@ async fn send_failed_mcp_startup(
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
                 thread_id: Some(thread_id.to_string()),
+                environment_id: None,
                 name: "fixture".to_string(),
                 status: McpServerStartupState::Failed,
                 error: Some("fixture failed".to_string()),

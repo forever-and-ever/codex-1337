@@ -52,6 +52,7 @@ impl App {
         }
         let request_id = Uuid::new_v4();
         self.agents_overview.pending_pin_change = Some(request_id);
+        let backend_id = app_server.backend_id();
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -68,6 +69,7 @@ impl App {
                 .map(|_| ())
                 .map_err(|error| error.to_string());
             app_event_tx.send(AppEvent::AgentsOverviewPinToggled {
+                backend_id,
                 request_id,
                 thread_id,
                 pinned,

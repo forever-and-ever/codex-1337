@@ -37,7 +37,7 @@ impl ChatWidget {
         text_elements: Vec<TextElement>,
         source: UserMessageSource,
     ) -> bool {
-        if self.external_writer_view || self.has_misalignment_policy_violation() {
+        if self.is_read_only_view() || self.has_misalignment_policy_violation() {
             return false;
         }
         match self.prepare_subagent_text(text, text_elements, source) {
@@ -161,7 +161,8 @@ impl ChatWidget {
                     return;
                 }
                 self.app_event_tx.send(AppEvent::FollowTranscript);
-                let should_submit_now = self.is_session_configured()
+                let should_submit_now = !self.is_read_only_view()
+                    && self.is_session_configured()
                     && !self.is_plan_streaming_in_tui()
                     && !self.input_queue_frontend.submissions_paused()
                     && !self.submission_settings_pending()
@@ -283,7 +284,8 @@ impl ChatWidget {
         if self.has_misalignment_policy_violation() {
             return false;
         }
-        let should_run_now = self.is_session_configured()
+        let should_run_now = !self.is_read_only_view()
+            && self.is_session_configured()
             && !self.is_user_turn_pending_or_running()
             && !self.input_queue_frontend.submissions_paused()
             && !self.submission_settings_pending();
@@ -324,7 +326,8 @@ impl ChatWidget {
 
     /// If idle and there are queued inputs, submit exactly one to start the next turn.
     pub(crate) fn maybe_send_next_queued_input(&mut self) -> bool {
-        if !self.is_session_configured()
+        if self.is_read_only_view()
+            || !self.is_session_configured()
             || self.fork_in_progress
             || self.has_misalignment_policy_violation()
             || self.input_queue_frontend.submissions_paused()
@@ -505,9 +508,8 @@ impl ChatWidget {
         mut collaboration_mode: CollaborationModeMask,
     ) {
         if self.blocks_direct_input {
-            self.add_error_message(if self.external_writer_view {
-                "This thread is open elsewhere. Close it there and retry resume to continue."
-                    .to_string()
+            self.add_error_message(if let Some(reason) = self.read_only_thread {
+                reason.message().to_string()
             } else {
                 PARENT_OWNED_INPUT_MESSAGE.to_string()
             });

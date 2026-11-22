@@ -74,6 +74,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
         "unicode-call".into(),
         McpInvocation {
             server: "server".into(),
+            environment_id: None,
             tool: "search".into(),
             arguments: Some(
                 json!({"query": "页面 👩‍💻 e\u{301} a long query", "path": "页面 👩‍💻/lib.rs"}),

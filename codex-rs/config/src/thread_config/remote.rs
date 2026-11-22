@@ -24,6 +24,10 @@ use proto::thread_config_loader_client::ThreadConfigLoaderClient;
     clippy::trivially_copy_pass_by_ref,
     reason = "prost generates enum-name helpers with borrowed receivers"
 )]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait emits this in the generated tonic service"
+)]
 #[path = "proto/codex.thread_config.v1.rs"]
 mod proto;
 

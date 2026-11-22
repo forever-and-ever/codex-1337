@@ -28,6 +28,7 @@ use serde_json::Value as JsonValue;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -50,6 +51,7 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 #[derive(Default)]
 pub(crate) struct ToolCallState {
     pub(crate) terminal_outcome: OnceLock<ToolCallOutcome>,
+    pub(crate) handler_started_at: OnceLock<Instant>,
     pub(crate) delivered_assistant_message: OnceLock<String>,
     pub(crate) invocation: crate::agent::host::InvocationReservation,
 }
@@ -183,6 +185,10 @@ pub struct McpToolOutput {
 }
 
 impl ToolOutput for McpToolOutput {
+    fn output_budget_applied(&self) -> bool {
+        true
+    }
+
     fn log_output(&self) -> String {
         // Logging has its own budget; do not first apply the model-context budget.
         let output = self.result.log_output();
@@ -365,6 +371,10 @@ pub struct AbortedToolOutput {
 }
 
 impl ToolOutput for AbortedToolOutput {
+    fn was_aborted(&self) -> bool {
+        true
+    }
+
     fn log_output(&self) -> String {
         self.message.clone()
     }

@@ -267,7 +267,16 @@ impl App {
     /// Thread switches reconstruct the `ChatWidget`, which loses the `collab_agent_metadata` map.
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
-    pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+    pub(super) fn replace_chat_widget(&mut self, chat_widget: ChatWidget) {
+        let destination_provider = chat_widget.config_ref().model_provider_id.clone();
+        self.replace_chat_widget_for_provider(chat_widget, &destination_provider);
+    }
+
+    fn replace_chat_widget_for_provider(
+        &mut self,
+        mut chat_widget: ChatWidget,
+        destination_provider: &str,
+    ) {
         chat_widget.inherit_view_transition_key_guard(&mut self.chat_widget);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         if self.chat_widget.session_draft.is_some()
@@ -309,10 +318,21 @@ impl App {
             chat_widget.windows_sandbox_elevated_setup_complete =
                 self.chat_widget.windows_sandbox_elevated_setup_complete;
         }
-        if chat_widget.status_account_display() == self.chat_widget.status_account_display()
-            && chat_widget.has_chatgpt_account() == self.chat_widget.has_chatgpt_account()
-        {
+        let same_provider = self.chat_widget.quota_provider_id() == destination_provider;
+        let same_account = chat_widget.status_account_display()
+            == self.chat_widget.status_account_display()
+            && chat_widget.has_chatgpt_account() == self.chat_widget.has_chatgpt_account();
+        if !same_provider || !same_account {
+            self.rate_limit_hard_stop_generation =
+                self.rate_limit_hard_stop_generation.wrapping_add(1);
+            self.rate_limit_refresh_state.invalidate_recovery();
+        } else {
+            if self.rate_limit_refresh_state.has_pending_recovery() {
+                chat_widget.hold_rate_limit_recovery();
+            }
             chat_widget.inherit_backend_banner_state(&mut self.chat_widget);
+        }
+        if same_account {
             chat_widget.inherit_security_setup(&mut self.chat_widget);
         }
         chat_widget
@@ -428,23 +448,30 @@ impl App {
                 display,
             });
         }
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
+        let destination_provider = snapshot
+            .session
+            .as_ref()
+            .map(|session| session.model_provider_id.clone())
+            .unwrap_or_else(|| self.config.model_provider_id.clone());
+        let provider_changed =
+            self.chat_widget.quota_provider_id() != destination_provider.as_str();
+        let mut init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
             self.config.clone(),
             /*initial_user_message*/ None,
         );
-        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        if provider_changed {
+            init.account = crate::app_server_session::BootstrapAccount::AwaitingResume;
+        }
+        self.replace_chat_widget_for_provider(
+            ChatWidget::new_with_app_event(init),
+            &destination_provider,
+        );
         self.chat_widget
             .set_task_mentions_enabled(app_server.task_tools_available(thread_id));
         self.chat_widget
             .note_rendered_width(tui.terminal.last_known_screen_size.width);
-        let external_writer = self
-            .thread_event_channels
-            .get(&thread_id)
-            .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ExternalWriter);
-        if external_writer {
-            self.chat_widget.show_external_writer_thread();
-        }
+        archived_thread::show_cached_read_only_thread(self, thread_id);
         if self.agent_navigation.is_parent_owned(thread_id) {
             self.chat_widget.set_parent_owned_thread();
             if self
@@ -487,8 +514,10 @@ impl App {
         {
             self.adopt_server_permissions();
         }
-        if external_writer {
-            self.chat_widget.show_external_writer_thread();
+        archived_thread::show_cached_read_only_thread(self, thread_id);
+        if provider_changed {
+            self.app_event_tx
+                .send(AppEvent::RefreshConversationAccount { thread_id });
         }
         if retain_side_view {
             // Hold drawing and input through the history events emitted by replay.
@@ -865,8 +894,10 @@ impl App {
         account: Option<SessionAccount>,
     ) -> Result<()> {
         let account_thread_id = started.session.thread_id;
-        let refresh_account =
-            account.is_none() && self.chat_widget.thread_id() != Some(account_thread_id);
+        let destination_provider = &started.session.model_provider_id;
+        let refresh_account = account.is_none()
+            && (self.chat_widget.thread_id() != Some(account_thread_id)
+                || self.chat_widget.quota_provider_id() != destination_provider.as_str());
         // Initial messages are for freshly attached primary threads only. Thread switches and
         // resume/fork flows pass `None` so they cannot replay old history and then auto-submit a new
         // user turn by accident.
@@ -909,7 +940,10 @@ impl App {
         } else if refresh_account {
             init.account = crate::app_server_session::BootstrapAccount::AwaitingResume;
         }
-        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        self.replace_chat_widget_for_provider(
+            ChatWidget::new_with_app_event(init),
+            destination_provider,
+        );
         if matches!(
             presentation,
             ThreadAttachPresentation::Fresh | ThreadAttachPresentation::FreshWithDraft

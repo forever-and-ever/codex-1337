@@ -1,5 +1,7 @@
 ---
 source: tui/src/history_cell/tests.rs
+assertion_line: 1385
 expression: rendered
 ---
-• Calling MCP search.find_docs({"query":"ratatui styling","limit":3})
+• Calling
+  └ MCP search.find_docs({"query":"ratatui styling","limit":3}) (environment a)

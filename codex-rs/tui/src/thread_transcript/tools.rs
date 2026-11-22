@@ -76,6 +76,7 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItemPayload) -> Option<Plain
         }
         ThreadItemPayload::McpToolCall {
             server,
+            environment_id,
             tool,
             status,
             result,
@@ -87,6 +88,10 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItemPayload) -> Option<Plain
                 McpToolCallStatus::Completed => "Completed · result unavailable",
                 McpToolCallStatus::Failed => "Failed · result unavailable",
             };
+            let server = crate::app_server_approval_conversions::mcp_server_label(
+                server,
+                environment_id.as_deref(),
+            );
             vec![format!("mcp tool: {server}/{tool} · {status}").dim().into()]
         }
         ThreadItemPayload::CollabAgentToolCall {
@@ -148,12 +153,14 @@ pub(crate) fn pending_tool_cell(
             server,
             tool,
             arguments,
+            environment_id,
             status: McpToolCallStatus::InProgress,
             ..
         } => Some(Arc::new(new_active_mcp_tool_call(
             id.clone(),
             McpInvocation {
                 server: server.clone(),
+                environment_id: environment_id.clone(),
                 tool: tool.clone(),
                 arguments: Some(arguments.clone()),
             },
@@ -242,6 +249,7 @@ impl McpHistory {
         let ThreadItemPayload::McpToolCall {
             id,
             server,
+            environment_id,
             tool,
             status,
             arguments,
@@ -273,6 +281,7 @@ impl McpHistory {
             id,
             invocation: McpInvocation {
                 server,
+                environment_id,
                 tool,
                 arguments: Some(arguments),
             },

@@ -538,6 +538,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         code[0] = reduce(codex_app_server_protocol::ThreadItemPayload::McpToolCall {
             id: "mcp-child".into(),
             server: "depot".into(),
+            environment_id: None,
             tool: "sem.read.outline".into(),
             status: codex_app_server_protocol::McpToolCallStatus::InProgress,
             arguments: serde_json::json!({"file": "src/main.rs"}),

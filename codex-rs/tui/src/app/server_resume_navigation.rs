@@ -1353,11 +1353,24 @@ impl App {
             .last()
             .is_some_and(|turn| turn.status == TurnStatus::InProgress);
         let read_only = matches!(ready.presentation, ResumePresentation::ReadOnly { .. });
-        let retained_input = ((self.chat_widget.is_external_writer_view()
-            || self.thread_unavailable(thread_id))
-            && self.chat_widget.thread_id() == Some(thread_id))
-        .then(|| self.chat_widget.capture_thread_input_state())
-        .flatten();
+        // Resume replaces the channel registry even for same-thread recovery. Keep
+        // owned drafts by thread before resetting channels, without sending anything.
+        let current = self.current_displayed_thread_id();
+        for (&id, channel) in &self.thread_event_channels {
+            if Some(id) != current
+                && channel
+                    .backend_id
+                    .is_none_or(|owner| owner == server.backend_id())
+                && let Some(input) = channel.store.lock().await.input_state.clone()
+            {
+                self.agents_overview.input_states.insert(id, input);
+            }
+        }
+        if let Some(id) = current
+            && let Some(input) = self.chat_widget.capture_thread_input_state()
+        {
+            self.agents_overview.input_states.insert(id, input);
+        }
         self.local_settings = ready.context.settings;
         self.config = ready.context.config;
         self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
@@ -1403,9 +1416,7 @@ impl App {
         }
         // Resume admission does not switch widgets. Restore the destination only after
         // installation succeeds, keeping its saved input available on failure.
-        if let Some(mut input) =
-            retained_input.or(self.agents_overview.input_states.remove(&thread_id))
-        {
+        if let Some(mut input) = self.agents_overview.input_states.remove(&thread_id) {
             ready.presentation.refresh_provider_error(&mut input);
             let pending_settings = matches!(ready.presentation, ResumePresentation::CachedBlank)
                 .then(|| input.pending_thread_settings.take())

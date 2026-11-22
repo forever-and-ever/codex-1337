@@ -55,6 +55,7 @@ impl ChatWidget {
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label(),
             "quit".into(),
         )]));
+        self.refresh_status_line();
     }
 
     /// Restore local input only after replay, which can otherwise move interrupted queues into the draft.
@@ -116,6 +117,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn pause_unavailable_thread(&mut self) {
+        self.read_only_history = true;
+        self.sync_context_window_visibility();
+        self.refresh_status_line();
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.delivery_enabled = false;
         }
@@ -163,7 +167,7 @@ impl ChatWidget {
         key: KeyEvent,
         mode: RestrictedInputMode,
     ) -> KeyEventAction {
-        if self.external_writer_view {
+        if self.is_read_only_view() {
             return KeyEventAction::None;
         }
         if mode == RestrictedInputMode::DraftHandoff {
@@ -176,12 +180,14 @@ impl ChatWidget {
             {
                 return KeyEventAction::None;
             }
-            if !self.startup_submission_has_protected_input()
-                && !self.blocks_direct_input
-                && self.bottom_pane.composer_input_enabled()
-                && let Some(action) =
-                    self.image_paste_key_action(key, ClipboardPasteContext::DraftHandoff)
-            {
+            let protected = self.startup_submission_has_protected_input()
+                || self.blocks_direct_input
+                || !self.bottom_pane.composer_input_enabled();
+            if protected && self.bottom_pane.is_composer_undo_redo_key(key) {
+                return KeyEventAction::None;
+            }
+            let context = ClipboardPasteContext::DraftHandoff;
+            if !protected && let Some(action) = self.image_paste_key_action(key, context) {
                 return action;
             }
             self.bottom_pane.handle_restricted_key(key, mode);

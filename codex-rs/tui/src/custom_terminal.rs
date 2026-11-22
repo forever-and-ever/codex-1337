@@ -390,7 +390,6 @@ where
         if self.capture_output_frame(screen_size, cursor_position, cursor_style) {
             return Ok(());
         }
-
         // Not every terminal or multiplexer hides intermediate cursor moves inside a
         // synchronized update, especially when the frame spans multiple writes.
         let updates = {

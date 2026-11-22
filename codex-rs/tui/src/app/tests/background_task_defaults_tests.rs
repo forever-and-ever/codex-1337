@@ -1207,7 +1207,7 @@ async fn command_center_new_session_preserves_existing_checkout() -> Result<()> 
                 return Ok::<_, color_eyre::Report>(());
             }
         }
-        color_eyre::eyre::bail!("permissions menu event stream closed")
+        color_eyre::eyre::bail!("permissions menu event stream closed");
     })
     .await??;
     app.chat_widget.handle_key_event(KeyCode::Up.into());

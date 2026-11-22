@@ -876,8 +876,10 @@ async fn terminating_during_stdin_poll_returns_exited_response(
     Ok(())
 }
 
+#[test_case::test_case(false; "pipe")]
+#[cfg_attr(target_os = "linux", test_case::test_case(true; "PTY with non-UTF-8 sandbox launcher"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
+async fn completed_local_commands_preserve_exit_code(tty: bool) -> anyhow::Result<()> {
     let (_, turn) = make_session_and_context().await;
     // Classification must distinguish repository prose from a denial after a
     // prepared child exits; neither case may lose its nonzero exit or output.
@@ -908,6 +910,26 @@ async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
             cwd,
             env,
         );
+        #[cfg(target_os = "linux")]
+        let _helper_dir = if tty {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::tempdir()?;
+            let helper = dir.path().join(OsStr::from_bytes(b"helper-\xff"));
+            std::fs::write(
+                &helper,
+                "#!/bin/sh\nprintf '%s' \"$COMPLETED_OUTPUT\"; exit 17\n",
+            )?;
+            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700))?;
+            std::os::unix::fs::symlink("/bin/false", helper.to_string_lossy().as_ref())?;
+            request.command[0] = helper.to_string_lossy().into_owned();
+            request.native_program = Some(helper.into());
+            request.command.truncate(1);
+            Some(dir)
+        } else {
+            None
+        };
         // The prepared-launch boundary owns classification, not policy setup.
         request.sandbox = sandbox;
         let environment = codex_exec_server::Environment::default_for_tests();
@@ -918,7 +940,7 @@ async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
                 /*tool_ctx*/ None,
                 codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
                 /*network_policy_decider*/ None,
-                /*tty*/ false,
+                tty,
                 &environment,
             )
             .await;

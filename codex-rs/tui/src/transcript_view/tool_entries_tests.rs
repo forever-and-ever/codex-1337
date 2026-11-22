@@ -912,6 +912,7 @@ fn mixed_feed_keeps_its_grid_through_resize_and_details() {
         "mcp".into(),
         McpInvocation {
             server: "tools".into(),
+            environment_id: None,
             tool: "inspect".into(),
             arguments: None,
         },

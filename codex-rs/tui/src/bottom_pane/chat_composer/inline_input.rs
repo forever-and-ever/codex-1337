@@ -28,7 +28,7 @@ impl ChatComposer {
     }
 
     pub(crate) fn reset_vim_mode(&mut self) {
-        self.vim_history = VimHistory::default();
+        self.edit_history = EditHistory::default();
         self.draft.textarea.enter_vim_insert_mode();
     }
 

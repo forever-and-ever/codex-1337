@@ -53,7 +53,8 @@ pub(crate) fn exec_bwrap(mut argv: Vec<String>, preserved_files: Vec<File>) -> !
                 translate_legacy_bwrap_fd_mounts(&mut argv)
                     .unwrap_or_else(|error| panic!("invalid legacy bubblewrap fd mount: {error}"));
             }
-            exec_system_bwrap(&launcher.program, argv, preserved_files)
+            make_files_inheritable(&preserved_files);
+            exec_system_bwrap(&launcher.program, argv)
         }
         BubblewrapLauncher::Bundled(launcher) => launcher.exec(argv, preserved_files),
         BubblewrapLauncher::Unavailable => {
@@ -219,14 +220,7 @@ fn system_bwrap_capabilities(system_bwrap_path: &Path) -> Option<SystemBwrapCapa
     })
 }
 
-fn exec_system_bwrap(
-    program: &AbsolutePathBuf,
-    argv: Vec<String>,
-    preserved_files: Vec<File>,
-) -> ! {
-    // System bwrap runs across an exec boundary, so preserved fds must survive exec.
-    make_files_inheritable(&preserved_files);
-
+fn exec_system_bwrap(program: &AbsolutePathBuf, argv: Vec<String>) -> ! {
     let program_path = program.as_path().display().to_string();
     let program = CString::new(program.as_path().as_os_str().as_bytes())
         .unwrap_or_else(|err| panic!("invalid system bubblewrap path: {err}"));

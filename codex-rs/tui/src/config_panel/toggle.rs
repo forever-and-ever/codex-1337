@@ -21,12 +21,13 @@ pub(crate) enum ConfigToggle {
     Tips,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ConfigPreference {
     Toggle {
         setting: ConfigToggle,
         enabled: bool,
     },
+    MouseScrollSpeed(f64),
     NotificationCondition(NotificationCondition),
     RightClickPaste(RightClickPaste),
     SessionPickerLayout(SessionPickerViewMode),
@@ -37,6 +38,10 @@ impl ConfigPreference {
     pub(crate) fn edit(self) -> ConfigEdit {
         match self {
             Self::Toggle { setting, enabled } => setting.edit(enabled),
+            Self::MouseScrollSpeed(speed) => ConfigEdit::SetPath {
+                segments: vec!["tui".into(), "mouse_scroll_speed".into()],
+                value: toml_edit::value(speed),
+            },
             Self::NotificationCondition(condition) => ConfigEdit::SetPath {
                 segments: vec!["tui".to_string(), "notification_condition".to_string()],
                 value: toml_edit::value(condition.to_string()),
@@ -64,6 +69,7 @@ impl ConfigPreference {
     pub(crate) fn adopt(self, target: &mut Tui, source: &Tui) {
         match self {
             Self::Toggle { setting, .. } => setting.adopt(target, source),
+            Self::MouseScrollSpeed(_) => target.mouse_scroll_speed = source.mouse_scroll_speed,
             Self::NotificationCondition(_) => {
                 target.notification_settings.condition = source.notification_settings.condition;
             }

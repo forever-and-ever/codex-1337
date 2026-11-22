@@ -90,6 +90,7 @@ impl ChatWidget {
         FarmDraft {
             composer: ThreadComposerState {
                 text: draft.text,
+                shell_mode: Some(draft.shell_mode.unwrap_or(false)),
                 local_images: draft.local_images,
                 remote_image_urls: draft.remote_image_urls,
                 text_elements: draft.text_elements,

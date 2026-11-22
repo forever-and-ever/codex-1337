@@ -138,7 +138,23 @@ fn incremental_file_citations_preserve_metadata_unicode_and_markdown() {
 
         render.lines
     });
-    assert_debug_snapshot!("incremental_file_citations", rendered_cases);
+    assert!(
+        rendered_cases
+            .iter()
+            .flatten()
+            .all(|line| line.hyperlinks.is_empty())
+    );
+    for (lines, name) in rendered_cases
+        .iter()
+        .zip(["Quarterly Report.xlsx", "Résumé *final* ✨.xlsx"])
+    {
+        let rendered: String = lines.iter().map(|line| line.line.to_string()).collect();
+        assert!(rendered.contains(&cwd.join(name).to_string_lossy().replace('\\', "/")));
+    }
+    assert_debug_snapshot!(
+        "incremental_file_citations",
+        rendered_cases.map(visible_lines)
+    );
 }
 
 #[test]

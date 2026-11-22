@@ -61,6 +61,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         &server,
         AppServerEvent::ServerNotification(Box::new(ServerNotification::AccountUpdated(
             AccountUpdatedNotification {
+                reason: None,
                 auth_mode: Some(AuthMode::Chatgpt),
                 plan_type: Some(PlanType::Plus),
             },

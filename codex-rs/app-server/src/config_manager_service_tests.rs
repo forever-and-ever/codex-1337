@@ -2065,6 +2065,80 @@ tracestate = { managed = { tenant = "enterprise" }, empty = {} }"#,
 }
 
 #[tokio::test]
+async fn config_read_redacts_otel_exporter_headers_from_effective_config_and_layers() -> Result<()>
+{
+    let tmp = tempdir()?;
+    std::fs::write(
+        tmp.path().join(CONFIG_TOML_FILE),
+        r#"[otel]
+exporter = { otlp-http = { endpoint = "http://127.0.0.1:1/v1/logs", protocol = "json", headers = { Authorization = "logs-secret" } } }
+trace_exporter = { otlp-grpc = { endpoint = "http://127.0.0.1:1", headers = { Authorization = "traces-secret" } } }
+metrics_exporter = { otlp-http = { endpoint = "http://127.0.0.1:1/v1/metrics", protocol = "binary", headers = { Authorization = "metrics-secret" } } }"#,
+    )?;
+    // Read-only projection keeps legacy settings inspectable without admitting an exporter.
+    let cli_overrides = vec![(
+        "otel.exporter".to_string(),
+        r#"{ otlp-http = { endpoint = "http://127.0.0.1:1/override", protocol = "json", headers = { Authorization = "session-secret" } } }"#
+            .parse::<TomlValue>()?,
+    )];
+    let service = ConfigManager::new_for_tests(
+        tmp.path().to_path_buf(),
+        cli_overrides,
+        LoaderOverrides::without_managed_config_for_tests(),
+        CloudConfigBundleLoader::default(),
+    );
+    let response = service
+        .read(ConfigReadParams {
+            include_layers: true,
+            cwd: None,
+        })
+        .await?;
+    let serialized = serde_json::to_string(&response)?;
+    let effective_otel = response
+        .config
+        .additional
+        .get("otel")
+        .expect("effective OTEL config");
+    let layers = response.layers.as_ref().expect("included config layers");
+    let user_otel = layers
+        .iter()
+        .find(|layer| matches!(&layer.name, ApiConfigLayerSource::User { .. }))
+        .and_then(|layer| layer.config.get("otel"))
+        .expect("user OTEL config layer");
+    let session_otel = layers
+        .iter()
+        .find(|layer| matches!(layer.name, ApiConfigLayerSource::SessionFlags))
+        .and_then(|layer| layer.config.get("otel"))
+        .expect("session OTEL config layer");
+
+    let expected_headers = serde_json::json!({ "Authorization": "[redacted]" });
+    let endpoint = "http://127.0.0.1:1/override";
+    assert_eq!(
+        effective_otel["exporter"]["otlp-http"]["endpoint"],
+        endpoint
+    );
+    assert_eq!(
+        session_otel["exporter"]["otlp-http"]["headers"],
+        expected_headers
+    );
+    assert!(!serialized.contains("session-secret"));
+    for (field, transport, secret) in [
+        ("exporter", "otlp-http", "logs-secret"),
+        ("trace_exporter", "otlp-grpc", "traces-secret"),
+        ("metrics_exporter", "otlp-http", "metrics-secret"),
+    ] {
+        assert_eq!(
+            effective_otel[field][transport]["headers"],
+            expected_headers
+        );
+        assert_eq!(user_otel[field][transport]["headers"], expected_headers);
+        assert!(!serialized.contains(secret), "response leaked {field}");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn read_projects_managed_otel_tool_result_and_omits_its_origin() {
     let tmp = tempdir().expect("tempdir");
     std::fs::write(
@@ -3424,6 +3498,29 @@ async fn cloud_desktop_storage_requirements_control_reads_and_writes() {
 }
 
 #[tokio::test]
+async fn model_provider_default_set_reports_a_cli_override() -> Result<()> {
+    let tmp = tempdir()?;
+    std::fs::write(tmp.path().join(CONFIG_TOML_FILE), "")?;
+    let service = ConfigManager::new_for_tests(
+        tmp.path().to_path_buf(),
+        vec![("model_provider".into(), TomlValue::String("openai".into()))],
+        LoaderOverrides::without_managed_config_for_tests(),
+        CloudConfigBundleLoader::default(),
+    );
+    let result = service
+        .model_provider_default_set(codex_app_server_protocol::ModelProviderDefaultSetParams {
+            provider_id: "ollama".into(),
+        })
+        .await?;
+    assert_eq!(result.status, WriteStatus::OkOverridden);
+    assert_eq!(
+        result.overridden_metadata.unwrap().effective_value,
+        serde_json::json!("openai")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn model_provider_list_allows_user_overrides_of_system_defaults() -> Result<()> {
     use codex_app_server_protocol::ModelProviderListParams;
 
@@ -3519,6 +3616,20 @@ async fn model_provider_list_allows_user_overrides_of_system_defaults() -> Resul
             .model_provider_list(ModelProviderListParams {})
             .await?;
         assert_eq!(response.can_change_default, can_change_default);
+        if ignore_user_config {
+            let error = service
+                .model_provider_default_set(
+                    codex_app_server_protocol::ModelProviderDefaultSetParams {
+                        provider_id: "openai".into(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.write_error_code(),
+                Some(ConfigWriteErrorCode::ConfigLayerReadonly)
+            );
+        }
         assert_eq!(response.default_provider_id, "team");
         assert_eq!(
             serde_json::to_value(response.data)?,

@@ -4,6 +4,7 @@
 //! Preserve labels and absolute paths so they remain useful when copied. This module only formats
 //! destinations; it does not resolve files or infer execution-host paths from the frontend filesystem.
 
+use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use codex_utils_string::normalize_markdown_hash_location_suffix;
 use regex_lite::Regex;
@@ -53,8 +54,8 @@ pub(super) fn render_local_link_target(dest_url: &str) -> Option<String> {
 /// Split a local-link destination into `(normalized_path_text, location_suffix)`.
 ///
 /// The returned path text never includes a trailing `#L..` or `:line[:col]` suffix. Path
-/// normalization preserves `~/...` and rewrites path separators into display-stable forward
-/// slashes. The suffix, when present, is returned separately in normalized markdown form.
+/// normalization preserves home-relative paths and uses forward slashes as separators.
+/// A backslash in a POSIX file URI is part of the filename and is preserved.
 ///
 /// Returns `None` only when the destination looks like a `file://` URL but cannot be parsed into a
 /// local path. Plain path-like inputs always return `Some(...)` even if they are relative.
@@ -63,7 +64,12 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
         let url = Url::parse(dest_url).ok()?;
         // Infer the path's OS from the URI, not the host running the TUI.
         let path = PathUri::parse(&url[..url::Position::AfterPath]).ok()?;
-        let path_text = normalize_local_link_path_text(&path.inferred_native_path_string());
+        let native_path = path.inferred_native_path_string();
+        let path_text = if path.infer_path_convention() == Some(PathConvention::Posix) {
+            native_path
+        } else {
+            normalize_local_link_path_text(&native_path)
+        };
         let location_suffix = url
             .fragment()
             .and_then(normalize_hash_location_suffix_fragment);

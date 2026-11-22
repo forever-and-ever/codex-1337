@@ -44,7 +44,7 @@ use tracing::info;
 use tracing::warn;
 
 use super::LocalThreadStore;
-use super::rollout_lineage::RolloutLineage;
+use super::rollout_lineage::AncestorReads;
 use super::thread_history::RolloutProjectionState;
 use super::thread_history::projection_state;
 use super::thread_history_materialization::materialize_to_sqlite_locked;
@@ -115,55 +115,41 @@ pub(super) async fn finish_rebuild(
     Ok(())
 }
 
-/// Makes every segment of `lineage` readable: builds an evicted projection and finishes an
-/// interrupted one, then records the use.
+/// Finishes an evicted or interrupted projection before the caller queries it.
 pub(super) async fn ensure_projected(
     store: &LocalThreadStore,
-    lineage: &RolloutLineage,
+    rollout_id: ThreadId,
+    rollout_path: &std::path::Path,
+    reads: &AncestorReads,
 ) -> ThreadStoreResult<()> {
     if store.state_db.is_none() {
         return Ok(());
     }
-    for segment in lineage.segments() {
-        let rollout_id = segment.rollout_id();
-        let _projection = store.projection_warden.lock(rollout_id).await;
-        if let Some(state) = projection_state(store, rollout_id).await?
-            && !state.rebuilding
-        {
-            touch_locked(store, rollout_id, &state).await?;
-            continue;
-        }
-        let started = Instant::now();
-        let built = materialize_to_sqlite_locked(
-            store,
-            rollout_id,
-            segment.rollout_path.as_path(),
-            &lineage.reads,
-        )
-        .await;
-        // Another process may finish the same build first; only an unfinished one is an error.
-        let state = projection_state(store, rollout_id).await?;
-        match (built, state) {
-            (_, Some(state)) if !state.rebuilding => {
-                info!(
-                    %rollout_id,
-                    elapsed_ms = millis(started.elapsed()),
-                    "rebuilt thread history projection"
-                );
-                touch_locked(store, rollout_id, &state).await?;
-            }
-            (Ok(()), None) => {}
-            (Err(err), _) => return Err(err),
-            (Ok(()), Some(_)) => {
-                return Err(ThreadStoreError::Internal {
-                    message: format!(
-                        "thread history projection for {rollout_id} is still rebuilding"
-                    ),
-                });
-            }
-        }
+    let _projection = store.projection_warden.lock(rollout_id).await;
+    if let Some(state) = projection_state(store, rollout_id).await?
+        && !state.rebuilding
+    {
+        return touch_locked(store, rollout_id, &state).await;
     }
-    Ok(())
+    let started = Instant::now();
+    let built = materialize_to_sqlite_locked(store, rollout_id, rollout_path, reads).await;
+    // Another process may finish the same build first; only an unfinished one is an error.
+    let state = projection_state(store, rollout_id).await?;
+    match (built, state) {
+        (_, Some(state)) if !state.rebuilding => {
+            info!(
+                %rollout_id,
+                elapsed_ms = millis(started.elapsed()),
+                "rebuilt thread history projection"
+            );
+            touch_locked(store, rollout_id, &state).await
+        }
+        (Ok(()), None) => Ok(()),
+        (Err(err), _) => Err(err),
+        (Ok(()), Some(_)) => Err(ThreadStoreError::Internal {
+            message: format!("thread history projection for {rollout_id} is still rebuilding"),
+        }),
+    }
 }
 
 /// Records that a rollout's projection was opened, if it has one.

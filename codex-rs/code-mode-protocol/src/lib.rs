@@ -10,6 +10,7 @@ mod roster;
 mod runtime;
 mod session;
 mod sh;
+mod shared_catalog;
 
 pub use description::CODE_MODE_PRAGMA_PREFIX;
 pub use description::CodeModeToolKind;

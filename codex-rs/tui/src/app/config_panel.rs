@@ -99,6 +99,9 @@ impl App {
             ConfigPreference::Toggle { setting, enabled } => {
                 setting.enabled(&resolved.tui) == enabled
             }
+            ConfigPreference::MouseScrollSpeed(speed) => {
+                resolved.tui.mouse_scroll_speed == Some(speed)
+            }
             ConfigPreference::NotificationCondition(condition) => {
                 resolved.tui.notification_settings.condition == condition
             }

@@ -331,6 +331,13 @@ pub struct NetworkToml {
     pub enabled: Option<bool>,
     pub proxy_url: Option<String>,
     pub enable_socks5: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "reject_retired_transparent_tcp"
+    )]
+    #[schemars(skip)]
+    pub transparent_tcp: (),
     pub socks_url: Option<String>,
     pub enable_socks5_udp: Option<bool>,
     pub allow_upstream_proxy: Option<bool>,
@@ -345,6 +352,18 @@ pub struct NetworkToml {
     /// Defaults to true for MXC, which cannot enforce false; otherwise defaults to false.
     pub allow_local_binding: Option<bool>,
     pub mitm: Option<NetworkMitmToml>,
+}
+
+fn reject_retired_transparent_tcp<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    if bool::deserialize(deserializer)? {
+        return Err(serde::de::Error::custom(
+            codex_network_proxy::unsupported_error(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

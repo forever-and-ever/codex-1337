@@ -361,7 +361,13 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
         // exercises runtime readiness without injecting another user instruction.
         assert_eq!(
             test.codex
-                .call_mcp_tool("ordinary", "calendar_list_events", None, None)
+                .call_mcp_tool(
+                    "ordinary",
+                    /*environment_id*/ None,
+                    "calendar_list_events",
+                    None,
+                    None
+                )
                 .await?
                 .is_error,
             Some(false)
@@ -435,6 +441,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .await;
         let mut call = Box::pin(test.codex.call_mcp_tool(
             "enterprise",
+            /*environment_id*/ None,
             "calendar_list_events",
             Some(json!({"query": "permission"})),
             /*meta*/ None,
@@ -480,6 +487,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .codex
             .call_mcp_tool(
                 "enterprise",
+                /*environment_id*/ None,
                 "calendar_create_event",
                 /*arguments*/ None,
                 /*meta*/ None,
@@ -564,6 +572,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             .codex
             .call_mcp_tool(
                 "ordinary",
+                /*environment_id*/ None,
                 "calendar_create_event",
                 Some(json!({"title": "control", "starts_at": "2026-06-18T12:00:00Z"})),
                 /*meta*/ None,
@@ -635,6 +644,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
         thread
             .call_mcp_tool(
                 "enterprise",
+                /*environment_id*/ None,
                 "calendar_list_events",
                 Some(json!({"query":"blocked"})),
                 /*meta*/ None,
@@ -667,6 +677,7 @@ http_headers = {{ Authorization = "Bearer ordinary-access" }}
             let result = removed
                 .call_mcp_tool(
                     "enterprise",
+                    /*environment_id*/ None,
                     "calendar_list_events",
                     /*arguments*/ None,
                     /*meta*/ None,

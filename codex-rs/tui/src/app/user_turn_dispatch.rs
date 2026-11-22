@@ -25,7 +25,7 @@ impl App {
             }
             self.chat_widget
                 .apply_automatic_model_switch_to_pending_turn(&mut op);
-            let screen_size = tui.terminal.last_known_screen_size;
+            let screen_size = tui.prepare_draw_size()?;
             self.handle_draw_pre_render(tui, screen_size)?;
             if self.transcript_reflow.has_pending_reflow() {
                 self.transcript_reflow.schedule_immediate();

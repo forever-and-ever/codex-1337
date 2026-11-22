@@ -1,12 +1,12 @@
 // Notification publication belongs to model boundaries, never attribution lookups.
 use super::ToolInfo;
+use crate::McpServerKey;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::AnnotationSource;
 use super::BindingCatalogRevision;
-use super::CODEX_APPS_MCP_SERVER_NAME;
 use super::ClientToolCatalogRevision;
 use super::McpBinding;
 use super::McpBindingClients;
@@ -17,11 +17,9 @@ use super::Ordering;
 use super::PendingCallToolInfo;
 use super::PreparedToolInfo;
 use super::emit_binding_catalog;
-use super::filter_tools;
 use super::instrument;
 use super::join_all;
 use super::normalize_tools_for_model_with_prefix;
-use super::prepare_codex_apps_tools_for_model;
 use super::record_binding_catalog_size;
 use super::tool_definition_json_bytes;
 use super::trace;
@@ -35,10 +33,10 @@ pub(crate) enum CatalogReadMode {
 
 pub(crate) async fn catalog_revisions(
     connections: &McpConnectionSet,
-    required_servers: &[String],
+    required_servers: &[McpServerKey],
     required_plugins: &HashSet<String>,
     mode: CatalogReadMode,
-) -> Option<HashMap<String, BindingCatalogRevision>> {
+) -> Option<HashMap<McpServerKey, BindingCatalogRevision>> {
     let mut revisions = HashMap::new();
     for (server_name, view) in &connections.servers {
         let startup_complete = view
@@ -56,9 +54,9 @@ pub(crate) async fn catalog_revisions(
                 || required_servers
                     .iter()
                     .any(|required| required == server_name)
-                || (connections.is_selected_plugin_mcp_server(server_name)
+                || (connections.is_selected_plugin_server(server_name)
                     && connections
-                        .plugin_id_for_mcp_server_name(server_name)
+                        .plugin_id_for_server(server_name)
                         .is_some_and(|plugin_id| required_plugins.contains(plugin_id)))
             {
                 return None;
@@ -92,12 +90,17 @@ pub(crate) async fn catalog_revisions(
         }
         if mode == CatalogReadMode::Boundary {
             let _ = view
-                .refresh_regular_tool_catalog(server_name, &client, NotificationRefresh::Boundary)
+                .refresh_regular_tool_catalog(
+                    server_name.name(),
+                    &client,
+                    NotificationRefresh::Boundary,
+                )
                 .await;
-        } else if !client
-            .tool_catalog
-            .notifications_current(&client.client.tool_list_revision())
-            .await
+        } else if !view.connection.client.is_codex_apps_mcp_server
+            && !client
+                .tool_catalog
+                .notifications_current(&client.client.tool_list_revision())
+                .await
         {
             return None;
         }
@@ -118,7 +121,7 @@ pub(crate) async fn capture_binding_with_mode(
     connections: &Arc<McpConnectionSet>,
     config: Arc<crate::McpConfig>,
     plugins_available: bool,
-    required_servers: &[String],
+    required_servers: &[McpServerKey],
     required_plugins: &HashSet<String>,
     mode: CatalogReadMode,
 ) -> McpBinding {
@@ -138,6 +141,7 @@ pub(crate) async fn capture_binding_with_mode(
     ))
     .unwrap_or("unknown");
     let optional_mcp_startup_grace = config.optional_mcp_startup_grace;
+    let exposure = config.mcp_server_catalog.exposure();
     let server_snapshots = join_all(connections.servers.iter().map(|(server_name, view)| async move {
         if !view
             .connection
@@ -157,11 +161,11 @@ pub(crate) async fn capture_binding_with_mode(
                 || required_servers
                     .iter()
                     .any(|required| required == server_name)
-                || (connections.is_selected_plugin_mcp_server(server_name)
+                || (connections.is_selected_plugin_server(server_name)
                     && connections
-                        .plugin_id_for_mcp_server_name(server_name)
+                        .plugin_id_for_server(server_name)
                         .is_some_and(|plugin_id| required_plugins.contains(plugin_id)))
-                || (server_name == CODEX_APPS_MCP_SERVER_NAME && !has_cached_tools);
+                || (view.connection.client.is_codex_apps_mcp_server && !has_cached_tools);
             if !must_wait_for_startup && has_cached_tools {
                 trace!(server_name = %server_name, "using cached MCP catalog without waiting for startup");
                 return (server_name, view, cached_tools);
@@ -250,7 +254,7 @@ pub(crate) async fn capture_binding_with_mode(
             };
             client.tool_timeout = view.tool_timeout;
             if mode == CatalogReadMode::Boundary {
-                let _ = view.refresh_regular_tool_catalog(server_name, &client, NotificationRefresh::Boundary).await;
+                let _ = view.refresh_regular_tool_catalog(server_name.name(), &client, NotificationRefresh::Boundary).await;
             }
             let snapshot = client.tool_catalog.read(Arc::new).await;
             let server_tools = snapshot.tools.to_vec();
@@ -266,10 +270,10 @@ pub(crate) async fn capture_binding_with_mode(
             0
         };
         if catalog_log_enabled {
-            let plugin_id = connections.plugin_id_for_mcp_server_name(server_name);
+            let plugin_id = connections.plugin_id_for_server(server_name);
             emit_binding_catalog(
                 product_sku,
-                if server_name == CODEX_APPS_MCP_SERVER_NAME {
+                if view.connection.client.is_codex_apps_mcp_server {
                     "codex_apps"
                 } else if plugin_id.is_some() {
                     "plugin"
@@ -282,15 +286,7 @@ pub(crate) async fn capture_binding_with_mode(
                 raw_definition_json_bytes,
             );
         }
-        let server_tools = filter_tools(server_tools, &view.tool_filter);
-        let server_tools = if server_name == CODEX_APPS_MCP_SERVER_NAME {
-            prepare_codex_apps_tools_for_model(server_tools, &connections.tool_plugin_context)
-        } else {
-            crate::rmcp_client::prepare_regular_mcp_tools_for_model(
-                server_tools,
-                &connections.tool_plugin_context,
-            )
-        };
+        let server_tools = view.prepare_tools_for_model(server_tools, &connections.tool_plugin_context, exposure);
         let server_tools = server_tools
             .into_iter()
             .map(|mut tool| {
@@ -298,7 +294,7 @@ pub(crate) async fn capture_binding_with_mode(
                     withhold_read_only_hint(&mut tool.tool);
                     tool.annotation_source = AnnotationSource::Withheld;
                 }
-                McpConnectionSet::with_server_metadata(tool, &view.metadata)
+                tool
             })
             .collect::<Vec<_>>();
         Some((
@@ -328,23 +324,24 @@ pub(crate) async fn capture_binding_with_mode(
         connections.prefix_mcp_tool_names,
         &connections.non_prefixed_mcp_tool_servers,
         &connections.reserved_native_tool_namespaces,
+        exposure,
     );
     let mut tools = Vec::with_capacity(listed_tools.len());
     let mut pending_calls = Vec::with_capacity(listed_tools.len());
     for tool_info in listed_tools {
         let model_visible = crate::tool_is_model_visible(&tool_info);
-        let Some((client, snapshot)) = clients.get(&tool_info.server_name) else {
+        let Some((client, snapshot)) = clients.get(tool_info.server_key()) else {
             if model_visible {
                 tools.push(tool_info);
             }
             continue;
         };
         if config
-            .permission_profile_for_server(&tool_info.server_name)
+            .permission_profile_for_server(tool_info.server_key())
             .is_none()
         {
             trace!(
-                server_name = %tool_info.server_name,
+                server_name = %tool_info.server_key(),
                 tool_name = %tool_info.tool.name,
                 "omitting MCP tool without an exact ready client"
             );
@@ -374,7 +371,7 @@ pub(crate) async fn capture_binding_with_mode(
         };
         calls.insert(
             (
-                call.server_name().to_string(),
+                call.server_key().clone(),
                 call.tool_info().tool.name.to_string(),
             ),
             call,

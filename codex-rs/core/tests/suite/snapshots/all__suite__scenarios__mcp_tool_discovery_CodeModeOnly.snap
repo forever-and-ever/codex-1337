@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
+assertion_line: 971
 expression: "context_snapshot::format_context_snapshot(\"An MCP discovery call announces a new tool, which is called in the same turn.\",\n&entries,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: An MCP discovery call announces a new tool, which is called in the same turn.
@@ -15,8 +16,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=b13f432bb8fa2c77):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=032bffc300038401
+  tools (8; hash=d26d0a76c50c99ce):
+    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=1dadd5cb6f25c6d4
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
@@ -36,8 +37,8 @@ Settings:
 
 ## Window 2 (after request 1)
 Settings: relative to window 1
-  tools (8; hash=c6102cc72b425cc3):
-    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=e0cd74c31eee645d
+  tools (8; hash=c0828caf8daf073a):
+    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=8fab92aabf1d6740
 -- request 2 (request) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>

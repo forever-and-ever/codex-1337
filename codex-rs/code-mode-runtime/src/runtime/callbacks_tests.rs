@@ -109,7 +109,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
         let enabled_tools: Arc<[_]> = ["echo", "exec_command"]
             .into_iter()
             .map(|name| {
-                enabled_tool_metadata(ToolDefinition {
+                Arc::new(enabled_tool_metadata(ToolDefinition {
                     name: name.to_owned(),
                     tool_name: ToolName::plain(name),
                     summary: String::new(),
@@ -117,7 +117,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
                     kind: CodeModeToolKind::Function,
                     input_schema: None,
                     output_schema: None,
-                })
+                }))
             })
             .collect();
         scope.set_slot(RuntimeState {
@@ -126,7 +126,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
             pending_timeouts: HashMap::new(),
             stored_values: HashMap::new(),
             stored_value_writes: HashMap::new(),
-            enabled_tools: Arc::clone(&enabled_tools),
+            enabled_tools,
             next_tool_call_id: 1,
             next_timeout_id: 1,
             tool_call_id: "cell".to_string(),
@@ -134,7 +134,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
             exit_requested: None,
             sh_calls: Vec::new(),
         });
-        globals::install_globals(scope, &enabled_tools).expect("install globals");
+        globals::install_globals(scope).expect("install globals");
 
         let marker = v8::Function::new(scope, mark_exit_requested).expect("exit marker");
         let key = v8::String::new(scope, "markExit").expect("marker name");

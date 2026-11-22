@@ -67,6 +67,7 @@ pub(crate) use model_catalog::ModelCatalogState;
 pub(crate) use model_identity::ModelIdentityState;
 pub(crate) use multi_agent_mode::MultiAgentModeState;
 pub(crate) use multi_agent_usage_hint::MultiAgentUsageHintState;
+pub(crate) use permissions::PermissionDescription;
 pub(crate) use permissions::PermissionsState;
 pub(crate) use persistent_mode::PersistentModeState;
 pub(crate) use plugins_instructions::PluginsInstructionsState;
@@ -182,7 +183,15 @@ trait ErasedWorldStateSection: Send + Sync {
         kind: Option<&ContentItemKind>,
     ) -> bool;
 
-    fn render_diff(&self, previous: PreviousSectionState<'_, Value>) -> SectionTransition;
+    fn needs_latest_fragment(&self) -> bool {
+        false
+    }
+
+    fn render_diff(
+        &self,
+        previous: PreviousSectionState<'_, Value>,
+        retained: Option<&str>,
+    ) -> SectionTransition;
 }
 
 fn section_snapshot<S: WorldStateSection>(section: &S, snapshot: S::Snapshot) -> Option<Value> {
@@ -229,7 +238,15 @@ impl<S: WorldStateSection> ErasedWorldStateSection for S {
         S::matches_retained_fragment(role, text)
     }
 
-    fn render_diff(&self, previous: PreviousSectionState<'_, Value>) -> SectionTransition {
+    fn needs_latest_fragment(&self) -> bool {
+        S::NEEDS_LATEST_FRAGMENT
+    }
+
+    fn render_diff(
+        &self,
+        previous: PreviousSectionState<'_, Value>,
+        retained: Option<&str>,
+    ) -> SectionTransition {
         let typed_snapshot;
         let previous = match previous {
             PreviousSectionState::Known(previous) => {
@@ -252,7 +269,7 @@ impl<S: WorldStateSection> ErasedWorldStateSection for S {
             PreviousSectionState::Absent => PreviousSectionState::Absent,
             PreviousSectionState::Unknown => PreviousSectionState::Unknown,
         };
-        let (snapshot, updates) = WorldStateSection::render_diff(self, previous);
+        let (snapshot, updates) = self.render_retained_diff(previous, retained);
         (
             snapshot.map(|snapshot| section_snapshot(self, snapshot).unwrap_or(Value::Null)),
             updates,
@@ -285,7 +302,11 @@ impl ErasedWorldStateSection for ExtensionWorldStateSection {
             && self.0.matches_retained_fragment(role, text)
     }
 
-    fn render_diff(&self, previous: PreviousSectionState<'_, Value>) -> SectionTransition {
+    fn render_diff(
+        &self,
+        previous: PreviousSectionState<'_, Value>,
+        _retained: Option<&str>,
+    ) -> SectionTransition {
         let previous = match previous {
             PreviousSectionState::Absent => PreviousWorldStateSection::Absent,
             PreviousSectionState::Unknown => PreviousWorldStateSection::Unknown,
@@ -371,6 +392,17 @@ pub(crate) enum PreviousSectionState<'a, T> {
 pub(crate) trait WorldStateSection: Send + Sync + 'static {
     const ID: &'static str;
     type Snapshot: DeserializeOwned + Serialize;
+
+    /// Whether history recovery needs the most recent match instead of any match.
+    const NEEDS_LATEST_FRAGMENT: bool = false;
+
+    fn render_retained_diff(
+        &self,
+        previous: PreviousSectionState<'_, Self::Snapshot>,
+        _retained: Option<&str>,
+    ) -> SectionTransition<Self::Snapshot> {
+        self.render_diff(previous)
+    }
 
     /// Whether the section contributes comparison state to persisted rollouts.
     fn should_persist(&self) -> bool {
@@ -660,7 +692,7 @@ impl WorldState {
             RenderScope::FullContext,
             /*stored*/ None,
             &[],
-            |_, _| PreviousSectionState::Absent,
+            |_, _| (PreviousSectionState::Absent, None),
         )
     }
 
@@ -668,7 +700,7 @@ impl WorldState {
     pub(crate) fn render_history_diff<'a>(
         &self,
         previous: Option<&WorldStateSnapshot>,
-        items: impl IntoIterator<Item = &'a ResponseItem> + Clone,
+        items: impl IntoIterator<Item = &'a ResponseItem, IntoIter: DoubleEndedIterator> + Clone,
     ) -> (WorldStateSnapshot, Vec<WorldStateUpdate>) {
         // TELOS(retained-goal-rules): only retained revisions prove instruction presence.
         let retained = instruction_diff::retained(items.clone());
@@ -677,18 +709,31 @@ impl WorldState {
             previous,
             &retained,
             |id, section| {
+                let latest = || {
+                    if !section.needs_latest_fragment() {
+                        return None;
+                    }
+                    items
+                        .clone()
+                        .into_iter()
+                        .rev()
+                        .find_map(|item| latest_fragment(item, section))
+                };
                 if previous.is_some_and(|snapshot| snapshot.invalidated_sections.contains(id)) {
-                    return PreviousSectionState::Absent;
+                    return (PreviousSectionState::Absent, None);
                 }
                 if let Some(snapshot) = previous
                     && let Some(present) = instruction_diff::has_revision(snapshot, id, &retained)
                 {
                     return if present {
-                        snapshot
-                            .section(id)
-                            .map_or(PreviousSectionState::Absent, PreviousSectionState::Known)
+                        (
+                            snapshot
+                                .section(id)
+                                .map_or(PreviousSectionState::Absent, PreviousSectionState::Known),
+                            latest(),
+                        )
                     } else {
-                        PreviousSectionState::Absent
+                        (PreviousSectionState::Absent, None)
                     };
                 }
                 if let Some(previous) =
@@ -697,17 +742,17 @@ impl WorldState {
                     if section.has_retained_fragment_matcher()
                         && !has_retained_fragment(items.clone(), section)
                     {
-                        PreviousSectionState::Absent
+                        (PreviousSectionState::Absent, None)
                     } else {
-                        PreviousSectionState::Known(previous)
+                        (PreviousSectionState::Known(previous), latest())
                     }
                 } else if (section.has_retained_fragment_matcher()
                     && has_retained_fragment(items.clone(), section))
                     || has_legacy_fragment(items.clone(), section)
                 {
-                    PreviousSectionState::Unknown
+                    (PreviousSectionState::Unknown, latest())
                 } else {
-                    PreviousSectionState::Absent
+                    (PreviousSectionState::Absent, None)
                 }
             },
         )
@@ -718,7 +763,10 @@ impl WorldState {
         scope: RenderScope,
         stored: Option<&WorldStateSnapshot>,
         retained: &[WorldStateHash],
-        mut previous: impl FnMut(&str, &dyn ErasedWorldStateSection) -> PreviousSectionState<'a, Value>,
+        mut previous: impl FnMut(
+            &str,
+            &dyn ErasedWorldStateSection,
+        ) -> (PreviousSectionState<'a, Value>, Option<&'a str>),
     ) -> (WorldStateSnapshot, Vec<WorldStateUpdate>) {
         let mut snapshot = WorldStateSnapshot::default();
         let mut updates = Vec::new();
@@ -728,9 +776,9 @@ impl WorldState {
             {
                 continue;
             }
-            let prior = previous(id, section.renderer());
+            let (prior, latest) = previous(id, section.renderer());
             let (section_snapshot, section_updates) =
-                section.render(id, prior, stored, retained, &mut snapshot);
+                section.render(id, prior, stored, retained, &mut snapshot, latest);
             // A skipped snapshot retains stored state even if history required a fresh render.
             let section_snapshot = section_snapshot
                 .or_else(|| stored.and_then(|snapshot| snapshot.section(id)).cloned());
@@ -754,33 +802,44 @@ fn has_retained_fragment<'a>(
     items: impl IntoIterator<Item = &'a ResponseItem>,
     section: &dyn ErasedWorldStateSection,
 ) -> bool {
-    items.into_iter().any(|item| {
-        let ResponseItem::Message {
-            role,
-            content,
-            internal_chat_message_metadata_passthrough,
-            ..
-        } = item
-        else {
-            return false;
-        };
-        // An annotation proves provenance only for its aligned content item.
-        let kinds = internal_chat_message_metadata_passthrough
-            .as_ref()
-            .and_then(|metadata| metadata.content_item_kinds.as_ref())
-            .filter(|kinds| kinds.len() == content.len());
-        content.iter().enumerate().any(|(index, content)| {
-            matches!(
-                content,
-                ContentItem::InputText { text }
-                    if section.matches_retained_fragment(
-                        role,
-                        text,
-                        kinds.and_then(|kinds| kinds.get(index)),
-                    )
-            )
+    items
+        .into_iter()
+        .any(|item| latest_fragment(item, section).is_some())
+}
+
+fn latest_fragment<'a>(
+    item: &'a ResponseItem,
+    section: &dyn ErasedWorldStateSection,
+) -> Option<&'a str> {
+    let ResponseItem::Message {
+        role,
+        content,
+        internal_chat_message_metadata_passthrough,
+        ..
+    } = item
+    else {
+        return None;
+    };
+    let kinds = internal_chat_message_metadata_passthrough
+        .as_ref()
+        .and_then(|metadata| metadata.content_item_kinds.as_ref())
+        .filter(|kinds| kinds.len() == content.len());
+    content
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, content)| match content {
+            ContentItem::InputText { text }
+                if section.matches_retained_fragment(
+                    role,
+                    text,
+                    kinds.and_then(|kinds| kinds.get(index)),
+                ) =>
+            {
+                Some(text.as_str())
+            }
+            _ => None,
         })
-    })
 }
 
 fn has_legacy_fragment<'a>(

@@ -1,27 +1,23 @@
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::process_telemetry::ProcessTelemetry;
 use codex_exec_server_protocol::JSONRPCErrorError;
+use codex_exec_server_protocol::ProcessStartErrorData;
 use codex_file_system::WindowsSandboxSelection;
 use codex_network_proxy::CUSTOM_CA_ENV_KEYS;
-use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
-use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyHandle;
 use codex_network_proxy::RemoteCredentialBrokerCache;
 use codex_network_proxy::is_managed_mitm_ca_trust_bundle_path;
-use codex_protocol::config_types::WindowsSandboxLevel;
-use codex_protocol::models::PermissionProfile;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
+use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxTransformRequest;
-use codex_sandboxing::SandboxType;
-use codex_sandboxing::WindowsSandboxFilesystemOverrides;
-use codex_sandboxing::WindowsSandboxProxySettingsMode;
-use codex_sandboxing::WindowsSandboxSpawnRequest;
+use codex_sandboxing::WrappedSandboxCommand;
 #[cfg(windows)]
 use codex_shell_command::shell_detect::fallback_powershell_shell_for_windows_sandbox;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -35,63 +31,6 @@ use crate::protocol::ExecParams;
 use crate::rpc::invalid_params;
 use crate::sandbox_selection::sandbox_selection;
 
-pub(crate) struct PreparedExecRequest {
-    pub(crate) command: Vec<String>,
-    pub(crate) cwd: AbsolutePathBuf,
-    pub(crate) env: HashMap<String, String>,
-    pub(crate) arg0: Option<String>,
-    pub(crate) sandbox: SandboxType,
-    pub(crate) network_proxy_handle: Option<NetworkProxyHandle>,
-    windows_sandbox: Option<PreparedWindowsSandboxRequest>,
-}
-
-struct PreparedWindowsSandboxRequest {
-    permission_profile: PermissionProfile,
-    workspace_roots: Vec<AbsolutePathBuf>,
-    windows_sandbox_level: WindowsSandboxLevel,
-    proxy_enforced: bool,
-    network_proxy_restricting_sid: Option<String>,
-    proxy_settings_mode: WindowsSandboxProxySettingsMode,
-    filesystem_overrides: Option<WindowsSandboxFilesystemOverrides>,
-}
-
-impl PreparedExecRequest {
-    #[cfg(unix)]
-    pub(crate) fn credential_snapshot_proxy(&self, params: &ExecParams) -> Option<&NetworkProxy> {
-        let launch = params.network_proxy.as_ref()?;
-        if !launch.proxy.credential_masking_enabled() || !supports_credential_snapshot(params) {
-            return None;
-        }
-        self.network_proxy_handle.as_ref()?.proxy()
-    }
-
-    pub(crate) fn windows_sandbox_spawn_request(&self) -> Option<WindowsSandboxSpawnRequest<'_>> {
-        self.windows_sandbox
-            .as_ref()
-            .map(|request| WindowsSandboxSpawnRequest {
-                permission_profile: &request.permission_profile,
-                workspace_roots: &request.workspace_roots,
-                windows_sandbox_level: request.windows_sandbox_level,
-                proxy_enforced: request.proxy_enforced,
-                network_proxy_restricting_sid: request.network_proxy_restricting_sid.as_deref(),
-                proxy_settings_mode: request.proxy_settings_mode,
-                filesystem_overrides: request.filesystem_overrides.as_ref(),
-            })
-    }
-}
-
-fn supports_credential_snapshot(params: &ExecParams) -> bool {
-    cfg!(any(target_os = "linux", target_os = "macos"))
-        && params.arg0.is_none()
-        && params.shell_snapshot.as_ref().is_some_and(|snapshot| {
-            snapshot.shell.name == "zsh"
-                && matches!(params.argv.as_slice(), [program, flag, _]
-                    if program == &snapshot.shell.path
-                        && flag == "-lc"
-                        && Path::new(program).file_name().is_some_and(|name| name == "zsh"))
-        })
-}
-
 #[tracing::instrument(
     name = "codex.exec_server.process_prepare_sandbox",
     skip_all,
@@ -101,11 +40,11 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
     params: &ExecParams,
     env: HashMap<String, String>,
     runtime_paths: Option<&ExecServerRuntimeOptions>,
-    network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
-    network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
-    credential_brokers: &RemoteCredentialBrokerCache,
-    telemetry: &ProcessTelemetry,
-) -> Result<PreparedExecRequest, JSONRPCErrorError> {
+    _network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
+    _network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
+    _credential_brokers: &RemoteCredentialBrokerCache,
+    _telemetry: &ProcessTelemetry,
+) -> Result<(WrappedSandboxCommand, Option<NetworkProxyHandle>), JSONRPCErrorError> {
     if let Some(sandbox) = params.sandbox.as_ref()
         && sandbox.windows_sandbox_selection == WindowsSandboxSelection::Mxc
     {
@@ -115,38 +54,41 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
             ));
         }
         if !codex_sandboxing::windows_mxc_available() {
-            return Err(invalid_params(
-                "native MXC is unavailable on this executor".to_owned(),
-            ));
+            return Err(
+                ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(
+                    "native MXC is unavailable on this executor".to_owned(),
+                )),
+            );
         }
     }
-    let (env, managed_network, network_proxy_handle, network_proxy_restricting_sid) =
-        prepare_managed_network(
-            params,
-            credential_brokers,
-            runtime_paths.is_some_and(|paths| paths.proxy_private_ips_via_upstream),
-            env,
-            network_policy_decider,
-            network_policy_audit_observer,
-            telemetry,
-        )
-        .await?;
+    // TELOS(removed-stacks): never downgrade an executor-local proxy request.
+    if params.network_proxy.is_some() {
+        return Err(invalid_params("network proxy is not supported".to_string()));
+    }
+    let managed_network = params.managed_network.clone();
     let Some(sandbox_context) = params.sandbox.as_ref() else {
-        return Ok(PreparedExecRequest {
-            command: params.argv.clone(),
-            cwd: native_path(&params.cwd, "cwd")?,
+        if params.enforce_managed_network {
+            return Err(
+                ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(
+                    "managed network enforcement requires a configured sandbox".to_string(),
+                )),
+            );
+        }
+        validate_native_cwd(&params.cwd)?;
+        let prepared = WrappedSandboxCommand::native(
+            params.argv.clone(),
+            params.cwd.clone(),
             env,
-            arg0: params.arg0.clone(),
-            sandbox: SandboxType::None,
-            network_proxy_handle,
-            windows_sandbox: None,
-        });
+            params.arg0.clone(),
+        )
+        .map_err(|err| invalid_params(err.to_string()))?;
+        return Ok((prepared, None));
     };
-    let runtime_paths = runtime_paths
-        .ok_or_else(|| invalid_params("sandbox runtime paths are not configured".to_string()))?;
-    let windows_sandbox_proxy_settings_mode = sandbox_context
-        .windows_sandbox_proxy_settings_mode
-        .unwrap_or_default();
+    let runtime_paths = runtime_paths.ok_or_else(|| {
+        ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(
+            "sandbox runtime paths are not configured".to_string(),
+        ))
+    })?;
     let mut runtime_readable_paths = Vec::new();
     if cfg!(target_os = "linux") || (cfg!(unix) && params.arg0.is_some()) {
         runtime_readable_paths.push(runtime_paths.codex_self_exe.clone());
@@ -154,18 +96,26 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
     if cfg!(target_os = "linux") {
         runtime_readable_paths.extend(runtime_paths.codex_linux_sandbox_exe.iter().cloned());
     }
-    let managed_mitm_ca_trust_bundle_path = managed_network.as_ref().and_then(|_| {
-        CUSTOM_CA_ENV_KEYS.iter().find_map(|key| {
-            let path = env.get(*key)?;
+    let managed_mitm_ca_trust_bundle_path = if managed_network.is_some() {
+        CUSTOM_CA_ENV_KEYS.into_iter().find_map(|key| {
+            let path = env.get(key)?;
             if !is_managed_mitm_ca_trust_bundle_path(path) {
                 return None;
             }
             AbsolutePathBuf::from_absolute_path(path).ok()
         })
-    });
+    } else {
+        None
+    };
     runtime_readable_paths.extend(managed_mitm_ca_trust_bundle_path);
     let sandbox_manager = SandboxManager::new()
         .with_linux_sandbox_pid_namespace(runtime_paths.linux_sandbox_pid_namespace);
+    #[cfg(windows)]
+    let sandbox_manager = sandbox_manager.with_windows_token_session(
+        sandbox_context
+            .windows_sandbox_proxy_settings_mode
+            .unwrap_or_default(),
+    );
     #[cfg(target_os = "macos")]
     let sandbox_manager = sandbox_manager
         .with_allowed_symlinked_codex_home(runtime_paths.allowed_symlinked_codex_home.clone());
@@ -208,7 +158,7 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
     } else {
         program
     };
-    let mut request = sandbox_manager
+    let prepared = sandbox_manager
         .transform(SandboxTransformRequest {
             command: SandboxCommand {
                 program,
@@ -220,11 +170,13 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
             },
             permissions: &sandbox_context.permissions,
             workspace_roots: Some(&sandbox_context.workspace_roots),
-            runtime_readable_paths: &runtime_readable_paths,
+            runtime_readable_paths: Some(&runtime_readable_paths),
             selection,
-            enforce_managed_network: params.enforce_managed_network,
-            environment_id: None,
-            network: None,
+            network: SandboxNetwork::new(
+                params.enforce_managed_network,
+                /*proxy*/ None,
+                /*environment_id*/ None,
+            ),
             sandbox_policy_cwd: &sandbox_context.cwd,
             sandbox_exe: if cfg!(windows) {
                 Some(runtime_paths.codex_self_exe.as_path())
@@ -236,88 +188,27 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
         })
         .map_err(|err| match err {
             codex_sandboxing::SandboxTransformError::SandboxUnavailable => {
-                invalid_params(err.to_string())
+                ProcessStartErrorData::SandboxUnavailable.attach_to(invalid_params(err.to_string()))
             }
-            err => invalid_params(format!("failed to prepare process sandbox: {err}")),
-        })?
-        .into_command_request();
-    request.sandbox_override = sandbox_context.sandbox_override;
-    crate::run_integrity_checks(&request).await;
-    let windows_sandbox = if request.sandbox == SandboxType::WindowsRestrictedToken {
-        let permissions = request.permission_profile;
-        let native_sandbox_policy_cwd = native_path(&request.sandbox_policy_cwd, "sandbox cwd")?;
-        let native_workspace_roots = sandbox_context
-            .workspace_roots
-            .iter()
-            .map(|root| native_path(root, "sandbox workspace root"))
-            .collect::<Result<_, _>>()?;
-        request.arg0 = params.arg0.clone();
-        let proxy_enforced = params.enforce_managed_network;
-        let filesystem_overrides = WindowsSandboxFilesystemOverrides::resolve(
-            request.sandbox,
-            &permissions,
-            &native_sandbox_policy_cwd,
-            windows_sandbox_level,
-            &request.env,
-        )
-        .map_err(|err| invalid_params(format!("failed to prepare process sandbox: {err}")))?;
-        Some(PreparedWindowsSandboxRequest {
-            permission_profile: permissions,
-            workspace_roots: native_workspace_roots,
-            windows_sandbox_level,
-            proxy_enforced,
-            network_proxy_restricting_sid,
-            proxy_settings_mode: windows_sandbox_proxy_settings_mode,
-            filesystem_overrides,
-        })
-    } else {
-        None
-    };
-    Ok(PreparedExecRequest {
-        command: request.command,
-        cwd: native_path(&request.cwd, "cwd")?,
-        env: request.env,
-        arg0: request.arg0,
-        sandbox: request.sandbox,
-        network_proxy_handle,
-        windows_sandbox,
-    })
+            err => sandbox_preparation_error(err),
+        })?;
+    crate::run_integrity_checks(prepared.integrity_request(sandbox_context.sandbox_override)).await;
+    Ok((prepared, None))
 }
 
-#[expect(
-    clippy::unused_async,
-    reason = "The uninhabited seam retains the upstream async preparation signature"
-)]
-async fn prepare_managed_network(
-    params: &ExecParams,
-    _credential_brokers: &RemoteCredentialBrokerCache,
-    _proxy_private_ips_via_upstream: bool,
-    env: HashMap<String, String>,
-    _network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
-    _network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
-    _telemetry: &ProcessTelemetry,
-) -> Result<
-    (
-        HashMap<String, String>,
-        Option<ManagedNetworkSandboxContext>,
-        Option<NetworkProxyHandle>,
-        Option<String>,
-    ),
-    JSONRPCErrorError,
-> {
-    // TELOS(removed-stacks): never admit a proxy launch through the inert seam.
-    if params.network_proxy.is_some() {
-        return Err(invalid_params("network proxy is not supported".to_string()));
-    }
-    Ok((env, params.managed_network.clone(), None, None))
+fn sandbox_preparation_error(err: impl std::fmt::Display) -> JSONRPCErrorError {
+    ProcessStartErrorData::SandboxPreparation.attach_to(invalid_params(format!(
+        "failed to prepare process sandbox: {err}"
+    )))
 }
 
-fn native_path(path: &PathUri, label: &str) -> Result<AbsolutePathBuf, JSONRPCErrorError> {
-    path.to_abs_path().map_err(|err| {
+pub(crate) fn validate_native_cwd(cwd: &PathUri) -> Result<(), JSONRPCErrorError> {
+    cwd.to_abs_path().map_err(|err| {
         invalid_params(format!(
-            "{label} URI `{path}` is not valid on this exec-server host: {err}"
+            "cwd URI `{cwd}` is not valid on this exec-server host: {err}"
         ))
-    })
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]

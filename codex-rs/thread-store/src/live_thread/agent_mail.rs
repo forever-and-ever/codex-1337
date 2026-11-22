@@ -10,6 +10,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
+use codex_rollout::persisted_rollout_items;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -65,14 +66,16 @@ impl AgentMailPersistence for LiveThread {
         &self,
         envelope: &ResponseItemEnvelope,
     ) -> ThreadStoreResult<AgentMailCommit> {
+        let raw_items = [
+            RolloutItem::InterAgentCommunicationMetadata {
+                trigger_turn: false,
+            },
+            RolloutItem::ResponseItem(envelope.clone()),
+        ];
         let items = self
-            .persist_appended_items(&[
-                RolloutItem::InterAgentCommunicationMetadata {
-                    trigger_turn: false,
-                },
-                RolloutItem::ResponseItem(envelope.clone()),
-            ])
-            .await?;
+            .persist_appended_items(&raw_items)
+            .await?
+            .unwrap_or_else(|| persisted_rollout_items(&raw_items, self.history_mode));
         Ok(match self.sync_appended_metadata(&items).await {
             Ok(()) => AgentMailCommit::Complete,
             Err(error) => AgentMailCommit::MetadataPending(error),

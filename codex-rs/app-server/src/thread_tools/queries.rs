@@ -51,6 +51,7 @@ pub(super) async fn list(
             include_attached_threads: false,
             current_account_only: false,
             originators: None,
+            included_thread_ids: None,
             excluded_thread_ids: None,
             cursor: args.cursor,
             limit: Some(limit),

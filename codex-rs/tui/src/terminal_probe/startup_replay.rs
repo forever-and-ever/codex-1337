@@ -17,6 +17,13 @@ pub(super) fn startup_replay_input(input: &[u8]) -> Vec<u8> {
             cursor += super::bracketed_paste::REPLY_LEN;
             continue;
         }
+        if input
+            .get(cursor..cursor + 11)
+            .is_some_and(|report| super::alternate_scroll_report(report).is_some())
+        {
+            cursor += 11;
+            continue;
+        }
         if inside_paste {
             if input[cursor..].starts_with(PASTE_END) {
                 replay.extend_from_slice(PASTE_END);

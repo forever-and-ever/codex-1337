@@ -1,4 +1,8 @@
+use codex_code_mode_protocol::EnabledToolMetadata;
+use codex_code_mode_protocol::enabled_tool_metadata;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use codex_code_mode_protocol::CellId;
@@ -36,6 +40,7 @@ const MIN_YIELD_TIME_FOR_GRACE: Duration = Duration::from_secs(10);
 
 pub struct InProcessCodeModeSession {
     runtime: SessionRuntime,
+    catalog: Mutex<(u64, runtime::ToolCatalog)>,
     options: CodeModeSessionOptions,
 }
 
@@ -62,6 +67,7 @@ impl InProcessCodeModeSession {
     ) -> Self {
         Self {
             runtime: SessionRuntime::new_with_task_failure_handler(task_failure_handler),
+            catalog: Default::default(),
             options: CodeModeSessionOptions {
                 cell_execution_limits: CodeModeSessionCellExecutionLimits {
                     max_heap_size_bytes: None,
@@ -72,9 +78,62 @@ impl InProcessCodeModeSession {
         }
     }
 
+    fn runtime_request(
+        &self,
+        request: ExecuteRequest,
+        revision: Option<u64>,
+    ) -> Result<runtime::CreateCellRequest, String> {
+        let tools: Vec<EnabledToolMetadata> = request
+            .enabled_tools
+            .into_iter()
+            .map(enabled_tool_metadata)
+            .collect();
+        let mut tools: runtime::ToolCatalog = if revision.is_some() && !tools.is_empty() {
+            EnabledToolMetadata::shared_catalog(tools).into()
+        } else {
+            tools.into_iter().map(Arc::new).collect()
+        };
+        if let Some(revision) = revision {
+            let mut cache = self.catalog.lock().unwrap_or_else(PoisonError::into_inner);
+            if revision == 0 {
+                return Err("invalid code-mode catalog revision".into());
+            }
+            if tools.is_empty() {
+                if revision != cache.0 {
+                    return Err("unknown code-mode catalog revision".into());
+                }
+                tools = Arc::clone(&cache.1);
+            } else if revision > cache.0 {
+                *cache = (revision, Arc::clone(&tools));
+            } else if revision == cache.0 && tools != cache.1 {
+                return Err("conflicting code-mode catalog revision".into());
+            }
+            // A late full request runs with its own tools after cancellation.
+        }
+        Ok(runtime::CreateCellRequest {
+            output_truncation: self.options.output_truncation,
+            tool_call_id: request.tool_call_id,
+            enabled_tools: tools,
+            source: request.source,
+        })
+    }
+
     pub async fn execute(
         &self,
         request: ExecuteRequest,
+        delegate: Arc<dyn CodeModeSessionDelegate>,
+        preempt: Option<CancellationToken>,
+    ) -> Result<StartedCell, String> {
+        self.execute_with_catalog(request, /*catalog_revision*/ None, delegate, preempt)
+            .await
+    }
+
+    /// A nonempty catalog installs a session-local revision. Subsequent cells
+    /// retain that immutable snapshot while newer revisions can change the tools.
+    pub async fn execute_with_catalog(
+        &self,
+        request: ExecuteRequest,
+        catalog_revision: Option<u64>,
         delegate: Arc<dyn CodeModeSessionDelegate>,
         preempt: Option<CancellationToken>,
     ) -> Result<StartedCell, String> {
@@ -84,7 +143,7 @@ impl InProcessCodeModeSession {
         let started = self
             .runtime
             .execute(
-                runtime_request(request, self.options.output_truncation),
+                self.runtime_request(request, catalog_revision)?,
                 runtime::ObserveMode::YieldAfter(self.resolve_yield_timeout(yield_time_ms))
                     .with_yield_signal(preempt.unwrap_or_default()),
                 Arc::new(ProtocolDelegate { delegate }),
@@ -121,7 +180,7 @@ impl InProcessCodeModeSession {
         let started = self
             .runtime
             .execute(
-                runtime_request(request, self.options.output_truncation),
+                self.runtime_request(request, /*revision*/ None)?,
                 runtime::ObserveMode::PendingFrontier,
                 Arc::new(ProtocolDelegate { delegate }),
             )
@@ -381,35 +440,6 @@ impl runtime::SessionRuntimeDelegate for ProtocolDelegate {
     ) {
         self.delegate
             .cell_finished(&protocol_cell_id(cell_id), outcome);
-    }
-}
-
-fn runtime_request(
-    request: ExecuteRequest,
-    output_truncation: CodeModeOutputTruncation,
-) -> runtime::CreateCellRequest {
-    runtime::CreateCellRequest {
-        output_truncation,
-        tool_call_id: request.tool_call_id,
-        enabled_tools: request
-            .enabled_tools
-            .into_iter()
-            .map(|definition| runtime::ToolDefinition {
-                summary: definition.summary,
-                name: definition.name,
-                tool_name: runtime::ToolName {
-                    name: definition.tool_name.name,
-                    namespace: definition.tool_name.namespace,
-                },
-                description: definition.description,
-                output_schema: definition.output_schema,
-                kind: match definition.kind {
-                    CodeModeToolKind::Function => runtime::ToolKind::Function,
-                    CodeModeToolKind::Freeform => runtime::ToolKind::Freeform,
-                },
-            })
-            .collect(),
-        source: request.source,
     }
 }
 

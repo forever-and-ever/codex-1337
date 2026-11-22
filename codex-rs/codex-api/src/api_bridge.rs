@@ -32,6 +32,7 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
         | ApiError::Stream(_)
         | ApiError::NativeStream(_)
         | ApiError::AnthropicStream { .. }
+        | ApiError::WebsocketMessageTooLarge
         | ApiError::ContentFilter
         | ApiError::ResponseIncomplete(_)
         | ApiError::ContextWindowExceeded
@@ -80,6 +81,9 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
             } else {
                 CodexErr::Fatal(format!("Anthropic stream error ({progress:?}): {source}"))
             }
+        }
+        ApiError::WebsocketMessageTooLarge => {
+            CodexErr::new(CodexErrorDetails::WebsocketMessageTooLarge)
         }
         ApiError::ContentFilter => CodexErr::new(CodexErrorDetails::ContentFilter),
         ApiError::ResponseIncomplete(incomplete) => {

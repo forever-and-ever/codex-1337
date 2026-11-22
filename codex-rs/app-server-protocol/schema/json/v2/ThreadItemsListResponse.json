@@ -114,35 +114,100 @@
       "type": "string"
     },
     "AgentMessageDisplay": {
-      "description": "A presentation instruction for Chat to apply to this answer when recovering history.",
-      "properties": {
-        "action": {
-          "description": "Unknown actions must be left for the producing client to handle.",
-          "type": "string"
+      "description": "How Chat should present a recovered answer.",
+      "oneOf": [
+        {
+          "properties": {
+            "annotation": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AnswerAnnotation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "enum": [
+                "show"
+              ],
+              "type": "string"
+            },
+            "trustedContacts": {
+              "$ref": "#/definitions/TrustedContacts"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "trustedContacts",
+            "version"
+          ],
+          "type": "object"
         },
-        "blockType": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "properties": {
+            "mode": {
+              "enum": [
+                "hide"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "$ref": "#/definitions/AnswerReplacement"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "replacement",
+            "version"
+          ],
+          "type": "object"
         },
-        "checkTrustedContacts": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "cyberTrustedAccess": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+        {
+          "properties": {
+            "mode": {
+              "enum": [
+                "block"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/BlockReason"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "reason",
+            "version"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
+      ]
     },
     "AgentMessageModeration": {
       "properties": {
@@ -189,6 +254,47 @@
         "steered"
       ],
       "type": "string"
+    },
+    "AnswerAnnotation": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "wellbeingHelpline"
+              ],
+              "type": "string"
+            },
+            "subject": {
+              "$ref": "#/definitions/HelplineSubject"
+            }
+          },
+          "required": [
+            "kind",
+            "subject"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AnswerReplacement": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "wellbeingPromptHelpline"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "WellbeingPromptHelplineAnswerReplacement",
+          "type": "object"
+        }
+      ]
     },
     "Arrival": {
       "properties": {
@@ -248,7 +354,7 @@
           "$ref": "#/definitions/ArrivalSide"
         },
         "userResponseItemId": {
-          "type": "string"
+          "$ref": "#/definitions/ResponseItemId"
         }
       },
       "required": [
@@ -360,6 +466,50 @@
         "title"
       ],
       "type": "object"
+    },
+    "BlockReason": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "protection"
+              ],
+              "type": "string"
+            },
+            "protectionType": {
+              "description": "Identifies the same moderation row that Chat writes on the live path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "protectionType"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "cyber"
+              ],
+              "type": "string"
+            },
+            "trustedAccess": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "KindBlockReason",
+          "type": "object"
+        }
+      ]
     },
     "ByteRange": {
       "properties": {
@@ -1051,6 +1201,13 @@
         }
       ]
     },
+    "HelplineSubject": {
+      "enum": [
+        "answer",
+        "prompt"
+      ],
+      "type": "string"
+    },
     "HookPromptFragment": {
       "properties": {
         "hookRunId": {
@@ -1432,6 +1589,68 @@
       "minLength": 1,
       "type": "string"
     },
+    "ResponseItemId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "id_allocation": {
+              "$ref": "#/definitions/ResponseItemIdAllocation"
+            }
+          },
+          "required": [
+            "id",
+            "id_allocation"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A Responses API item ID. New IDs require an explicit prefix; deserialization remains permissive so legacy rollouts can still be read."
+    },
+    "ResponseItemIdAllocation": {
+      "description": "The generator allocation and the Responses-specific parts of a structured item ID.",
+      "properties": {
+        "ordinal": {
+          "description": "Zero-based position in the generator sequence.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "prefix": {
+          "description": "Item kind, e.g. `msg` in `msg_item042`. Bare request reservations omit it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "salt": {
+          "type": "string"
+        },
+        "suffix": {
+          "description": "Provider-assigned tail, including its separator.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "salt",
+        "value"
+      ],
+      "type": "object"
+    },
     "SubAgentActivityKind": {
       "enum": [
         "started",
@@ -1716,9 +1935,13 @@
               "type": "string"
             },
             "sourceResponseItemId": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -2242,6 +2465,13 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "environmentId": {
+              "description": "Registration scope, not necessarily the server's execution environment.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -3103,9 +3333,13 @@
               "type": "string"
             },
             "sourceResponseItemId": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -3629,6 +3863,13 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "environmentId": {
+              "description": "Registration scope, not necessarily the server's execution environment.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -4246,6 +4487,13 @@
         "name"
       ],
       "type": "object"
+    },
+    "TrustedContacts": {
+      "enum": [
+        "check",
+        "skip"
+      ],
+      "type": "string"
     },
     "UserInput": {
       "oneOf": [

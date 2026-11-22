@@ -17,20 +17,17 @@ const FACTORY: &str = r"(file => Object.freeze({
 
 pub(super) fn helper<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    tools: v8::Local<'s, v8::Object>,
 ) -> Result<Option<v8::Local<'s, v8::Value>>, String> {
-    let Some(name) = scope.get_slot::<RuntimeState>().and_then(|state| {
+    let Some(index) = scope.get_slot::<RuntimeState>().and_then(|state| {
         state
             .enabled_tools
             .iter()
-            .find(|tool| tool.tool_name.is_default_namespace() && tool.tool_name.name == "fs")
-            .map(|tool| tool.global_name.clone())
+            .position(|tool| tool.tool_name.is_default_namespace() && tool.tool_name.name == "fs")
     }) else {
         return Ok(None);
     };
     let fail = || "failed to install fs helpers".to_string();
-    let key = v8::String::new(scope, &name).ok_or_else(fail)?;
-    let file = tools.get(scope, key.into()).ok_or_else(fail)?;
+    let file = super::globals::tool_function(scope, index)?.into();
     let source = v8::String::new(scope, FACTORY).ok_or_else(fail)?;
     let factory = v8::Script::compile(scope, source, /*origin*/ None)
         .and_then(|script| script.run(scope))

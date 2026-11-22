@@ -3,6 +3,7 @@
 
 use super::App;
 use crate::app_event::AppEvent;
+use crate::app_server_session::AppServerSession;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
@@ -50,6 +51,7 @@ pub(crate) async fn list_pinned_threads(
                     params: ThreadListParams {
                         include_attached_threads: false,
                         current_account_only: true,
+                        included_thread_ids: None,
                         excluded_thread_ids: None,
                         originators: None,
                         cursor: cursor.clone(),
@@ -95,6 +97,7 @@ pub(crate) async fn list_pinned_threads(
 
 fn is_overview_thread(thread: &Thread) -> bool {
     !thread.ephemeral
+        && thread.attached_to_thread_id.is_none()
         && thread.parent_thread_id.is_none()
         && !matches!(
             thread.source,
@@ -196,6 +199,7 @@ impl SourcePage {
                     params: ThreadListParams {
                         include_attached_threads: false,
                         current_account_only: true,
+                        included_thread_ids: None,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
                         originators: None,
@@ -257,6 +261,15 @@ pub(super) struct HistorySearch {
 }
 
 pub(super) fn matches_query(thread: &Thread, query: &str) -> bool {
+    if thread.id.to_ascii_lowercase().contains(query)
+        || thread
+            .git_info
+            .as_ref()
+            .and_then(|git| git.branch.as_deref())
+            .is_some_and(|branch| branch.to_ascii_lowercase().contains(query))
+    {
+        return true;
+    }
     let name = thread.name.as_deref().unwrap_or_default();
     let cwd = thread.cwd.display();
     format!("{name} {} {cwd}", thread.preview)
@@ -267,7 +280,7 @@ pub(super) fn matches_query(thread: &Thread, query: &str) -> bool {
 impl App {
     pub(super) fn search_agents_overview(
         &mut self,
-        handle: AppServerRequestHandle,
+        app_server: &AppServerSession,
         id: Uuid,
         limit: usize,
     ) {
@@ -286,6 +299,8 @@ impl App {
         for source in &mut cursor.sources {
             source.page_size = 100;
         }
+        let backend_id = app_server.backend_id();
+        let handle = app_server.request_handle();
         let tx = self.app_event_tx.clone();
         search.task = Some(AbortOnDropHandle::new(tokio::spawn(async move {
             if first {
@@ -299,6 +314,7 @@ impl App {
                 }
                 tx.send(AppEvent::AgentsOverviewSearchPage {
                     id,
+                    backend_id,
                     rows,
                     cursor,
                     ok,

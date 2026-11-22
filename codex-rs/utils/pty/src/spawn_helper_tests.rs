@@ -168,7 +168,9 @@ async fn helper_target_dies_when_parent_is_killed() -> anyhow::Result<()> {
         .expect("child reports its PID after verifying PDEATHSIG")
         .parse::<libc::pid_t>()?;
     // The fixture child waits on the cleanup pipe while its parent is alive.
-    let child = tokio::io::unix::AsyncFd::new(open_pidfd(pid)?)?;
+    let pidfd = open_pidfd(pid)?;
+    // SAFETY: The registration owns the fresh pidfd; process exit does not close it.
+    let child = unsafe { tokio::io::unix::AsyncFd::register(pidfd) }.map_err(io::Error::from)?;
     // The fixture forked it from a thread that has since exited.
     assert!(
         tokio::time::timeout(Duration::from_millis(500), child.readable())
@@ -588,11 +590,11 @@ async fn pty_helper_establishes_a_controlling_terminal_without_forking() -> anyh
         "/bin/sh",
         &[
             "-c".to_owned(),
-            "test -t 0 && test -t 1 && test -t 2 && printf ready >/dev/tty".to_owned(),
+            r#"test -t 0 && test -t 1 && test -t 2 && printf '%s' "$0" >/dev/tty"#.to_owned(),
         ],
         std::path::Path::new("."),
         &std::env::vars().collect(),
-        /*arg0*/ &None,
+        &Some("pty-dispatch".to_owned()),
         crate::TerminalSize::default(),
         crate::ChildFds::Inherited(&[]),
     )
@@ -601,7 +603,10 @@ async fn pty_helper_establishes_a_controlling_terminal_without_forking() -> anyh
     while let Some(chunk) = spawned.stdout_rx.recv().await {
         output.extend(chunk);
     }
-    assert_eq!((spawned.exit_rx.await?, output), (0, b"ready".to_vec()));
+    assert_eq!(
+        (spawned.exit_rx.await?, output),
+        (0, b"pty-dispatch".to_vec())
+    );
     if native_helper_available().await? {
         assert_eq!(FORKS.with(Cell::get), 0);
     }

@@ -198,6 +198,25 @@ fn empty_web_link_labels_keep_a_visible_destination() {
 }
 
 #[test]
+fn empty_local_links_keep_a_visible_noninteractive_destination() {
+    for markdown in [
+        "[](empty.md)",
+        "[](./empty.md)",
+        "[](src/empty.md#L42)",
+        "[ ](./empty.md)",
+        "[\u{200d}](./empty.md)",
+    ] {
+        let lines = render(markdown, /*width*/ 80, WebLinkDisplay::LabelOnly);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.line.to_string().contains("empty.md"))
+        );
+        assert!(lines.iter().all(|line| line.hyperlinks.is_empty()));
+    }
+}
+
+#[test]
 fn label_only_web_links_keep_targets_after_prose_and_table_wrapping() {
     let links = "[plain label](https://example.com/plain) [`code label`](https://example.com/code) [<b>](https://example.com/html)";
     for markdown in [

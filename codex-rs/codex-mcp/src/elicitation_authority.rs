@@ -50,7 +50,7 @@ pub(crate) async fn resolve(
     let authority = ElicitationApprovalAuthority {
         approval_policy: config.approval_policy.value(),
         permission_profile: config
-            .permission_profile_for_server(&request.server_name)
+            .permission_profile_for_server(&request.server_key)
             .cloned(),
     };
     let reviewer = reviewer.cloned();

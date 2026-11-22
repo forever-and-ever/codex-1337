@@ -42,6 +42,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::future::ready;
 use std::io::BufRead;
 use std::io::Read;
 use std::io::Write;
@@ -76,13 +77,16 @@ struct Offline {
 }
 
 impl HttpTransport for Offline {
-    async fn execute(&self, _: Request) -> Result<Response, TransportError> {
-        Err(TransportError::Build(
+    fn execute(&self, _: Request) -> impl Future<Output = Result<Response, TransportError>> {
+        ready(Err(TransportError::Build(
             "offline adapter forbids unary requests".into(),
-        ))
+        )))
     }
 
-    async fn stream(&self, request: Request) -> Result<StreamResponse, TransportError> {
+    fn stream(
+        &self,
+        request: Request,
+    ) -> impl Future<Output = Result<StreamResponse, TransportError>> {
         if self.calls.fetch_add(1, Ordering::SeqCst) != 0
             || request.method != Method::POST
             || request.url != "https://fixture.invalid/v1/messages"
@@ -91,11 +95,11 @@ impl HttpTransport for Offline {
             || request.headers.contains_key("cookie")
             || !matches!(request.body.as_ref(), Some(RequestBody::EncodedJson(body)) if body.as_bytes() == self.expected.as_bytes())
         {
-            return Err(TransportError::Build(
+            return ready(Err(TransportError::Build(
                 "unexpected offline Messages request".into(),
-            ));
+            )));
         }
-        Ok(StreamResponse {
+        ready(Ok(StreamResponse {
             status: StatusCode::OK,
             headers: HeaderMap::new(),
             bytes: Box::pin(stream::iter(
@@ -104,7 +108,7 @@ impl HttpTransport for Offline {
                     .into_iter()
                     .map(|chunk| Ok(Bytes::from(chunk))),
             )),
-        })
+        }))
     }
 }
 

@@ -48,6 +48,7 @@ pub(crate) use history::HISTORY_ITEM_SCAN_LIMIT;
 pub(crate) use history::HistoryContent;
 pub(crate) use history::HistoryCursor;
 pub(crate) use history::HistoryHydrationScope;
+pub(crate) use history::HistoryItem;
 pub(crate) use history::HistoryPage;
 pub(crate) use history::HistoryResponse;
 pub(crate) use history::INITIAL_HISTORY_TURN_LIMIT;
@@ -123,6 +124,8 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::openai_models::ModelUpgrade;
 use codex_protocol::openai_models::ReasoningEffortPreset;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::SubAgentSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
@@ -134,7 +137,6 @@ use futures::future::RemoteHandle;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
@@ -388,7 +390,7 @@ pub(crate) struct AppServerSession {
     pub(crate) attempted_revision: Option<String>,
     pub(crate) frozen_receipt: Option<(ThreadId, String)>,
     pub(crate) unread_revisions: HashMap<ThreadId, String>,
-    task_search_generation: Arc<AtomicU64>,
+    pub(crate) task_search: crate::task_mentions::TaskSearch,
     remote_cwd_override: Option<PathBuf>,
     thread_params_mode: ThreadParamsMode,
     /// Explicit CLI provider selection, distinct from resolved configuration defaults.
@@ -548,7 +550,7 @@ impl AppServerSession {
             attempted_revision: None,
             frozen_receipt: None,
             unread_revisions: HashMap::new(),
-            task_search_generation: Arc::new(AtomicU64::new(0)),
+            task_search: Default::default(),
             remote_cwd_override: None,
             thread_params_mode,
             model_provider_override: None,
@@ -643,10 +645,6 @@ impl AppServerSession {
 
     pub(crate) fn task_tools_available(&self, _thread_id: ThreadId) -> bool {
         self.request_handle.supports_thread_coordination()
-    }
-
-    pub(crate) fn task_search_generation(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.task_search_generation)
     }
 
     pub(crate) fn codex_home_path(
@@ -1491,9 +1489,14 @@ pub(crate) fn permission_profile_is_safely_represented_by_sandbox_mode(
     let projected_profile = match sandbox_mode {
         codex_app_server_protocol::SandboxMode::ReadOnly => PermissionProfile::read_only(),
         codex_app_server_protocol::SandboxMode::WorkspaceWrite => {
-            PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-                &codex_protocol::protocol::SandboxPolicy::new_workspace_write_policy(),
-                cwd,
+            PermissionProfile::from_runtime_permissions(
+                &FileSystemSandboxPolicy::workspace_write(
+                    &[],
+                    /*exclude_tmpdir_env_var*/ false,
+                    /*exclude_slash_tmp*/ false,
+                )
+                .with_workspace_write_cwd(cwd),
+                NetworkSandboxPolicy::Restricted,
             )
         }
         codex_app_server_protocol::SandboxMode::DangerFullAccess => PermissionProfile::Disabled,
@@ -1857,7 +1860,7 @@ async fn thread_session_state_from_thread_start_response(
     );
     let mut session = thread_session_state_from_thread_response(
         &response.thread.id,
-        crate::windows_sandbox::host_from_environments(response.thread.environments.as_deref()),
+        response.thread.environments.as_deref(),
         response.thread.forked_from_id.clone(),
         response.thread.name.clone(),
         response.thread.path.clone(),
@@ -1895,7 +1898,7 @@ async fn thread_session_state_from_thread_resume_response(
     );
     let mut session = thread_session_state_from_thread_response(
         &response.thread.id,
-        crate::windows_sandbox::host_from_environments(response.thread.environments.as_deref()),
+        response.thread.environments.as_deref(),
         response.thread.forked_from_id.clone(),
         response.thread.name.clone(),
         response.thread.path.clone(),
@@ -1932,7 +1935,7 @@ async fn thread_session_state_from_thread_fork_response(
     );
     let mut session = thread_session_state_from_thread_response(
         &response.thread.id,
-        crate::windows_sandbox::host_from_environments(response.thread.environments.as_deref()),
+        response.thread.environments.as_deref(),
         response.thread.forked_from_id.clone(),
         response.thread.name.clone(),
         response.thread.path.clone(),
@@ -1985,7 +1988,7 @@ fn display_permission_profile_from_thread_response(
 )]
 async fn thread_session_state_from_thread_response(
     thread_id: &str,
-    windows_sandbox_host: crate::app::WindowsSandboxHost,
+    environments: Option<&[codex_app_server_protocol::ThreadEnvironment]>,
     forked_from_id: Option<String>,
     thread_name: Option<String>,
     rollout_path: Option<PathBuf>,
@@ -2015,8 +2018,13 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
         daybreak_enabled: false,
-        windows_sandbox_host,
+        windows_sandbox_host: crate::windows_sandbox::host_from_environments(environments),
+        primary_environment_cwd: crate::session_state::primary_environment_cwd(
+            environments.unwrap_or_default(),
+        ),
         thread_id,
         forked_from_id,
         fork_parent_title: None,
@@ -2865,6 +2873,12 @@ mod tests {
                 missing_path_behavior: None,
             });
 
+            assert!(
+                permission_profile
+                    .to_legacy_sandbox_policy_template()
+                    .is_err()
+            );
+
             let error = turn_permissions_overrides(
                 TurnPermissionsOverride::LegacySandbox(permission_profile),
                 cwd.as_path(),
@@ -2969,6 +2983,32 @@ mod tests {
 
         assert_eq!(resume.cwd, Some(remote_cwd.to_string_lossy().to_string()));
         assert_eq!(resume.runtime_workspace_roots, None);
+    }
+
+    #[test]
+    fn sandbox_mode_preserves_workspace_metadata_at_the_destination() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let cwd = workspace.path();
+        std::fs::create_dir(cwd.join(".git")).expect("git metadata");
+        let profile = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
+            &codex_protocol::protocol::SandboxPolicy::new_workspace_write_policy(),
+            cwd,
+        );
+        assert!(permission_profile_is_safely_represented_by_sandbox_mode(
+            &profile, cwd
+        ));
+        let policy = profile
+            .file_system_sandbox_policy()
+            .with_additional_writable_roots(
+                cwd,
+                &[AbsolutePathBuf::from_absolute_path(cwd.join(".git"))
+                    .expect("absolute metadata")],
+            );
+        let profile =
+            PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted);
+        assert!(!permission_profile_is_safely_represented_by_sandbox_mode(
+            &profile, cwd
+        ));
     }
 
     #[test]
@@ -3718,7 +3758,11 @@ mod tests {
             thread: codex_app_server_protocol::Thread {
                 theme: None,
                 originator: None,
-                environments: None,
+                environments: Some(vec![codex_app_server_protocol::ThreadEnvironment {
+                    environment_id: "remote".into(),
+                    cwd: LegacyAppPathString::from_string("/executor/work"),
+                    runtime_workspace_roots: Vec::new(),
+                }]),
                 id: thread_id.to_string(),
                 extra: None,
                 session_id: ThreadId::new().to_string(),
@@ -3959,7 +4003,7 @@ mod tests {
 
         let session = thread_session_state_from_thread_response(
             &thread_id.to_string(),
-            crate::app::WindowsSandboxHost::Local,
+            /*environments*/ None,
             /*forked_from_id*/ None,
             Some("restore".to_string()),
             /*rollout_path*/ None,
@@ -3995,7 +4039,7 @@ mod tests {
 
         let session = thread_session_state_from_thread_response(
             &thread_id.to_string(),
-            crate::app::WindowsSandboxHost::Local,
+            /*environments*/ None,
             Some(forked_from_id.to_string()),
             Some("restore".to_string()),
             /*rollout_path*/ None,

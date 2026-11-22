@@ -197,6 +197,15 @@ fn has_usable_workspace_credits(credits: &CreditsSnapshot) -> bool {
 }
 
 impl ChatWidget {
+    pub(crate) fn quota_provider_id(&self) -> &str {
+        if self.thread_id().is_none()
+            && let Some(provider) = &self.inherited_quota_provider
+        {
+            return provider;
+        }
+        &self.config.model_provider_id
+    }
+
     /// Match the shared account quota cache's successful-fetch window.
     pub(crate) fn rate_limit_refresh_interval(&self) -> Option<Duration> {
         self.should_prefetch_rate_limits()
@@ -218,7 +227,27 @@ impl ChatWidget {
     }
 
     pub(crate) fn on_rate_limit_snapshot(&mut self, snapshot: Option<RateLimitSnapshot>) {
+        if let Some(snapshot) = &snapshot {
+            self.observe_quota_plan(snapshot);
+        }
         self.on_rate_limit_snapshot_from(snapshot, RateLimitSnapshotSource::AccountUsage);
+    }
+
+    pub(crate) fn observe_quota_plan(&mut self, snapshot: &RateLimitSnapshot) {
+        if snapshot
+            .limit_id
+            .as_deref()
+            .is_none_or(|id| id.eq_ignore_ascii_case("codex"))
+            && let Some(plan) = snapshot.plan_type.filter(|plan| *plan != PlanType::Unknown)
+        {
+            let previous_plan = self.current_plan_type();
+            let previously_available = self.thread_usage_is_available();
+            self.quota_plan = Some(plan);
+            if previous_plan != Some(plan) {
+                self.reconcile_billing_plan(previously_available);
+                self.refresh_status_surfaces();
+            }
+        }
     }
 
     pub(crate) fn on_rolling_rate_limit_snapshot(&mut self, snapshot: RateLimitSnapshot) {
@@ -268,10 +297,6 @@ impl ChatWidget {
                         balance: credits.balance.clone(),
                     });
             }
-            if let Some(account) = self.loaded_account_mut() {
-                account.plan = snapshot.plan_type.or(account.plan);
-            }
-
             if is_codex_limit
                 && (matches!(source, RateLimitSnapshotSource::AccountUsage)
                     || snapshot.spend_control_reached.is_some())
@@ -390,6 +415,9 @@ impl ChatWidget {
             }
         } else {
             self.rate_limit_snapshots_by_limit_id.clear();
+            let previously_available = self.thread_usage_is_available();
+            self.quota_plan = None;
+            self.reconcile_billing_plan(previously_available);
             self.codex_rate_limit_reached_type = None;
             self.codex_spend_control_reached = None;
         }

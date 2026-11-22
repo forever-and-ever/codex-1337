@@ -118,6 +118,7 @@ pub(crate) struct TranscriptView {
     pub(crate) primary_selection: bool,
     position: Position,
     follow_control: follow_control::FollowControl,
+    pub(crate) show_follow_control: bool,
     copy_feedback: Option<composer_gap::CopyFeedback>,
     composer_tip: Option<(Rect, HyperlinkLine)>,
     turn_tip_key: Option<EntryKey>,
@@ -173,6 +174,7 @@ impl Default for TranscriptView {
             primary_selection: false,
             position: Position::Latest,
             follow_control: follow_control::FollowControl::default(),
+            show_follow_control: true,
             copy_feedback: None,
             composer_tip: None,
             turn_tip_key: None,
@@ -258,7 +260,19 @@ impl TranscriptView {
             self.capture_synchronous_frame();
             return;
         }
-        let initial_start = self.start(cells);
+        // Closing a disclosure can leave its reading anchor below the new scroll limit.
+        let clamp_after_collapse = self.disclosure.clamp_after_collapse
+            && self.selection.is_none()
+            && matches!(self.position, Position::Reading(_));
+        let render_start = |view: &mut Self| {
+            let start = view.start(cells);
+            if clamp_after_collapse {
+                start.min(view.bottom_start(cells))
+            } else {
+                start
+            }
+        };
+        let initial_start = render_start(self);
         let initial_position = self.position;
         let mut start = initial_start;
         let mut body = area;
@@ -282,8 +296,8 @@ impl TranscriptView {
             if resized {
                 self.reveal_copy_context(cells);
             }
-            // Following may advance into the next turn after reserving the header row.
-            start = self.start(cells);
+            // The bottom limit changes after reserving the header row.
+            start = render_start(self);
             if let Some((header, key)) =
                 prompt_header::line(cells, start.0, area.width, self.detailed)
             {
@@ -377,6 +391,27 @@ impl TranscriptView {
         }
         self.render_search(buf);
         self.capture_synchronous_frame();
+    }
+
+    /// Persist the clamped reading position after the last paint at the final viewport height.
+    pub(crate) fn finish_collapse_layout(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        if self.area.is_empty()
+            || self.cache.waiting
+            || !std::mem::take(&mut self.disclosure.clamp_after_collapse)
+            || self.selection.is_some()
+            || !matches!(self.position, Position::Reading(_))
+        {
+            return;
+        }
+        let snapshot = self.snapshot_cells();
+        let cells = snapshot.as_deref().unwrap_or(cells);
+        let start = self.start(cells);
+        if let Some(first) = self.visible.first()
+            && (first.index, first.row) < start
+        {
+            let (index, row, layout) = (first.index, first.row, Arc::clone(&first.layout));
+            self.read_from_row(cells, index, row, &layout);
+        }
     }
 
     pub(crate) fn sync_live_tail(
@@ -586,8 +621,7 @@ impl TranscriptView {
         }
         // Anchor visible content, not a hidden header that stays ahead of every older page.
         let index = self.next_nonempty(cells, index).unwrap_or(index);
-        let bottom = self.bottom_start(cells);
-        if rows > 0 && (index, row) >= bottom {
+        if rows > 0 && (index, row) >= self.bottom_start(cells) {
             if self.selection.is_none() && !self.search.is_active() {
                 self.jump_to_latest();
             } else {
@@ -597,15 +631,25 @@ impl TranscriptView {
             return;
         }
         if let Some(layout) = self.layout(cells, index) {
-            let offset = layout.position_at(row, /*column*/ 0);
-            self.position = Position::Reading(Anchor {
-                key: self.entry_key(cells, index),
-                index,
-                offset,
-                row_bias: layout.row_for_offset(offset) as isize - row as isize,
-            });
+            self.read_from_row(cells, index, row, &layout);
             self.hold_live_reading(current_cells, layout);
         }
+    }
+
+    fn read_from_row(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        row: usize,
+        layout: &TextLayout,
+    ) {
+        let offset = layout.position_at(row, /*column*/ 0);
+        self.position = Position::Reading(Anchor {
+            key: self.entry_key(cells, index),
+            index,
+            offset,
+            row_bias: layout.row_for_offset(offset) as isize - row as isize,
+        });
     }
 
     pub(crate) fn jump_to_entry(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) {

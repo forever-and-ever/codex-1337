@@ -14,6 +14,9 @@ use codex_app_server_protocol::ReviewStartResponse;
 use codex_app_server_protocol::ReviewTarget;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadClosedNotification;
+use codex_app_server_protocol::ThreadGuardianReviewParams;
+use codex_app_server_protocol::ThreadInjectItemsParams;
+use codex_app_server_protocol::ThreadInjectItemsResponse;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
@@ -706,40 +709,210 @@ async fn inline_review_delegate_runs_strict_guardian_assessment() -> Result<()> 
 }
 
 #[tokio::test]
-async fn guardian_review_returns_assessment_for_injected_exec() -> Result<()> {
+async fn recorded_guardian_review_does_not_share_live_approval_history() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let rationale = "Guardian approved the recorded file write.";
+    let verdict = assistant_response(
+        &json!({
+            "outcome": "allow",
+            "risk_level": "medium",
+            "user_authorization": "high",
+            "rationale": rationale,
+        })
+        .to_string(),
+    )?;
     let server = responses::start_mock_server().await;
-    let verdict = r#"{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"User requested this command."}"#;
-    let requests = responses::mount_sse_once(&server, assistant_response(verdict)?).await;
+    let requests = responses::mount_sse_sequence(
+        &server,
+        vec![
+            verdict.clone(),
+            verdict.clone(),
+            verdict,
+            tool_response(TEST_SERVER_NAME, TEST_TOOL_NAME, &["live-approval"]),
+            assistant_response(r#"{"outcome":"deny","rationale":"Live verdict."}"#)?,
+            assistant_response("Done.")?,
+        ],
+    )
+    .await;
+    let (mcp_url, mcp_server) = start_mcp_server(/*sensitive_action*/ None).await?;
     let codex_home = TempDir::new()?;
-    sync_config(&server.uri()).write(codex_home.path())?;
+    sync_config(&server.uri())
+        .with_extra_config(&format!(
+            "[mcp_servers.{TEST_SERVER_NAME}]\nurl = \"{mcp_url}/mcp\"\ndefault_tools_approval_mode = \"prompt\""
+        ))
+        .write(codex_home.path())?;
     let mut app = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
-    let thread = app.start_thread(ThreadStartParams::default()).await?.thread;
-    let inject = app.send_raw_request("thread/inject_items", Some(json!({
-        "threadId": thread.id,
-        "items": [
-            {"type":"message","role":"user","content":[{"type":"input_text","text":"Create guardian-direct.txt."}]},
-            {"type":"function_call","name":"exec_command","call_id":"exec-review",
-             "arguments":r#"{"cmd":"echo reviewed > guardian-direct.txt","sandbox_permissions":"require_escalated","justification":"Create the requested file."}"#}
-        ]
-    }))).await?;
-    let _: Value = app.read_response(inject).await?;
-    let review = app
-        .send_raw_request("thread/guardianReview", Some(json!({"threadId":thread.id})))
-        .await?;
-    let result: Value = app.read_response(review).await?;
-    assert_eq!(
-        result,
-        json!({
-            "callId":"exec-review",
-            "assessment":{"outcome":"allow","riskLevel":"medium","userAuthorization":"high","rationale":"User requested this command."}
+    let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
+    let other = app.start_thread(ThreadStartParams::default()).await?.thread;
+
+    for (thread, call_id) in [(&parent, "a"), (&parent, "b"), (&other, "c")] {
+        let evidence = if call_id == "b" {
+            json!({
+                "type": "function_call_output",
+                "call_id": "a",
+                "output": "Recorded success.",
+            })
+        } else {
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Create the requested file."}],
+            })
+        };
+        let items = vec![
+            evidence,
+            json!({
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": call_id,
+                "arguments": r#"{"cmd":"echo reviewed > guardian-direct.txt","sandbox_permissions":"require_escalated","justification":"Create the requested file."}"#,
+            }),
+        ];
+        let _: ThreadInjectItemsResponse = app
+            .request(|request_id| ClientRequest::ThreadInjectItems {
+                request_id,
+                params: ThreadInjectItemsParams {
+                    thread_id: thread.id.clone(),
+                    items,
+                },
+            })
+            .await?;
+        let result: Value = app
+            .request(|request_id| ClientRequest::ThreadGuardianReview {
+                request_id,
+                params: ThreadGuardianReviewParams {
+                    thread_id: thread.id.clone(),
+                },
+            })
+            .await?;
+        assert_eq!(
+            result,
+            json!({
+                "callId": call_id,
+                "assessment": {
+                    "outcome": "allow",
+                    "riskLevel": "medium",
+                    "userAuthorization": "high",
+                    "rationale": rationale,
+                }
+            })
+        );
+    }
+
+    let started: TurnStartResponse = app
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: parent.id,
+                input: vec![UserInput::Text {
+                    text: "Review this independent live tool call.".to_owned(),
+                    text_elements: vec![],
+                }],
+                ..Default::default()
+            },
         })
-    );
-    assert_eq!(
-        requests.single_request().body_json()["client_metadata"]["x-openai-subagent"],
-        "guardian"
-    );
+        .await?;
+    let completed: TurnCompletedNotification =
+        timeout(TIMEOUT, app.read_notification("turn/completed")).await??;
+    assert_eq!(completed.turn.id, started.turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+
+    let requests = requests.requests();
+    let [a, b, c, _, live, _] = requests.as_slice() else {
+        anyhow::bail!(
+            "expected three direct reviews and one live turn, got {} requests",
+            requests.len()
+        );
+    };
+    for (case, request) in [("a", a), ("b", b), ("c", c), ("live", live)] {
+        assert_eq!(
+            request.body_json()["client_metadata"]["x-openai-subagent"],
+            "guardian",
+        );
+        assert!(
+            !serde_json::to_string(&request.input())?.contains(rationale),
+            "unexpected recorded verdict in {case}",
+        );
+    }
+
+    app.shutdown_gracefully().await?;
+    mcp_server.abort();
+    Ok(())
+}
+
+#[test_case(None; "new_root")]
+#[test_case(Some("This instruction predates the resume."); "resumed_root")]
+#[tokio::test]
+async fn v3_config_does_not_collect_live_evidence(prior_message: Option<&str>) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let requests =
+        responses::mount_sse_sequence(&server, vec![assistant_response("Foreground reply.")?])
+            .await;
+    let home = TempDir::new()?;
+    sync_config(&server.uri())
+        .with_extra_config("[features.guardianv3]\nenabled = true")
+        .write(home.path())?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized_with_timeout(TIMEOUT)
+        .await?;
+    let thread = if let Some(prior_message) = prior_message {
+        let thread_id = app_test_support::create_fake_paginated_rollout(
+            home.path(),
+            "2025-01-01T00-01-00",
+            "2025-01-01T00:01:00Z",
+            prior_message,
+            Some("mock_provider"),
+            /*git_info*/ None,
+        )?;
+        let resumed: ThreadResumeResponse = app
+            .request(|request_id| ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id,
+                    exclude_turns: true,
+                    ..Default::default()
+                },
+            })
+            .await?;
+        resumed.thread
+    } else {
+        app.start_thread(ThreadStartParams {
+            history_mode: Some(codex_app_server_protocol::ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?
+        .thread
+    };
+    let started: TurnStartResponse = app
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id,
+                input: vec![UserInput::Text {
+                    text: "Hold the release until Friday.".to_owned(),
+                    text_elements: vec![],
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    let completed: TurnCompletedNotification =
+        timeout(TIMEOUT, app.read_notification("turn/completed")).await??;
+    assert_eq!(completed.turn.id, started.turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+    app.shutdown_gracefully().await?;
+    let requests = requests.requests();
+    let [actor] = requests.as_slice() else {
+        anyhow::bail!(
+            "expected only the foreground request, got {}",
+            requests.len()
+        );
+    };
+    assert!(actor.header("x-openai-subagent").is_none());
     Ok(())
 }

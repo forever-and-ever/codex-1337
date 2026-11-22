@@ -1,0 +1,14 @@
+---
+source: tui/src/transcript_view/select_mode_tests.rs
+expression: "format!(\"{before}\\n{highlight}\\n{}\", footer(&view))"
+---
+⌃x v mark cell · q close
+
+
+
+             alpha    Beta
+
+             @amma    delta
+
+
+v mark text · y copy

@@ -18,6 +18,7 @@ pub(super) fn batched_terminal_responses() {
             keyboard_enhancement_supported: None,
             terminal_app_over_ssh: Some(false),
             bracketed_paste: None,
+            alternate_scroll_enabled: None,
         };
         let mut saw_supported_keyboard = false;
         let mut buffer = reply.as_bytes().to_vec();
@@ -39,6 +40,7 @@ pub(super) fn batched_terminal_responses() {
                 keyboard_enhancement_supported: Some(true),
                 terminal_app_over_ssh: Some(false),
                 bracketed_paste,
+                alternate_scroll_enabled: None,
             }
         );
         // Missing DECRPM must not extend the existing round trip.

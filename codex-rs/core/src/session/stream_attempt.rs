@@ -59,11 +59,11 @@ impl From<CodexErr> for SamplingFailure {
 }
 
 impl StreamItems {
-    pub(super) fn new(plan_mode: bool, turn_id: &str) -> Self {
+    pub(super) fn new(plan_mode: bool, unfinished_plan_id: Option<String>) -> Self {
         Self {
             items: BTreeMap::new(),
             parsers: AssistantMessageStreamParsers::new(plan_mode),
-            plan: plan_mode.then(|| PlanModeStreamState::new(turn_id)),
+            plan: plan_mode.then(|| PlanModeStreamState::new(unfinished_plan_id)),
         }
     }
 

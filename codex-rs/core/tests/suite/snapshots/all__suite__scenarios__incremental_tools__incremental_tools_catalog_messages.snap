@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
+assertion_line: 798
 expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Catalog overrides supply the update hint, both removal headers, and namespace instructions notices. MCP refreshes remove and restore tools, then change and clear only the namespace instructions. Runtime instructions remain verbatim, and unchanged turns do not repeat notices.
@@ -16,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=96b5f9a734c32aa0):
-        - namespace/functions; hash=99ccdac76e678623
+00:additional_tools/developer (3; hash=056da854d2fc5ae7):
+        - namespace/functions; hash=8e2eaa732842f1d6
           - custom/python
           - custom/bash
           - function/exec_command
@@ -30,7 +31,7 @@ Settings:
           - custom/apply_patch
           - function/view_image
           - function/fence
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=5dd3bb26471219ee
           - function/close_agent
           - function/resume_agent
           - function/send_input

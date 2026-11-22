@@ -312,6 +312,7 @@ impl RollbackPlanner {
                 codex_rollout::RetainedContextEvent::DeliveredAssistantMessage {
                     message,
                     acceptance_order,
+                    ..
                 }
                 | codex_rollout::RetainedContextEvent::UserDelegation {
                     message,

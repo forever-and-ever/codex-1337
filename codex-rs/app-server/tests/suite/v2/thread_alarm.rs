@@ -1,3 +1,4 @@
+use codex_app_server_protocol::AlarmSummary;
 use codex_app_server_protocol::ThreadAlarmDisarmResponse;
 use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadClosedNotification;
@@ -587,7 +588,7 @@ async fn restart_delivers_overdue_clock_and_lost_terminal_without_resuming_from_
             json!({"threadId": thread_id, "id": future.id}),
         )
         .await?;
-    assert!(disarmed.alarms.is_empty());
+    assert_eq!(disarmed.alarms, Vec::<AlarmSummary>::new());
     let closed: ThreadClosedNotification = app.read_notification("thread/closed").await?;
     assert_eq!(closed.thread_id, thread_id);
     let loaded: ThreadLoadedListResponse = app.request("thread/loaded/list", json!({})).await?;

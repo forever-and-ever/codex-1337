@@ -17,6 +17,8 @@ use http::HeaderMap;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::fmt::Write as _;
+use std::future::poll_fn;
+use std::future::ready;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -198,12 +200,14 @@ impl AuthProvider for NoAuth {
 
 struct UncertainTransport(Arc<AtomicUsize>);
 impl HttpTransport for UncertainTransport {
-    async fn execute(&self, _: Request) -> Result<Response, TransportError> {
-        unreachable!("native inference must stream")
+    fn execute(&self, _: Request) -> impl Future<Output = Result<Response, TransportError>> {
+        poll_fn(|_| unreachable!("native inference must stream"))
     }
-    async fn stream(&self, _: Request) -> Result<StreamResponse, TransportError> {
+    fn stream(&self, _: Request) -> impl Future<Output = Result<StreamResponse, TransportError>> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Err(TransportError::Network("synthetic uncertain POST".into()))
+        ready(Err(TransportError::Network(
+            "synthetic uncertain POST".into(),
+        )))
     }
 }
 

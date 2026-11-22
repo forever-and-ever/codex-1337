@@ -101,7 +101,9 @@ async fn observe_idle(tx: watch::Sender<DesktopAttention>) -> Result<()> {
     });
     // XSync alarms wake on both the idle crossing and the clock reset caused by human input.
     // The X11 socket itself is registered with Tokio; no periodic desktop query is needed.
-    let readable = tokio::io::unix::AsyncFd::new(conn.stream().as_fd())?;
+    // SAFETY: The borrow ties the registration to the connection's fixed socket.
+    let readable = unsafe { tokio::io::unix::AsyncFd::register(conn.stream().as_fd()) }
+        .map_err(std::io::Error::from)?;
     loop {
         // A synchronous reply may already have pulled an alarm into x11rb's event queue;
         // socket readability alone would then never wake the observer again.

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::callbacks::audio_callback;
 use super::callbacks::clear_timeout_callback;
 use super::callbacks::content_block_callback;
@@ -16,10 +18,7 @@ use super::discovery::describe_tool_callback;
 use super::discovery::search_tools_callback;
 use codex_code_mode_protocol::EnabledToolMetadata;
 
-pub(super) fn install_globals(
-    scope: &mut v8::PinScope<'_, '_>,
-    enabled_tools: &[EnabledToolMetadata],
-) -> Result<(), String> {
+pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     super::encoding::install_globals(scope)?;
     let global = scope.get_current_context().global(scope);
     delete_global(scope, global, "console")?;
@@ -27,11 +26,6 @@ pub(super) fn install_globals(
     delete_global(scope, global, "SharedArrayBuffer")?;
     delete_global(scope, global, "WebAssembly")?;
 
-    let tools = build_tools_object(scope, enabled_tools)?;
-    if let Some(fs) = super::filesystem::helper(scope, tools)? {
-        set_global(scope, global, "fs", fs)?;
-    }
-    let all_tools = build_all_tools_value(scope, enabled_tools)?;
     let describe_tool = helper_function(scope, "describe_tool", describe_tool_callback)?;
     let search_tools = helper_function(scope, "search_tools", search_tools_callback)?;
     let clear_timeout = helper_function(scope, "clearTimeout", clear_timeout_callback)?;
@@ -48,11 +42,19 @@ pub(super) fn install_globals(
     let exit = helper_function(scope, "exit", exit_callback)?;
     let fail = helper_function(scope, "fail", fail_callback)?;
 
-    set_global(scope, global, "tools", tools.into())?;
-    if let Some(sh) = super::sh::helper(scope, tools)? {
+    for name in ["tools", "ALL_TOOLS"] {
+        let key =
+            v8::String::new(scope, name).ok_or_else(|| format!("failed to allocate {name}"))?;
+        if global.set_lazy_data_property(scope, key.into(), catalog_global) != Some(true) {
+            return Err(format!("failed to install {name}"));
+        }
+    }
+    if let Some(fs) = super::filesystem::helper(scope)? {
+        set_global(scope, global, "fs", fs)?;
+    }
+    if let Some(sh) = super::sh::helper(scope)? {
         set_global(scope, global, "sh", sh)?;
     }
-    set_global(scope, global, "ALL_TOOLS", all_tools)?;
     set_global(scope, global, "describe_tool", describe_tool.into())?;
     set_global(scope, global, "search_tools", search_tools.into())?;
     set_global(scope, global, "clearTimeout", clear_timeout.into())?;
@@ -78,50 +80,80 @@ pub(super) fn install_globals(
     Ok(())
 }
 
+/// V8 replaces the lazy property with its writable value on the first read.
+fn catalog_global(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<v8::Name>,
+    _args: v8::PropertyCallbackArguments,
+    mut retval: v8::ReturnValue<v8::Value>,
+) {
+    let Some(state) = scope.get_slot::<super::RuntimeState>() else {
+        super::value::throw_type_error(scope, "code-mode catalog is unavailable");
+        return;
+    };
+    let tools = Arc::clone(&state.enabled_tools);
+    let value = if key.to_rust_string_lossy(scope) == "tools" {
+        build_tools_object(scope, &tools).map(Into::into)
+    } else {
+        build_all_tools_value(scope, &tools)
+    };
+    match value {
+        Ok(value) => retval.set(value),
+        Err(message) => super::value::throw_type_error(scope, &message),
+    }
+}
+
 fn build_tools_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    enabled_tools: &[EnabledToolMetadata],
+    enabled_tools: &[Arc<EnabledToolMetadata>],
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    let tools = v8::Object::new(scope);
+    let prototype = v8::Object::new(scope)
+        .get_prototype(scope)
+        .ok_or_else(|| "failed to get tool object prototype".to_string())?;
+    let mut names = Vec::with_capacity(enabled_tools.len());
+    let mut functions = Vec::with_capacity(enabled_tools.len());
 
     for (tool_index, tool) in enabled_tools.iter().enumerate() {
         let name = v8::String::new(scope, &tool.global_name)
             .ok_or_else(|| "failed to allocate tool name".to_string())?;
         let function = tool_function(scope, tool_index)?;
-        tools.set(scope, name.into(), function.into());
+        names.push(name.into());
+        functions.push(function.into());
     }
-    Ok(tools)
+    Ok(v8::Object::with_prototype_and_properties(
+        scope, prototype, &names, &functions,
+    ))
 }
 
 fn build_all_tools_value<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    enabled_tools: &[EnabledToolMetadata],
+    enabled_tools: &[Arc<EnabledToolMetadata>],
 ) -> Result<v8::Local<'s, v8::Value>, String> {
-    let array = v8::Array::new(scope, enabled_tools.len() as i32);
+    let mut items = Vec::with_capacity(enabled_tools.len());
     let name_key = v8::String::new(scope, "name")
         .ok_or_else(|| "failed to allocate ALL_TOOLS name key".to_string())?;
     let description_key = v8::String::new(scope, "description")
         .ok_or_else(|| "failed to allocate ALL_TOOLS description key".to_string())?;
 
-    for (index, tool) in enabled_tools.iter().enumerate() {
+    for tool in enabled_tools {
         let item = v8::Object::new(scope);
         let name = v8::String::new(scope, &tool.global_name)
             .ok_or_else(|| "failed to allocate ALL_TOOLS name".to_string())?;
         let description = v8::String::new(scope, &tool.summary)
             .ok_or_else(|| "failed to allocate ALL_TOOLS description".to_string())?;
 
-        if item.set(scope, name_key.into(), name.into()) != Some(true) {
+        if item.create_data_property(scope, name_key.into(), name.into()) != Some(true) {
             return Err("failed to set ALL_TOOLS name".to_string());
         }
-        if item.set(scope, description_key.into(), description.into()) != Some(true) {
+        if item.create_data_property(scope, description_key.into(), description.into())
+            != Some(true)
+        {
             return Err("failed to set ALL_TOOLS description".to_string());
         }
-        if array.set_index(scope, index as u32, item.into()) != Some(true) {
-            return Err("failed to append ALL_TOOLS metadata".to_string());
-        }
+        items.push(item.into());
     }
 
-    Ok(array.into())
+    Ok(v8::Array::new_with_elements(scope, &items).into())
 }
 
 fn helper_function<'s, F>(
@@ -142,7 +174,7 @@ where
         .ok_or_else(|| "failed to create helper function".to_string())
 }
 
-fn tool_function<'s>(
+pub(super) fn tool_function<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     tool_index: usize,
 ) -> Result<v8::Local<'s, v8::Function>, String> {

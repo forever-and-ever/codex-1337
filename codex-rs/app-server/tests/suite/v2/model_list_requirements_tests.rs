@@ -5,15 +5,18 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ConfigWriteResponse;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::ModelProviderConfigWriteResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::WriteStatus;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelsResponse;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::time::Duration;
@@ -241,6 +244,104 @@ requires_openai_auth = true
     Ok(())
 }
 
+#[tokio::test]
+async fn model_list_follows_active_provider_auth_edit() -> Result<()> {
+    let gateway = MockServer::start().await;
+    mock_server::run(&[&gateway], async {
+        for (token, model) in [("initial-key", "first-model"), ("saved-key", "saved-model")] {
+            Mock::given(header("authorization", format!("Bearer {token}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(catalog(model)?))
+                .mount(&gateway)
+                .await;
+        }
+        let home = TempDir::new()?;
+        let path = home.path().join("config.toml");
+        let config = format!(
+            r#"model_provider = 'gateway'
+[features]
+api_key_model_discovery = true
+[model_providers.gateway]
+name = 'Gateway'
+base_url = '{0}'
+model_catalog_url = '{0}/models'
+env_key = 'GATEWAY_KEY'
+[model_providers.other]
+name = 'Other'
+"#,
+            gateway.uri(),
+        );
+        std::fs::write(&path, &config)?;
+        let mut server = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .without_managed_config()
+            .with_env_overrides(&[
+                ("GATEWAY_KEY", Some("initial-key")),
+                ("NEW_GATEWAY_KEY", Some("saved-key")),
+                ("OPENAI_API_KEY", None),
+                ("CODEX_API_KEY", None),
+                ("CODEX_ACCESS_TOKEN", None),
+                ("OPENAI_FEDERATION_RULE_ID", None),
+                ("OPENAI_IDENTITY_TOKEN_FILE", None),
+                ("OPENAI_WORKLOAD_IDENTITY_CONTEXT", None),
+            ])
+            .build_initialized()
+            .await?;
+        let initial = list_models(&mut server).await?;
+        assert_eq!(initial.data[0].id, "first-model");
+
+        // Discovery follows current configuration and must not reuse a removed credential.
+        std::fs::write(&path, config.replace("env_key = 'GATEWAY_KEY'", ""))?;
+        let id = server
+            .send_request(
+                "modelProvider/config/write",
+                Some(json!({
+                    "settings": {"type":"customGateway", "providerId": "other", "name": "Renamed"}
+                })),
+            )
+            .await?;
+        let _: ModelProviderConfigWriteResponse = server.read_response(id).await?;
+        let id = server
+            .send_request(
+                "modelProvider/config/write",
+                Some(json!({
+                    "settings": {"type":"customGateway", "providerId": "gateway", "baseUrl": "invalid"}
+                })),
+            )
+            .await?;
+        server
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        let unavailable = list_models(&mut server).await?;
+        assert!(unavailable.data.is_empty());
+        assert_eq!(unavailable.model_provider.as_deref(), Some("gateway"));
+
+        let id = server
+            .send_request(
+                "modelProvider/config/write",
+                Some(json!({"settings": {"type":"customGateway", "providerId": "gateway", "envKey": "NEW_GATEWAY_KEY"}})),
+            )
+            .await?;
+        let _: ModelProviderConfigWriteResponse = server.read_response(id).await?;
+        let saved = list_models(&mut server).await?;
+        assert_eq!(saved.data[0].id, "saved-model");
+        let id = server
+            .send_request(
+                "modelProvider/default/set",
+                Some(json!({"providerId": "other"})),
+            )
+            .await?;
+        let _: ConfigWriteResponse = server.read_response(id).await?;
+        let id = server
+            .send_request("model/list", Some(json!({"modelProvider": "gateway"})))
+            .await?;
+        let retained: ModelListResponse = server.read_response(id).await?;
+        assert_eq!(retained, saved);
+        Ok(())
+    })
+    .await
+}
+
+/// Warm lists reuse their configuration; a completed login reloads the catalog once.
 /// Startup recovery must not turn malformed current policy into catalog authority.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_list_rejects_invalid_config_across_account_changes() -> Result<()> {
@@ -331,6 +432,39 @@ requires_openai_auth = true
     let disk_catalog: ModelsResponse = serde_json::from_slice(&std::fs::read(&cache_path)?)?;
     assert_eq!(disk_catalog, initial_cache);
     assert_eq!(list_models(&mut server).await?, initial);
+
+    let id = server
+        .send_request(
+            "modelProvider/default/set",
+            Some(json!({"providerId": "second"})),
+        )
+        .await?;
+    let saved: ConfigWriteResponse = server.read_response(id).await?;
+    assert_eq!(saved.status, WriteStatus::Ok);
+    assert_eq!(list_models(&mut server).await?, selected);
+
+    let id = server
+        .send_request(
+            "modelProvider/default/set",
+            Some(json!({"providerId": "missing"})),
+        )
+        .await?;
+    let rejected = server
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
+    assert_eq!(
+        rejected.error.data,
+        Some(json!({"config_write_error_code": "configValidationError"}))
+    );
+    assert_eq!(list_models(&mut server).await?, selected);
+    let id = server
+        .send_request(
+            "modelProvider/default/set",
+            Some(json!({"providerId": "first"})),
+        )
+        .await?;
+    let _: ConfigWriteResponse = server.read_response(id).await?;
+    assert_eq!(list_models(&mut server).await?, initial);
     Ok(())
 }
 
@@ -349,89 +483,4 @@ async fn model_list_reports_an_unconfigured_provider() -> Result<()> {
         Some(json!({"type": "modelProviderNotConfigured", "modelProvider": "missing"}))
     );
     Ok(())
-}
-
-#[tokio::test]
-async fn model_list_follows_active_provider_auth_edit() -> Result<()> {
-    use core_test_support::mock_server;
-    let gateway = MockServer::start().await;
-    mock_server::run(&[&gateway], async {
-    for (token, model) in [("initial-key", "first-model"), ("saved-key", "saved-model")] {
-        Mock::given(header("authorization", format!("Bearer {token}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(catalog(model)?))
-            .mount(&gateway)
-            .await;
-    }
-    let home = TempDir::new()?;
-    let path = home.path().join("config.toml");
-    let config = format!(
-        r#"model_provider = 'gateway'
-[features]
-api_key_model_discovery = true
-[model_providers.gateway]
-name = 'Gateway'
-base_url = '{0}'
-model_catalog_url = '{0}/models'
-env_key = 'GATEWAY_KEY'
-[model_providers.other]
-name = 'Other'
-"#,
-        gateway.uri(),
-    );
-    std::fs::write(&path, &config)?;
-    let mut server = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .without_managed_config()
-        .with_env_overrides(&[
-            ("GATEWAY_KEY", Some("initial-key")),
-            ("NEW_GATEWAY_KEY", Some("saved-key")),
-            ("OPENAI_API_KEY", None),
-            ("CODEX_API_KEY", None),
-            ("CODEX_ACCESS_TOKEN", None),
-            ("OPENAI_FEDERATION_RULE_ID", None),
-            ("OPENAI_IDENTITY_TOKEN_FILE", None),
-            ("OPENAI_WORKLOAD_IDENTITY_CONTEXT", None),
-        ])
-        .build_initialized()
-        .await?;
-    let initial = list_models(&mut server).await?;
-    assert_eq!(initial.data[0].id, "first-model");
-
-    // Global lists reload the current route; removing its key cannot reuse old credentials.
-    std::fs::write(&path, config.replace("env_key = 'GATEWAY_KEY'", ""))?;
-    let id = server
-        .send_request(
-            "modelProvider/config/write",
-            Some(json!({
-                "settings": {"type":"customGateway", "providerId": "other", "name": "Renamed"}
-            })),
-        )
-        .await?;
-    let _: ModelProviderConfigWriteResponse = server.read_response(id).await?;
-    let id = server
-        .send_request(
-            "modelProvider/config/write",
-            Some(json!({
-                "settings": {"type":"customGateway", "providerId": "gateway", "baseUrl": "invalid"}
-            })),
-        )
-        .await?;
-    server
-        .read_stream_until_error_message(RequestId::Integer(id))
-        .await?;
-    let unavailable = list_models(&mut server).await?;
-    assert!(unavailable.data.is_empty());
-    assert_eq!(unavailable.model_provider.as_deref(), Some("gateway"));
-
-    let id = server
-        .send_request(
-            "modelProvider/config/write",
-            Some(json!({"settings": {"type":"customGateway", "providerId": "gateway", "envKey": "NEW_GATEWAY_KEY"}})),
-        )
-        .await?;
-    let _: ModelProviderConfigWriteResponse = server.read_response(id).await?;
-    assert_eq!(list_models(&mut server).await?.data[0].id, "saved-model");
-    Ok(())
-    })
-    .await
 }

@@ -55,6 +55,16 @@ impl<T: HttpTransport> AnthropicClient<T> {
         request: AnthropicRequest,
         options: AnthropicStreamOptions,
     ) -> Result<ResponseStream, ApiError> {
+        self.stream_request_with_body_observer(request, options, |_| ())
+            .await
+    }
+
+    pub async fn stream_request_with_body_observer(
+        &self,
+        request: AnthropicRequest,
+        options: AnthropicStreamOptions,
+        observe_body: impl FnOnce(&EncodedJsonBody) + Send,
+    ) -> Result<ResponseStream, ApiError> {
         let idle_timeout = self
             .session
             .provider()
@@ -65,6 +75,7 @@ impl<T: HttpTransport> AnthropicClient<T> {
                 message: format!("failed to encode Anthropic request: {e}"),
             })?;
         let headers = request.api_headers(options.extra_headers)?;
+        observe_body(&body);
         let response = timeout(
             idle_timeout,
             self.session.stream_encoded_json_with(

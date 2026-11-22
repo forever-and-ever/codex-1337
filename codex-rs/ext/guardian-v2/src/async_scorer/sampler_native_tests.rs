@@ -110,6 +110,7 @@ async fn native_classification_requires_complete_structured_output() {
                 token_usage: None,
                 usage_metadata,
                 end_turn: Some(end_turn),
+                reasoning_removals: None,
             }))
             .await
             .unwrap();

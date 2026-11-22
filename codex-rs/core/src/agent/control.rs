@@ -49,6 +49,7 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::ReadThreadParams;
+use codex_user_input::ResolvedUserInput;
 use futures::StreamExt;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -154,7 +155,7 @@ impl LocalAgentControl {
     pub(crate) async fn send_input(
         &self,
         agent_id: ThreadId,
-        input: Vec<UserInput>,
+        input: Vec<ResolvedUserInput>,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
         let _lifecycle = self.runtime.lifecycle.read().await;
@@ -166,13 +167,15 @@ impl LocalAgentControl {
     async fn submit_agent_input(
         &self,
         agent_id: ThreadId,
-        input: Vec<UserInput>,
+        input: Vec<ResolvedUserInput>,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
         let state = self.runtime.upgrade()?;
         let thread = state.get_thread(agent_id).await?;
         let result = match thread
-            .start_or_steer_turn(TurnInputRequest::user_input(input).on_start(start_options))
+            .start_or_steer_resolved_turn(
+                TurnInputRequest::<ResolvedUserInput>::user_input(input).on_start(start_options),
+            )
             .await
         {
             Ok(TurnInputSubmission::Started { turn_id, .. }) => Ok(turn_id),
@@ -339,17 +342,14 @@ impl LocalAgentControl {
     }
 
     /// Interrupt the current task for an existing agent thread.
-    pub(crate) async fn interrupt_agent(&self, agent_id: ThreadId) -> CodexResult<String> {
+    pub(crate) async fn interrupt_agent(&self, agent_id: ThreadId, op: Op) -> CodexResult<String> {
         let state = self.runtime.upgrade()?;
         self.handle_thread_request_result(
             agent_id,
             &state,
             state
                 .send_op(
-                    agent_id,
-                    Op::Interrupt,
-                    /*parent_turn_id*/ None,
-                    /*root_turn_id*/ None,
+                    agent_id, op, /*parent_turn_id*/ None, /*root_turn_id*/ None,
                     /*message_delivery*/ None,
                 )
                 .await,
@@ -564,8 +564,10 @@ impl LocalAgentControl {
                     message,
                     /*trigger_turn*/ false,
                 );
-                let context =
-                    AgentCommunicationContext::new(AgentCommunicationKind::Result, child_thread_id);
+                let context = AgentCommunicationContext::new(
+                    AgentCommunicationKind::CompletionWatcher,
+                    child_thread_id,
+                );
                 let _ = control
                     .send_inter_agent_communication(
                         parent_thread_id,

@@ -121,6 +121,7 @@ impl Color {
     }
 }
 
+/// A six-digit sRGB color in `#RRGGBB` form.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub(super) struct HexRgb((u8, u8, u8));

@@ -32,7 +32,7 @@ fn preparation_timeout_does_not_wait_for_blocking_worker() -> anyhow::Result<()>
             let _ = wait.recv();
         });
         ready.await?;
-        let mut check = Box::pin(run_checks_with_metrics(&request, None));
+        let mut check = Box::pin(run_checks_with_metrics((&request).into(), None));
         assert!(futures::poll!(&mut check).is_pending());
         tokio::time::advance(CHECK_TIMEOUT + Duration::from_millis(1)).await;
         assert!(futures::poll!(&mut check).is_ready());

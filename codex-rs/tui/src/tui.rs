@@ -545,16 +545,18 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
                     duration_ms = %started_at.elapsed().as_millis(),
                     "terminal startup probes failed: {err}"
                 );
-                crate::terminal_probe::StartupProbe {
-                    cursor_position: None,
-                    default_colors: None,
-                    bracketed_paste: None,
-                    keyboard_enhancement_supported: None,
-                    terminal_app_over_ssh: None,
-                }
+                crate::terminal_probe::StartupProbe::default()
             }
         }
     };
+
+    #[cfg(unix)]
+    ALTERNATE_SCREEN.initial_scroll_enabled.store(
+        startup_probe
+            .alternate_scroll_enabled
+            .unwrap_or(/*default*/ false),
+        Ordering::Relaxed,
+    );
 
     #[cfg(unix)]
     crate::terminal_palette::set_default_colors_from_startup_probe(startup_probe.default_colors);
@@ -604,6 +606,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
             .unwrap_or(/*default*/ false),
         #[cfg(not(unix))]
         terminal_app_over_ssh: false,
+
         stderr_guard,
     };
     restore_guard.active = false;
@@ -1071,6 +1074,12 @@ impl Tui {
         if let Err(err) = terminal_stderr::resume() {
             tracing::warn!("failed to suppress terminal stderr after external program: {err}");
         }
+        // An editor's suspend/resume cycle can change termios behind crossterm's raw-mode cache.
+        // Clear that cache so set_modes actually restores raw mode.
+        #[cfg(unix)]
+        if let Err(err) = disable_raw_mode() {
+            tracing::warn!("failed to reset raw mode after external program: {err}");
+        }
         if let Err(err) = set_modes() {
             tracing::warn!("failed to re-enable terminal modes after external program: {err}");
         }
@@ -1339,22 +1348,20 @@ impl Tui {
     }
 
     /// Write any buffered history lines above the viewport and clear the buffer.
-    fn flush_pending_history_lines(
-        terminal: &mut Terminal,
+    fn flush_pending_history_lines<B>(
+        terminal: &mut CustomTerminal<B>,
         pending_history_lines: &mut Vec<PendingHistoryLines>,
         scrollback: ScrollbackStrategy,
         screen_size: Size,
-    ) -> Result<()> {
-        if pending_history_lines.is_empty() {
-            return Ok(());
-        }
-
-        // A failed write can already have emitted part of this batch. Never retry that batch
-        // automatically: replaying it would duplicate the successful prefix. Remaining batches
-        // stay queued, and the caller reports the I/O error.
-        while !pending_history_lines.is_empty() {
-            let batch = pending_history_lines.remove(/*index*/ 0);
+    ) -> Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        while let Some(batch) = pending_history_lines.first() {
             let mode = scrollback.history_insertion_mode(batch.wrap_policy);
+            // Once insertion starts, an I/O error can leave a prefix on screen. Dequeue
+            // this batch first so retrying the remaining batches cannot duplicate that prefix.
+            let batch = pending_history_lines.remove(/*index*/ 0);
             crate::insert_history::insert_history_hyperlink_lines_with_mode_and_wrap_policy(
                 terminal,
                 &batch.lines,
@@ -1529,6 +1536,8 @@ impl Tui {
             return Ok(());
         }
         self.begin_full_frame();
+        // This draw uses the caller's resolved geometry directly, so its reservation is consumed.
+        self.screen_size.pending_draw_size = None;
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
         #[cfg(unix)]

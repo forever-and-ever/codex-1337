@@ -451,6 +451,10 @@ impl ChatWidget {
         self.bottom_pane.shortcut_overlay_visible()
     }
 
+    pub(crate) fn handle_shortcut_view_key(&mut self, key: KeyEvent) -> bool {
+        self.bottom_pane.handle_shortcut_view_key(key)
+    }
+
     pub(crate) fn no_modal_or_popup_active(&self) -> bool {
         self.bottom_pane.no_modal_or_popup_active()
     }
@@ -460,7 +464,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn can_launch_external_editor(&self) -> bool {
-        !self.external_writer_view && self.bottom_pane.can_launch_external_editor()
+        !self.is_read_only_view() && self.bottom_pane.can_launch_external_editor()
     }
 
     pub(crate) fn can_run_ctrl_l_clear_now(&mut self) -> bool {
@@ -585,7 +589,7 @@ impl ChatWidget {
 
     pub(crate) fn handle_paste(&mut self, text: String) {
         self.cancel_quick_dial_menu();
-        if (self.external_writer_view || self.has_provider_error())
+        if (self.is_read_only_view() || self.has_provider_error())
             && !self.bottom_pane.has_active_view()
         {
             return;

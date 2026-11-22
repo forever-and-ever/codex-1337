@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
+assertion_line: 798
 expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Regular Responses retains its full-current-catalog path across MCP removal and restoration. Genuine catalog changes may rebuild the request prefix; unchanged requests retain the same declarations, and unsupported incremental removal notices are never emitted.
@@ -15,10 +16,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (15; hash=8bd20f500b270a87):
+  tools (15; hash=be5f8b3152eacd26):
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
-    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=383228a84558a0ce
+    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=cc03a6502c6a5cd9
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=bf80c8a46f862d10
     - function/list_mcp_resources: Lists resources provided by MCP servers. Resources allow servers to share data that provides cont...; args=[cursor, server]; hash=6792edaff13561bd
     - function/list_mcp_resource_templates: Lists resource templates provided by MCP servers. Parameterized resource templates allow servers ...; args=[cursor, server]; hash=60f17c90ef7a4ebb
@@ -27,7 +28,7 @@ Settings:
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - custom/apply_patch: The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the pat...; hash=dea9f12b0111a4ba
     - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[path]; hash=1908de9c0be7118a
-    - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+    - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=5dd3bb26471219ee
       - function/close_agent
       - function/resume_agent
       - function/send_input
@@ -50,7 +51,7 @@ Settings:
 
 ## Window 2 (after request 1)
 Settings: relative to window 1
-  tools (15; hash=caa0f95971769024):
+  tools (15; hash=0653682365d2317d):
     ~ namespace/mcp__echo_service: Echo service instructions.; hash=cd4faea1ab398734
       - function/echo
 -- request 2 (turn) --
@@ -70,7 +71,7 @@ Settings: relative to window 1
 
 ## Window 3 (after request 3)
 Settings: relative to window 2
-  tools (11; hash=d6cb4f77eb8a1482):
+  tools (11; hash=187b00f1a88d70bb):
     - removed function/list_mcp_resources
     - removed function/list_mcp_resource_templates
     - removed function/read_mcp_resource

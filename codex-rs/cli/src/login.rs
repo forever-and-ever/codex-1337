@@ -7,12 +7,14 @@
 //! into a one-shot CLI command while still producing a durable `codex-login.log` artifact that
 //! support can request from users.
 
+use codex_cloud_config::ConfigServerLoginMethod;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::Config;
 use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthRouteConfig;
 use codex_login::CLIENT_ID;
 use codex_login::CodexAuth;
+use codex_login::OAuthDeviceCodePrompt;
 use codex_login::ServerOptions;
 use codex_login::login_with_access_token;
 use codex_login::login_with_api_key;
@@ -146,6 +148,7 @@ pub async fn login_with_chatgpt(
 async fn sign_in_to_config_server_and_reload_config(
     config: &mut Config,
     cli_config_overrides: &CliConfigOverrides,
+    method: ConfigServerLoginMethod,
 ) -> std::io::Result<()> {
     let requirements = config.config_layer_stack.requirements_toml();
     let network = codex_app_server_embedding::EmbeddedNetworkPolicy::load(
@@ -154,7 +157,7 @@ async fn sign_in_to_config_server_and_reload_config(
     .await;
     let bootstrap_auth = network.bind_bootstrap_auth(config.auth_config());
     let auth_route_config = bootstrap_auth.auth_route_config.clone();
-    codex_cloud_config::ensure_config_server_login(bootstrap_auth, requirements).await?;
+    codex_cloud_config::ensure_config_server_login(bootstrap_auth, requirements, method).await?;
     *config = crate::cloud_config::load_config(cli_config_overrides, Default::default())
         .await
         .map_err(|error| std::io::Error::other(format!("{error:#}")))?;
@@ -177,6 +180,7 @@ async fn finish_login(config: &Config, result: std::io::Result<()>) -> ! {
 
 async fn run_interactive_login(
     cli_config_overrides: CliConfigOverrides,
+    config_server_login_method: ConfigServerLoginMethod,
     chatgpt_login: impl AsyncFnOnce(&Config) -> std::io::Result<()>,
 ) -> ! {
     let mut config = load_config_or_exit(cli_config_overrides.clone()).await;
@@ -190,14 +194,18 @@ async fn run_interactive_login(
         finish_login(&config, result).await;
     }
 
-    let result =
-        sign_in_to_config_server_and_reload_config(&mut config, &cli_config_overrides).await;
+    let result = sign_in_to_config_server_and_reload_config(
+        &mut config,
+        &cli_config_overrides,
+        config_server_login_method,
+    )
+    .await;
     let _login_log_guard = init_login_file_logging(&config);
     finish_login(&config, result).await
 }
 
 pub async fn run_login_with_browser(cli_config_overrides: CliConfigOverrides) -> ! {
-    run_interactive_login(cli_config_overrides, async move |config| {
+    let chatgpt_login = async move |config: &Config| {
         tracing::info!("starting browser login flow");
 
         if !config
@@ -217,7 +225,12 @@ pub async fn run_login_with_browser(cli_config_overrides: CliConfigOverrides) ->
             config.auth_route_config(),
         )
         .await
-    })
+    };
+    run_interactive_login(
+        cli_config_overrides,
+        ConfigServerLoginMethod::Browser,
+        chatgpt_login,
+    )
     .await
 }
 
@@ -343,7 +356,7 @@ pub async fn run_login_with_device_code(
     issuer_base_url: Option<String>,
     client_id: Option<String>,
 ) -> ! {
-    run_interactive_login(cli_config_overrides, async move |config| {
+    let chatgpt_login = async move |config: &Config| {
         tracing::info!("starting device code login flow");
         if !config
             .auth_config()
@@ -366,8 +379,23 @@ pub async fn run_login_with_device_code(
             opts.issuer = iss;
         }
         run_device_code_login(opts).await
-    })
+    };
+    run_interactive_login(
+        cli_config_overrides,
+        ConfigServerLoginMethod::DeviceCode {
+            present: |prompt| eprintln!("{}", config_server_device_code_message(prompt)),
+        },
+        chatgpt_login,
+    )
     .await
+}
+
+fn config_server_device_code_message(prompt: &OAuthDeviceCodePrompt) -> String {
+    let OAuthDeviceCodePrompt {
+        verification_uri,
+        user_code,
+    } = prompt;
+    format!("To sign in to the config server, open {verification_uri} and enter code {user_code}.")
 }
 
 /// Prefers device-code login (with `open_browser = false`) when headless environment is detected, but keeps
@@ -571,8 +599,12 @@ async fn load_managed_login_config_or_exit(cli_config_overrides: CliConfigOverri
         .config_layer_stack
         .requirements_toml()
         .requires_remote_config()
-        && let Err(error) =
-            sign_in_to_config_server_and_reload_config(&mut config, &cli_config_overrides).await
+        && let Err(error) = sign_in_to_config_server_and_reload_config(
+            &mut config,
+            &cli_config_overrides,
+            ConfigServerLoginMethod::Browser,
+        )
+        .await
     {
         finish_login(&config, Err(error)).await;
     }
@@ -620,6 +652,20 @@ mod storage_tests;
 mod tests {
     use super::safe_format_key;
     use pretty_assertions::assert_eq;
+
+    use super::config_server_device_code_message;
+    use codex_login::OAuthDeviceCodePrompt;
+
+    #[test]
+    fn config_server_device_code_prompt_shows_verification_url_and_code() {
+        let prompt = OAuthDeviceCodePrompt {
+            verification_uri: "https://login.example/device"
+                .parse()
+                .expect("valid verification URL"),
+            user_code: "ABCD-EFGH".into(),
+        };
+        insta::assert_snapshot!(config_server_device_code_message(&prompt), @"To sign in to the config server, open https://login.example/device and enter code ABCD-EFGH.");
+    }
 
     #[test]
     fn formats_long_key() {

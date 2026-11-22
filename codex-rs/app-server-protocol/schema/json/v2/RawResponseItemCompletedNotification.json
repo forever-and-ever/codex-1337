@@ -1313,9 +1313,13 @@
           ],
           "properties": {
             "id": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "reason": {
@@ -1364,9 +1368,13 @@
           ],
           "properties": {
             "id": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -1475,6 +1483,68 @@
           "type": "object"
         }
       ]
+    },
+    "ResponseItemId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "id_allocation": {
+              "$ref": "#/definitions/ResponseItemIdAllocation"
+            }
+          },
+          "required": [
+            "id",
+            "id_allocation"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A Responses API item ID. New IDs require an explicit prefix; deserialization remains permissive so legacy rollouts can still be read."
+    },
+    "ResponseItemIdAllocation": {
+      "description": "The generator allocation and the Responses-specific parts of a structured item ID.",
+      "properties": {
+        "ordinal": {
+          "description": "Zero-based position in the generator sequence.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "prefix": {
+          "description": "Item kind, e.g. `msg` in `msg_item042`. Bare request reservations omit it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "salt": {
+          "type": "string"
+        },
+        "suffix": {
+          "description": "Provider-assigned tail, including its separator.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "salt",
+        "value"
+      ],
+      "type": "object"
     },
     "ResponsesApiWebSearchAction": {
       "oneOf": [

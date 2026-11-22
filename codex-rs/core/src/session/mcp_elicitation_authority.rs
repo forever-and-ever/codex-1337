@@ -22,7 +22,7 @@ impl IssuingElicitationReviewer for GuardianMcpElicitationReviewer {
                 "MCP elicitation issuing turn was cancelled"
             );
             let authority =
-                project_authority(&context.review, &context.config, &request.server_name);
+                project_authority(&context.review, &context.config, &request.server_key);
             Ok(Some(codex_mcp::PreparedElicitationReview::Issued {
                 authority,
                 review: Box::pin(review_bound_elicitation(session, request, context)),
@@ -36,13 +36,15 @@ fn invocation_call_id(request: &ElicitationReviewRequest) -> anyhow::Result<Opti
         return Ok(None);
     };
     let value = match request.server_name.as_str() {
-        CODEX_APPS_MCP_SERVER_NAME => match meta.get(MCP_TOOL_CODEX_APPS_META_KEY) {
-            Some(value) => value
-                .as_object()
-                .ok_or_else(|| anyhow::anyhow!("invalid MCP invocation metadata"))?
-                .get("call_id"),
-            None => None,
-        },
+        CODEX_APPS_MCP_SERVER_NAME if request.server_key.scoped_environment_id().is_none() => {
+            match meta.get(MCP_TOOL_CODEX_APPS_META_KEY) {
+                Some(value) => value
+                    .as_object()
+                    .ok_or_else(|| anyhow::anyhow!("invalid MCP invocation metadata"))?
+                    .get("call_id"),
+                None => None,
+            }
+        }
         _ => meta.get("callId"),
     };
     value
@@ -70,7 +72,7 @@ async fn issuing_context(
     let invocation = invocation_call_id(request)?
         .map(|call_id| {
             session
-                .mcp_tool_approval_metadata(&request.server_name, call_id)
+                .mcp_tool_approval_metadata(&request.server_key, call_id)
                 .ok_or_else(|| {
                     anyhow::anyhow!("MCP elicitation invocation {call_id} is unavailable")
                 })
@@ -117,7 +119,7 @@ async fn issuing_context(
 fn project_authority(
     context: &crate::guardian::GuardianReviewContext,
     config: &McpConfig,
-    server_name: &str,
+    server_key: &McpServerKey,
 ) -> ElicitationApprovalAuthority {
     let thread_profile = context
         .turn()
@@ -126,7 +128,7 @@ fn project_authority(
         .effective_permission_profile();
     let environment_profile = config
         .mcp_server_catalog
-        .server(server_name)
+        .server(server_key)
         .and_then(|server| {
             context
                 .environments()
@@ -137,7 +139,7 @@ fn project_authority(
         })
         .map(TurnEnvironment::permission_profile_with_workspace_roots);
     let permission_profile = config
-        .server_permission_profile(server_name, &thread_profile, |_| {
+        .server_permission_profile(server_key, &thread_profile, |_| {
             environment_profile.as_ref()
         })
         .cloned();
@@ -168,7 +170,7 @@ async fn review_bound_elicitation(
         invocation: approval_context,
         cancellation: cancellation_token,
     } = context;
-    let authority = project_authority(&review_context, &mcp_config, &request.server_name);
+    let authority = project_authority(&review_context, &mcp_config, &request.server_key);
     let Some(permission_profile) = authority.permission_profile.as_ref() else {
         return Ok(Some(mcp_elicitation_decline_without_message()));
     };
@@ -181,14 +183,17 @@ async fn review_bound_elicitation(
     }
     let turn_context = Arc::clone(review_context.turn());
 
+    let is_js_preflight = request.elicitation.meta().is_some_and(|meta| {
+        metadata_str(meta, MCP_ELICITATION_TOOL_NAME_KEY) == Some("js")
+            && metadata_str(meta, MCP_ELICITATION_CONNECTOR_ID_KEY) == Some("node_repl")
+    });
     // User approval skips ordinary CUA checks, not separate sensitive requests.
     let user_cua_execution = review_context.approvals_reviewer == ApprovalsReviewer::User
         && is_node_repl_backed_server(&request.server_name)
+        && is_js_preflight
         && request.elicitation.meta().is_some_and(|meta| {
-            metadata_str(meta, MCP_ELICITATION_TOOL_NAME_KEY) == Some("js")
-                && metadata_str(meta, MCP_ELICITATION_CONNECTOR_ID_KEY) == Some("node_repl")
-                && metadata_str(meta, MCP_ELICITATION_APPROVAL_KIND_KEY)
-                    == Some(MCP_ELICITATION_APPROVAL_KIND_MCP_TOOL_CALL)
+            metadata_str(meta, MCP_ELICITATION_APPROVAL_KIND_KEY)
+                == Some(MCP_ELICITATION_APPROVAL_KIND_MCP_TOOL_CALL)
                 && meta.get(MCP_ELICITATION_SENSITIVE_ACTION_KEY) != Some(&Value::Bool(true))
                 && meta.get("codex_requires_user_input") != Some(&Value::Bool(true))
         });
@@ -420,6 +425,19 @@ async fn review_bound_elicitation(
         }
     };
     guardian_request.category = guardian_scope;
+    if !is_js_preflight
+        && turn_context
+            .config
+            .features
+            .enabled(Feature::GuardianNestedApprovalContext)
+        && let Some(call_id) = originating_call_id
+        && matches!(
+            &guardian_request.request,
+            Ok(crate::guardian::GuardianApprovalRequest::McpToolCall { .. })
+        )
+    {
+        review_context.enclosing_invocation_id = Some(call_id.to_owned());
+    }
     if let Ok(crate::guardian::GuardianApprovalRequest::McpToolCall {
         prompt_permissions, ..
     }) = &mut guardian_request.request

@@ -591,7 +591,7 @@ impl App {
             None => (None, None),
         };
         let mut composer_gap = (!self.chat_widget.has_active_view()
-            && !self.chat_widget.is_external_writer_view())
+            && !self.chat_widget.is_read_only_view())
         .then(crate::bottom_pane::ComposerGap::default);
         if let Some(gap) = &mut composer_gap {
             gap.live_height = self.live_work.desired_height(transcript_width);
@@ -732,6 +732,9 @@ impl App {
                 completion_tip,
             );
             needs_redraw = false;
+        }
+        if !needs_redraw {
+            view.finish_collapse_layout(&self.transcript_cells);
         }
         let blossom_tick = chat_widget
             .empty_state_animation
@@ -882,7 +885,7 @@ impl App {
         let is_vertical_wheel = matches!(event, TuiEvent::Mouse(mouse)
             if matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown));
         if !self.chat_widget.no_modal_or_popup_active()
-            || self.chat_widget.is_external_writer_view()
+            || self.chat_widget.is_read_only_view()
             || self.overlay.is_some()
         {
             self.live_work.blur();
@@ -1054,7 +1057,7 @@ impl App {
         // Search and selection still consume Escape first to dismiss their interaction.
         if let TuiEvent::Key(key) = event
             && !self.transcript_view.has_active_interaction()
-            && (self.chat_widget.is_external_writer_view()
+            && (self.chat_widget.is_read_only_view()
                 || self.chat_widget.is_parent_owned_thread()
                 || self.chat_widget.has_provider_error())
             && crate::key_hint::plain(KeyCode::Esc).is_press(*key)

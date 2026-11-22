@@ -15,12 +15,13 @@ use super::can_auto_accept_elicitation;
 use super::elicitation_is_rejected_by_policy;
 use super::mcp_permission_prompt_is_auto_approved;
 use super::strict_auto_review_decline;
+use crate::McpServerKey;
 use crate::PreparedElicitationReview;
 
 pub(super) async fn resolve(
     prepared: PreparedElicitationReview,
     config: &McpConfig,
-    server_name: &str,
+    server_key: &McpServerKey,
     elicitation: &Elicitation,
     router: &ElicitationRequestRouter,
     has_reviewer: bool,
@@ -31,7 +32,7 @@ pub(super) async fn resolve(
         PreparedElicitationReview::Human => (
             crate::ElicitationApprovalAuthority {
                 approval_policy: config.approval_policy.value(),
-                permission_profile: config.permission_profile_for_server(server_name).cloned(),
+                permission_profile: config.permission_profile_for_server(server_key).cloned(),
             },
             None,
         ),

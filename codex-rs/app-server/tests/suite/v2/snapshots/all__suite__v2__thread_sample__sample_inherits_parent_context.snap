@@ -16,8 +16,8 @@ Settings:
   stream: true
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=73193fd3575e4c48):
-        - namespace/functions; hash=3031e87ef789d7eb
+00:additional_tools/developer (3; hash=7d8acaa1c9a99631):
+        - namespace/functions; hash=5d95f78ba4c47e9c
           - custom/python
           - custom/bash
           - function/exec_command
@@ -31,7 +31,7 @@ Settings:
           - function/update_goal
           - function/parent_tool
           - function/fence
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=5dd3bb26471219ee
           - function/close_agent
           - function/resume_agent
           - function/send_input
@@ -81,8 +81,8 @@ Settings:
 ## Window 2 (after request 2: input repeated)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (3; hash=73193fd3575e4c48):
-        - namespace/functions; hash=3031e87ef789d7eb
+00:additional_tools/developer (3; hash=7d8acaa1c9a99631):
+        - namespace/functions; hash=5d95f78ba4c47e9c
           - custom/python
           - custom/bash
           - function/exec_command
@@ -96,7 +96,7 @@ Settings: same as window 1
           - function/update_goal
           - function/parent_tool
           - function/fence
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=5dd3bb26471219ee
           - function/close_agent
           - function/resume_agent
           - function/send_input
@@ -145,8 +145,8 @@ Settings: same as window 1
 ## Window 3 (after request 3: input repeated)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=73193fd3575e4c48):
-        - namespace/functions; hash=3031e87ef789d7eb
+00:additional_tools/developer (3; hash=7d8acaa1c9a99631):
+        - namespace/functions; hash=5d95f78ba4c47e9c
           - custom/python
           - custom/bash
           - function/exec_command
@@ -160,7 +160,7 @@ Settings: same as window 1
           - function/update_goal
           - function/parent_tool
           - function/fence
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=6b4038c6b3ca759e
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=5dd3bb26471219ee
           - function/close_agent
           - function/resume_agent
           - function/send_input

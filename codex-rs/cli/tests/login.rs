@@ -127,7 +127,7 @@ async fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
         exit_rx,
         ..
     } = codex_utils_pty::spawn_pty_process(
-        &codex_utils_cargo_bin::cargo_bin("codex")?.to_string_lossy(),
+        codex_utils_cargo_bin::cargo_bin("codex")?.as_os_str(),
         &[
             "-c".into(),
             "forced_login_method=\"api\"".into(),

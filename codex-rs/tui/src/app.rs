@@ -249,6 +249,7 @@ mod quick_dials;
 mod turn_tips;
 mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
+mod archived_thread;
 mod clipboard;
 mod footer_selection;
 mod native_history;
@@ -681,7 +682,13 @@ pub(crate) struct App {
     realtime_replay_order: VecDeque<ThreadId>,
     background_voice: Option<Box<ChatWidget>>,
     background_voice_error: Option<(ThreadId, String)>,
-    temporary_structured_requests: HashMap<ThreadId, mpsc::UnboundedSender<ServerNotification>>,
+    temporary_structured_requests: HashMap<
+        ThreadId,
+        (
+            crate::temporary_structured_request::TemporaryThreadKind,
+            mpsc::UnboundedSender<ServerNotification>,
+        ),
+    >,
     /// Track title generation across thread switches and deduplicate automatic requests.
     pending_thread_titles: HashMap<(ThreadId, ThreadTitleDestination), CancellationToken>,
     thread_event_listener_tasks: HashMap<ThreadId, JoinHandle<()>>,
@@ -725,8 +732,8 @@ pub(crate) struct App {
     queued_messages: queued_messages::QueuedMessages,
     server_operations: turn_submissions::ServerOperations,
     pending_mcp_login_start: Option<PendingMcpLoginStart>,
-    // Latest accepted attempt per server; stale retry completions must not update the UI.
-    active_mcp_login_ids: HashMap<String, String>,
+    // Login ID -> requested server and environment. Retrying one target keeps other logins alive.
+    active_mcp_login_ids: HashMap<String, (String, Option<String>)>,
     // Serialize plugin enablement writes per plugin so stale completions cannot
     // overwrite a newer toggle, even if the plugin is toggled from different
     // cwd contexts.
@@ -747,6 +754,7 @@ pub(crate) struct App {
 struct PendingMcpLoginStart {
     request_id: String,
     name: String,
+    environment_id: Option<String>,
     thread_id: ThreadId,
     completions: Vec<codex_app_server_protocol::McpServerOauthLoginCompletedNotification>,
 }
@@ -862,6 +870,18 @@ impl App {
             terminal_title_invalid_items_warned: self.terminal_title_invalid_items_warned.clone(),
             session_telemetry: self.session_telemetry.clone(),
         }
+    }
+
+    fn shortcut_guide_owns_input(&self, tui: &tui::Tui) -> bool {
+        self.overlay.is_none()
+            && self.chat_widget.shortcut_overlay_visible()
+            && !self.focused_sidebar_chooser(tui)
+            && !(tui.is_owned_screen()
+                && (self.backtrack.overlay_preview_active
+                    || self.transcript_view.has_active_interaction()
+                    || self
+                        .transcript_view
+                        .owns_interaction_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))))
     }
 
     pub(crate) async fn handle_tui_event(
@@ -1103,6 +1123,12 @@ impl App {
             let Some(key_event) = self.route_key_chord_event(tui, key_event) else {
                 return Ok(AppRunControl::Continue);
             };
+            if self.routed_key_activation.is_none()
+                && self.shortcut_guide_owns_input(tui)
+                && self.chat_widget.handle_shortcut_view_key(key_event)
+            {
+                return Ok(AppRunControl::Continue);
+            }
             TuiEvent::Key(key_event)
         } else {
             event
@@ -1239,7 +1265,7 @@ impl App {
         {
             if self.overlay.is_none()
                 && self.chat_widget.no_modal_or_popup_active()
-                && self.chat_widget.is_external_writer_view()
+                && self.chat_widget.is_read_only_view()
                 && (crate::key_hint::plain(KeyCode::Esc).is_press(*key)
                     || (crate::key_hint::plain(KeyCode::Left).is_press(*key)
                         && self.chat_widget.agents_navigation_key_available()))
@@ -1451,7 +1477,7 @@ impl App {
 
     pub(super) fn show_shutdown_feedback(&mut self, tui: &mut tui::Tui) -> Result<()> {
         self.chat_widget.show_shutdown_in_progress();
-        let screen_size = tui.terminal.last_known_screen_size;
+        let screen_size = tui.prepare_draw_size()?;
         self.handle_draw_pre_render(tui, screen_size)?;
         self.chat_widget.pre_draw_tick();
         self.render_chat_widget_frame(tui, screen_size)?;

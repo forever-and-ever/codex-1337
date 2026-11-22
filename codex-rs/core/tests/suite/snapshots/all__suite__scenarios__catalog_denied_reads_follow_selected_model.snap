@@ -15,8 +15,8 @@ Settings:
   stream: true
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=6e42987766c4bef9):
-        - namespace/functions; hash=39a686053a0a942f
+00:additional_tools/developer (2; hash=748b7c49c1d6eedc):
+        - namespace/functions; hash=ee4efbddcbb81274
           - custom/python
           - custom/bash
           - function/exec_command
@@ -57,8 +57,8 @@ Settings:
 Settings: relative to window 1
   model: "catalog-denied-reads-b"
 -- request 2 (turn) --
-00:additional_tools/developer (2; hash=6e42987766c4bef9):
-        - namespace/functions; hash=39a686053a0a942f
+00:additional_tools/developer (2; hash=748b7c49c1d6eedc):
+        - namespace/functions; hash=ee4efbddcbb81274
           - custom/python
           - custom/bash
           - function/exec_command

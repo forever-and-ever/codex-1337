@@ -1,4 +1,6 @@
 use super::Submission;
+use super::sampling_interrupt::SamplingInterrupt;
+use super::submission::SubmissionOp;
 use crate::McpRefreshReason;
 use crate::WithTurnExtensionData;
 use crate::realtime_conversation::handle_audio as handle_realtime_conversation_audio;
@@ -46,6 +48,7 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputResponse;
+use codex_protocol::turn_input::TurnInputSubmission;
 use codex_thread_store::PersistContext;
 
 use crate::context_manager::is_user_turn_boundary;
@@ -60,7 +63,7 @@ use tracing::info;
 use tracing::warn;
 
 pub async fn interrupt(sess: &Arc<Session>) {
-    sess.interrupt_task().await;
+    sess.interrupt_task(sess.active_turn.lock().await).await;
 }
 
 pub async fn clean_background_terminals(sess: &Arc<Session>) {
@@ -292,7 +295,18 @@ pub async fn compact(sess: &Arc<Session>, sub_id: String) -> CodexResult<()> {
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
 
-    sess.spawn_task(turn_context, Vec::new(), CompactTask).await
+    match sess
+        .spawn_task(turn_context, Vec::new(), CompactTask)
+        .await?
+    {
+        TurnInputSubmission::Started { .. } => Ok(()),
+        TurnInputSubmission::NotSubmitted { reason } => Err(CodexErr::InvalidRequest(format!(
+            "Compaction was not started: {reason:?}"
+        ))),
+        TurnInputSubmission::Accepted | TurnInputSubmission::Steered { .. } => Err(
+            CodexErr::InvalidRequest("Compaction requires a new turn".to_string()),
+        ),
+    }
 }
 
 pub(super) async fn persist_thread_memory_mode_update(
@@ -485,9 +499,8 @@ pub async fn review(
 pub(super) async fn submission_loop(
     sess: Arc<Session>,
     config: Arc<Config>,
-    rx_sub: Receiver<Submission>,
+    rx_sub: Receiver<Box<Submission>>,
 ) {
-    // Session shutdown and tree shutdown both use the existing teardown handler.
     if let Err(error) = sess.recover_accepted_agent_mail().await {
         tracing::error!(%error, "accepted agent-mail recovery is blocked; durable inbox retained");
     }
@@ -527,7 +540,7 @@ pub(super) async fn submission_loop(
                 continue;
             }
             sub = rx_sub.recv() => match sub {
-                Ok(sub) => sub,
+                Ok(sub) => *sub,
                 Err(_) => break,
             },
             update = async {
@@ -558,9 +571,29 @@ pub(super) async fn submission_loop(
         );
         let dispatch_span = submission_dispatch_span(&sub);
         let should_exit = async {
-            match sub.op {
+            let op = match sub.op {
+                SubmissionOp::TurnInput {
+                    request,
+                    mode,
+                    reply,
+                } => {
+                    let request = WithTurnExtensionData {
+                        request: *request,
+                        turn_extension_init: sub.turn_extension_init,
+                    };
+                    let result = turn_input::handle(&sess, request, mode, sub.id.clone()).await;
+                    let _ = reply.send(result);
+                    return false;
+                }
+                SubmissionOp::Protocol(op) => *op,
+            };
+            match op {
                 Op::Interrupt => {
                     interrupt(&sess).await;
+                    false
+                }
+                Op::InterruptAgent => {
+                    SamplingInterrupt::request(&sess).await;
                     false
                 }
                 Op::InterruptIfNoPendingInput { turn_id, reply } => {
@@ -643,19 +676,6 @@ pub(super) async fn submission_loop(
                 }
                 Op::RealtimeConversationListVoices => {
                     realtime_conversation_list_voices(&sess, sub.id.clone()).await;
-                    false
-                }
-                Op::TurnInput {
-                    request,
-                    mode,
-                    reply,
-                } => {
-                    let request = WithTurnExtensionData {
-                        request: *request,
-                        turn_extension_init: sub.turn_extension_init,
-                    };
-                    let result = turn_input::handle(&sess, request, mode, sub.id.clone()).await;
-                    let _ = reply.send(result);
                     false
                 }
                 Op::RecoverTurn {
@@ -924,8 +944,8 @@ async fn approve_guardian_denied_action(sess: &Arc<Session>, event: GuardianAsse
 pub(super) fn submission_dispatch_span(sub: &Submission) -> tracing::Span {
     let op_name = sub.op.kind();
     let span_name = format!("op.dispatch.{op_name}");
-    let dispatch_span = match &sub.op {
-        Op::RealtimeConversationAudio(_) => {
+    let dispatch_span = match sub.op.as_protocol() {
+        Some(Op::RealtimeConversationAudio(_)) => {
             debug_span!(
                 "submission_dispatch",
                 otel.name = span_name.as_str(),

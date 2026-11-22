@@ -39,7 +39,7 @@ fn extension_status_line_clips_links_to_footer_layout() {
     }"#
     .parse()
     .unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
 
     for separate_status_line in [false, true] {
         for width in [12, 40] {
@@ -139,6 +139,26 @@ fn frame(buffer: &Buffer) -> String {
 }
 
 #[test]
+fn status_line_keeps_the_caret_anchored_while_typing() {
+    let mut composer = composer();
+    let options = ComposerRenderOptions {
+        separate_status_line: true,
+        max_height: Some(5),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    for key in [None, Some(KeyCode::Char('x')), Some(KeyCode::Backspace)] {
+        if let Some(key) = key {
+            composer.handle_key_event(KeyEvent::from(key));
+        }
+        let height = composer.desired_height_with_options(/*width*/ 48, options);
+        let area = Rect::new(0, 5 - height, 48, height);
+        rows.push(composer.cursor_pos_with_options(area, options).unwrap().1);
+    }
+    assert_eq!(rows, [1, 1, 1]);
+}
+
+#[test]
 fn extension_uses_the_full_width_after_resize() {
     let mut composer = composer();
     composer.footer.show_warnings_key = None;
@@ -148,7 +168,7 @@ fn extension_uses_the_full_width_after_resize() {
         {"type":"link","props":{"href":"https://example.com/pr/12345"},"children":["12345"]}]}]}"#
             .parse()
             .unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
     composer.set_collaboration_modes_enabled(/*enabled*/ true);
     let linked_number: String = "12345"
         .chars()
@@ -216,7 +236,7 @@ fn provider_status_and_hints_use_separate_rows() {
 fn status_rows_respect_host_budget_and_yield_to_the_draft() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree\nfour\nfive""#.parse().unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
     composer.set_text_content("a\nb\nc".into(), Vec::new(), Vec::new());
     composer.move_cursor_to_end();
     for separate_status_line in [false, true] {
@@ -263,8 +283,19 @@ fn status_rows_respect_host_budget_and_yield_to_the_draft() {
         ["one…"]
     );
     composer.set_collaboration_mode_indicator(/*indicator*/ None);
+    let options = ComposerRenderOptions {
+        separate_status_line: true,
+        max_height: Some(14),
+        ..Default::default()
+    };
+    let area = Rect::new(0, 0, 7, 14);
+    assert_eq!(
+        render_status(&composer, area, options).1,
+        ["one", "two", "three", "four…"]
+    );
     let tree: crate::ui_tree::UiTree = r#""x\ny""#.parse().unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
+    assert_eq!(render_status(&composer, area, options).1, ["x", "y"]);
     assert_eq!(
         composer.footer_hint_height(/*width*/ 7, ComposerRenderOptions::default()),
         0
@@ -294,6 +325,13 @@ fn sidebar_focus_collapses_extension_status_to_its_dim_line() {
         if unfocused {
             assert_eq!(composer.footer.warning_notice_area.get(), None);
             assert!(!buffer.content.iter().any(|cell| cell.symbol() == "⚠"));
+            let status = composer.layout_with_options(buffer.area, options).status;
+            let content = composer.status_content_area(status, options);
+            assert!(
+                buffer[(content.x, content.bottom() - 1)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
         }
         rows.join("\n")
     });
@@ -324,7 +362,7 @@ fn extension_status_paints_with_the_current_theme_at_the_same_width() {
         r#"{"type":"text","props":{"color":"primary"},"children":["λ"]}"#
             .parse()
             .unwrap();
-    composer.set_status_line(Some(FooterContent::from(content)));
+    composer.set_status_line(Some(StatusLine::from(content)));
     let previous = current_syntax_theme();
     let colors = [1, 2].map(|index| {
         let mut theme = previous.clone();
@@ -360,7 +398,7 @@ fn extension_status_paints_with_the_current_theme_at_the_same_width() {
 fn extension_status_keeps_its_rows_when_effort_changes() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree""#.parse().unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
     composer.set_active_reasoning_effort_baseline(/*effort*/ None);
     composer.set_active_reasoning_effort(
         Some(&ReasoningEffort::Max),
@@ -613,13 +651,13 @@ fn fullscreen_plan_indicator_keeps_the_cycle_hint_when_it_fits() {
     assert!(visible.starts_with("project · PR #42"), "{narrow}");
     assert!(visible.ends_with('…'), "{narrow}");
     assert_eq!(
-        composer
-            .status_surface_content()
-            .unwrap()
-            .into_owned()
-            .into_hyperlink_line()
-            .line
-            .to_string(),
+        composer.with_status_surface_content(StatusLineFocus::Focused, |content| {
+            content
+                .and_then(|status| status.as_native())
+                .unwrap()
+                .line
+                .to_string()
+        }),
         "project · PR #42 · reviewer"
     );
     assert_eq!(narrow.matches("Plan mode").count(), 1, "{narrow}");
@@ -795,7 +833,7 @@ fn oversized_goal_yields_to_an_eligible_whole_hint_with_status_disabled() {
         Some("100% context left")
     );
 
-    composer.set_context_window_pending(/*pending*/ true);
+    composer.set_context_window_hidden(/*hidden*/ true);
     composer.set_goal_status_indicator(Some(GoalStatusIndicator::Paused));
     let (text, _) = render(&composer, /*width*/ 18, /*footer*/ None);
     assert_eq!(text.lines().last().map(str::trim), Some("? for shortcuts"));
@@ -968,7 +1006,7 @@ fn status_survives_hints_feedback_and_queue() {
     composer.set_collaboration_mode_indicator(Some(CollaborationModeIndicator::Plan));
     let mut states = Vec::new();
     states.push(render(&composer, /*width*/ 64, /*footer*/ None).0);
-    composer.footer.mode = FooterMode::ShortcutOverlay;
+    composer.footer.mode = FooterMode::ShortcutOverlay(Default::default());
     composer.show_footer_flash("Copied selection".into(), Duration::from_secs(/*secs*/ 3));
     states.push(render(&composer, /*width*/ 64, /*footer*/ None).0);
     composer.footer.flash = None;
@@ -1059,6 +1097,11 @@ fn slash_suggestions_take_space_before_status_expands() {
     let (buf, rows) = render_status(&composer, area, options);
     assert_eq!(rows, ["one…"]);
     insta::assert_snapshot!(frame(&buf));
+
+    composer.set_status_line(Some("OK".into()));
+    let (buf, rows) = render_status(&composer, area, options);
+    assert_eq!(rows, ["OK"]);
+    assert!(frame(&buf).contains("/model"));
 }
 
 #[test]

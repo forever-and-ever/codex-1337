@@ -105,6 +105,10 @@ impl App {
                     | AppEvent::FinishTranscriptExport { .. }
                     | AppEvent::CancelTranscriptExport
                     | AppEvent::AgentsOverviewPinToggled { .. }
+                    | AppEvent::OpenAgentsOverview
+                    | AppEvent::ShowMoreAgentsOverview
+                    | AppEvent::AgentsOverviewThreadsLoaded { .. }
+                    | AppEvent::AgentsOverviewUsageLoaded { .. }
                     | AppEvent::AppendMessageHistoryEntry { .. }
                     | AppEvent::BeginInitialHistoryReplayBuffer
                     | AppEvent::BeginThreadSwitchHistoryReplayBuffer
@@ -487,6 +491,36 @@ impl App {
                         self.chat_widget.add_error_message(err.to_string());
                     }
                     Err(err) => return Err(err),
+                }
+            }
+            AppEvent::UnarchiveFinished { backend_id, thread_id, result } => {
+                if app_server.backend_id() == backend_id
+                    && self.current_displayed_thread_id() == Some(thread_id)
+                    && self.chat_widget.is_archived_view()
+                {
+                    match result {
+                        Ok(()) => {
+                            if let Some(channel) = self.thread_event_channels.get_mut(&thread_id)
+                                && channel.is_archived()
+                            {
+                                channel.mark_replay_only();
+                                self.app_event_tx.send(AppEvent::ResumeUnarchivedThread(thread_id));
+                            }
+                        }
+                        Err(error) => self.chat_widget.add_error_message(error),
+                    }
+                }
+            }
+            AppEvent::ResumeUnarchivedThread(thread_id) => {
+                if self.current_displayed_thread_id() == Some(thread_id) {
+                    let target = SessionTarget {
+                        backend_id: app_server.backend_id(),
+                        path: None,
+                        cwd: None,
+                        thread_id,
+                        history_mode: None,
+                    };
+                    return self.resume_target_session(tui, app_server, target).await;
                 }
             }
             AppEvent::ArchiveCurrentThread => {
@@ -1384,7 +1418,7 @@ impl App {
             AppEvent::FetchMcpInventory { detail, thread_id } => {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
             }
-            AppEvent::StartMcpLogin { name, thread_id } => {
+            AppEvent::StartMcpLogin { name, environment_id, thread_id } => {
                 if self.pending_mcp_login_start.is_some() {
                     self.chat_widget.add_info_message(
                         "MCP sign-in is starting. Wait for it to finish before trying again.".to_string(),
@@ -1396,10 +1430,11 @@ impl App {
                 self.pending_mcp_login_start = Some(PendingMcpLoginStart {
                     request_id: request_id.clone(),
                     name: name.clone(),
+                    environment_id: environment_id.clone(),
                     thread_id,
                     completions: Vec::new(),
                 });
-                self.start_mcp_login(app_server, request_id, name, thread_id);
+                self.start_mcp_login(app_server, request_id, name, environment_id, thread_id);
             }
             AppEvent::McpLoginStarted { request_id, result } => {
                 if let Some(pending) = self
@@ -1408,11 +1443,13 @@ impl App {
                 {
                     match result {
                         Ok(response) => {
-                            // Track the latest attempt per server: unrelated OAuth logins can
-                            // remain open while a user retries this server.
+                            // Replace this target's old attempt, not another environment's
+                            // login to a server with the same name.
                             if let Some(login_id) = response.login_id.as_ref() {
+                                let target = (pending.name.clone(), pending.environment_id);
+                                self.active_mcp_login_ids.retain(|_, current| current != &target);
                                 self.active_mcp_login_ids
-                                    .insert(pending.name.clone(), login_id.clone());
+                                    .insert(login_id.clone(), target);
                             }
                             let completed = pending.completions.iter().any(|completion| {
                                 completion.login_id == response.login_id
@@ -1440,13 +1477,10 @@ impl App {
                     // A rejected start leaves the old attempt current. A successful replacement
                     // has changed its ID, so the old cancellation is discarded here.
                     for completion in pending.completions {
-                        if completion.login_id.is_some() {
-                            if completion.login_id.as_ref()
-                                != self.active_mcp_login_ids.get(&completion.name)
-                            {
-                                continue;
-                            }
-                            self.active_mcp_login_ids.remove(&completion.name);
+                        if let Some(login_id) = &completion.login_id
+                            && self.active_mcp_login_ids.remove(login_id).is_none()
+                        {
+                            continue;
                         }
                         if let Some(thread_id) = completion.thread_id.as_deref()
                             .and_then(|id| ThreadId::from_string(id).ok())
@@ -1489,6 +1523,7 @@ impl App {
                 self.skill_load_warnings.startup_complete = true;
             }
             AppEvent::StartFileSearch(query) => {
+                app_server.task_search.cancel();
                 self.file_search.on_user_query(query.clone());
                 if let Some(thread_id) = self.active_thread_id
                     && app_server.task_tools_available(thread_id)
@@ -1504,12 +1539,12 @@ impl App {
                                 .map(std::path::Path::to_path_buf)
                         })
                         .unwrap_or_else(|| self.config.cwd.to_path_buf());
-                    crate::task_mentions::spawn_search(
-                        app_server.request_handle(),
+                    let handle = app_server.request_handle();
+                    app_server.task_search.spawn(
+                        handle,
                         query,
                         thread_id,
                         cwd,
-                        app_server.task_search_generation(),
                         self.app_event_tx.clone(),
                     );
                 }
@@ -1529,7 +1564,12 @@ impl App {
                 }
             }
             AppEvent::RefreshRateLimits { origin } => {
-                self.refresh_rate_limits(app_server, origin);
+                // A queued recovery can outlive the chat's ChatGPT account.
+                if origin != RateLimitRefreshOrigin::Recovery
+                    || self.chat_widget.has_chatgpt_account()
+                {
+                    self.refresh_rate_limits(app_server, origin);
+                }
             }
             AppEvent::RefreshClaudeQuota { request_id, account } => {
                 self.refresh_claude_quota(app_server, request_id, account);
@@ -1658,7 +1698,12 @@ impl App {
                         self.chat_widget.apply_usage_notice_read(request_id);
                         self.chat_widget.update_backend_banner(&response);
                         self.apply_backend_banner_fallback(app_server).await;
-                        app_server_rate_limit_snapshots(response)
+                        let snapshots = app_server_rate_limit_snapshots(response);
+                        // The account can outlive the popup or chat that requested this read.
+                        for snapshot in &snapshots {
+                            self.chat_widget.observe_quota_plan(snapshot);
+                        }
+                        snapshots
                     } else {
                         Vec::new()
                     };
@@ -2619,9 +2664,11 @@ impl App {
                     "Failed to start the background server: {error}"
                 )),
             },
-            AppEvent::SearchAgentsOverview(id, limit) => self.search_agents_overview(app_server.request_handle(), id, limit),
-            AppEvent::AgentsOverviewSearchPage { id, rows, cursor, ok } => {
-                self.apply_agents_overview_search_page(id, rows, cursor, ok);
+            AppEvent::SearchAgentsOverview(id, limit) => self.search_agents_overview(app_server, id, limit),
+            AppEvent::AgentsOverviewSearchPage { id, backend_id, rows, cursor, ok } => {
+                if app_server.backend_id() == backend_id {
+                    self.apply_agents_overview_search_page(id, rows, cursor, ok);
+                }
             }
             AppEvent::ShowMoreAgentsOverview => self.show_more_agents_overview(app_server),
             AppEvent::RefreshViewedThread { backend_id, thread_id, revision } => {
@@ -2631,7 +2678,7 @@ impl App {
                     self.refresh_changed_agents_overview_threads(app_server);
                 }
             }
-            AppEvent::NewAgentsOverviewSession { cwd } => {
+            AppEvent::NewAgentsOverviewSession { cwd, .. } => {
                 return Box::pin(self.new_agents_overview_session(tui, app_server, cwd)).await;
             }
             AppEvent::AgentsOverviewThreadsLoaded { request_id, result } => {
@@ -2689,14 +2736,17 @@ impl App {
                 self.toggle_agents_overview_pin(app_server, thread_id, pinned);
             }
             AppEvent::AgentsOverviewPinToggled {
+                backend_id,
                 request_id,
                 thread_id,
                 pinned,
                 result,
             } => {
-                self.complete_agents_overview_pin(
-                    app_server, request_id, thread_id, pinned, result,
-                );
+                if app_server.backend_id() == backend_id {
+                    self.complete_agents_overview_pin(
+                        app_server, request_id, thread_id, pinned, result,
+                    );
+                }
             }
             AppEvent::SuggestThreadName {
                 thread_id,
@@ -2710,6 +2760,7 @@ impl App {
                 thread_id,
                 destination,
                 prompt,
+                fallback_title,
                 effort,
                 result,
             } => {
@@ -2718,6 +2769,7 @@ impl App {
                     thread_id,
                     destination,
                     prompt,
+                    fallback_title,
                     effort,
                     result,
                     cancellation,
@@ -2730,8 +2782,9 @@ impl App {
                 destination,
                 result,
             } => {
-                self.temporary_structured_requests
-                    .remove(&temporary_thread_id);
+                if let Some(temporary_thread_id) = temporary_thread_id {
+                    self.temporary_structured_requests.remove(&temporary_thread_id);
+                }
 
                 if cancellation.is_cancelled() {
                     return Ok(AppRunControl::Continue);

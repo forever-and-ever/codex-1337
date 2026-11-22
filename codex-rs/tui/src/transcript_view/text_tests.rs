@@ -320,9 +320,12 @@ fn aligned_text_excludes_synthetic_leading_columns() {
     let mut line = HyperlinkLine::new(Line::default().right_aligned());
     line.push_span("wide".into(), Some("https://example.com"));
     let layout = TextLayout::new(vec![line], /*width*/ 8);
-    assert_eq!(layout.link_at(/*row*/ 0, /*column*/ 3), None);
+    assert_eq!(layout.raw_link_at(/*row*/ 0, /*column*/ 3), None);
     assert_eq!(
-        layout.link_at(/*row*/ 0, /*column*/ 4).as_deref(),
+        layout
+            .raw_link_at(/*row*/ 0, /*column*/ 4)
+            .and_then(crate::terminal_hyperlinks::TerminalHyperlink::terminal_destination)
+            .as_deref(),
         Some("https://example.com")
     );
     assert_eq!(
@@ -416,9 +419,18 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
         }
         assert_eq!(layout.text(), format!("{label}\n{label}"));
         let mut lines = Vec::new();
-        layout.copy_lines(0..layout.text().len(), "", &mut lines);
+        layout.copy_lines(
+            0..layout.text().len(),
+            "",
+            /*cell_ranges*/ &[],
+            &mut lines,
+        );
         assert_eq!(
-            crate::markdown_copy::literal_selection(&lines, layout.text()),
+            crate::markdown_copy::literal_selection(
+                &lines,
+                layout.text(),
+                /*rectangle_rows*/ None
+            ),
             layout.text()
         );
     }
@@ -426,9 +438,18 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
         let resized = layout.rewrap(width);
         assert_eq!(resized.text(), expected);
         let mut lines = Vec::new();
-        resized.copy_lines(0..resized.text().len(), "", &mut lines);
+        resized.copy_lines(
+            0..resized.text().len(),
+            "",
+            /*cell_ranges*/ &[],
+            &mut lines,
+        );
         assert_eq!(
-            crate::markdown_copy::literal_selection(&lines, resized.text()),
+            crate::markdown_copy::literal_selection(
+                &lines,
+                resized.text(),
+                /*rectangle_rows*/ None
+            ),
             expected
         );
         assert_eq!(resized.position_at(0, 9), 4);
@@ -471,7 +492,9 @@ fn selected_revision_rewraps_both_directions_with_styles_and_indents() {
     restored.render(narrow_area, &mut restored_buffer, /*start_row*/ 0);
     assert_eq!(restored_buffer, original_buffer);
     assert_eq!(
-        wide.link_at(/*row*/ 0, /*column*/ 8).as_deref(),
+        wide.raw_link_at(/*row*/ 0, /*column*/ 8)
+            .and_then(crate::terminal_hyperlinks::TerminalHyperlink::terminal_destination)
+            .as_deref(),
         Some("https://example.com")
     );
 }

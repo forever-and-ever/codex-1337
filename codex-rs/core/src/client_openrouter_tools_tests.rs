@@ -46,6 +46,7 @@ fn wire_projection_hides_custom_tools_and_tool_images() {
         model: "openai/test".into(),
         stream: true,
         service_tier: None,
+        request_country: codex_protocol::RequestCountry::default(),
         openrouter: None,
         input: std::iter::once(original.clone()).chain(rest).collect(),
         tools: None,

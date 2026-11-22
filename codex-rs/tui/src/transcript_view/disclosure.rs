@@ -21,6 +21,7 @@ pub(super) struct Disclosure {
     output_revision: u64,
     pub(super) focused: Option<ActivityFocus>,
     pub(super) resume_after_approval: Option<(ThreadId, String)>,
+    pub(super) clamp_after_collapse: bool,
     pub(super) live_ids: Vec<String>,
     pub(super) keymap: RuntimeKeymap,
 }
@@ -46,6 +47,7 @@ impl Default for Disclosure {
             output_revision: 0,
             focused: None,
             resume_after_approval: None,
+            clamp_after_collapse: false,
             live_ids: Vec::new(),
             keymap: RuntimeKeymap::defaults(),
         }
@@ -642,6 +644,7 @@ impl TranscriptView {
                 offset: 0,
                 row_bias: 0,
             });
+        let collapsing;
         if target == FoldTarget::Activity
             && let Some(group) = self.feed.activity_group(index)
         {
@@ -652,6 +655,7 @@ impl TranscriptView {
                         .expanded
                         .is_open_in(&scope, group, id, false)
                 });
+            collapsing = open;
             if grouped {
                 self.disclosure.expanded.set_default(scope, group, !open);
             } else {
@@ -669,18 +673,21 @@ impl TranscriptView {
                 .disclosure
                 .expanded
                 .is_open_in(&scope, *group, id, false);
+            collapsing = open;
             if grouped {
                 self.disclosure.expanded.set_default(scope, *group, !open);
             } else {
                 self.disclosure.expanded.set(id.clone(), !open);
             }
         } else if let FoldTarget::Invocation { call_id, action } = &target {
+            collapsing = false;
             if grouped && let Some(item) = self.feed.fold_of(index) {
                 self.invocations.apply_scoped(call_id, Some(item), *action);
             } else {
                 self.invocations.apply(call_id, *action);
             }
         } else if let FoldTarget::OutputMode(mode) = target {
+            collapsing = false;
             self.disclosure.output_revision = self
                 .disclosure
                 .output_revision
@@ -693,11 +700,15 @@ impl TranscriptView {
             self.disclosure
                 .output_modes
                 .extend(ids.iter().cloned().map(|id| (id, choice)));
-        } else if matched || self.disclosure.is_expanded(&ids) {
-            self.disclosure.expanded.retain(|id| !ids.contains(id));
         } else {
-            self.disclosure.expanded.extend(ids.iter().cloned());
+            collapsing = matched || self.disclosure.is_expanded(&ids);
+            if collapsing {
+                self.disclosure.expanded.retain(|id| !ids.contains(id));
+            } else {
+                self.disclosure.expanded.extend(ids.iter().cloned());
+            }
         }
+        self.disclosure.clamp_after_collapse = collapsing;
         let target = match target {
             FoldTarget::Invocation {
                 call_id,

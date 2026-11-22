@@ -329,8 +329,7 @@ impl<S: ReviewerSession> ReviewerPool<S> {
         (outcome, analytics)
     }
 
-    /// Reviews in a temporary session without reading or changing the reusable reviewer.
-    /// The request builds its context without a previous session or cached snapshot.
+    /// Reviews a hypothetical action without reading or updating the live approval trunk.
     pub async fn review_isolated<R>(
         &self,
         request: &R,

@@ -64,6 +64,13 @@
       ],
       "type": "object"
     },
+    "AccountUpdateReason": {
+      "enum": [
+        "workspaceRoutingReady",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "AccountUpdatedNotification": {
       "properties": {
         "authMode": {
@@ -85,6 +92,17 @@
               "type": "null"
             }
           ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountUpdateReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when initial routing discovery completes for the same authenticated owner."
         }
       },
       "type": "object"
@@ -294,35 +312,100 @@
       "type": "object"
     },
     "AgentMessageDisplay": {
-      "description": "A presentation instruction for Chat to apply to this answer when recovering history.",
-      "properties": {
-        "action": {
-          "description": "Unknown actions must be left for the producing client to handle.",
-          "type": "string"
+      "description": "How Chat should present a recovered answer.",
+      "oneOf": [
+        {
+          "properties": {
+            "annotation": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AnswerAnnotation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "enum": [
+                "show"
+              ],
+              "type": "string"
+            },
+            "trustedContacts": {
+              "$ref": "#/definitions/TrustedContacts"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "trustedContacts",
+            "version"
+          ],
+          "type": "object"
         },
-        "blockType": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "properties": {
+            "mode": {
+              "enum": [
+                "hide"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "$ref": "#/definitions/AnswerReplacement"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "replacement",
+            "version"
+          ],
+          "type": "object"
         },
-        "checkTrustedContacts": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "cyberTrustedAccess": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+        {
+          "properties": {
+            "mode": {
+              "enum": [
+                "block"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/BlockReason"
+            },
+            "version": {
+              "enum": [
+                1
+              ],
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "reason",
+            "version"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
+      ]
     },
     "AgentMessageInputContent": {
       "oneOf": [
@@ -506,6 +589,47 @@
         "note"
       ],
       "type": "object"
+    },
+    "AnswerAnnotation": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "wellbeingHelpline"
+              ],
+              "type": "string"
+            },
+            "subject": {
+              "$ref": "#/definitions/HelplineSubject"
+            }
+          },
+          "required": [
+            "kind",
+            "subject"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AnswerReplacement": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "wellbeingPromptHelpline"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "WellbeingPromptHelplineAnswerReplacement",
+          "type": "object"
+        }
+      ]
     },
     "AppBranding": {
       "description": "EXPERIMENTAL - app metadata returned by app-list APIs.",
@@ -858,7 +982,7 @@
           "$ref": "#/definitions/ArrivalSide"
         },
         "userResponseItemId": {
-          "type": "string"
+          "$ref": "#/definitions/ResponseItemId"
         }
       },
       "required": [
@@ -1096,6 +1220,50 @@
         "agent"
       ],
       "type": "string"
+    },
+    "BlockReason": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "protection"
+              ],
+              "type": "string"
+            },
+            "protectionType": {
+              "description": "Identifies the same moderation row that Chat writes on the live path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "protectionType"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "cyber"
+              ],
+              "type": "string"
+            },
+            "trustedAccess": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "KindBlockReason",
+          "type": "object"
+        }
+      ]
     },
     "ByteRange": {
       "properties": {
@@ -1346,6 +1514,7 @@
             "modelNotFound",
             "policyCapacityUnavailable",
             "cyberPolicy",
+            "bioPolicy",
             "misalignmentPolicyViolation",
             "tooManyDenials",
             "internalServerError",
@@ -3274,6 +3443,13 @@
       ],
       "type": "object"
     },
+    "HelplineSubject": {
+      "enum": [
+        "answer",
+        "prompt"
+      ],
+      "type": "string"
+    },
     "HookCompletedNotification": {
       "properties": {
         "run": {
@@ -3896,6 +4072,13 @@
     },
     "McpServerStatusUpdatedNotification": {
       "properties": {
+        "environmentId": {
+          "description": "Registration scope, not necessarily the server's execution environment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "error": {
           "type": [
             "string",
@@ -5932,9 +6115,13 @@
           ],
           "properties": {
             "id": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "reason": {
@@ -5983,9 +6170,13 @@
           ],
           "properties": {
             "id": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -6094,6 +6285,68 @@
           "type": "object"
         }
       ]
+    },
+    "ResponseItemId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "id_allocation": {
+              "$ref": "#/definitions/ResponseItemIdAllocation"
+            }
+          },
+          "required": [
+            "id",
+            "id_allocation"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A Responses API item ID. New IDs require an explicit prefix; deserialization remains permissive so legacy rollouts can still be read."
+    },
+    "ResponseItemIdAllocation": {
+      "description": "The generator allocation and the Responses-specific parts of a structured item ID.",
+      "properties": {
+        "ordinal": {
+          "description": "Zero-based position in the generator sequence.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "prefix": {
+          "description": "Item kind, e.g. `msg` in `msg_item042`. Bare request reservations omit it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "salt": {
+          "type": "string"
+        },
+        "suffix": {
+          "description": "Provider-assigned tail, including its separator.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "salt",
+        "value"
+      ],
+      "type": "object"
     },
     "ResponseUsageMetadata": {
       "description": "Usage metadata reported for one upstream response.",
@@ -7284,6 +7537,26 @@
             "params"
           ],
           "title": "Process/outputDeltaNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/search/partial"
+              ],
+              "title": "Thread/search/partialNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadSearchPartialNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/search/partialNotification",
           "type": "object"
         },
         {
@@ -9305,9 +9578,13 @@
               "type": "string"
             },
             "sourceResponseItemId": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -9831,6 +10108,13 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "environmentId": {
+              "description": "Registration scope, not necessarily the server's execution environment.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -10660,9 +10944,13 @@
               "type": "string"
             },
             "sourceResponseItemId": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ResponseItemId"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -11186,6 +11474,13 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "environmentId": {
+              "description": "Registration scope, not necessarily the server's execution environment.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -12062,6 +12357,25 @@
       ],
       "type": "object"
     },
+    "ThreadRealtimeFrameChannels": {
+      "description": "A frame holds one or more payloads, at most one per channel. They share one ID, observation time, and seal. V1 requires its only channel, `voice_transcript`.",
+      "properties": {
+        "voice_transcript": {
+          "$ref": "#/definitions/ThreadRealtimeVoiceTranscript"
+        }
+      },
+      "required": [
+        "voice_transcript"
+      ],
+      "type": "object"
+    },
+    "ThreadRealtimeHandoffMode": {
+      "enum": [
+        "start",
+        "steer"
+      ],
+      "type": "string"
+    },
     "ThreadRealtimeItem": {
       "description": "EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline.",
       "oneOf": [
@@ -12079,6 +12393,26 @@
             "type"
           ],
           "title": "RealtimeSessionStartedThreadRealtimeItem",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "channels": {
+              "$ref": "#/definitions/ThreadRealtimeFrameChannels"
+            },
+            "type": {
+              "enum": [
+                "frame"
+              ],
+              "title": "FrameThreadRealtimeItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "channels",
+            "type"
+          ],
+          "title": "FrameThreadRealtimeItem",
           "type": "object"
         },
         {
@@ -12152,11 +12486,93 @@
           ],
           "title": "RealtimeSessionClosedThreadRealtimeItem",
           "type": "object"
+        },
+        {
+          "properties": {
+            "handoff_id": {
+              "type": "string"
+            },
+            "input": {
+              "type": "string"
+            },
+            "input_item_id": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/definitions/ThreadRealtimeHandoffMode"
+            },
+            "source_event_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turnInputAccepted"
+              ],
+              "title": "TurnInputAcceptedThreadRealtimeItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "handoff_id",
+            "input",
+            "input_item_id",
+            "mode",
+            "source_event_ids",
+            "turn_id",
+            "type"
+          ],
+          "title": "TurnInputAcceptedThreadRealtimeItem",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "input_item_id": {
+              "type": "string"
+            },
+            "source_event_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "sessionEndInputSaved"
+              ],
+              "title": "SessionEndInputSavedThreadRealtimeItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "input_item_id",
+            "source_event_ids",
+            "type"
+          ],
+          "title": "SessionEndInputSavedThreadRealtimeItem",
+          "type": "object"
         }
       ],
       "properties": {
         "id": {
           "type": "string"
+        },
+        "observedAtMs": {
+          "description": "Canonical observation time in Unix milliseconds for eligible voice calls.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "realtimeSessionId": {
           "type": "string"
@@ -12344,6 +12760,21 @@
       ],
       "type": "string"
     },
+    "ThreadRealtimeVoiceTranscript": {
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/ThreadRealtimeTranscriptRole"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "text"
+      ],
+      "type": "object"
+    },
     "ThreadRetiredNotification": {
       "properties": {
         "threadIds": {
@@ -12366,6 +12797,40 @@
       },
       "required": [
         "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadSearchPartialNotification": {
+      "description": "A best-effort incremental batch for `thread/search/stream`. Match `requestId` to the request on this connection. Only a small subset of verified matches may be emitted; rows are unique and arrive in discovery order, but may be dropped under load or fall outside the final sorted page. Thread fields use stored metadata and the current watched status; live thread settings are enriched in the final response. Replace provisional rows with the authoritative final response. No partials follow it or an error.",
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/ThreadSearchResult"
+          },
+          "type": "array"
+        },
+        "requestId": {
+          "$ref": "#/definitions/RequestId"
+        }
+      },
+      "required": [
+        "data",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ThreadSearchResult": {
+      "properties": {
+        "snippet": {
+          "type": "string"
+        },
+        "thread": {
+          "$ref": "#/definitions/Thread"
+        }
+      },
+      "required": [
+        "snippet",
+        "thread"
       ],
       "type": "object"
     },
@@ -12895,6 +13360,13 @@
         "name"
       ],
       "type": "object"
+    },
+    "TrustedContacts": {
+      "enum": [
+        "check",
+        "skip"
+      ],
+      "type": "string"
     },
     "Turn": {
       "properties": {
@@ -14521,6 +14993,26 @@
         "params"
       ],
       "title": "Process/outputDeltaNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/search/partial"
+          ],
+          "title": "Thread/search/partialNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadSearchPartialNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/search/partialNotification",
       "type": "object"
     },
     {

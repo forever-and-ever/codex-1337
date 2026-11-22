@@ -20,7 +20,7 @@ expression: "frames.join(\"\\n\\n\")"
 › parent draft
                                                                                                   󰜗
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  GPT-6.1-Sol default · Main [default]
+  GPT-6.2-Sol default · Main [default]
 
 100 columns, reopened
               parent-24                                        │ Side chat×                      +
@@ -39,8 +39,8 @@ expression: "frames.join(\"\\n\\n\")"
                                                                │
 › parent draft-                                                │› child draft!
                                                                │                                  󰜗
-  GPT-6.1-Sol default                                          │────────────────────────────────────
-                                                               │  GPT-6.1-Sol default · Agent
+  GPT-6.2-Sol default                                          │────────────────────────────────────
+                                                               │  GPT-6.2-Sol default · Agent
 
 99 columns, reopened
  Side chat×                                                                                     +
@@ -60,4 +60,4 @@ expression: "frames.join(\"\\n\\n\")"
 › child draft!
                                                                                                  󰜗
 ───────────────────────────────────────────────────────────────────────────────────────────────────
-  GPT-6.1-Sol default · Agent
+  GPT-6.2-Sol default · Agent

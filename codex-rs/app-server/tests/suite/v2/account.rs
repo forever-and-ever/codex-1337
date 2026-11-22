@@ -214,6 +214,7 @@ async fn assert_account_updated(
     assert_eq!(
         payload,
         AccountUpdatedNotification {
+            reason: None,
             auth_mode,
             plan_type: None,
         }
@@ -626,7 +627,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
         .expect("initial account authority");
     assert_eq!(
         initial.params,
-        Some(json!({"authMode": null, "planType": null}))
+        Some(json!({"authMode": null, "planType": null, "reason": null}))
     );
 
     let set_id = mcp
@@ -1796,6 +1797,7 @@ async fn login_survives_same_owner_token_refresh(
         assert_eq!(
             updated,
             AccountUpdatedNotification {
+                reason: None,
                 auth_mode: Some(AuthMode::Chatgpt),
                 plan_type: Some(AccountPlanType::Enterprise),
             }

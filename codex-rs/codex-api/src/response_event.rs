@@ -1,3 +1,4 @@
+use super::ReasoningRemovalReason;
 use super::SafetyBuffering;
 use codex_protocol::ResponseItemId;
 use codex_protocol::ResponseUsageMetadata;
@@ -6,6 +7,7 @@ use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnModerationMetadataEvent;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub enum ResponseEvent {
@@ -33,6 +35,8 @@ pub enum ResponseEvent {
         response_id: String,
         token_usage: Option<TokenUsage>,
         usage_metadata: Option<ResponseUsageMetadata>,
+        /// Bounded diagnostic counts; absent when the provider reports no transformation data.
+        reasoning_removals: Option<BTreeMap<ReasoningRemovalReason, i64>>,
         /// Did the model affirmatively end its turn? Some providers do not set this,
         /// so we rely on fallback logic when this is `None`.
         end_turn: Option<bool>,

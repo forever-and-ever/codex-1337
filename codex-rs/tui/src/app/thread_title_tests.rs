@@ -95,10 +95,12 @@ fn bounds_the_entire_title_prompt_for_dense_unicode() {
 #[tokio::test]
 async fn automatic_thread_title_respects_origin_metadata_after_switching() -> color_eyre::Result<()>
 {
-    for (switch_threads, manual_name) in [
-        (true, None),
-        (true, Some("Manual title")),
-        (false, Some("Manual title")),
+    for (switch_threads, fork_name, manual_name) in [
+        (true, None, None),
+        (true, Some("Release plan"), None),
+        (true, Some("Release plan"), Some("Manual title")),
+        (true, None, Some("Manual title")),
+        (false, None, Some("Manual title")),
     ] {
         let mut app = make_test_app().await;
         let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
@@ -118,6 +120,11 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         );
 
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        if let Some(name) = fork_name {
+            app_server
+                .thread_set_name(thread_id, name.to_owned())
+                .await?;
+        }
         let automatic = app_server.automatic_thread_name_writer(thread_id);
         if switch_threads {
             let second = app_server.start_thread(&app.config).await?;
@@ -146,7 +153,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             AppEvent::GeneratedThreadTitle {
                 cancellation: CancellationToken::new(),
                 thread_id,
-                temporary_thread_id: codex_protocol::ThreadId::new(),
+                temporary_thread_id: Some(ThreadId::new()),
                 destination: ThreadTitleDestination::Automatic,
                 result: Ok(r#"{"title":"Generated title"}"#.to_string()),
             },
@@ -154,7 +161,12 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         .now_or_never()
         .expect("title dispatch must return to keyboard polling")?;
         app.settle_turn_submissions(&mut app_server).await?;
-        let expected_name = Some(manual_name.unwrap_or("Generated title").to_string());
+        let expected_name = Some(
+            manual_name
+                .or(fork_name)
+                .unwrap_or("Generated title")
+                .to_string(),
+        );
         assert_eq!(
             app_server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -188,8 +200,14 @@ async fn slash_rename_generates_editable_title_through_embedded_app_server()
 }
 
 #[tokio::test]
-async fn automatic_thread_title_generates_without_a_provisional_name() -> color_eyre::Result<()> {
+async fn automatic_thread_title_replaces_the_provisional_name() -> color_eyre::Result<()> {
     check_thread_title_generation(TitleScenario::Automatic).await
+}
+
+#[tokio::test]
+async fn automatic_thread_title_saves_the_first_message_if_generation_fails()
+-> color_eyre::Result<()> {
+    check_thread_title_generation(TitleScenario::Fallback).await
 }
 
 #[tokio::test]
@@ -205,6 +223,7 @@ async fn overview_rename_cancels_running_thread_title() -> color_eyre::Result<()
 #[derive(Clone, Copy)]
 enum TitleScenario {
     Automatic,
+    Fallback,
     Suggestion,
     ManualRename,
     OverviewRename,
@@ -217,9 +236,19 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         TitleScenario::ManualRename | TitleScenario::OverviewRename
     );
     let server = wiremock::MockServer::start().await;
+    let user_message = if matches!(scenario, TitleScenario::Fallback) {
+        "Fix the **login**\n[timeout](https://example.test/issue)"
+    } else {
+        "Fix the login timeout"
+    };
+    let title_message = if matches!(scenario, TitleScenario::Fallback) {
+        "{}"
+    } else {
+        r#"{"title":"Fix login timeout"}"#
+    };
     let mut template = responses::sse_response(responses::sse(vec![
         responses::ev_response_created("title-response"),
-        responses::ev_assistant_message("title-message", r#"{"title":"Fix login timeout"}"#),
+        responses::ev_assistant_message("title-message", title_message),
         responses::ev_completed("title-response"),
     ]));
     if cancel {
@@ -281,7 +310,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             root_turn_id: None,
             items: vec![ThreadItem::untimed(title_user_message(
                 "user-message",
-                "Fix the login timeout",
+                user_message,
             ))],
             items_view: Default::default(),
             status: TurnStatus::Completed,
@@ -301,7 +330,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                     ItemCompletedNotification::new(
                         thread_id.to_string(),
                         "existing-turn".to_string(),
-                        title_user_message("user-message", "Fix the login timeout"),
+                        title_user_message("user-message", user_message),
                         /*started_at_ms*/ None,
                         /*completed_at_ms*/ 0,
                     ),
@@ -309,7 +338,10 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             )
             .await?;
         }
-        assert_eq!(app.chat_widget.thread_name(), None);
+        assert_eq!(
+            app.chat_widget.thread_name().as_deref(),
+            Some("Fix the login timeout")
+        );
         if matches!(scenario, TitleScenario::Automatic) {
             app.chat_widget.refresh_status_surfaces();
             insta::assert_snapshot!(
@@ -399,7 +431,9 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                     TitleScenario::OverviewRename => {
                         AppEvent::RenameAgentsOverviewThread { thread_id, name }
                     }
-                    TitleScenario::Automatic | TitleScenario::Suggestion => unreachable!(),
+                    TitleScenario::Automatic
+                    | TitleScenario::Fallback
+                    | TitleScenario::Suggestion => unreachable!(),
                 };
                 app.handle_event(&mut tui, &mut app_server, event).await?;
                 app.settle_turn_submissions(&mut app_server).await?;
@@ -420,7 +454,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         }
         if generated
             && (!cancel || interrupted)
-            && (!automatic || app.chat_widget.thread_name().is_some())
+            && (!matches!(scenario, TitleScenario::Automatic)
+                || app.chat_widget.thread_name().as_deref() == Some("Fix login timeout"))
         {
             break;
         }
@@ -430,6 +465,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     if automatic {
         let expected_name = if cancel {
             "Keep this title"
+        } else if matches!(scenario, TitleScenario::Fallback) {
+            "Fix the login timeout"
         } else {
             "Fix login timeout"
         };
@@ -463,9 +500,9 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     let request = response.single_request();
     assert!(
         request
-            .body_json()
-            .to_string()
-            .contains("Fix the login timeout")
+            .message_input_texts("user")
+            .iter()
+            .any(|prompt| prompt.contains(user_message))
     );
 
     app_server.shutdown().await?;
@@ -514,6 +551,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         thread_id,
         destination,
         "prompt".to_string(),
+        /*fallback_title*/ None,
         /*effort*/ None,
         Ok(temporary_thread_id.to_string()),
         cancellation.clone(),
@@ -526,7 +564,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         AppEvent::GeneratedThreadTitle {
             cancellation,
             thread_id,
-            temporary_thread_id,
+            temporary_thread_id: Some(temporary_thread_id),
             destination,
             result: Ok(r#"{"title":"Late automatic title"}"#.to_string()),
         },
@@ -885,6 +923,7 @@ async fn failed_thread_title_requests_are_removed() -> color_eyre::Result<()> {
         thread_id,
         ThreadTitleDestination::Automatic,
         "prompt".to_string(),
+        /*fallback_title*/ None,
         /*effort*/ None,
         Err("startup failed".to_string()),
         CancellationToken::new(),
@@ -894,6 +933,7 @@ async fn failed_thread_title_requests_are_removed() -> color_eyre::Result<()> {
         thread_id,
         suggestion,
         "prompt".to_string(),
+        /*fallback_title*/ None,
         /*effort*/ None,
         Ok("invalid-thread-id".to_string()),
         CancellationToken::new(),
@@ -911,7 +951,7 @@ async fn failed_thread_title_requests_are_removed() -> color_eyre::Result<()> {
         AppEvent::GeneratedThreadTitle {
             cancellation: CancellationToken::new(),
             thread_id,
-            temporary_thread_id: codex_protocol::ThreadId::new(),
+            temporary_thread_id: Some(ThreadId::new()),
             destination: ThreadTitleDestination::Automatic,
             result: Err("generation failed".to_string()),
         },

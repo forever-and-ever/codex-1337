@@ -139,7 +139,19 @@ pub(crate) enum HistoryPage<Items, Turns> {
 
 pub(crate) type HistoryCursor = HistoryPage<String, String>;
 pub(crate) type HistoryResponse = HistoryPage<ThreadItemsListResponse, ThreadTurnsListResponse>;
-pub(crate) type HistoryContent = HistoryPage<Vec<ThreadItem>, Vec<Turn>>;
+pub(crate) type HistoryContent = HistoryPage<Vec<HistoryItem>, Vec<Turn>>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HistoryItem {
+    pub(crate) turn_id: String,
+    pub(crate) item: ThreadItem,
+}
+
+impl HistoryItem {
+    pub(crate) fn key(&self) -> (&str, &str) {
+        (&self.turn_id, self.item.id())
+    }
+}
 
 impl HistoryCursor {
     pub(crate) async fn load(
@@ -361,7 +373,7 @@ impl AppServerSession {
         page: ThreadItemsListResponse,
         state: &mut ThreadHistoryPagination,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<ThreadItem>> {
+    ) -> Result<Vec<HistoryItem>> {
         preparation::merge_thread_item_page(
             super::session_preparation::RequestPolicy::Unbounded,
             &self.request_handle(),
@@ -411,7 +423,7 @@ impl AppServerSession {
 fn rendered_history_rows(
     thread_id: ThreadId,
     thread: &Thread,
-    items: Vec<ThreadItem>,
+    items: Vec<HistoryItem>,
     config: &Config,
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
@@ -431,7 +443,7 @@ fn rendered_history_rows(
     thread_items_to_transcript_cells(
         Some(thread_id),
         &thread.cwd,
-        items.into_iter().map(|item| item.payload),
+        items.into_iter().map(|item| item.item.payload),
         visibility,
         Some(config),
         &|_| crate::multi_agents::AgentMetadata::default(),

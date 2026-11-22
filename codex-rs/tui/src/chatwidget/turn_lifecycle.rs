@@ -14,7 +14,7 @@ pub(super) struct TurnLifecycleState {
     pub(super) last_turn_id: Option<String>,
     /// A live or restored turn makes the parent available for side-chat creation.
     pub(super) has_turn_history: bool,
-    /// Cloud confirmed admission to a turn whose live start we have yet to process.
+    /// Server confirmed admission to a turn whose live start we have yet to process.
     pub(super) admitted_turn_id: Option<String>,
     pub(super) budget_limited_turn_ids: HashSet<String>,
     /// False records an untimed turn boundary that may still receive a completion label.

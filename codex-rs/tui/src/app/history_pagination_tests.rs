@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::test_support::make_test_app;
+use crate::app_server_session::HistoryItem;
 use crate::history_cell::ComputerActivityCell;
 use crate::history_cell::FinalMessageSeparator;
 use crate::history_cell::ForkedThreadHistoryCell;
@@ -109,13 +110,17 @@ async fn fork_lineage_stays_before_repeated_older_history_pages() {
 fn repeated_prompt_matching_removes_only_the_hidden_occurrence() {
     let cells = vec![user_cell("repeat"), user_cell("other"), user_cell("repeat")];
     let persisted = vec![
-        ("unloaded".to_string(), user_cell("repeat")),
-        ("hidden".to_string(), user_cell("repeat")),
-        ("middle".to_string(), user_cell("other")),
-        ("visible".to_string(), user_cell("repeat")),
+        (("oldest", "unloaded"), user_cell("repeat")),
+        (("earlier", "hidden"), user_cell("repeat")),
+        (("middle", "middle"), user_cell("other")),
+        (("later", "hidden"), user_cell("repeat")),
     ];
     assert_eq!(
-        hidden_transcript_indices(&cells, persisted, &HashSet::from(["hidden", "unloaded"])),
+        hidden_transcript_indices(
+            &cells,
+            persisted,
+            &HashSet::from([("earlier", "hidden"), ("oldest", "unloaded")])
+        ),
         vec![0],
     );
 }
@@ -146,7 +151,12 @@ async fn resume_places_interruption_before_searches_split_across_pages() {
 
     canceled.items.push(search("canceled"));
     audit.items.insert(/*index*/ 0, search("older"));
-    let page = vec![canceled.items[0].clone(), audit.items[0].clone()];
+    let page = [&canceled, &audit]
+        .map(|turn| HistoryItem {
+            turn_id: turn.id.clone(),
+            item: turn.items[0].clone(),
+        })
+        .to_vec();
     let cwd = app.config.cwd.clone();
     let mut tui = crate::tui::test_support::make_test_tui().expect("test terminal");
     let older = app.project_older_history_cells(
@@ -168,7 +178,7 @@ async fn resume_places_interruption_before_searches_split_across_pages() {
         rows,
         [
             "• Searched the web for canceled",
-            "■ Conversation interrupted - use /feedback if something went wrong",
+            "■ Conversation interrupted",
             "• Searched the web for older",
             "• Searched the web for newer",
         ]
@@ -217,14 +227,18 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         first.completed_at = Some(1_700_000_000);
         first.duration_ms = Some(125_000);
         let mut second = turn("second", TurnStatus::InProgress, &[]);
-        second.items = vec![computer("newer-call")];
+        second.items = vec![computer("hidden")];
         let turns = vec![first, second];
         let hidden = hidden_review_item_ids(&turns);
-        assert_eq!(hidden, HashSet::from(["hidden"]));
+        assert_eq!(hidden, HashSet::from([("first", "hidden")]));
         let items = turns
             .iter()
-            .flat_map(|turn| &turn.items)
-            .cloned()
+            .flat_map(|turn| {
+                turn.items.iter().cloned().map(|item| HistoryItem {
+                    turn_id: turn.id.clone(),
+                    item,
+                })
+            })
             .collect::<Vec<_>>();
 
         let cells = app.project_older_history_cells(
@@ -252,10 +266,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         assert_eq!(
             (groups, completions, visible_users),
             (
-                vec![
-                    vec!["older-call".to_string()],
-                    vec!["newer-call".to_string()]
-                ],
+                vec![vec!["older-call".to_string()], vec!["hidden".to_string()]],
                 expected_completions,
                 0,
             ),

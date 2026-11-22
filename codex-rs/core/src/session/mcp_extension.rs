@@ -89,7 +89,7 @@ impl Session {
                     .services
                     .mcp_runtime
                     .current_config()
-                    .is_some_and(|config| config.mcp_server_catalog.server(&server_name).is_some())
+                    .is_some_and(|config| config.mcp_server_catalog.servers().any(|(key, _)| key.name() == server_name))
                 {
                     anyhow::bail!("extension lease conflict: MCP server name is already registered");
                 }
@@ -236,8 +236,8 @@ impl Session {
         if projection
             .config
             .mcp_server_catalog
-            .server(&lease.server_name)
-            .is_some()
+            .servers()
+            .any(|(key, _)| key.name() == lease.server_name)
         {
             lease.cancellation.cancel();
             tracing::warn!(

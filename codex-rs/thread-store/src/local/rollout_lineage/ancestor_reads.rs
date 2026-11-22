@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::HistoryPosition;
 
+use super::LineageWalk;
 use super::LocalThreadStore;
 use super::RolloutLineage;
 use crate::ThreadStoreError;
@@ -58,6 +59,12 @@ impl AncestorReads {
         {
             ancestors.failed_path.get_or_init(|| path.to_owned());
         }
+    }
+
+    pub(super) fn failed(&self) -> bool {
+        self.0
+            .as_ref()
+            .is_some_and(|tracked| tracked.failed_path.get().is_some())
     }
 
     /// Validate the inherited offset on the reader that will actually consume the file.
@@ -133,15 +140,16 @@ impl RolloutLineage {
                     error: error.clone(),
                 },
             );
-            lineage = store
-                .resolve_rollout_lineage_with_mode(
-                    requested_thread_id,
-                    mode,
-                    leaf.clone(),
-                    &excluded,
-                )
-                .await
-                .map_err(|_| error)?;
+            lineage = LineageWalk::new(
+                store,
+                requested_thread_id,
+                mode,
+                leaf.clone(),
+                Some(&excluded),
+            )
+            .finish()
+            .await
+            .map_err(|_| error)?;
         }
     }
 }

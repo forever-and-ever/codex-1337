@@ -27,6 +27,7 @@ pub(crate) enum AgentCommunicationKind {
     Message,
     Followup,
     Result,
+    CompletionWatcher,
 }
 
 impl AgentCommunicationKind {
@@ -35,14 +36,14 @@ impl AgentCommunicationKind {
             Self::Spawn => "spawn",
             Self::Message => "message",
             Self::Followup => "followup",
-            Self::Result => "result",
+            Self::Result | Self::CompletionWatcher => "result",
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AgentCommunicationContext {
-    kind: AgentCommunicationKind,
+    pub(crate) kind: AgentCommunicationKind,
     pub(crate) sender_thread_id: ThreadId,
     pub(crate) origin: Option<String>,
 }

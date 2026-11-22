@@ -159,7 +159,9 @@ async fn saved_workspace_is_discovered_once_and_not_the_default_account(
     .await??;
     assert_eq!(
         notification.params,
-        Some(json!({"authMode": "chatgpt", "planType": plan_type}))
+        Some(
+            json!({"authMode": "chatgpt", "planType": plan_type, "reason": "workspaceRoutingReady"})
+        )
     );
     let expected = json!({
         "account": {"type": "chatgpt", "email": "user@example.com", "planType": plan_type, "workspaceName": "Selected workspace"},
@@ -348,7 +350,7 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
     let initial = server.initial_account_notification.as_ref().expect("initial account authority");
     assert_eq!(
         initial.params,
-        Some(json!({"authMode": null, "planType": null}))
+        Some(json!({"authMode": null, "planType": null, "reason": null}))
     );
     for (account, origin, value) in [
         ("first", "https://chatgpt.com", "us_cr"),
@@ -362,7 +364,9 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
         .await??;
         assert_eq!(
             notification.params,
-            Some(json!({"authMode": "chatgptAuthTokens", "planType": "enterprise"}))
+            Some(
+                json!({"authMode": "chatgptAuthTokens", "planType": "enterprise", "reason": null})
+            )
         );
         assert_eq!(
             read(&mut server).await?["workspaceRouting"],
@@ -379,6 +383,15 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
     }
     let request = server.send_logout_account_request().await?;
     let _: LogoutAccountResponse = timeout(READ_TIMEOUT, server.read_response(request)).await??;
+    let notification = timeout(
+        READ_TIMEOUT,
+        server.read_stream_until_notification_message("account/updated"),
+    )
+    .await??;
+    assert_eq!(
+        notification.params,
+        Some(json!({"authMode": null, "planType": null, "reason": null}))
+    );
     assert_eq!(
         read(&mut server).await?,
         json!({"account": null, "userId": null, "accountId": null, "displayName": null, "requiresOpenaiAuth": true, "workspaceRouting": null})

@@ -641,12 +641,34 @@ async fn run_guardian_subagent_review(
     if messaging_case {
         let pending_mcp_response = Arc::clone(&pending_mcp_response);
         let receive_release = std::sync::Mutex::new(receive_release);
+        let hook_tool = |name: &str| {
+            let mut descriptor = json!({
+                "name": name,
+                "inputSchema": {"type": "object", "properties": {}}
+            });
+            if code_mode && !matches!(messaging_outcome, MessagingOutcome::UntrustedMcp) {
+                // The host Apps catalog must identify and permit these read-only callbacks
+                // independently of the message tool's authority.
+                descriptor["annotations"] = json!({"readOnlyHint": true});
+                descriptor["_meta"] = json!({
+                    "connector_id": "user_message",
+                    "connector_name": "user_message",
+                    "ui": {"visibility": ["app"]},
+                    "_codex_apps": {
+                        "resource_uri": format!("connector://user_message/tools/{name}"),
+                        "contains_mcp_source": true,
+                        "connector_id": "user_message"
+                    }
+                });
+            }
+            descriptor
+        };
         mount_messaging_server(
             &server,
             json!([
                 messaging_tool_descriptor(raw_messaging_tool, connector_name),
-                {"name": "rewrite_question", "inputSchema": {"type": "object", "properties": {}}},
-                {"name": "post_send", "inputSchema": {"type": "object", "properties": {}}}
+                hook_tool("rewrite_question"),
+                hook_tool("post_send")
             ]),
             move |request| {
                 let name = request["params"]["name"].as_str().unwrap_or_default();

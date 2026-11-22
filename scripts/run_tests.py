@@ -144,6 +144,7 @@ FIXTURE_BINARIES = (
             "core_test_support",
         ),
     ),
+    ("codex-message-board-mcp", "codex-message-board-mcp", ("codex-core",)),
     (
         "codex-rmcp-client",
         "test_mcp_2026_discovery_stdio_server",
@@ -179,7 +180,6 @@ FIXTURE_BINARIES = (
             "codex-rmcp-client",
         ),
     ),
-    ("codex-stdio-to-uds", "codex-stdio-to-uds", ("codex-stdio-to-uds",)),
 )
 
 

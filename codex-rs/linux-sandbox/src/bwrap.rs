@@ -45,7 +45,7 @@ use ignore::overrides::OverrideBuilder;
 ///
 /// These are intentionally system-level paths only (plus Nix store roots) so
 /// `include_platform_defaults` does not silently widen access to user data.
-const LINUX_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
+pub(super) const LINUX_PLATFORM_DEFAULT_READ_ROOTS: &[&str] = &[
     "/bin",
     "/sbin",
     "/usr",
@@ -111,7 +111,7 @@ pub(crate) enum BwrapNetworkMode {
 
 impl BwrapNetworkMode {
     fn should_unshare_network(self) -> bool {
-        !matches!(self, Self::FullAccess)
+        matches!(self, Self::Isolated | Self::ProxyOnly)
     }
 }
 

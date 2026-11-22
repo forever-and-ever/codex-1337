@@ -46,6 +46,7 @@ mod farm_requests;
 mod goals;
 mod memories;
 mod memory_versions;
+pub(crate) mod model_ids;
 mod projects;
 mod warpaint;
 pub use agent_mail::AgentMailRecord;

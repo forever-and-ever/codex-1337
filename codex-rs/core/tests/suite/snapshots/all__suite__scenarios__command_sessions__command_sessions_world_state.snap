@@ -6,8 +6,8 @@ Scenario: A Code Mode script drops its command handle. WorldState retains it whi
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=80f7d137a6875ae9):
-        - namespace/functions; hash=04f871a2cb0f4859
+00:additional_tools/developer (2; hash=2c9af3dc99abf842):
+        - namespace/functions; hash=d17415e4b1d663e8
           - custom/exec
           - function/wait
           - custom/python
@@ -54,8 +54,8 @@ Scenario: A Code Mode script drops its command handle. WorldState retains it whi
 
 ## Window 2 (after request 3: settings changed (model))
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=80f7d137a6875ae9):
-        - namespace/functions; hash=04f871a2cb0f4859
+00:additional_tools/developer (2; hash=2c9af3dc99abf842):
+        - namespace/functions; hash=d17415e4b1d663e8
           - custom/exec
           - function/wait
           - custom/python
@@ -170,8 +170,8 @@ Scenario: A Code Mode script drops its command handle. WorldState retains it whi
     </command_sessions>
 12:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-13:additional_tools/developer (1; hash=e15ad91fb4007d9a):
-        - namespace/functions; hash=45717c8ac31ecaec
+13:additional_tools/developer (1; hash=01acd15ec4a05edb):
+        - namespace/functions; hash=e632a64008a87239
           - custom/exec
           - custom/python
           - custom/bash

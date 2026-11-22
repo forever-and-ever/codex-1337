@@ -1,6 +1,7 @@
 //! Notification admission preserves continuation, receiving ownership, and output budgets.
 
 use super::*;
+use codex_user_input::ResolvedUserInput;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -107,10 +108,9 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
     assert_eq!(raw_history_items(&session.clone_history().await).len(), 1);
     session.active_turn.lock().await.as_mut().unwrap().task = task;
 
-    let user_input = vec![UserInput::Text {
-        text: "keep this queued user input".to_string(),
-        text_elements: Vec::new(),
-    }];
+    let user_input = vec![ResolvedUserInput::text(
+        "keep this queued user input".to_string(),
+    )];
     assert!(matches!(
         submit_steer_only(&session, user_input.clone(), &turn.sub_id).await,
         TurnInputSubmission::Steered { .. }
@@ -152,7 +152,7 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
             codex_utils_output_truncation::TruncationPolicy::Tokens(120),
         )),
         notification(late_text),
-        session.response_item_from_user_input(user_input),
+        session.response_item_from_user_input(&user_input),
         late[0].clone(),
     ];
     let history = session.clone_history().await;

@@ -37,7 +37,7 @@ pub(crate) enum PendingSteerCancelAction {
 }
 
 /// Keeps ICE credentials out of command diagnostics and session recordings.
-/// Convert back to a string only when sending the offer to app-server signaling.
+/// Convert back to a string only at the media signaling boundary.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct RealtimeOfferSdp(String);
 

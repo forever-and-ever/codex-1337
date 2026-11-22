@@ -1,3 +1,6 @@
+// The managed HTTP request's `Send` proof traverses the Tokio driver stack.
+#![recursion_limit = "256"]
+
 //! Cloud-hosted configuration data for Codex.
 //!
 //! This crate owns transport, caching, and refresh behavior for cloud-delivered
@@ -13,6 +16,7 @@ mod metrics;
 mod service;
 mod validation;
 
+pub use bundle_loader::ConfigServerLoginMethod;
 pub use bundle_loader::chatgpt_config_bundle_loader;
 pub use bundle_loader::chatgpt_config_bundle_loader_for_storage;
 pub use bundle_loader::chatgpt_config_bundle_loader_for_storage_without_cache;

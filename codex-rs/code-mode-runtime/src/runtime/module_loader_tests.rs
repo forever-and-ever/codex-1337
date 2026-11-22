@@ -1,6 +1,7 @@
 //! Checks that tool response delivery preserves live results without rooting discarded values.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
 
 use pretty_assertions::assert_eq;
@@ -119,6 +120,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
                     output_schema: None,
                 })
             })
+            .map(Arc::new)
             .collect(),
         next_tool_call_id: 1,
         next_timeout_id: 1,
@@ -127,12 +129,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         exit_requested: None,
         sh_calls: Vec::new(),
     });
-    let enabled_tools = scope
-        .get_slot::<RuntimeState>()
-        .expect("runtime state")
-        .enabled_tools
-        .clone();
-    super::super::globals::install_globals(scope, &enabled_tools).expect("install globals");
+    super::super::globals::install_globals(scope).expect("install globals");
     let promise = super::evaluate_main_module(scope, r#"
 const first = tools.exec_command({});
 const other = tools.mcp__fake__exec_command({});

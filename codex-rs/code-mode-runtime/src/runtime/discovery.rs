@@ -2,6 +2,7 @@ use codex_code_mode_protocol::EnabledToolMetadata;
 use codex_code_mode_protocol::normalize_code_mode_identifier;
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
 
 use super::RuntimeState;
 use super::value::json_to_v8;
@@ -88,7 +89,7 @@ pub(super) fn describe_tool_callback(
 
 fn resolve_tool<'a>(
     name: &str,
-    tools: &'a [EnabledToolMetadata],
+    tools: &'a [Arc<EnabledToolMetadata>],
 ) -> Result<&'a EnabledToolMetadata, String> {
     if let Some(tool) = tools.iter().find(|tool| tool.global_name == name) {
         return Ok(tool);

@@ -123,7 +123,7 @@ impl MergeHarness {
                 thread_store: &harness.thread_store,
             })
             .await;
-        start_registered_turn(
+        refresh_registered_catalogs_for_step(
             &harness.registry,
             &harness.session_store,
             &harness.thread_store,
@@ -458,7 +458,7 @@ async fn executor_aliases_survive_cloud_promotion_without_reassigning_remaining_
             );
             harness.turn_store = ExtensionData::new("turn-2");
             harness.step_store = ExtensionData::new("step-2");
-            start_registered_turn(
+            refresh_registered_catalogs_for_step(
                 &harness.registry,
                 &harness.session_store,
                 &harness.thread_store,

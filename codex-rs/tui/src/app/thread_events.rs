@@ -89,6 +89,7 @@ fn hide_private_items_after_voice_handoff(
 pub(super) enum ThreadEventAttachment {
     Live,
     ReplayOnly,
+    Archived,
     ExternalWriter,
     SignInRequired(codex_protocol::sign_in_required::SignInRequired),
 }
@@ -705,6 +706,14 @@ impl ThreadEventChannel {
         self.attachment = ThreadEventAttachment::Live;
     }
 
+    pub(super) fn is_archived(&self) -> bool {
+        self.attachment == ThreadEventAttachment::Archived
+    }
+
+    pub(super) fn mark_archived(&mut self) {
+        self.attachment = ThreadEventAttachment::Archived;
+    }
+
     pub(super) fn mark_replay_only(&mut self) {
         self.attachment = ThreadEventAttachment::ReplayOnly;
     }
@@ -783,6 +792,9 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,
@@ -1141,6 +1153,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let notification = ServerNotification::McpServerStatusUpdated(
             codex_app_server_protocol::McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(thread_id.to_string()),
                 name: "sentry".to_string(),
                 status: codex_app_server_protocol::McpServerStartupState::Failed,

@@ -3,8 +3,6 @@
 //! Core only reports requests that completed, human messages, and changes that break the cached
 //! prefix. The app server owns estimates, warming, retention and scheduling.
 use crate::client::ModelClient;
-use crate::client_common::ResponseEvent;
-use crate::client_common::ResponseStream;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use codex_api::AnthropicClient;
@@ -22,13 +20,11 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::turn_input::TurnInput;
 use codex_protocol::turn_input::TurnStartOptions;
-use futures::StreamExt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 
 /// Provider retention policy for passive estimates and supported keepalive replays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,10 +135,30 @@ impl WarmingRequest {
 
 /// What a conversation request reports once it completes.
 pub(crate) struct Dispatch {
+    observer: Arc<dyn PromptCacheObserver>,
+    thread: ThreadId,
     epoch: u64,
     started: RequestStart,
     lore: WarmingLore,
     replay: std::result::Result<WarmingRequest, Unreplayable>,
+}
+
+impl Dispatch {
+    pub(crate) fn completed(self, usage: &TokenUsage) {
+        let cached = usage.cached_input_tokens > 0 || usage.cache_write_input_tokens > 0;
+        self.observer.completed(
+            self.thread,
+            CompletedRequest {
+                epoch: self.epoch,
+                started: self.started,
+                lore: self.lore,
+                usage: usage.clone(),
+                replay: self
+                    .replay
+                    .and_then(|request| cached.then_some(request).ok_or(Unreplayable::Uncached)),
+            },
+        );
+    }
 }
 
 impl ModelClient {
@@ -203,6 +219,8 @@ impl ModelClient {
         let observer = self.prompt_cache_observer.get()?;
         let lore = self.prompt_cache_lore(model, effort)?;
         Some(Dispatch {
+            observer: Arc::clone(observer),
+            thread: self.state.thread_id,
             epoch: observer.epoch(self.state.thread_id),
             started: RequestStart::now(),
             lore,
@@ -256,78 +274,11 @@ impl ModelClient {
             account: account.ok_or(Unreplayable::Provider)?,
         })
     }
-
-    /// Forwards the stream unchanged, reporting its completion usage to the observer.
-    pub(crate) fn observe_prompt_cache_stream(
-        &self,
-        mut stream: ResponseStream,
-        dispatch: Option<Dispatch>,
-    ) -> ResponseStream {
-        let Some(dispatch) = dispatch else {
-            return stream;
-        };
-        let Some(observer) = self.prompt_cache_observer.get().cloned() else {
-            return stream;
-        };
-        let thread = self.state.thread_id;
-        let routing_affinity = stream.routing_affinity.take();
-        let interrupt = stream.interrupt.take();
-        let consumer_dropped = CancellationToken::new();
-        let dropped = consumer_dropped.clone();
-        let (sender, rx_event) = tokio::sync::mpsc::channel(/*buffer*/ 16);
-        tokio::spawn(async move {
-            let mut dispatch = Some(dispatch);
-            loop {
-                let event = tokio::select! {
-                    () = dropped.cancelled() => break,
-                    event = stream.next() => event,
-                };
-                let Some(event) = event else {
-                    break;
-                };
-                if let Ok(ResponseEvent::Completed {
-                    token_usage: Some(usage),
-                    ..
-                }) = &event
-                    && let Some(Dispatch {
-                        epoch,
-                        started,
-                        lore,
-                        replay,
-                    }) = dispatch.take()
-                {
-                    let cached =
-                        usage.cached_input_tokens > 0 || usage.cache_write_input_tokens > 0;
-                    observer.completed(
-                        thread,
-                        CompletedRequest {
-                            epoch,
-                            started,
-                            lore,
-                            usage: usage.clone(),
-                            replay: replay.and_then(|replay| {
-                                cached.then_some(replay).ok_or(Unreplayable::Uncached)
-                            }),
-                        },
-                    );
-                }
-                if sender.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
-        ResponseStream {
-            routing_affinity,
-            rx_event,
-            interrupt,
-            consumer_dropped,
-        }
-    }
 }
 
 /// Only non-empty input typed by a person restarts the warming hold; goal continuations, agent
 /// messages and other automatic turns do not.
-pub(crate) fn is_human_message(input: &TurnInput, start: &TurnStartOptions) -> bool {
+pub(crate) fn is_human_message<T>(input: &TurnInput<T>, start: &TurnStartOptions) -> bool {
     matches!(input, TurnInput::UserInput { content, .. } if !content.is_empty())
         && matches!(
             start.turn_trigger.as_deref(),

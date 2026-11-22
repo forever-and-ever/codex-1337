@@ -8,9 +8,10 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
     let fixture = MutableCatalog::new().await?;
     fixture.connections.list_all_tools().await;
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
-    config
-        .server_permissions
-        .insert("docs".to_string(), crate::McpServerPermissions::Thread);
+    config.server_permissions.insert(
+        McpServerKey::unscoped("docs"),
+        crate::McpServerPermissions::Thread,
+    );
     let published = Arc::new(PublishedMcpRuntime {
         connections: Arc::clone(&fixture.connections),
         config: Some(Arc::new(config)),
@@ -70,14 +71,22 @@ async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary(
     assert_eq!(before.tools(), frozen);
     assert_eq!(
         after
-            .prepare_call("docs", "search")
+            .prepare_call(&McpServerKey::unscoped("docs"), "search")
             .expect("updated call")
             .tool_info()
             .tool,
         updated
     );
-    assert!(after.prepare_call("docs", "added").is_some());
-    assert!(after.prepare_call("docs", "removed").is_none());
+    assert!(
+        after
+            .prepare_call(&McpServerKey::unscoped("docs"), "added")
+            .is_some()
+    );
+    assert!(
+        after
+            .prepare_call(&McpServerKey::unscoped("docs"), "removed")
+            .is_none()
+    );
     assert!(Arc::ptr_eq(
         &after,
         &capture().await.expect("cached refreshed binding")

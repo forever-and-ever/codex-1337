@@ -17,14 +17,15 @@ use crate::compact::CompactedHistoryMetadata;
 use crate::compact::CompactionAnalyticsDetails;
 use crate::compact::CompactionWindow;
 use crate::compact::SUMMARY_PREFIX;
-use crate::compact::build_compacted_history;
+use crate::compact::build_compacted_history_from_items;
 use crate::compact::build_compaction_replacement_history;
-use crate::compact::collect_annotated_user_messages;
 use crate::compact_remote_history::trim_function_call_history_to_fit_context_window;
+use crate::compact_remote_v2::retained_client_items;
 use crate::context::UserGoalUpdate;
 use crate::context::world_state::WorldState;
 use crate::context_manager::estimate_item_token_count;
 use crate::responses_metadata::CompactionTurnMetadata;
+use crate::session::FileAudioDurations;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn::get_last_assistant_message_from_turn;
@@ -129,7 +130,7 @@ pub(crate) async fn run_native_compaction(
     let compaction_trace = sess.services.rollout_thread_trace.compaction_trace_context(
         turn_context.sub_id.as_str(),
         compaction.id.as_str(),
-        turn_context.model_info().slug.as_str(),
+        step_context.settings.model_info.slug.as_str(),
         turn_context.provider.info().name.as_str(),
     );
     let compaction = TurnItem::ContextCompaction(compaction);
@@ -143,6 +144,7 @@ pub(crate) async fn run_native_compaction(
     let mut history = sess.clone_history().await;
     // Whichever rung succeeds replaces this snapshot; appends made meanwhile survive.
     let source = history.clone().into_shared_annotated_items();
+    let audio_durations = Arc::clone(&history.file_audio_durations);
     history = history.for_compaction(&world_state.render_full().0);
     let mut base_instructions = sess.get_prompt_base_instructions().await;
     if let Some(text) = history.take_base_instructions() {
@@ -184,7 +186,7 @@ pub(crate) async fn run_native_compaction(
             .and_then(|window| usize::try_from(window / 4).ok())
             .unwrap_or(UNKNOWN_WINDOW_TAIL_TOKENS),
     );
-    let recent = reset_history(&source)
+    let recent = reset_history(&source, &audio_durations)
         .0
         .into_iter()
         .map(ResponseItemEnvelope::into_item)
@@ -231,6 +233,7 @@ pub(crate) async fn run_native_compaction(
             &compaction_trace,
             analytics_details,
             source,
+            &audio_durations,
             trace_input_history,
             checkpoint,
         ))
@@ -249,6 +252,7 @@ pub(crate) async fn run_native_compaction(
         replacement_step_context,
         world_state,
         source,
+        &audio_durations,
     )
     .await?;
     let message = format!(
@@ -283,7 +287,7 @@ async fn attempt(
     };
     let AnthropicSalvage { items, repairs } = salvage_anthropic_history(input, modalities);
     let tool_router = &step_context.tool_router;
-    let prompt = Prompt {
+    let prompt = Arc::new(Prompt {
         input: items,
         tools: tool_router.model_visible_specs(),
         parallel_tool_calls: true,
@@ -292,9 +296,9 @@ async fn attempt(
         output_schema_strict: true,
         cyber_access_program: turn_context.cyber_access_program,
         prompt_cache_ttl: turn_context.prompt_cache_ttl,
-    };
+    });
     let mut responses_metadata = sess
-        .compaction_responses_metadata(turn_context.as_ref(), compaction_metadata)
+        .compaction_responses_metadata(step_context, compaction_metadata)
         .await;
     responses_metadata.tool_namespaces_info = tool_router.tool_namespaces_info().cloned();
     let output = Box::pin(request(
@@ -346,7 +350,10 @@ fn tail(input: &[ResponseItem], budget: usize) -> Option<Vec<ResponseItem>> {
 
 /// The recent user messages and a notice carrying the last reply: the material both the
 /// `Recent` rung and a reset preserve. Returns it with the notice's text.
-fn reset_history(source: &[ResponseItemEnvelope]) -> (Vec<ResponseItemEnvelope>, String) {
+fn reset_history(
+    source: &[ResponseItemEnvelope],
+    audio_durations: &FileAudioDurations,
+) -> (Vec<ResponseItemEnvelope>, String) {
     let mut notice = RESET_NOTICE.to_owned();
     if let Some(message) =
         get_last_assistant_message_from_turn(source.iter().map(|envelope| &envelope.item))
@@ -358,11 +365,7 @@ fn reset_history(source: &[ResponseItemEnvelope]) -> (Vec<ResponseItemEnvelope>,
         ));
     }
     let summary = format!("{SUMMARY_PREFIX}\n{notice}");
-    let history = build_compacted_history(
-        Vec::new(),
-        &collect_annotated_user_messages(source),
-        &summary,
-    );
+    let history = build_compacted_history_from_items(source, &summary, audio_durations);
     (history, summary)
 }
 
@@ -378,6 +381,7 @@ async fn install_checkpoint(
     compaction_trace: &CompactionTraceContext,
     analytics_details: &mut CompactionAnalyticsDetails,
     source: Arc<Vec<ResponseItemEnvelope>>,
+    audio_durations: &FileAudioDurations,
     trace_input_history: Option<Vec<ResponseItem>>,
     checkpoint: Checkpoint,
 ) -> CodexResult<()> {
@@ -394,11 +398,18 @@ async fn install_checkpoint(
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
     analytics_details.retained_image_count = Some(0);
+    let retained = retained_client_items(
+        &source,
+        audio_durations,
+        ResponseItemEnvelope::is_always_retained,
+    )
+    .into_values()
+    .collect();
     let (initial_context, world_state_baseline) = Box::pin(build_compaction_replacement_history(
         sess.as_ref(),
         replacement_step_context,
         world_state,
-        Vec::new(),
+        retained,
         CompactionContinuation::capture(source.iter().map(|envelope| &envelope.item))?,
     ))
     .await;
@@ -451,8 +462,9 @@ async fn install_reset(
     replacement_step_context: &StepContext,
     world_state: &WorldState,
     source: Arc<Vec<ResponseItemEnvelope>>,
+    audio_durations: &FileAudioDurations,
 ) -> CodexResult<()> {
-    let (history, summary) = reset_history(&source);
+    let (history, summary) = reset_history(&source, audio_durations);
     let (history, world_state_baseline) = Box::pin(build_compaction_replacement_history(
         sess.as_ref(),
         replacement_step_context,

@@ -570,6 +570,7 @@ impl RolloutRecorder {
                 allowed_sources,
                 model_providers,
                 cwd_filters,
+                /*included_thread_ids*/ None,
                 relation_filter,
                 archived,
                 /*section*/ None,
@@ -605,9 +606,15 @@ impl RolloutRecorder {
         };
         let fs_page = match sort_direction {
             SortDirection::Asc => {
+                // SQLite needs one extra indexed row to produce a recency cursor.
+                let scan_size = if sort_key == ThreadSortKey::RecencyAt && state_db_ctx.is_some() {
+                    page_size.saturating_add(1)
+                } else {
+                    page_size
+                };
                 list_threads_from_files_asc(
                     codex_home,
-                    page_size,
+                    scan_size,
                     cursor,
                     sort_key,
                     file_config,
@@ -686,6 +693,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            /*included_thread_ids*/ None,
             relation_filter,
             archived,
             /*section*/ None,
@@ -717,6 +725,7 @@ impl RolloutRecorder {
                     allowed_sources,
                     model_providers,
                     cwd_filters,
+                    /*included_thread_ids*/ None,
                     relation_filter,
                     archived,
                     /*section*/ None,
@@ -759,6 +768,7 @@ impl RolloutRecorder {
                         allowed_sources,
                         model_providers,
                         cwd_filters,
+                        /*included_thread_ids*/ None,
                         relation_filter,
                         archived,
                         /*section*/ None,
@@ -840,6 +850,7 @@ impl RolloutRecorder {
                     allowed_sources,
                     model_providers,
                     cwd_filter.as_ref().map(std::slice::from_ref),
+                    /*included_thread_ids*/ None,
                     /*relation_filter*/ None,
                     /*archived*/ false,
                     /*section*/ None,
@@ -1019,6 +1030,9 @@ impl RolloutRecorder {
                     writer: None,
                     deferred_creation: true,
                     pending_items: Vec::new(),
+                    realtime_sync_pending: false,
+                    #[cfg(unix)]
+                    directories_to_sync: Vec::new(),
                     meta: Some(session_meta),
                     cwd: cwd.clone(),
                     rollout_path: path,
@@ -1033,6 +1047,9 @@ impl RolloutRecorder {
                     writer: Some(JsonlWriter { sink }),
                     deferred_creation: false,
                     pending_items: Vec::new(),
+                    realtime_sync_pending: false,
+                    #[cfg(unix)]
+                    directories_to_sync: Vec::new(),
                     meta: None,
                     cwd: cwd.clone(),
                     rollout_path: path,
@@ -1386,8 +1403,8 @@ fn page_from_filesystem_scan(
     sort_key: ThreadSortKey,
 ) -> ThreadsPage {
     match sort_direction {
-        SortDirection::Asc => page,
-        SortDirection::Desc => truncate_fs_page(page, page_size, sort_key),
+        SortDirection::Asc if sort_key != ThreadSortKey::RecencyAt => page,
+        SortDirection::Asc | SortDirection::Desc => truncate_fs_page(page, page_size, sort_key),
     }
 }
 
@@ -1718,6 +1735,21 @@ fn precompute_new_rollout_path(
     Ok((path, timestamp))
 }
 
+#[cfg(unix)]
+fn rollout_directories_to_sync(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+    // Creating the file changes its parent. Creating a date directory changes its parent too.
+    let mut directories = Vec::new();
+    if let Some(parent) = path.parent() {
+        for directory in parent.ancestors() {
+            directories.push(directory.to_owned());
+            if directory.try_exists()? {
+                break;
+            }
+        }
+    }
+    Ok(directories)
+}
+
 fn open_log_file(path: &Path) -> std::io::Result<RolloutSink> {
     let path = compression::resolve_rollout_for_append_blocking(path)?;
     RolloutSink::create(path.as_path())
@@ -1733,6 +1765,11 @@ struct RolloutWriterState {
     /// True until a newly created rollout is first materialized.
     deferred_creation: bool,
     pending_items: Vec<RolloutItem>,
+    /// A sealed V1 event requires a disk barrier, even if background append drained its item.
+    realtime_sync_pending: bool,
+    /// Directory entries that must reach disk before the first realtime seal is acknowledged.
+    #[cfg(unix)]
+    directories_to_sync: Vec<PathBuf>,
     meta: Option<SessionMeta>,
     cwd: PathBuf,
     rollout_path: PathBuf,
@@ -1752,6 +1789,9 @@ impl RolloutWriterState {
     }
 
     fn add_items(&mut self, items: Vec<RolloutItem>) {
+        self.realtime_sync_pending |= items.iter().any(
+            |item| matches!(item, RolloutItem::RealtimeItem(item) if item.observed_at_ms.is_some()),
+        );
         self.pending_items.extend(items);
     }
 
@@ -1759,7 +1799,7 @@ impl RolloutWriterState {
         if self.is_deferred() {
             return;
         }
-        if let Err(err) = self.flush().await {
+        if let Err(err) = self.write_pending_with_recovery("append").await {
             self.enter_recovery_mode(&err);
         }
     }
@@ -1772,7 +1812,21 @@ impl RolloutWriterState {
         if self.is_deferred() && self.pending_items.is_empty() {
             return Ok(());
         }
-        self.write_pending_with_recovery("flush").await
+        self.write_pending_with_recovery("flush").await?;
+        if self.realtime_sync_pending
+            && let Some(writer) = self.writer.as_mut()
+        {
+            writer.sink.sync_data().await?;
+            #[cfg(unix)]
+            {
+                for directory in &self.directories_to_sync {
+                    tokio::fs::File::open(directory).await?.sync_all().await?;
+                }
+                self.directories_to_sync.clear();
+            }
+            self.realtime_sync_pending = false;
+        }
+        Ok(())
     }
 
     async fn shutdown(&mut self) -> std::io::Result<()> {
@@ -1834,7 +1888,26 @@ impl RolloutWriterState {
         }
 
         let path = self.rollout_path.clone();
-        let sink = tokio::task::spawn_blocking(move || open_log_file(path.as_path()))
+        #[cfg(unix)]
+        let sink = {
+            let creating = self.deferred_creation && self.directories_to_sync.is_empty();
+            let (sink, directories) = tokio::task::spawn_blocking(move || {
+                let directories = creating
+                    .then(|| rollout_directories_to_sync(&path))
+                    .transpose()?;
+                Ok::<_, IoError>((open_log_file(&path), directories))
+            })
+            .await
+            .map_err(IoError::other)??;
+            // Opening the file can fail after creating its directories. Carry the original
+            // directory entries through recovery rather than re-probing the partially made path.
+            if let Some(directories) = directories {
+                self.directories_to_sync = directories;
+            }
+            sink?
+        };
+        #[cfg(not(unix))]
+        let sink = tokio::task::spawn_blocking(move || open_log_file(&path))
             .await
             .map_err(IoError::other)??;
         self.writer = Some(JsonlWriter { sink });
@@ -2131,7 +2204,8 @@ impl From<codex_state::ThreadsPage> for ThreadsPage {
     }
 }
 
-fn thread_item_from_state_metadata(
+/// Projects a SQLite row into the rollout summary used by thread listings.
+pub fn thread_item_from_state_metadata(
     item: codex_state::ThreadMetadata,
     parent_thread_id: Option<ThreadId>,
 ) -> ThreadItem {

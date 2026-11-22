@@ -691,6 +691,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
             id.into(),
             crate::history_cell::McpInvocation {
                 server: "tools".into(),
+                environment_id: None,
                 tool: "inspect".into(),
                 arguments: None,
             },

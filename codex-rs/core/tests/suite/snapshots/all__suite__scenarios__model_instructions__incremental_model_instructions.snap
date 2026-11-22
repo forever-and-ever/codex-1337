@@ -15,8 +15,8 @@ Settings:
   stream: true
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=98b8f11c823d137f):
-        - namespace/functions; hash=39a686053a0a942f
+00:additional_tools/developer (2; hash=f4bc38296ca4448e):
+        - namespace/functions; hash=ee4efbddcbb81274
           - custom/python
           - custom/bash
           - function/exec_command
@@ -69,8 +69,8 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 01)
 Settings: same as window 1
 -- request 4 (compaction) --
-00:additional_tools/developer (2; hash=98b8f11c823d137f):
-        - namespace/functions; hash=39a686053a0a942f
+00:additional_tools/developer (2; hash=f4bc38296ca4448e):
+        - namespace/functions; hash=ee4efbddcbb81274
           - custom/python
           - custom/bash
           - function/exec_command
@@ -111,8 +111,8 @@ Settings: same as window 1
 ## Window 3 (after request 4: input diverged at item 02)
 Settings: same as window 1
 -- request 5 (turn) --
-00:additional_tools/developer (2; hash=98b8f11c823d137f):
-        - namespace/functions; hash=39a686053a0a942f
+00:additional_tools/developer (2; hash=f4bc38296ca4448e):
+        - namespace/functions; hash=ee4efbddcbb81274
           - custom/python
           - custom/bash
           - function/exec_command

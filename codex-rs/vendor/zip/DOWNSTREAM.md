@@ -1,16 +1,15 @@
 # Zip bzip2 backend feature forwarding
 
-This is the published zip 9.0.0 package from https://crates.io/crates/zip/9.0.0,
+This is the published zip 9.0.5 package from https://crates.io/crates/zip/9.0.5,
 sourced from https://github.com/zip-rs/zip2.
 
-- Upstream commit: `2b1c4244a6f42906c8b3f21a358bf2321d0baaef`
-- Archive SHA-256: `711e8c9646791c49b7eb799a19c4ae70a9b8372ddc6a1fa4778defd1e2aa5d5e`, verified against the workspace Cargo.lock
-  before extraction.
+- Upstream commit: `0123ed144cfa7d672dae78b79a034d8900f9aaeb`
+- Archive SHA-256: `6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e`, verified against the upstream Codex rust-v0.171.0 Cargo.lock before extraction.
 - License: MIT; LICENSE and upstream README are retained.
 
 The workspace excludes this directory from membership and patches crates.io
-zip to this path. All compiler source is byte-identical to the published
-archive. Cargo.lock and the original manifest are retained; repository-only
+zip to this path. The Rust sources are the published archive's sources with
+repository rustfmt applied. Cargo.lock and Cargo.toml.orig are retained; repository-only
 development/release/scanning metadata is omitted.
 
 ## Local delta

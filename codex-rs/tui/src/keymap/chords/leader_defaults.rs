@@ -29,6 +29,7 @@ pub(in crate::keymap) fn register(
     use KeyCode::Char;
     use KeymapContext::Chat;
     use KeymapContext::Global;
+    use KeymapContext::Pager;
     for (context, name, completion, spec) in [
         (Global, "select_transcript", Char('['), "["),
         (Chat, "open_presets", Char('p'), "p"),
@@ -54,6 +55,7 @@ pub(in crate::keymap) fn register(
         (Global, "sidebar_up", Char('k'), "k"),
         (Global, "sidebar_down", KeyCode::Down, "down"),
         (Global, "sidebar_down", Char('j'), "j"),
+        (Pager, "mark_markdown", Char('v'), "v"),
     ] {
         if remaining == 0 {
             break;

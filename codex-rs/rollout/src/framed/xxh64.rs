@@ -21,10 +21,12 @@ fn merge(hash: u64, accumulator: u64) -> u64 {
 
 /// XXH64 with seed 0.
 pub(super) fn xxh64(data: &[u8]) -> u64 {
-    let mut stripes = data.chunks_exact(32);
-    let mut hash = if data.len() >= 32 {
+    let (stripes, mut rest) = data.as_chunks::<32>();
+    let mut hash = if stripes.is_empty() {
+        P5
+    } else {
         let mut accumulators = [P1.wrapping_add(P2), P2, 0, 0u64.wrapping_sub(P1)];
-        for stripe in &mut stripes {
+        for stripe in stripes {
             for (index, accumulator) in accumulators.iter_mut().enumerate() {
                 *accumulator = round(*accumulator, super::u64_le(&stripe[index * 8..]));
             }
@@ -36,11 +38,8 @@ pub(super) fn xxh64(data: &[u8]) -> u64 {
             .wrapping_add(c.rotate_left(12))
             .wrapping_add(d.rotate_left(18));
         accumulators.into_iter().fold(hash, merge)
-    } else {
-        P5
     };
     hash = hash.wrapping_add(data.len() as u64);
-    let mut rest = stripes.remainder();
     while rest.len() >= 8 {
         hash ^= round(0, super::u64_le(rest));
         hash = hash.rotate_left(27).wrapping_mul(P1).wrapping_add(P4);

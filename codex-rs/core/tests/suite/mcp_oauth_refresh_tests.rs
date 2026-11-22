@@ -320,6 +320,7 @@ async fn oauth_mode_refresh_replaces_the_live_connection(
         .codex
         .call_mcp_tool(
             server_name,
+            /*environment_id*/ None,
             "calendar_list_events",
             /*arguments*/ None,
             /*meta*/ None,
@@ -352,6 +353,7 @@ async fn oauth_mode_refresh_replaces_the_live_connection(
             .codex
             .call_mcp_tool(
                 server_name,
+                /*environment_id*/ None,
                 "calendar_list_events",
                 /*arguments*/ None,
                 /*meta*/ None,

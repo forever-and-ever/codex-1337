@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
+use codex_sandboxing::WrappedSandboxCommand;
 use pretty_assertions::assert_eq;
 use test_case::test_case;
 
@@ -79,7 +80,7 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
                 "printf x >> \"$HOME/captures\"\nprofile_helper() { printf recovered; }\n",
             )?;
         }
-        let mut prepared = prepare_exec_request_with_telemetry(
+        let (mut prepared, _) = prepare_exec_request_with_telemetry(
             &params,
             params.env.clone(),
             /*runtime_paths*/ None,
@@ -90,7 +91,7 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
         )
         .await
         .expect("prepare capture");
-        let mut concurrent = prepare_exec_request_with_telemetry(
+        let (mut concurrent, _) = prepare_exec_request_with_telemetry(
             &params,
             params.env.clone(),
             /*runtime_paths*/ None,
@@ -107,11 +108,10 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
         } else {
             CapturePurpose::Execution
         };
-        let credential_brokers = codex_network_proxy::RemoteCredentialBrokerCache::default();
         let (first, second) = tokio::join!(
             biased;
-            cache.prepare(&params, &mut prepared, &telemetry, purpose, &credential_brokers),
-            cache.prepare(&params, &mut concurrent, &telemetry, CapturePurpose::Execution, &credential_brokers),
+            cache.prepare(&params, &mut prepared, &telemetry, purpose),
+            cache.prepare(&params, &mut concurrent, &telemetry, CapturePurpose::Execution),
         );
         let first = if prewarming {
             first.expect_err("prewarm must report failure without caching it");
@@ -120,38 +120,34 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
             first.expect("capture failure must preserve command fallback")
         };
         let second = second.expect("waiting command must complete even when prewarm fails");
-        for (prepared, reader) in [(&mut prepared, first), (&mut concurrent, second)] {
+        let replay = |prepared: WrappedSandboxCommand, reader: Option<std::fs::File>| {
+            let mut request = prepared.into_command_request().expect("shell command");
             if let Some(reader) = reader {
                 let fd = std::os::fd::AsRawFd::as_raw_fd(&reader);
-                for argument in &mut prepared.command {
-                    *argument = argument.replace(&format!("/dev/fd/{fd}"), "/dev/fd/SNAPSHOT");
-                }
+                let script = request.command.last_mut().expect("replay script");
+                *script = script.replace(&format!("/dev/fd/{fd}"), "/dev/fd/SNAPSHOT");
             }
-        }
-        assert_eq!(
-            (&prepared.command, &prepared.env),
-            (&concurrent.command, &concurrent.env)
-        );
+            (request.command, request.env)
+        };
+        let (command, env) = replay(concurrent, second);
 
         tokio::time::pause();
         if attempt < recovery_attempt || recovery_attempt > MAX_SNAPSHOT_ATTEMPTS {
-            cache
+            let replayed = cache
                 .prepare(
                     &params,
                     &mut prepared,
                     &telemetry,
                     CapturePurpose::Execution,
-                    &credential_brokers,
                 )
                 .await
                 .expect("capture must stay cached during backoff");
-            assert_eq!(
-                (&prepared.command, &prepared.env),
-                (&params.argv, &params.env)
-            );
+            assert!(replayed.is_none());
+            assert_eq!((&command, &env), (&params.argv, &params.env));
         } else {
-            assert_ne!(prepared.command, params.argv);
+            assert_eq!(&command[1..3], &["--norc", "-pc"]);
         }
+        assert_eq!(replay(prepared, first), (command, env));
         assert_eq!(
             std::fs::read_to_string(home.path().join("captures"))?,
             "x".repeat(

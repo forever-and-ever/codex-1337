@@ -48,12 +48,7 @@ impl ChatWidget {
         let Some(fast_tier) = self.current_model_fast_service_tier() else {
             return;
         };
-        let next_tier = if self.current_service_tier() == Some(fast_tier.id.as_str()) {
-            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
-        } else {
-            Some(fast_tier.id)
-        };
-        self.set_service_tier_selection(next_tier);
+        self.toggle_service_tier_from_ui(fast_tier);
     }
 
     pub(crate) fn toggle_service_tier_from_ui(&mut self, command: ServiceTierCommand) {
@@ -65,15 +60,15 @@ impl ChatWidget {
         self.set_service_tier_selection(next_tier);
     }
 
-    pub(super) fn sync_service_tier_commands(&mut self) {
+    pub(crate) fn sync_service_tier_commands(&mut self) {
         let commands = self.current_model_service_tier_commands();
         self.bottom_pane
             .set_service_tier_commands_enabled(!commands.is_empty());
         self.bottom_pane.set_service_tier_commands(commands);
     }
 
-    pub(super) fn current_model_service_tier_commands(&self) -> Vec<ServiceTierCommand> {
-        let model = self.current_model();
+    pub(crate) fn current_model_service_tier_commands(&self) -> Vec<ServiceTierCommand> {
+        let model = self.selected_model();
         self.model_catalog
             .try_list_models()
             .ok()
@@ -122,11 +117,15 @@ impl ChatWidget {
             .find(|tier| tier.name.eq_ignore_ascii_case(SPEED_TIER_FAST))
     }
 
+    pub(super) fn selected_model(&self) -> &str {
+        self.current_model()
+    }
+
     pub(super) fn refresh_effective_service_tier(&mut self) {
         self.effective_service_tier = service_tier_resolution::effective_service_tier(
             &self.config,
             &self.local_settings.notices,
-            self.current_model(),
+            self.selected_model(),
             &self.model_catalog.try_list_models().unwrap_or_default(),
         );
     }

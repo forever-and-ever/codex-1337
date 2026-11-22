@@ -4,6 +4,7 @@ use codex_connectors::ConnectorRuntimeTool;
 use codex_connectors::connector_runtime_context_key;
 use codex_connectors::connector_tool_is_synthetic;
 use codex_connectors::installed_connector_runtime;
+use codex_extension_api::McpServerContributionContext;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::MCP_TOOL_CODEX_APPS_META_KEY;
 use codex_mcp::McpRuntime;
@@ -67,23 +68,26 @@ impl AppsRequestProcessor {
             let mut model_visible_tool_names = None;
             let tools = if force_refresh && runtime_enabled {
                 let refresh_result = async {
-                    let mcp_config = match &thread_mcp {
-                        Some((_, mcp_config)) => Arc::clone(mcp_config),
-                        None => Arc::new(mcp_manager.runtime_config(&config).await),
-                    };
+                    if let Some((thread, _)) = &thread_mcp {
+                        let snapshot = thread.refresh_codex_apps_tools().await?;
+                        model_visible_tool_names = Some(snapshot.model_visible_tool_names);
+                        snapshot_age = Some(Duration::ZERO);
+                        return Ok(snapshot.tools);
+                    }
+                    let mcp_config = mcp_manager
+                        .runtime_config(McpServerContributionContext::global(&config))
+                        .await;
                     let mut mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
-                    mcp_servers.retain(|name, _| name == CODEX_APPS_MCP_SERVER_NAME);
-                    let mcp_config = if thread_mcp.is_some() {
-                        mcp_config
-                    } else {
-                        Arc::new(mcp_config.for_threadless_operations(&mcp_servers))
-                    };
+                    let codex_apps_server =
+                        codex_mcp::McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME);
+                    mcp_servers.retain(|key, _| key == &codex_apps_server);
+                    let mcp_config = Arc::new(mcp_config.for_threadless_operations(&mcp_servers));
                     anyhow::ensure!(
                         !mcp_servers.is_empty(),
                         "host-owned MCP server '{CODEX_APPS_MCP_SERVER_NAME}' is not enabled"
                     );
                     let startup_timeout = mcp_servers
-                        .get(CODEX_APPS_MCP_SERVER_NAME)
+                        .get(&codex_apps_server)
                         .and_then(|server| server.config().startup_timeout_sec)
                         .unwrap_or(CONNECTOR_RUNTIME_REFRESH_TIMEOUT);
                     let runtime_context = McpRuntimeContext::new(
@@ -142,11 +146,6 @@ impl AppsRequestProcessor {
                     result.map(|snapshot| {
                         snapshot_age = Some(Duration::ZERO);
                         model_visible_tool_names = Some(snapshot.model_visible_tool_names);
-                        if let Some((thread, _)) = &thread_mcp {
-                            thread.mark_mcp_runtime_dirty(
-                                codex_core::McpRefreshReason::CodexAppsToolRefresh,
-                            );
-                        }
                         snapshot.tools
                     })
                 }

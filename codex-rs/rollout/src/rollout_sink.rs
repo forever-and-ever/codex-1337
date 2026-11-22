@@ -105,6 +105,13 @@ impl RolloutSink {
         }
     }
 
+    pub(crate) async fn sync_data(&mut self) -> io::Result<()> {
+        match self {
+            Self::Plain(file) => file.sync_data().await,
+            Self::Framed(writer) => off_runtime(writer, |writer| writer.file().sync_data()).await,
+        }
+    }
+
     /// When the open frame should close because no line arrived.
     pub(crate) fn idle_deadline(&self) -> Option<Instant> {
         match self {

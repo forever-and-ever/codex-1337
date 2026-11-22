@@ -8,8 +8,13 @@ use codex_file_system::WindowsSandboxSelection;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
+use codex_network_proxy::NetworkProxyConfig;
+use codex_network_proxy::NetworkProxyHandle;
+use codex_network_proxy::RemoteNetworkProxyConfig;
+use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
 #[cfg(any(unix, windows))]
 use codex_protocol::models::PermissionProfile;
+use codex_sandboxing::WrappedSandboxCommand;
 #[cfg(target_os = "linux")]
 use codex_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -18,7 +23,6 @@ use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use tempfile::tempdir;
 
-use super::PreparedExecRequest;
 use super::prepare_exec_request_with_telemetry;
 #[cfg(unix)]
 use crate::CODEX_ARG0_EXEC_HELPER_ARG1;
@@ -35,7 +39,7 @@ async fn prepare_exec_request(
     runtime_paths: Option<&ExecServerRuntimeOptions>,
     network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     network_policy_audit_observer: Option<NetworkPolicyAuditObserver>,
-) -> Result<PreparedExecRequest, JSONRPCErrorError> {
+) -> Result<(WrappedSandboxCommand, Option<NetworkProxyHandle>), JSONRPCErrorError> {
     prepare_exec_request_with_telemetry(
         params,
         env,
@@ -82,7 +86,7 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
         network_proxy: None,
     };
 
-    let prepared = prepare_exec_request(
+    let (prepared, _) = prepare_exec_request(
         &params,
         HashMap::new(),
         Some(&runtime_paths),
@@ -91,9 +95,10 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
     )
     .await
     .expect("prepare sandboxed request");
+    let prepared = prepared.into_command_request().expect("command request");
 
     assert_ne!(prepared.command, params.argv);
-    assert_eq!(prepared.cwd, cwd);
+    assert_eq!(prepared.cwd, params.cwd);
     #[cfg(target_os = "linux")]
     {
         assert_eq!(
@@ -120,7 +125,7 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
         let mut params = params.clone();
         for policy_cwd in [&cwd, &explicit_cwd] {
             params.sandbox.as_mut().expect("sandbox").cwd = PathUri::from_abs_path(policy_cwd);
-            let prepared = prepare_exec_request(
+            let (prepared, _) = prepare_exec_request(
                 &params,
                 HashMap::new(),
                 Some(&runtime_paths),
@@ -129,6 +134,7 @@ async fn sandbox_request_wraps_native_argv_on_executor() {
             )
             .await
             .expect("prepare sandboxed request");
+            let prepared = prepared.into_command_request().expect("command request");
             let actual_cwds = prepared
                 .command
                 .windows(4)
@@ -198,7 +204,7 @@ async fn sandbox_request_routes_custom_arg0_to_inner_helper() {
         network_proxy: None,
     };
 
-    let prepared = prepare_exec_request(
+    let (prepared, _) = prepare_exec_request(
         &params,
         HashMap::new(),
         Some(&runtime_paths),
@@ -207,6 +213,7 @@ async fn sandbox_request_routes_custom_arg0_to_inner_helper() {
     )
     .await
     .expect("prepare sandboxed request");
+    let prepared = prepared.into_command_request().expect("command request");
     let helper_mode = prepared
         .command
         .iter()
@@ -289,7 +296,7 @@ async fn sandbox_request_preserves_prepared_managed_network_policy() {
         dangerously_allow_all_unix_sockets: false,
     });
 
-    let prepared = prepare_exec_request(
+    let (prepared, _) = prepare_exec_request(
         &params,
         HashMap::new(),
         Some(&runtime_paths),
@@ -298,6 +305,7 @@ async fn sandbox_request_preserves_prepared_managed_network_policy() {
     )
     .await
     .expect("prepare managed-network sandbox request");
+    let prepared = prepared.into_command_request().expect("command request");
     let policy = seatbelt_policy_arg(&prepared.command);
     let unix_socket_definitions = prepared
         .command
@@ -334,7 +342,7 @@ async fn sandbox_request_only_allows_all_unix_sockets_when_configured() {
             .as_mut()
             .expect("managed network context")
             .dangerously_allow_all_unix_sockets = allow_all;
-        let prepared = prepare_exec_request(
+        let (prepared, _) = prepare_exec_request(
             &params,
             HashMap::new(),
             Some(&runtime_paths),
@@ -343,6 +351,7 @@ async fn sandbox_request_only_allows_all_unix_sockets_when_configured() {
         )
         .await
         .expect("prepare managed-network sandbox request");
+        let prepared = prepared.into_command_request().expect("command request");
         let policy = seatbelt_policy_arg(&prepared.command);
 
         assert_eq!(
@@ -388,7 +397,7 @@ async fn native_request_preserves_native_launch_fields() {
         network_proxy: None,
     };
 
-    let prepared = prepare_exec_request(
+    let (prepared, _) = prepare_exec_request(
         &params,
         env.clone(),
         /*runtime_paths*/ None,
@@ -397,9 +406,53 @@ async fn native_request_preserves_native_launch_fields() {
     )
     .await
     .expect("prepare native request");
+    let prepared = prepared.into_command_request().expect("command request");
 
     assert_eq!(prepared.command, params.argv);
-    assert_eq!(prepared.cwd, cwd);
+    assert_eq!(prepared.cwd, params.cwd);
     assert_eq!(prepared.env, env);
     assert_eq!(prepared.arg0, params.arg0);
+}
+
+// Client capability negotiation cannot authorize a proxy through raw process/start.
+#[tokio::test]
+async fn retired_network_requests_cannot_downgrade_to_a_native_launch() {
+    let mut params: ExecParams = serde_json::from_value(serde_json::json!({
+        "processId": "removed-proxy",
+        "argv": ["/bin/false"],
+        "cwd": PathUri::from_host_native_path(std::env::current_dir().unwrap()).unwrap(),
+        "env": {},
+        "tty": false
+    }))
+    .unwrap();
+
+    for transparent in [false, true] {
+        let mut request = serde_json::to_value(&params).unwrap();
+        request["managedNetwork"] = serde_json::json!({"transparentTcp": transparent});
+        assert_eq!(
+            serde_json::from_value::<ExecParams>(request).is_err(),
+            transparent
+        );
+    }
+
+    let proxy = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig::default())
+        .expect("inactive proxy wire configuration");
+    params.network_proxy = Some(RemoteNetworkProxyLaunchConfig::new(proxy));
+    let error = prepare_exec_request(&params, HashMap::new(), None, None, None)
+        .await
+        .err()
+        .expect("executor-local proxy launch must be rejected");
+    assert!(error.message.contains("network proxy is not supported"));
+
+    params.network_proxy = None;
+    params.enforce_managed_network = true;
+    let error = prepare_exec_request(&params, HashMap::new(), None, None, None)
+        .await
+        .err()
+        .expect("native launch must not erase managed network enforcement");
+    assert!(
+        error
+            .message
+            .contains("managed network enforcement requires")
+    );
 }

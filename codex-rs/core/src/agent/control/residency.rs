@@ -99,6 +99,12 @@ impl LocalAgentControl {
 
 impl LocalAgentRuntime {
     /// Pins and touches the registered runtime without waiting for unrelated eviction.
+    pub(super) fn touch_v2_recipient(&self, thread: &CodexThread) {
+        if is_resident_candidate(thread) {
+            self.residency.touch(thread.session.thread_id);
+        }
+    }
+
     pub(crate) async fn pin_v2_residency(
         &self,
         thread: &CodexThread,
@@ -112,7 +118,7 @@ impl LocalAgentRuntime {
         if !std::ptr::eq(thread, registered.as_ref()) {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        self.residency.touch(thread_id);
+        self.touch_v2_recipient(thread);
         Ok(Some(guard))
     }
 }

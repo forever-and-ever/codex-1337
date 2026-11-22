@@ -87,6 +87,7 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
     );
     Box::pin(fixture.codex.call_mcp_tool(
         "leased_mcp",
+        /*environment_id*/ None,
         "echo",
         Some(json!({"message": "after refresh"})),
         /*meta*/ None,
@@ -97,6 +98,7 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
     let in_flight = tokio::spawn(async move {
         Box::pin(thread.call_mcp_tool(
             "leased_mcp",
+            /*environment_id*/ None,
             "sync",
             Some(json!({"sleep_after_ms": 30_000})),
             /*meta*/ None,
@@ -155,6 +157,7 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
     fixture.codex.detach_mcp_extension(&first).await;
     Box::pin(fixture.codex.call_mcp_tool(
         "leased_mcp",
+        /*environment_id*/ None,
         "echo",
         Some(json!({"message": "replacement"})),
         /*meta*/ None,

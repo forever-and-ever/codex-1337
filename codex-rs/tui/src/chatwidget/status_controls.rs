@@ -5,7 +5,8 @@
 //! history-facing `/status` surface.
 
 use super::*;
-use crate::bottom_pane::footer_content::FooterContent;
+use crate::bottom_pane::StatusLine;
+use crate::bottom_pane::terminal_title_setup;
 use crate::status::thread_cost_micros;
 
 impl ChatWidget {
@@ -85,7 +86,7 @@ impl ChatWidget {
     }
 
     /// Sets the currently rendered footer status-line value.
-    pub(crate) fn set_status_line(&mut self, status_line: Option<FooterContent>) {
+    pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) {
         self.bottom_pane.set_status_line(status_line);
     }
 
@@ -221,7 +222,7 @@ impl ChatWidget {
             .map(|ti| &ti.total_token_usage)
             .unwrap_or(&default_usage);
         let collaboration_mode = self.collaboration_mode_label();
-        let model = self.current_model().to_string();
+        let model = self.selected_model().to_string();
         let model_default_reasoning_effort =
             self.model_catalog
                 .try_list_models()
@@ -232,9 +233,10 @@ impl ChatWidget {
                         .find(|preset| preset.model == model)
                         .map(|preset| preset.default_reasoning_effort)
                 });
+        let configured_reasoning_effort = self.config.model_reasoning_effort.clone();
         let reasoning_effort_override = Some(
-            self.effective_reasoning_effort()
-                .or_else(|| self.config.model_reasoning_effort.clone())
+            self.status_reasoning_effort()
+                .or(configured_reasoning_effort)
                 .or(model_default_reasoning_effort),
         );
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
@@ -259,7 +261,7 @@ impl ChatWidget {
             rate_limit_snapshots.as_slice(),
             self.current_plan_type(),
             Local::now(),
-            self.model_display_name(),
+            self.status_model_display_name(),
             collaboration_mode,
             reasoning_effort_override,
             agents_summary,
@@ -310,47 +312,30 @@ impl ChatWidget {
         request_id: u64,
         snapshots: Vec<RateLimitSnapshot>,
     ) {
-        if !self
+        let Some(index) = self
             .refreshing_status_outputs
             .iter()
-            .any(|(pending_request_id, _)| *pending_request_id == request_id)
-        {
+            .position(|(pending_request_id, _)| *pending_request_id == request_id)
+        else {
             return;
-        }
-
+        };
         let fresh = !snapshots.is_empty();
         for snapshot in snapshots {
             self.on_rate_limit_snapshot(Some(snapshot));
         }
+        let (_, handle) = self.refreshing_status_outputs.swap_remove(index);
 
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()
             .cloned()
             .collect();
-        let now = Local::now();
-        let mut remaining = Vec::with_capacity(self.refreshing_status_outputs.len());
-        let mut updated_any = false;
-        for (pending_request_id, handle) in self.refreshing_status_outputs.drain(..) {
-            if pending_request_id == request_id {
-                updated_any = true;
-                handle.finish_rate_limit_refresh(
-                    if fresh {
-                        rate_limit_snapshots.as_slice()
-                    } else {
-                        &[]
-                    },
-                    now,
-                );
-            } else {
-                remaining.push((pending_request_id, handle));
-            }
-        }
-        self.refreshing_status_outputs = remaining;
-        if updated_any {
-            self.flush_status_outputs();
-            self.request_redraw();
-        }
+        handle.finish_rate_limit_refresh(
+            if fresh { &rate_limit_snapshots } else { &[] },
+            Local::now(),
+        );
+        self.flush_status_outputs();
+        self.request_redraw();
     }
 
     pub(super) fn open_status_line_setup(&mut self) {
@@ -369,7 +354,7 @@ impl ChatWidget {
         let configured_terminal_title_items = self.configured_terminal_title_items();
         self.terminal_title_setup_original_items =
             Some(self.local_settings.tui.terminal_title.clone());
-        let view = TerminalTitleSetupView::new(
+        let view = terminal_title_setup(
             Some(configured_terminal_title_items.as_slice()),
             self.terminal_title_preview_data(),
             self.app_event_tx.clone(),

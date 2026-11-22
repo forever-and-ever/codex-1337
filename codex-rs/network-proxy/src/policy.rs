@@ -41,6 +41,12 @@ pub fn is_loopback_host(host: &Host) -> bool {
     false
 }
 
+/// The local-binding exception applies only to localhost and non-public IP literals.
+pub(crate) fn is_local_literal(host: &str) -> bool {
+    let unscoped = unscoped_ip_literal(host).unwrap_or(host);
+    host == "localhost" || unscoped.parse::<IpAddr>().is_ok_and(is_non_public_ip)
+}
+
 /// Classifies IP literals excluded from public network destinations; does not resolve DNS.
 pub fn is_non_public_ip(ip: IpAddr) -> bool {
     match ip {

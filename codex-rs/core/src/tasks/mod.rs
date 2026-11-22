@@ -6,6 +6,7 @@ mod review;
 mod user_shell;
 
 use crate::McpRefreshReason;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -16,12 +17,14 @@ use codex_extension_api::ThreadIdleCause;
 use futures::future::BoxFuture;
 use tokio::select;
 use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::Span;
 use tracing::field;
+use tracing::info;
 use tracing::info_span;
 use tracing::trace;
 use tracing::trace_span;
@@ -32,6 +35,7 @@ use crate::codex_thread::BackgroundTerminalInfo;
 use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::hook_runtime::run_turn_interrupt_hooks;
+use crate::session::SamplingInterrupt;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn::McpStartupRequirements;
@@ -42,6 +46,7 @@ use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
 use crate::state::TurnState;
+use crate::turn_diff_tracker::TurnDiffTracker;
 use admission::TaskAdmission;
 use codex_analytics::TurnProfileFact;
 use codex_analytics::TurnTokenUsageFact;
@@ -54,6 +59,7 @@ use codex_otel::TURN_TOOL_CALL_METRIC;
 use codex_otel::TURN_UNIFIED_EXEC_RUNNING_PROCESSES_METRIC;
 use codex_otel::auth_storage::AuthStorageOriginator;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -62,11 +68,15 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
+use codex_protocol::protocol::TurnDiffEvent;
 use codex_protocol::protocol::WarningEvent;
+use codex_protocol::turn_input::NotSubmittedReason;
+use codex_protocol::turn_input::TurnInputSubmission;
 use codex_thread_store::PersistContext;
 
 pub(crate) use admission::HostTurnStarted;
 use codex_features::Feature;
+use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 pub(crate) use compact::CompactTask;
@@ -81,6 +91,11 @@ const TASK_COMPACT_METRIC: &str = "codex.task.compact";
 static ACTIVE_TURNS: Gauge = Gauge::new("core.turns.active");
 
 pub(crate) type SessionTaskResult = CodexResult<Option<regular::RegularTaskOutput>>;
+
+/// Whether task completion should publish an interrupted turn.
+pub(crate) fn ends_turn_as_interrupted(error: &CodexErr) -> bool {
+    matches!(error.details(), CodexErrorDetails::TurnAborted)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InterruptedTurnHistoryMarker {
@@ -109,20 +124,28 @@ impl InterruptedTurnHistoryMarker {
 /// interrupted fork snapshots.
 pub(crate) fn interrupted_turn_history_marker(
     marker: InterruptedTurnHistoryMarker,
+    cause: Option<&CodexErrorInfo>,
 ) -> Option<ResponseItem> {
-    match marker {
-        InterruptedTurnHistoryMarker::Disabled => None,
-        InterruptedTurnHistoryMarker::ContextualUser => Some(ContextualUserFragment::into(
-            crate::context::TurnAborted::new(crate::context::TurnAborted::INTERRUPTED_GUIDANCE),
-        )),
-        InterruptedTurnHistoryMarker::Developer => {
+    match (marker, cause.is_some_and(is_automatic_rollout_stop)) {
+        (InterruptedTurnHistoryMarker::Disabled, _) => None,
+        (InterruptedTurnHistoryMarker::ContextualUser, false) => {
+            Some(ContextualUserFragment::into(
+                crate::context::TurnAborted::new(crate::context::TurnAborted::INTERRUPTED_GUIDANCE),
+            ))
+        }
+        (InterruptedTurnHistoryMarker::ContextualUser, true)
+        | (InterruptedTurnHistoryMarker::Developer, _) => {
             let marker = crate::context::TurnAborted::new(
-                crate::context::TurnAborted::INTERRUPTED_DEVELOPER_GUIDANCE,
+                crate::context::TurnAborted::INTERRUPTED_NEUTRAL_GUIDANCE,
             );
             let (_, content) = marker.render_fragment().into_parts();
             Some(RenderedFragment::new("developer", content).into())
         }
     }
+}
+
+fn is_automatic_rollout_stop(cause: &CodexErrorInfo) -> bool {
+    matches!(cause, CodexErrorInfo::SessionBudgetExceeded)
 }
 
 fn emit_turn_network_proxy_metric(
@@ -282,7 +305,7 @@ impl Session {
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
-    ) -> CodexResult<()> {
+    ) -> CodexResult<TurnInputSubmission> {
         self.check_agent_mail_task_start().await?;
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
         self.clear_connector_selection().await;
@@ -291,14 +314,14 @@ impl Session {
 
     #[expect(
         clippy::await_holding_invalid_type,
-        reason = "record the started turn atomically with task registration"
+        reason = "register the turn and its pending input atomically with the suspension fence"
     )]
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: impl Into<TaskAdmission> + Send,
         task: T,
-    ) -> CodexResult<()> {
+    ) -> CodexResult<TurnInputSubmission> {
         let input = input.into();
         if let Err(error) = self.check_agent_mail_task_start().await {
             let mut active = self.active_turn.lock().await;
@@ -349,6 +372,23 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
+        let turn_state = {
+            let Some(mut active) = input.lock(self).await else {
+                let reason = if self.turn_starts_closed() {
+                    NotSubmittedReason::ServerDraining
+                } else {
+                    NotSubmittedReason::Superseded
+                };
+                return Ok(TurnInputSubmission::NotSubmitted { reason });
+            };
+            let turn = active.as_mut().expect("task admission owns an active turn");
+            debug_assert!(turn.task.is_none());
+            turn.turn_id = Some(turn_context.sub_id.clone());
+            turn.finishing = None;
+            Arc::clone(&turn.turn_state)
+        };
+        turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
+
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
@@ -360,15 +400,20 @@ impl Session {
             .acquire_owned()
             .await
             .unwrap_or_else(|_| unreachable!("account work semaphore is never closed"));
-        let Some(mut active) = input.lock(self).await else {
-            return if self.runtime_holds.is_closing() {
-                Err(codex_protocol::error::CodexErr::ThreadNotFound(
-                    self.thread_id,
-                ))
-            } else {
-                Ok(())
-            };
-        };
+        let mut active = self.active_turn.lock().await;
+        if self.turn_starts_closed() {
+            return Ok(TurnInputSubmission::NotSubmitted {
+                reason: NotSubmittedReason::ServerDraining,
+            });
+        }
+        if !active
+            .as_ref()
+            .is_some_and(|turn| turn.task.is_none() && Arc::ptr_eq(&turn.turn_state, &turn_state))
+        {
+            return Ok(TurnInputSubmission::NotSubmitted {
+                reason: NotSubmittedReason::Superseded,
+            });
+        }
         let outcome_handoff = if let Some(reporting) = &self.outcome_reporting {
             if reporting.handoffs.is_closed() {
                 return Err(codex_protocol::error::CodexErr::TurnAborted);
@@ -383,10 +428,7 @@ impl Session {
         }
         let turn = active.as_mut().expect("task admission owns an active turn");
         debug_assert!(turn.task.is_none());
-        turn.finishing = None;
-        let turn_state = Arc::clone(&turn.turn_state);
         let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
-        turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
             .await;
@@ -515,6 +557,11 @@ impl Session {
             handle: AbortOnDropHandle::new(handle),
             kind: task_kind,
             task,
+            mcp_elicitation_cancellation: if SamplingInterrupt::enabled(&turn_context) {
+                cancellation_token.child_token()
+            } else {
+                cancellation_token.clone()
+            },
             cancellation_token,
             turn_context: Arc::clone(&turn_context),
             _agent_execution_guard: agent_execution_guard,
@@ -524,7 +571,10 @@ impl Session {
             _timer: timer,
         };
         turn.task = Some(running_task);
-        Ok(())
+        Ok(TurnInputSubmission::Started {
+            turn_id: turn_context.sub_id.clone(),
+            root_turn_id: turn_context.root_turn_id(),
+        })
     }
 
     /// Returns whether an extension has marked this thread as durably asleep.
@@ -647,6 +697,14 @@ impl Session {
         if let Some(id) = start_options.root_turn_id {
             turn_context.turn_metadata_state.set_root_turn_id(id);
         }
+        turn_context
+            .turn_metadata_state
+            .update_responsesapi_client_metadata(
+                codex_protocol::turn_input::ResponsesApiClientMetadataUpdate {
+                    replacement: Some(start_options.inherited_client_metadata),
+                    ..Default::default()
+                },
+            );
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
         // InputQueue retains custody until start_task passes admission and drains it.
@@ -680,10 +738,38 @@ impl Session {
         }
     }
 
+    pub(crate) fn interrupt_task(
+        self: &Arc<Self>,
+        active: MutexGuard<'_, Option<ActiveTurn>>,
+    ) -> impl Future<Output = ()> + Send + use<> {
+        info!("interrupt received: abort current task, if any");
+        // Release the admission lock before creating the asynchronous cleanup.
+        let turn = self.take_active_turn(active, &TurnAbortReason::Interrupted);
+        let session = Arc::clone(self);
+        async move {
+            let had_active_turn = turn.is_some();
+            session
+                .abort_taken_tasks(turn, TurnAbortReason::Interrupted)
+                .await;
+            if !had_active_turn {
+                session.cancel_mcp_startup();
+            }
+        }
+    }
+
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
+        let active = self.take_active_turn(self.active_turn.lock().await, &reason);
+        self.abort_taken_tasks(active, reason).await;
+    }
+
+    async fn abort_taken_tasks(
+        self: &Arc<Self>,
+        active: Option<ActiveTurn>,
+        reason: TurnAbortReason,
+    ) {
         let mut aborted_turn = false;
         let mut active_turn_to_clear = None;
-        if let Some(mut active_turn) = self.take_active_turn(&reason).await {
+        if let Some(mut active_turn) = active {
             let task = active_turn.task.take();
             aborted_turn = task.is_some();
             if let Some(task) = task {
@@ -717,30 +803,32 @@ impl Session {
         reason: TurnAbortReason,
         error: Option<ErrorEvent>,
     ) -> bool {
-        let active_turn = {
-            let mut active = self.active_turn.lock().await;
-            if active
-                .as_ref()
-                .and_then(|active_turn| active_turn.task.as_ref())
-                .is_some_and(|task| task.turn_context.sub_id == turn_id)
-            {
-                if matches!(
-                    reason,
-                    TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-                ) {
-                    self.mark_interrupted();
-                }
-                active.take()
-            } else {
-                None
-            }
-        };
+        let active_turn = self.take_named_active_turn(turn_id, &reason).await;
         let Some(active_turn) = active_turn else {
             return false;
         };
 
         self.finish_turn_abort(active_turn, reason, error).await;
         true
+    }
+
+    async fn take_named_active_turn(
+        &self,
+        turn_id: &str,
+        reason: &TurnAbortReason,
+    ) -> Option<ActiveTurn> {
+        let mut active = self.active_turn.lock().await;
+        let turn = &active.as_ref()?.task.as_ref()?.turn_context;
+        if turn.sub_id != turn_id {
+            return None;
+        }
+        if matches!(
+            reason,
+            TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+        ) {
+            self.mark_interrupted();
+        }
+        active.take()
     }
 
     pub(crate) async fn finish_turn_abort(
@@ -773,27 +861,34 @@ impl Session {
         turn_context: Arc<TurnContext>,
         task_result: SessionTaskResult,
     ) -> Option<McpStartupRequirements> {
-        let (regular_output, abort_reason, task_error) = match task_result {
+        let (regular_output, abort, task_error) = match task_result {
             Ok(output) => (output, None, None),
-            Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted) => {
-                (None, Some(TurnAbortReason::Interrupted), None)
+            Err(err) if ends_turn_as_interrupted(&err) => {
+                let error: Option<ErrorEvent> = None;
+                (None, Some((TurnAbortReason::Interrupted, error)), None)
             }
             Err(err) => {
                 warn!(%err, "session task returned an unexpected error");
                 (None, None, Some(err))
             }
         };
-        let can_continue =
-            regular_output.is_some() && turn_context.terminal_error.lock().await.is_none();
+        // A late steer cannot reopen the stopped rollout after the turn loop has finished.
+        let can_continue = regular_output.is_some()
+            && turn_context.terminal_error.lock().await.is_none()
+            && !self.work_budget().is_exhausted();
         let finishing = CancellationToken::new();
         let finish_recording = finishing.clone().drop_guard();
-        let (turn_state, unadmitted_task, mut pending_input, outcome_handoff) = {
+        let (turn_state, unadmitted_task, mut pending_input, outcome_handoff, sampling_interrupted) = {
             let mut active = self.active_turn.lock().await;
             let active_turn = active.as_mut()?;
             if !Arc::ptr_eq(&active_turn.task.as_ref()?.turn_context, &turn_context) {
                 return None;
             }
-            if can_continue {
+            let sampling_interrupted = active_turn
+                .sampling_interrupt
+                .as_ref()
+                .is_some_and(SamplingInterrupt::is_requested);
+            if can_continue && !sampling_interrupted {
                 let state = active_turn.turn_state.lock().await;
                 if state.accepts_mailbox_delivery_for_current_turn()
                     && !state.pending_input.is_empty()
@@ -810,6 +905,7 @@ impl Session {
                     .then_some(task.task),
                 task.pending_initial_input.unwrap_or_default(),
                 task.outcome_handoff,
+                sampling_interrupted,
             )
         };
         turn_context
@@ -847,6 +943,36 @@ impl Session {
         if let Some(task) = unadmitted_task {
             // The task never ran. Unwind setup such as entering review mode.
             task.abort(Arc::clone(self), Arc::clone(&turn_context))
+                .await;
+        }
+        let stop_cause = {
+            let terminal_error = turn_context.terminal_error.lock().await;
+            abort
+                .as_ref()
+                .and_then(|(_, error)| error.as_ref())
+                .and_then(|error| error.codex_error_info.clone())
+                .or_else(|| task_error.as_ref().map(CodexErr::to_codex_protocol_error))
+                .or_else(|| {
+                    terminal_error
+                        .as_ref()
+                        .and_then(|error| error.codex_error_info.clone())
+                })
+                .filter(is_automatic_rollout_stop)
+        };
+        if sampling_interrupted
+            && turn_context
+                .config
+                .features
+                .enabled(Feature::CodeModeInterrupt)
+        {
+            // A cell can finish registering while its dispatch is being cancelled.
+            self.services
+                .code_mode_service
+                .interrupt_active_cells()
+                .await;
+        }
+        if sampling_interrupted || stop_cause.is_some() {
+            self.record_interrupted_turn_history(&turn_context, stop_cause.as_ref())
                 .await;
         }
         drop(finish_recording);
@@ -972,16 +1098,16 @@ impl Session {
                 profile,
             });
         let idle_cause = if matches!(
-            abort_reason.as_ref(),
+            abort.as_ref().map(|(reason, _)| reason),
             Some(TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited)
         ) {
             ThreadIdleCause::Interrupted
-        } else if abort_reason.is_none() && turn_context.terminal_error.lock().await.is_some() {
+        } else if abort.is_none() && turn_context.terminal_error.lock().await.is_some() {
             ThreadIdleCause::Failed
         } else {
             ThreadIdleCause::Completed
         };
-        let event = if let Some(reason) = abort_reason {
+        let event = if let Some((reason, error)) = abort {
             if reason == TurnAbortReason::Interrupted {
                 run_turn_interrupt_hooks(self, &turn_context, &turn_state).await;
             }
@@ -991,7 +1117,7 @@ impl Session {
                 root_turn_id: Some(turn_context.root_turn_id()),
                 turn_id: Some(turn_context.sub_id.clone()),
                 reason,
-                error: None,
+                error,
                 started_at,
                 completed_at,
                 duration_ms,
@@ -1017,6 +1143,7 @@ impl Session {
         };
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
+        self.finish_turn_diff(&turn_context, &event).await;
         let cleared_active_turn = {
             let _publication;
             if !saved_guardian_completion {
@@ -1041,6 +1168,8 @@ impl Session {
         drop(outcome_handoff);
         if cleared_active_turn {
             self.settle_idle_account().await;
+        }
+        if cleared_active_turn && !sampling_interrupted {
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
         // Private reviewers already flushed the terminal event before delivering it.
@@ -1048,14 +1177,29 @@ impl Session {
         if !saved_guardian_completion && let Err(err) = self.flush_rollout().await {
             warn!("failed to flush rollout after emitting terminal turn event: {err}");
         }
-        if cleared_active_turn {
+        if cleared_active_turn && !sampling_interrupted {
             self.maybe_start_turn_for_pending_work().await;
         }
         None
     }
 
-    async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
-        let mut active = self.active_turn.lock().await;
+    async fn finish_turn_diff(&self, turn: &TurnContext, terminal_event: &EventMsg) {
+        let tracker = turn.extension_data.remove::<Mutex<TurnDiffTracker>>();
+        let (EventMsg::TurnComplete(_), Some(tracker)) = (terminal_event, tracker) else {
+            return;
+        };
+        let unified_diff = tracker.lock().await.get_unified_diff();
+        if let Some(unified_diff) = unified_diff {
+            self.send_event(turn, EventMsg::TurnDiff(TurnDiffEvent { unified_diff }))
+                .await;
+        }
+    }
+
+    fn take_active_turn(
+        &self,
+        mut active: MutexGuard<'_, Option<ActiveTurn>>,
+        reason: &TurnAbortReason,
+    ) -> Option<ActiveTurn> {
         if matches!(
             reason,
             TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
@@ -1063,10 +1207,9 @@ impl Session {
             turn.task.is_some()
                 || (self.enabled(Feature::WakeOnAgentMessages) && turn.finishing.is_none())
         }) {
-            // Message wakes reserve work before registering a task. With the
-            // feature enabled, stopping a reservation must block later mail too.
-            // Finishing turns must retain their status until completion is
-            // persisted, so capacity eviction cannot close their rollout writer.
+            // A message wake can reserve work before registering a task. Mark
+            // it interrupted too, but leave a finishing turn's status intact
+            // until its terminal event is persisted.
             self.mark_interrupted();
         }
         active.take()
@@ -1088,6 +1231,32 @@ impl Session {
             .unified_exec_manager
             .terminate_process(process_id)
             .await
+    }
+
+    async fn record_interrupted_turn_history(
+        &self,
+        turn_context: &TurnContext,
+        cause: Option<&CodexErrorInfo>,
+    ) {
+        let Some(marker) = interrupted_turn_history_marker(
+            InterruptedTurnHistoryMarker::from_config_and_version(
+                turn_context.config.as_ref(),
+                turn_context.multi_agent_version,
+            ),
+            cause,
+        ) else {
+            return;
+        };
+        self.record_conversation_items(
+            turn_context,
+            turn_context.model_info(),
+            std::slice::from_ref(&marker),
+        )
+        .await;
+        // Clients may re-read the rollout as soon as they receive the terminal event.
+        if let Err(err) = self.flush_rollout().await {
+            warn!("failed to flush interrupted-turn marker before terminal event: {err}");
+        }
     }
 
     async fn handle_task_abort(
@@ -1159,28 +1328,14 @@ impl Session {
             .abort(Arc::clone(self), Arc::clone(&task.turn_context))
             .await;
 
-        if reason == TurnAbortReason::Interrupted
-            && let Some(marker) = interrupted_turn_history_marker(
-                InterruptedTurnHistoryMarker::from_config_and_version(
-                    task.turn_context.config.as_ref(),
-                    task.turn_context.multi_agent_version,
-                ),
-            )
-        {
-            self.record_conversation_items(
-                task.turn_context.as_ref(),
-                task.turn_context.model_info(),
-                std::slice::from_ref(&marker),
+        if reason == TurnAbortReason::Interrupted {
+            self.record_interrupted_turn_history(
+                &task.turn_context,
+                error
+                    .as_ref()
+                    .and_then(|error| error.codex_error_info.as_ref()),
             )
             .await;
-            // Ensure the marker is durably visible before emitting TurnAborted: some clients
-            // synchronously re-read the rollout on receipt of the abort event.
-            if let Err(err) = self.flush_rollout().await {
-                warn!("failed to flush interrupted-turn marker before emitting TurnAborted: {err}");
-            }
-        }
-
-        if reason == TurnAbortReason::Interrupted {
             run_turn_interrupt_hooks(self, &task.turn_context, turn_state).await;
         }
 
@@ -1216,6 +1371,7 @@ impl Session {
             completed_at,
             duration_ms,
         });
+        self.finish_turn_diff(&task.turn_context, &event).await;
         self.send_event(task.turn_context.as_ref(), event).await;
         // Regular items were flushed before this terminal event was appended; buffering
         // thread writers may not flush it without another explicit barrier.

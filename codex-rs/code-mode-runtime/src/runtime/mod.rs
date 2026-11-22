@@ -18,12 +18,11 @@ use std::sync::mpsc as std_mpsc;
 use std::thread;
 
 use crate::TaskFailureHandler;
+use crate::session_runtime::CreateCellRequest;
 use crate::session_runtime::OutputItem;
+use crate::session_runtime::ToolCatalog;
 use crate::v8_init::ensure_v8_initialized;
 use codex_code_mode_protocol::CodeModeToolKind;
-use codex_code_mode_protocol::EnabledToolMetadata;
-use codex_code_mode_protocol::ExecuteRequest;
-use codex_code_mode_protocol::enabled_tool_metadata;
 use codex_protocol::ToolName;
 pub(crate) use event_channel::RuntimeEventReceiver;
 pub(crate) use event_channel::RuntimeEventSender;
@@ -78,7 +77,7 @@ pub(crate) enum RuntimeEvent {
 
 pub(crate) fn spawn_runtime(
     stored_values: HashMap<String, Arc<JsonValue>>,
-    request: ExecuteRequest,
+    request: CreateCellRequest,
     event_tx: impl Into<RuntimeEventSender>,
     pending_mode: PendingRuntimeMode,
     task_failure_handler: Option<TaskFailureHandler>,
@@ -97,14 +96,9 @@ pub(crate) fn spawn_runtime(
     let (control_tx, control_rx) = std_mpsc::channel();
     let runtime_command_tx = command_tx.clone();
     let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
-    let enabled_tools = request
-        .enabled_tools
-        .into_iter()
-        .map(enabled_tool_metadata)
-        .collect::<Arc<[_]>>();
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
-        enabled_tools,
+        enabled_tools: request.enabled_tools,
         source: request.source,
         stored_values,
     };
@@ -148,7 +142,7 @@ fn spawn_supervised_runtime_thread(
 #[derive(Clone)]
 struct RuntimeConfig {
     tool_call_id: String,
-    enabled_tools: Arc<[EnabledToolMetadata]>,
+    enabled_tools: ToolCatalog,
     source: String,
     stored_values: HashMap<String, Arc<JsonValue>>,
 }
@@ -159,8 +153,8 @@ pub(super) struct RuntimeState {
     pending_timeouts: HashMap<u64, timers::ScheduledTimeout>,
     stored_values: HashMap<String, Arc<JsonValue>>,
     stored_value_writes: HashMap<String, Arc<JsonValue>>,
-    // TELOS(compact-contracts): on-demand discovery retains the cell's original schemas.
-    enabled_tools: Arc<[EnabledToolMetadata]>,
+    // TELOS(compact-contracts): on-demand discovery retains original schemas.
+    enabled_tools: ToolCatalog,
     next_tool_call_id: u64,
     next_timeout_id: u64,
     tool_call_id: String,
@@ -201,8 +195,6 @@ fn run_runtime(
     let context = v8::Context::new(scope, Default::default());
     let scope = &mut v8::ContextScope::new(scope, context);
 
-    let enabled_tools = Arc::clone(&config.enabled_tools);
-
     scope.set_slot(RuntimeState {
         event_tx: event_tx.clone(),
         pending_tool_calls: HashMap::new(),
@@ -218,7 +210,7 @@ fn run_runtime(
         sh_calls: Vec::new(),
     });
 
-    if let Err(error_text) = globals::install_globals(scope, &enabled_tools) {
+    if let Err(error_text) = globals::install_globals(scope) {
         send_result(&event_tx, HashMap::new(), Some(error_text));
         return;
     }
@@ -361,7 +353,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tokio::sync::mpsc;
 
-    use super::ExecuteRequest;
+    use super::CreateCellRequest;
     use super::PendingRuntimeMode;
     use super::RuntimeCommand;
     use super::RuntimeControlCommand;
@@ -370,13 +362,12 @@ mod tests {
     use super::spawn_supervised_runtime_thread;
     use crate::session_runtime::OutputItem;
 
-    fn execute_request(source: &str) -> ExecuteRequest {
-        ExecuteRequest {
+    fn execute_request(source: &str) -> CreateCellRequest {
+        CreateCellRequest {
             tool_call_id: "call_1".to_string(),
-            enabled_tools: Vec::new(),
+            enabled_tools: Default::default(),
             source: source.to_string(),
-            yield_time_ms: Some(1),
-            max_output_tokens: None,
+            output_truncation: codex_code_mode_protocol::CodeModeOutputTruncation::Client,
         }
     }
 

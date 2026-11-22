@@ -2133,3 +2133,61 @@ fn table_key_value_fallback_preserves_rich_values_and_themed_labels() {
             .any(|span| span.style.add_modifier.contains(Modifier::UNDERLINED))
     }));
 }
+
+#[test]
+fn narrow_header_only_table_keeps_local_file_reference_literal() {
+    let rendered = render_markdown_lines_with_width_and_cwd(
+        "| 👩‍💻 [Guide](./guide.md) | A | B | C | D | E |\n| --- | --- | --- | --- | --- | --- |",
+        Some(32),
+        /*cwd*/ None,
+    );
+    let first = &rendered[0];
+    let text = first.line.to_string();
+    assert!(text.starts_with("| 👩‍💻"), "{text}");
+    assert!(text.contains("Guide (./guide.md)"), "{text}");
+    assert!(first.hyperlinks.is_empty());
+}
+
+#[test]
+fn narrow_header_only_table_preserves_link_columns_and_escaped_pipes() {
+    let rendered = super::render_markdown_lines_with_width_cwd_and_hidden_link_destinations(
+        "| 👩**‍💻** [Docs](https://example.com) | x\\|́y | B | C | D | E |\n| --- | --- | --- | --- | --- | --- |",
+        Some(/*width*/ 32),
+        /*cwd*/ None,
+        &|_| true,
+    );
+    let first = &rendered[0];
+    assert!(first.line.to_string().contains("x\\|́y"));
+    assert_eq!(
+        first
+            .hyperlinks
+            .iter()
+            .map(|link| (link.columns.clone(), link.destination.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(5..9, "https://example.com")]
+    );
+}
+
+#[test]
+fn narrow_table_record_labels_keep_local_file_references_literal() {
+    let markdown = "| [Guide](./guide.md) | A | B | C | D | E | F | G |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |";
+    for width in [20, 50] {
+        let rendered =
+            render_markdown_lines_with_width_and_cwd(markdown, Some(width), /*cwd*/ None);
+        let first = &rendered[0];
+        let text = first.line.to_string();
+        assert!(text.starts_with(" Guide (./guide.md)"), "{text}");
+        assert!(rendered.iter().all(|line| line.hyperlinks.is_empty()));
+    }
+}
+
+#[test]
+fn posix_file_uri_keeps_literal_backslash_in_copyable_text() {
+    let rendered = render_markdown_lines_with_width_and_cwd(
+        "[Guide](file:///tmp/Guide%5Cnotes.md)",
+        /*width*/ None,
+        /*cwd*/ None,
+    );
+    assert_eq!(rendered[0].line.to_string(), r"Guide (/tmp/Guide\notes.md)");
+    assert!(rendered[0].hyperlinks.is_empty());
+}

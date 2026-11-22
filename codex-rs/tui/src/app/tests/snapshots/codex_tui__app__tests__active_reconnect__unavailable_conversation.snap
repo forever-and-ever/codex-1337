@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/tests/active_reconnect_tests.rs
-assertion_line: 743
 expression: "format!(\"{history}\\n{}\",\nrender_bottom_popup(&app.chat_widget,\n80)).replace(&test_path_buf(\"/tmp/project\").display().to_string(),\n\"/tmp/project\")"
 ---
 • Claude sign-in expired for claude@example.test. Sign in again with /account;
@@ -11,4 +10,3 @@ expression: "format!(\"{history}\\n{}\",\nrender_bottom_popup(&app.chat_widget,\
 
 › unavailable draft
                                                                               󰜗
-  gpt-5.6-sol default · /tmp/project

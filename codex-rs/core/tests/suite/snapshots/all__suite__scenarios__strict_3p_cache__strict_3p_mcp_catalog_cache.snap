@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_strict_3p_cache.rs
+assertion_line: 207
 expression: snapshot
 ---
 Scenario: Strict Code Mode Only: MCP config changes between turns, with omit-all and namespace skips. Exec calls the live catalog. One window means the captured prefix stayed stable. The execution environment remains running.
@@ -56,7 +57,7 @@ Settings:
 -- request 3 (turn; turn 2: register MCP with lookup; omit-all, direct-only and excluded) --
 10:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-11:additional_tools/developer (1; hash=1355172ea2710024):
+11:additional_tools/developer (1; hash=dec70030b30400e3):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 12:message/user:
@@ -75,7 +76,7 @@ Settings:
 -- request 5 (turn; turn 3: same MCP name, new endpoint; replace lookup with resolve and search) --
 15:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-16:additional_tools/developer (1; hash=307bb736590c4c6c):
+16:additional_tools/developer (1; hash=333e38cd9d801ceb):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 17:message/user:
@@ -94,7 +95,7 @@ Settings:
 -- request 7 (turn; turn 4: remove MCP server from config) --
 20:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-21:additional_tools/developer (1; hash=464688740f72c196):
+21:additional_tools/developer (1; hash=9429b626eaa6a1bd):
         - namespace/functions; hash=<INITIAL_BUILD_HASH>
           - custom/exec
 22:message/user:

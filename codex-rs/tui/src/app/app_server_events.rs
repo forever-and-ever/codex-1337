@@ -195,7 +195,7 @@ impl App {
         // Hidden helper threads must not enter visible thread routing or overview refreshes.
         let target = server_notification_thread_target(&notification);
         if let ServerNotificationThreadTarget::Thread(thread_id) = target
-            && let Some(sender) = self.temporary_structured_requests.get(&thread_id)
+            && let Some((_, sender)) = self.temporary_structured_requests.get(&thread_id)
         {
             if matches!(
                 &notification,
@@ -263,17 +263,14 @@ impl App {
             self.refresh_agent_picker_threads(app_server_client, root);
         }
         self.track_agents_overview_notification(&notification);
-        // Retained blank sessions stay subscribed after their event channels are cleared.
         if let ServerNotification::ThreadSettingsUpdated(settings) = &notification
             && let Ok(thread_id) = ThreadId::from_string(&settings.thread_id)
-            && self.agents_overview.blank_sessions.contains_key(&thread_id)
-            && !self.thread_event_channels.contains_key(&thread_id)
+            && self
+                .update_retained_blank_settings(thread_id, settings)
+                .await
+            && let Some(input) = self.agents_overview.input_states.get_mut(&thread_id)
         {
-            self.apply_thread_settings_to_cached_session(thread_id, &settings.thread_settings)
-                .await;
-            if let Some(input) = self.agents_overview.input_states.get_mut(&thread_id) {
-                input.pending_thread_settings = Some(settings.clone());
-            }
+            input.pending_thread_settings = Some(settings.clone());
         }
         if matches!(
             &notification,
@@ -327,13 +324,10 @@ impl App {
                     pending.completions.push(notification.clone());
                     return;
                 }
-                if notification.login_id.is_some() {
-                    if notification.login_id.as_ref()
-                        != self.active_mcp_login_ids.get(&notification.name)
-                    {
-                        return;
-                    }
-                    self.active_mcp_login_ids.remove(&notification.name);
+                if let Some(login_id) = &notification.login_id
+                    && self.active_mcp_login_ids.remove(login_id).is_none()
+                {
+                    return;
                 }
             }
 
@@ -580,9 +574,16 @@ impl App {
             self.saved_openings
                 .preparing(id, self.thread_event_channels.get(&id))
         });
-        if thread_id
-            .is_some_and(|thread_id| self.temporary_structured_requests.contains_key(&thread_id))
+        if let Some((kind, _)) =
+            thread_id.and_then(|thread_id| self.temporary_structured_requests.get(&thread_id))
         {
+            // Managed policy can allow a title turn to ask a question. Keep it on
+            // the hidden thread until the structured turn times out, as on desktop.
+            if *kind == crate::temporary_structured_request::TemporaryThreadKind::Title
+                && matches!(request, ServerRequest::ToolRequestUserInput { params, .. } if params.is_blocking)
+            {
+                return;
+            }
             self.reject_unsupported_app_server_request(
                 app_server_client,
                 super::app_server_requests::UnsupportedAppServerRequest {
@@ -659,7 +660,6 @@ impl App {
             &request,
             ServerRequest::DynamicToolCall { .. }
                 | ServerRequest::AttestationGenerate { .. }
-                | ServerRequest::CurrentTimeRead { .. }
                 | ServerRequest::ApplyPatchApproval { .. }
                 | ServerRequest::ExecCommandApproval { .. }
         );

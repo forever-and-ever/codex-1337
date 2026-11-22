@@ -1,3 +1,6 @@
+#[path = "archived_thread_tests.rs"]
+mod archived_thread_tests;
+
 use super::*;
 use crate::app_event::TranscriptExportDestination;
 use crate::bottom_pane::BottomPaneView;
@@ -1193,7 +1196,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                     serde_json::json!("future_voice");
                             }
                             if custom_voice_catalog && let Ok(value) = &mut result {
-                                value["voices"]["v1"] =
+                                value["voices"]["v3"] =
                                     serde_json::json!(["maple", "cove", "juniper"]);
                                 value["voices"]["defaultV1"] = serde_json::json!("maple");
                             }
@@ -1807,7 +1810,7 @@ async fn older_external_server_starts_without_unsupported_dynamic_tools_or_histo
     let error = crate::temporary_structured_request::start_temporary_thread(
         &app_server.request_handle(),
         crate::temporary_structured_request::TemporaryStructuredThreadOptions {
-            thread_source: codex_app_server_protocol::ThreadSource::Feature("system".to_string()),
+            kind: crate::temporary_structured_request::TemporaryThreadKind::Title,
             model: "gpt-5.2".to_string(),
             model_provider: app.config.model_provider_id.clone(),
             cwd: app.config.cwd.display().to_string(),

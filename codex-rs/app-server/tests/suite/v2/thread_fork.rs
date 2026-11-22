@@ -117,6 +117,7 @@ async fn list_threads(mcp: &mut TestAppServer) -> Result<ThreadListResponse> {
         .send_thread_list_request(ThreadListParams {
             include_attached_threads: false,
             current_account_only: false,
+            included_thread_ids: None,
             excluded_thread_ids: None,
             attached_to_thread_id: None,
             originators: None,
@@ -3185,6 +3186,8 @@ async fn fork_option_disables_mcp_servers(
     let parent = app
         .start_thread(ThreadStartParams {
             history_mode: Some(history_mode),
+            // Only the parent catalog advertises the capability used by the prediction fork.
+            config: Some([("model_catalog_json".into(), json!(catalog))].into()),
             ..Default::default()
         })
         .await?;

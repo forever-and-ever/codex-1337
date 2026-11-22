@@ -1,11 +1,15 @@
 //! One native compaction request: transport retries, and the provider's verdict on the input.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::Prompt;
 use crate::client::ModelClientSession;
+use crate::client::SamplingOptions;
 use crate::client_common::ResponseEvent;
-use crate::client_common::ResponseStream;
+use crate::client_common::SamplingEvent;
+use crate::client_common::SamplingStream;
+use crate::client_common::SamplingUsage;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
@@ -13,6 +17,7 @@ use crate::responses_retry::handle_response_stream_error;
 use crate::session::RequestEffortUsage;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
+use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::turn_context::TurnContext;
 use codex_api::AnthropicStopReason;
 use codex_api::anthropic_stop_reason;
@@ -21,9 +26,9 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
 use codex_rollout_trace::CompactionTraceContext;
-use futures::StreamExt;
 use http::StatusCode;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 /// Includes connection and header wait as well as streaming. Summarizing a large Claude context
 /// may take minutes; cancellation still drops the attempt early.
@@ -77,14 +82,16 @@ pub(super) fn provider_error_message(body: &str) -> Option<String> {
 }
 
 pub(super) async fn request(
-    sess: &Session,
-    step_context: &StepContext,
+    sess: &Arc<Session>,
+    step_context: &Arc<StepContext>,
     client_session: &mut ModelClientSession,
-    prompt: &Prompt,
+    prompt: &Arc<Prompt>,
     responses_metadata: &CodexResponsesMetadata,
     compaction_trace: &CompactionTraceContext,
 ) -> Result<(ResponseItem, String, Option<TokenUsage>), Miss> {
     let turn_context = &step_context.turn;
+    let settings = &step_context.settings;
+    let model_info = &settings.model_info;
     let trace = compaction_trace.inference_trace_context();
     let max_retries = turn_context
         .provider
@@ -92,6 +99,10 @@ pub(super) async fn request(
         .stream_max_retries()
         .min(MAX_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
+    let mut sampling = crate::hook_runtime::sampling::SamplingRequest::new(
+        codex_hooks::SamplingKind::ForegroundCompaction,
+    );
+    let cancellation = &step_context.turn_cancellation;
     loop {
         Box::pin(sess.apply_pending_account())
             .await
@@ -104,24 +115,26 @@ pub(super) async fn request(
                 )
             })?;
         let exchange = async {
-            let stream = client_session
-                .stream(
-                    prompt,
-                    turn_context.model_info(),
-                    &turn_context.session_telemetry,
-                    sess.reasoning_effort_for_request(
-                        &turn_context.initial_settings,
-                        RequestEffortUsage::Compaction,
-                    )
-                    .await,
-                    turn_context.reasoning_summary(),
-                    step_context.settings.service_tier.clone(),
-                    responses_metadata,
-                    &trace,
-                )
+            let effort = sess
+                .reasoning_effort_for_request(settings, RequestEffortUsage::Compaction)
+                .await;
+            let send = client_session.open_model_response(
+                prompt,
+                model_info,
+                &step_context.session_telemetry,
+                SamplingOptions {
+                    reasoning_effort: effort,
+                    reasoning_summary: settings.reasoning_summary,
+                    service_tier: settings.service_tier.clone(),
+                },
+                responses_metadata,
+                &trace,
+            );
+            let stream = sampling
+                .open(sess, step_context, &model_info.slug, cancellation, send)
                 .await
                 .map_err(Miss::of)?;
-            collect(sess, turn_context, stream).await
+            collect(sess, turn_context, settings, stream, cancellation).await
         };
         let error = match tokio::time::timeout(ATTEMPT_TIMEOUT, exchange).await {
             Ok(Ok(output)) => return Ok(output),
@@ -158,11 +171,29 @@ pub(super) async fn request(
 async fn collect(
     sess: &Session,
     turn_context: &TurnContext,
-    mut stream: ResponseStream,
+    settings: &ResolvedStepSettings,
+    mut stream: SamplingStream,
+    cancellation: &CancellationToken,
 ) -> Result<(ResponseItem, String, Option<TokenUsage>), Miss> {
     let mut checkpoints = Vec::new();
-    while let Some(event) = stream.next().await {
-        match event.map_err(Miss::of)? {
+    while let Some(SamplingEvent { event, hook_output }) = stream.next_for_turn(cancellation).await
+    {
+        let event = match event {
+            Ok(event) => event,
+            Err(error) => {
+                if let CodexErrorDetails::ResponseIncomplete(incomplete) = error.details() {
+                    sess.record_incomplete_response_usage(
+                        turn_context,
+                        settings,
+                        incomplete,
+                        hook_output,
+                    )
+                    .await;
+                }
+                return Err(Miss::of(error));
+            }
+        };
+        match event {
             ResponseEvent::OutputItemDone(item @ ResponseItem::NativeCompaction { .. }) => {
                 checkpoints.push(item);
             }
@@ -185,8 +216,11 @@ async fn collect(
                 // recomputes context occupancy, not cumulative usage.
                 sess.record_token_usage_info(
                     turn_context,
-                    &turn_context.initial_settings,
-                    token_usage.as_ref(),
+                    settings,
+                    SamplingUsage {
+                        provider: token_usage.clone(),
+                        charge: hook_output,
+                    },
                     crate::session::TokenUsageContext::SpendingOnly,
                 )
                 .await

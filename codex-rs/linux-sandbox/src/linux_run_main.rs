@@ -22,8 +22,10 @@ use crate::bwrap::create_bwrap_command_args;
 use crate::launcher::exec_bwrap;
 use crate::launcher::initialize_bwrap_launcher;
 use crate::launcher::preferred_bwrap_supports_argv0;
+use crate::proxy_routing::HostProxyBridge;
 use crate::proxy_routing::activate_proxy_routes_in_netns;
 use crate::proxy_routing::prepare_host_proxy_route_spec;
+use crate::proxy_routing::start_host_proxy_bridges;
 use crate::seccomp::apply_sandbox_policies_to_current_thread;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_protocol::error::Result as CodexResult;
@@ -44,7 +46,6 @@ static PENDING_FORWARDED_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 const FORWARDED_SIGNALS: &[libc::c_int] =
     &[libc::SIGHUP, libc::SIGINT, libc::SIGQUIT, libc::SIGTERM];
-const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const SYNTHETIC_MOUNT_MARKER_SYNTHETIC: &[u8] = b"synthetic\n";
 const SYNTHETIC_MOUNT_MARKER_EXISTING: &[u8] = b"existing\n";
 // The reaper still reads markers left by older sandbox processes.
@@ -138,6 +139,7 @@ pub struct LinuxSandboxCommand {
 /// 2. Apply in-process restrictions (no_new_privs + seccomp).
 /// 3. `execvp` into the final command.
 pub fn run_main() -> ! {
+    let caller_pid = unsafe { libc::getppid() };
     let LinuxSandboxCommand {
         sandbox_policy_cwd,
         command_cwd,
@@ -152,7 +154,6 @@ pub fn run_main() -> ! {
         command,
     } = LinuxSandboxCommand::parse();
     let allow_network_for_proxy = managed_network.is_some();
-
     if command.is_empty() {
         panic!("No command specified to execute.");
     }
@@ -174,27 +175,9 @@ pub fn run_main() -> ! {
             panic!("failed to verify descriptor-backed bubblewrap mount: {err}");
         }
 
-        let mut capability_header = [LINUX_CAPABILITY_VERSION_3, 0];
-        let mut capability_sets = [[0_u32; 3]; 2];
-        // SAFETY: capability ABI version 3 uses a [version, pid] header and
-        // two [effective, permitted, inheritable] capability-set entries.
-        let result = unsafe {
-            libc::syscall(
-                libc::SYS_capget,
-                capability_header.as_mut_ptr(),
-                capability_sets.as_mut_ptr(),
-            )
-        };
-        if result < 0 {
-            panic!(
-                "failed to verify Linux sandbox capabilities: {}",
-                std::io::Error::last_os_error()
-            );
-        }
-        if capability_sets
-            .into_iter()
-            .any(|[effective, permitted, _]| effective != 0 || permitted != 0)
-        {
+        let caps = rustix::thread::capabilities(None)
+            .unwrap_or_else(|err| panic!("failed to verify Linux sandbox capabilities: {err}"));
+        if !caps.effective.is_empty() || !caps.permitted.is_empty() {
             panic!("Linux sandbox retained effective or permitted capabilities");
         }
 
@@ -202,18 +185,16 @@ pub fn run_main() -> ! {
             let spec = proxy_route_spec
                 .as_deref()
                 .unwrap_or_else(|| panic!("managed proxy mode requires --proxy-route-spec"));
-            if let Err(err) = activate_proxy_routes_in_netns(spec) {
-                panic!("error activating Linux proxy routing bridge: {err}");
-            }
+            activate_proxy_routes_in_netns(spec)
+                .unwrap_or_else(|err| panic!("error activating Linux proxy routing bridge: {err}"));
         }
-        let proxy_routing_active = allow_network_for_proxy;
         if let Err(e) = apply_sandbox_policies_to_current_thread(
             &file_system_sandbox_policy,
             network_sandbox_policy,
             &sandbox_policy_cwd,
             /*apply_landlock_fs*/ false,
             managed_network.as_ref(),
-            proxy_routing_active,
+            /*proxy_routed_network*/ allow_network_for_proxy,
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
@@ -234,21 +215,12 @@ pub fn run_main() -> ! {
         let signal_forwarders = install_bwrap_signal_forwarders(command_pid);
         signal_mask.restore();
         loop {
-            let mut status = 0;
-            let reaped_pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+            let (reaped_pid, status) = wait_for_child(/*pid*/ -1);
             if reaped_pid == command_pid {
                 let exit_signal_mask = ForwardedSignalMask::block();
                 signal_forwarders.restore();
                 exit_signal_mask.restore();
                 exit_with_wait_status(status);
-            }
-            if reaped_pid >= 0 {
-                continue;
-            }
-
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() != Some(libc::EINTR) {
-                panic!("failed to reap sandboxed child: {err}");
             }
         }
     }
@@ -260,7 +232,7 @@ pub fn run_main() -> ! {
             &sandbox_policy_cwd,
             /*apply_landlock_fs*/ false,
             managed_network.as_ref(),
-            /*proxy_routing_active*/ false,
+            /*proxy_routed_network*/ false,
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
@@ -271,13 +243,13 @@ pub fn run_main() -> ! {
         // Outer stage: bubblewrap first, then re-enter this binary in the
         // sandboxed environment to apply seccomp. This path never falls back
         // to legacy Landlock on failure.
-        let (proxy_route_spec, proxy_controls) = if let Some(context) = managed_network.as_ref() {
-            // Older explicit-proxy callers may omit the port list.
+        let (proxy_route_spec, proxy_bridges) = if let Some(context) = managed_network.as_ref() {
+            // Older explicit-proxy callers may omit ports.
             let ports =
                 (!context.loopback_ports.is_empty()).then_some(context.loopback_ports.as_slice());
-            let (proxy_route_spec, controls) = prepare_host_proxy_route_spec(ports)
+            let (proxy_route_spec, bridges) = prepare_host_proxy_route_spec(ports)
                 .unwrap_or_else(|err| panic!("failed to prepare host proxy routing bridge: {err}"));
-            (Some(proxy_route_spec), controls)
+            (Some(proxy_route_spec), bridges)
         } else {
             (None, Vec::new())
         };
@@ -316,12 +288,13 @@ pub fn run_main() -> ! {
             command,
         });
         run_bwrap_with_proc_fallback(
+            caller_pid,
             &sandbox_policy_cwd,
             command_cwd.as_deref(),
             &file_system_sandbox_policy,
             options,
             inner,
-            proxy_controls,
+            proxy_bridges,
         );
     }
 
@@ -332,7 +305,7 @@ pub fn run_main() -> ! {
         &sandbox_policy_cwd,
         /*apply_landlock_fs*/ true,
         managed_network.as_ref(),
-        /*proxy_routing_active*/ false,
+        /*proxy_routed_network*/ false,
     ) {
         panic!("error applying legacy Linux sandbox restrictions: {e:?}");
     }
@@ -398,18 +371,27 @@ fn ensure_legacy_landlock_mode_supports_policy(
 }
 
 fn run_bwrap_with_proc_fallback(
+    caller_pid: libc::pid_t,
     sandbox_policy_cwd: &Path,
     command_cwd: Option<&Path>,
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
     mut options: BwrapOptions,
     inner: Vec<String>,
-    proxy_controls: Vec<File>,
+    proxy_bridges: Vec<HostProxyBridge>,
 ) -> ! {
     let command_cwd = command_cwd.unwrap_or(sandbox_policy_cwd);
 
+    // An inherited SIG_IGN would auto-reap bubblewrap before we can collect
+    // its exit status. The preflight also waits for its own bubblewrap child.
+    if unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL) } == libc::SIG_ERR {
+        panic!(
+            "failed to reset SIGCHLD: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
     // Select before the preflight, whose synthetic policy omits writable roots.
     initialize_bwrap_launcher(file_system_sandbox_policy, sandbox_policy_cwd);
-
     if options.mount_proc
         && !preflight_proc_mount_support(options)
             .unwrap_or_else(|err| exit_with_bwrap_build_error(err))
@@ -419,7 +401,7 @@ fn run_bwrap_with_proc_fallback(
         options.mount_proc = false;
     }
 
-    let mut bwrap_args = build_bwrap_argv(
+    let bwrap_args = build_bwrap_argv(
         inner,
         file_system_sandbox_policy,
         sandbox_policy_cwd,
@@ -427,9 +409,14 @@ fn run_bwrap_with_proc_fallback(
         options,
     )
     .unwrap_or_else(|err| exit_with_bwrap_build_error(err));
-    bwrap_args.preserved_files.extend(proxy_controls);
+    if !proxy_bridges.is_empty() && bwrap_args.synthetic_mount_targets.is_empty() {
+        // This launcher would otherwise exec bubblewrap directly. Preserve
+        // --die-with-parent now that it stays alive to serve the proxy.
+        kill_on_parent_death(caller_pid);
+    }
+    let mut bwrap_args = start_bwrap_supervisors(bwrap_args, proxy_bridges);
     apply_inner_command_argv0(&mut bwrap_args.args);
-    run_or_exec_bwrap(bwrap_args);
+    exec_bwrap(bwrap_args.args, bwrap_args.preserved_files);
 }
 
 fn bwrap_network_mode(
@@ -552,49 +539,85 @@ fn resolve_true_command() -> String {
     "true".to_string()
 }
 
-fn run_or_exec_bwrap(bwrap_args: crate::bwrap::BwrapArgs) -> ! {
+/// With both supervisors, the launcher runs `proxy supervisor -> mount cleanup supervisor -> bubblewrap`.
+/// Each optional supervisor waits for its child. Separate descriptor tables
+/// let mount cleanup proceed even when proxy connections exhaust theirs.
+/// Returns only in the process that will exec bubblewrap.
+fn start_bwrap_supervisors(
+    mut bwrap_args: crate::bwrap::BwrapArgs,
+    proxy_bridges: Vec<HostProxyBridge>,
+) -> crate::bwrap::BwrapArgs {
     if bwrap_args.synthetic_mount_targets.is_empty() {
         mountpoint_reaper::sweep_unregistered();
-        exec_bwrap(bwrap_args.args, bwrap_args.preserved_files);
+        if proxy_bridges.is_empty() {
+            return bwrap_args;
+        }
     }
-    run_bwrap_in_child_with_synthetic_mount_cleanup(bwrap_args);
+
+    let setup_signal_mask = ForwardedSignalMask::block();
+    // Register before either fork so markers name the PID the caller will reap.
+    let registrations = register_synthetic_mount_targets(&bwrap_args.synthetic_mount_targets);
+
+    if !proxy_bridges.is_empty() {
+        let child_pid = fork_supervised_child();
+        if child_pid > 0 {
+            drop(bwrap_args.preserved_files);
+            // Bridge threads inherit the blocked signals. The supervising thread
+            // receives cancellation and forwards it to the child.
+            start_host_proxy_bridges(proxy_bridges);
+            supervise_child(child_pid, &setup_signal_mask, || {});
+        }
+        bwrap_args.preserved_files.extend(
+            proxy_bridges
+                .into_iter()
+                .map(HostProxyBridge::into_sandbox_control),
+        );
+    }
+
+    if !registrations.is_empty() {
+        let child_pid = fork_supervised_child();
+        if child_pid > 0 {
+            mountpoint_reaper::enlist(&registrations, child_pid);
+            drop(bwrap_args.preserved_files);
+            supervise_child(child_pid, &setup_signal_mask, || {
+                cleanup_synthetic_mount_targets(&registrations);
+            });
+        }
+    }
+    setup_signal_mask.restore();
+    bwrap_args
 }
 
-fn run_bwrap_in_child_with_synthetic_mount_cleanup(bwrap_args: crate::bwrap::BwrapArgs) -> ! {
-    let crate::bwrap::BwrapArgs {
-        args,
-        preserved_files,
-        synthetic_mount_targets,
-    } = bwrap_args;
-    let setup_signal_mask = ForwardedSignalMask::block();
-    let synthetic_mount_registrations = register_synthetic_mount_targets(&synthetic_mount_targets);
+fn fork_supervised_child() -> libc::pid_t {
     let parent_pid = unsafe { libc::getpid() };
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         let err = std::io::Error::last_os_error();
         panic!("failed to fork for bubblewrap: {err}");
     }
-
     if pid == 0 {
         reset_forwarded_signal_handlers_to_default();
-        setup_signal_mask.restore();
         let setpgid_res = unsafe { libc::setpgid(0, 0) };
         if setpgid_res < 0 {
             let err = std::io::Error::last_os_error();
             panic!("failed to place bubblewrap child in its own process group: {err}");
         }
-        terminate_with_parent(parent_pid);
-        exec_bwrap(args, preserved_files);
+        kill_on_parent_death(parent_pid);
     }
+    pid
+}
 
-    mountpoint_reaper::enlist(&synthetic_mount_registrations, pid);
-    drop(preserved_files);
+fn supervise_child(
+    pid: libc::pid_t,
+    setup_signal_mask: &ForwardedSignalMask,
+    cleanup: impl FnOnce(),
+) -> ! {
     let signal_forwarders = install_bwrap_signal_forwarders(pid);
     setup_signal_mask.restore();
-    let status = wait_for_bwrap_child(pid);
+    let (_, status) = wait_for_child(pid);
     let cleanup_signal_mask = ForwardedSignalMask::block();
     BWRAP_CHILD_PID.store(0, Ordering::SeqCst);
-    cleanup_synthetic_mount_targets(&synthetic_mount_registrations);
+    cleanup();
     signal_forwarders.restore();
     cleanup_signal_mask.restore();
     exit_with_wait_status(status);
@@ -639,15 +662,17 @@ impl ForwardedSignalMask {
     }
 }
 
-fn terminate_with_parent(parent_pid: libc::pid_t) {
-    let res = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+fn kill_on_parent_death(parent_pid: libc::pid_t) {
+    // Match bubblewrap's --die-with-parent even while the child has TERM blocked
+    // for mount registration or cleanup.
+    let res = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
     if res < 0 {
         let err = std::io::Error::last_os_error();
-        panic!("failed to set bubblewrap child parent-death signal: {err}");
+        panic!("failed to set sandbox parent-death signal: {err}");
     }
     if unsafe { libc::getppid() } != parent_pid {
         unsafe {
-            libc::raise(libc::SIGTERM);
+            libc::raise(libc::SIGKILL);
         }
     }
 }
@@ -720,24 +745,27 @@ fn reset_forwarded_signal_handlers_to_default() {
     }
 }
 
-fn wait_for_bwrap_child(pid: libc::pid_t) -> libc::c_int {
+fn wait_for_child(pid: libc::pid_t) -> (libc::pid_t, libc::c_int) {
     loop {
         let mut status: libc::c_int = 0;
         let wait_res = unsafe { libc::waitpid(pid, &mut status as *mut libc::c_int, 0) };
         if wait_res >= 0 {
-            return status;
+            return (wait_res, status);
         }
         let err = std::io::Error::last_os_error();
         if err.raw_os_error() == Some(libc::EINTR) {
             continue;
         }
-        panic!("waitpid failed for bubblewrap child: {err}");
+        panic!("waitpid failed for child {pid}: {err}");
     }
 }
 
 fn register_synthetic_mount_targets(
     targets: &[crate::bwrap::SyntheticMountTarget],
 ) -> Vec<SyntheticMountTargetRegistration> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
     with_synthetic_mount_registry_lock(|| {
         mountpoint_reaper::sweep(&synthetic_mount_registry_root());
         targets
@@ -1088,7 +1116,7 @@ fn run_bwrap_in_child_capture_stderr(bwrap_args: crate::bwrap::BwrapArgs) -> Str
         panic!("failed to read bubblewrap stderr: {err}");
     }
 
-    let status = wait_for_bwrap_child(pid);
+    let (_, status) = wait_for_child(pid);
     let cleanup_signal_mask = ForwardedSignalMask::block();
     BWRAP_CHILD_PID.store(0, Ordering::SeqCst);
     cleanup_synthetic_mount_targets(&synthetic_mount_registrations);
@@ -1115,13 +1143,19 @@ fn close_fd_or_panic(fd: libc::c_int, context: &str) {
 }
 
 fn is_proc_mount_failure(stderr: &str) -> bool {
-    // Bubblewrap before 0.12 names the mount point under its staging root;
-    // 0.12 and later name the destination as given, which the probe sets to /proc.
-    (stderr.contains("Can't mount proc on /newroot/proc:")
-        || stderr.contains("Can't mount proc on /proc:"))
-        && (stderr.contains("Invalid argument")
-            || stderr.contains("Operation not permitted")
-            || stderr.contains("Permission denied"))
+    stderr.lines().any(|line| {
+        let Some((_, diagnostic)) = line.split_once("Can't mount proc on ") else {
+            return false;
+        };
+        // Bubblewrap 0.12 reports the destination inside the sandbox.
+        matches!(
+            diagnostic.split_once(": "),
+            Some((
+                "/newroot/proc" | "/proc",
+                "Invalid argument" | "Operation not permitted" | "Permission denied"
+            ))
+        )
+    })
 }
 
 struct InnerSeccompCommandArgs<'a> {

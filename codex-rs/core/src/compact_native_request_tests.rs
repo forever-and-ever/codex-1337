@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use super::Miss;
 use super::collect;
 use crate::client_common::ResponseEvent;
-use crate::client_common::ResponseStream;
+use crate::client_common::SamplingStream;
 use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
@@ -12,14 +14,15 @@ use codex_protocol::protocol::TokenUsage;
 use pretty_assertions::assert_eq;
 use tokio_util::sync::CancellationToken;
 
-fn stream(event: CodexResult<ResponseEvent>) -> ResponseStream {
+fn stream(event: CodexResult<ResponseEvent>) -> SamplingStream {
     let (tx, rx_event) = tokio::sync::mpsc::channel(/*buffer*/ 1);
-    tx.try_send(event).unwrap();
-    ResponseStream {
+    tx.try_send(event.into()).unwrap();
+    SamplingStream {
         routing_affinity: None,
         rx_event,
         interrupt: None,
         consumer_dropped: CancellationToken::new(),
+        settlement_started: Arc::default(),
     }
 }
 
@@ -49,6 +52,7 @@ async fn unusable_completions_record_usage_and_name_their_rung_escalation() {
                 response_id: format!("msg_{stop_reason}"),
                 token_usage: Some(usage.clone()),
                 usage_metadata: Some(metadata.clone()),
+                reasoning_removals: None,
                 end_turn: Some(false),
             },
             RawResponseCompletedEvent {
@@ -67,9 +71,15 @@ async fn unusable_completions_record_usage_and_name_their_rung_escalation() {
         ("end_turn", false),
     ] {
         let (event, recorded) = completed(stop_reason);
-        let miss = collect(&sess, &context, stream(Ok(event)))
-            .await
-            .expect_err("a completion without one checkpoint is no checkpoint");
+        let miss = collect(
+            &sess,
+            &context,
+            &context.initial_settings,
+            stream(Ok(event)),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a completion without one checkpoint is no checkpoint");
         assert!(
             matches!(
                 (&miss, refused),
@@ -99,9 +109,11 @@ async fn unusable_completions_record_usage_and_name_their_rung_escalation() {
     let miss = collect(
         &sess,
         &context,
+        &context.initial_settings,
         stream(Err(CodexErr::Fatal(
             "Native Anthropic stream ended with an unknown request outcome".into(),
         ))),
+        &CancellationToken::new(),
     )
     .await
     .expect_err("unknown native compaction outcome must remain a failure");

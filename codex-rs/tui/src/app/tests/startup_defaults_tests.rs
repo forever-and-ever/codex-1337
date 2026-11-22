@@ -783,7 +783,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
 
             › Ask Codex to do anything
                                                                                           󰜗
-              GPT-6.1-Sol high · <PROJECT>
+              GPT-6.2-Sol high · <PROJECT>
               ? for shortcuts
             ");
         }

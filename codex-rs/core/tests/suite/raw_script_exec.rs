@@ -3,6 +3,7 @@ use super::parse_unified_exec_output;
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
+use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::EventMsg;
@@ -47,7 +48,8 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
                 config.features.enable(feature).expect("enable script hooks");
             }
             config
-                .set_legacy_sandbox_policy(SandboxPolicy::ReadOnly { network_access: false })
+                .permissions
+                .set_permission_profile(PermissionProfile::read_only())
                 .expect("owner environments inherit the reviewed read-only sandbox");
         });
     let test = builder.build_with_auto_env(&server).await?;

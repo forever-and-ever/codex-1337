@@ -1498,3 +1498,80 @@ fn history_prefetch_counts_rows_in_preceding_entries() {
         assert!(view.near_start(&cells));
     }
 }
+
+#[test]
+fn user_prompt_keeps_bracket_without_a_terminal_palette() {
+    use codex_protocol::user_input::TextElement;
+    use std::path::PathBuf;
+
+    let message = "First steering message";
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(new_user_prompt(
+        message.into(),
+        vec![TextElement::new((0..5).into(), Some("First".into()))],
+        vec![PathBuf::from("screenshot.png")],
+        Vec::new(),
+    ))];
+    crate::terminal_palette::with_test_default_colors(
+        /*colors*/ None::<crate::terminal_probe::DefaultColors>,
+        || {
+            let mut view = TranscriptView::default();
+            let buffer = render(&mut view, &cells, /*width*/ 48, /*height*/ 8);
+            let rendered = text(&buffer);
+            let row = rendered
+                .lines()
+                .position(|line| line.contains(message))
+                .expect("prompt body");
+            let bracket = &buffer[(crate::transcript_geometry::CONTROL_COLUMN, row as u16)];
+            assert_eq!(bracket.fg, crate::warpaint::Bracket::Prompt.color());
+            assert_eq!(bracket.bg, ratatui::style::Color::Reset);
+            assert!(rendered.contains("[Image #1]"));
+        },
+    );
+}
+
+#[test]
+fn spoken_prompt_selection_keeps_its_fallback_contrast() {
+    use crate::history_cell::new_spoken_user_prompt;
+    use ratatui::style::Color;
+    use ratatui::style::Modifier;
+
+    crate::terminal_palette::with_test_default_colors(
+        /*colors*/ None::<crate::terminal_probe::DefaultColors>,
+        || {
+            let cells: Vec<Arc<dyn HistoryCell>> =
+                vec![Arc::new(new_spoken_user_prompt("one\nnext".into()))];
+            let width = 32;
+            let height = 5;
+            for detailed in [false, true] {
+                let mut view = TranscriptView {
+                    detailed,
+                    ..TranscriptView::default()
+                };
+                let before = render(&mut view, &cells, width, height);
+                let rendered = text(&before);
+                let row = |text| {
+                    rendered
+                        .lines()
+                        .position(|line| line.contains(text))
+                        .expect("spoken prompt row") as u16
+                };
+                let first = row("one");
+                let second = row("next");
+                let column = (0..width)
+                    .find(|&x| before[(x, first)].symbol() == "o")
+                    .expect("spoken prompt body");
+                view.begin_selection(&cells, column, first, /*clicks*/ 1);
+                view.extend_selection(column, second);
+
+                let selected = render(&mut view, &cells, width, height);
+                let bracket = &selected[(crate::transcript_geometry::CONTROL_COLUMN, first)];
+                let newline = &selected[(column + 3, first)];
+                assert_eq!(view.selected_text(&cells).as_deref(), Some("one\n"));
+                assert_eq!(bracket.fg, crate::warpaint::Bracket::Prompt.color());
+                assert!(!bracket.modifier.contains(Modifier::REVERSED));
+                assert_eq!((newline.fg, newline.bg), (Color::Reset, Color::Reset));
+                assert!(newline.modifier.contains(Modifier::REVERSED));
+            }
+        },
+    );
+}

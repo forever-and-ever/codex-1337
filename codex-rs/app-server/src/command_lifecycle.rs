@@ -115,32 +115,27 @@ impl CommandStarts {
 }
 
 pub(crate) async fn note_review(
+    turn_id: &str,
     assessment: &GuardianAssessmentEvent,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) {
     if assessment.status == GuardianAssessmentStatus::Approved
         && let Some(id) = assessment.target_item_id.as_deref()
+        && let Some(summary) = thread_state.lock().await.turn_summaries.get_mut(turn_id)
     {
-        thread_state
-            .lock()
-            .await
-            .turn_summary
-            .command_execution_started
-            .approve(id);
+        summary.command_execution_started.approve(id);
     }
 }
 
 pub(crate) async fn note_decision(
     thread_state: &Arc<Mutex<ThreadState>>,
+    turn_id: &str,
     id: &str,
     completion_status: Option<&CommandExecutionStatus>,
 ) {
-    if completion_status.is_none() {
-        thread_state
-            .lock()
-            .await
-            .turn_summary
-            .command_execution_started
-            .approve(id);
+    if completion_status.is_none()
+        && let Some(summary) = thread_state.lock().await.turn_summaries.get_mut(turn_id)
+    {
+        summary.command_execution_started.approve(id);
     }
 }

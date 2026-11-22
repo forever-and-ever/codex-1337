@@ -31,7 +31,7 @@ use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 
 use crate::McpConfig;
-use crate::McpServerPermissions;
+use crate::McpServerKey;
 use crate::binding_clients::McpBindingClients;
 use crate::binding_clients::McpResourceListing;
 use crate::client_tool_catalog::ToolCatalogSnapshot;
@@ -48,7 +48,7 @@ pub struct McpBinding {
     config: Arc<McpConfig>,
     plugins_available: bool,
     tools: Arc<[ToolInfo]>,
-    calls: HashMap<(String, String), PreparedMcpCall>,
+    calls: HashMap<(McpServerKey, String), PreparedMcpCall>,
 }
 
 impl crate::McpRuntime {
@@ -66,7 +66,7 @@ impl crate::McpRuntime {
                 .tools
                 .iter()
                 .find(|tool| {
-                    tool.server_name == advertised.server_name
+                    tool.server_key() == advertised.server_key()
                         && tool.tool == advertised.tool
                         && tool.connector_id == advertised.connector_id
                         && tool.callable_name == advertised.callable_name
@@ -76,7 +76,7 @@ impl crate::McpRuntime {
                 })
                 .ok_or_else(unavailable)?;
             let issued =
-                binding.prepare_call(&advertised.server_name, advertised.tool.name.as_ref());
+                binding.prepare_call(advertised.server_key(), advertised.tool.name.as_ref());
             let canonical = issued
                 .as_ref()
                 .and_then(|call| call.projection_source.as_ref())
@@ -124,7 +124,7 @@ impl McpBinding {
         config: Arc<McpConfig>,
         plugins_available: bool,
         tools: impl Into<Arc<[ToolInfo]>>,
-        calls: HashMap<(String, String), PreparedMcpCall>,
+        calls: HashMap<(McpServerKey, String), PreparedMcpCall>,
     ) -> Self {
         Self {
             connections,
@@ -150,16 +150,16 @@ impl McpBinding {
     }
 
     /// Returns permitted tool metadata, including app-only tools.
-    pub fn tool_info(&self, server: &str, tool: &str) -> Option<&ToolInfo> {
+    pub fn tool_info(&self, server: &McpServerKey, tool: &str) -> Option<&ToolInfo> {
         self.calls
-            .get(&(server.to_string(), tool.to_string()))
+            .get(&(server.clone(), tool.to_string()))
             .map(PreparedMcpCall::tool_info)
     }
 
     /// Binds a model-visible call to the exact client and metadata in this binding.
-    pub fn prepare_call(&self, server: &str, tool: &str) -> Option<PreparedMcpCall> {
+    pub fn prepare_call(&self, server: &McpServerKey, tool: &str) -> Option<PreparedMcpCall> {
         self.calls
-            .get(&(server.to_string(), tool.to_string()))
+            .get(&(server.clone(), tool.to_string()))
             .filter(|call| crate::tool_is_model_visible(call.tool_info()))
             .cloned()
     }
@@ -173,13 +173,13 @@ impl McpBinding {
     }
 
     /// The environment owning this server in the step's connection set, even if it exposes no tools.
-    pub fn server_environment_id(&self, server: &str) -> Option<&str> {
+    pub fn server_environment_id(&self, server: &McpServerKey) -> Option<&str> {
         self.connections.server_environment_id(server)
     }
 
     pub async fn list_resources(
         &self,
-        server: &str,
+        server: &McpServerKey,
         params: Option<PaginatedRequestParams>,
     ) -> Result<ListResourcesResult> {
         if self.clients.client(server).is_some() {
@@ -189,16 +189,17 @@ impl McpBinding {
         }
     }
 
+    /// Lists ready servers' resources by exact key in this binding's catalog.
     pub async fn list_all_resources(
         &self,
-        include_server: impl Fn(&str) -> bool,
+        include_server: impl Fn(&McpServerKey) -> bool,
     ) -> McpResourceListing<Resource> {
         self.clients.list_all_resources(include_server).await
     }
 
     pub async fn list_resource_templates(
         &self,
-        server: &str,
+        server: &McpServerKey,
         params: Option<PaginatedRequestParams>,
     ) -> Result<ListResourceTemplatesResult> {
         if self.connections.skips_resource_template_listing(server) {
@@ -213,9 +214,10 @@ impl McpBinding {
         }
     }
 
+    /// Lists ready servers' templates by exact key in this binding's catalog.
     pub async fn list_all_resource_templates(
         &self,
-        include_server: impl Fn(&str) -> bool,
+        include_server: impl Fn(&McpServerKey) -> bool,
     ) -> McpResourceListing<ResourceTemplate> {
         self.clients
             .list_all_resource_templates(|server| {
@@ -226,7 +228,7 @@ impl McpBinding {
 
     pub async fn read_resource(
         &self,
-        server: &str,
+        server: &McpServerKey,
         params: ReadResourceRequestParams,
     ) -> Result<ReadResourceResult> {
         if self.clients.client(server).is_some() {
@@ -256,7 +258,6 @@ pub struct PreparedMcpCall {
     catalog_snapshot: Arc<ToolCatalogSnapshot>,
     tool_info: PreparedToolInfo,
     projection_source: Option<ToolInfo>,
-    server_name: String,
     server_metadata: McpServerMetadata,
     plugin_id: Option<String>,
     selected_plugin_server: bool,
@@ -264,7 +265,7 @@ pub struct PreparedMcpCall {
     lease_guard: Option<McpDispatchLeaseGuard>,
 }
 
-/// The rules for a prepared call and the folders used to interpret them.
+/// The rules for an MCP server or prepared call and the folders used to interpret them.
 pub enum McpPermissionSource<'a> {
     Environment {
         environment_id: &'a str,
@@ -330,8 +331,7 @@ impl PreparedMcpCall {
         selected_plugin_server: bool,
     ) -> Option<Self> {
         let tool_info = tool_info.into();
-        let server_name = tool_info.get().server_name.clone();
-        config.permission_profile_for_server(&server_name)?;
+        config.permission_source_for_server(tool_info.get().server_key())?;
         Some(Self {
             connections,
             client,
@@ -339,7 +339,6 @@ impl PreparedMcpCall {
             catalog_snapshot,
             tool_info,
             projection_source: None,
-            server_name,
             server_metadata,
             plugin_id,
             selected_plugin_server,
@@ -362,7 +361,12 @@ impl PreparedMcpCall {
     /// Whether the server connection that issued the step's tools still owns this call.
     pub fn uses_connection_from(&self, binding: &McpBinding) -> bool {
         self.connections
-            .shares_server_connection(&binding.connections, &self.server_name)
+            .shares_server_connection(&binding.connections, self.server_key())
+    }
+
+    /// Identifies the exact server and environment captured for this call.
+    pub fn server_key(&self) -> &McpServerKey {
+        self.tool_info().server_key()
     }
 
     /// Returns the configuration and approval authority captured with this client.
@@ -372,17 +376,10 @@ impl PreparedMcpCall {
 
     /// A hosted app can run through the local server but use thread rules, not local environment rules.
     pub fn permission_source(&self) -> McpPermissionSource<'_> {
-        // The constructor only prepares calls with an entry in this immutable config.
-        match &self.config.server_permissions[&self.server_name] {
-            McpServerPermissions::Environment(sandbox) => McpPermissionSource::Environment {
-                environment_id: self.server_environment_id(),
-                sandbox,
-            },
-            McpServerPermissions::Thread => McpPermissionSource::Thread {
-                profile: &self.config.permission_profile,
-                host_cwd: &self.config.host_cwd,
-            },
-        }
+        let Some(source) = self.config.permission_source_for_server(self.server_key()) else {
+            unreachable!("prepared calls have a permission source");
+        };
+        source
     }
 
     /// Returns the owner permissions validated when this immutable call was prepared.
@@ -408,46 +405,27 @@ impl PreparedMcpCall {
     /// loopback) or remote executor does not establish a shared filesystem.
     /// Capability probes are cached process-wide by absolute executable path.
     pub async fn sandbox_codex_executable(&self) -> Option<AbsolutePathBuf> {
-        let server = self
-            .config
-            .mcp_server_catalog
-            .server(&self.server_name)?
-            .config();
-        if self.server_environment_id() != codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID
-            || !server.is_local_environment()
-            || !matches!(
-                server.transport,
-                codex_config::McpServerTransportConfig::Stdio { .. }
-            )
-        {
-            return None;
-        }
-
-        // Require a literal absolute path before the constructor can expand `~`.
-        let executable = self
-            .config
-            .codex_self_exe
-            .as_deref()
-            .filter(|path| path.is_absolute() && path.to_str().is_some())?;
-        let executable = AbsolutePathBuf::from_absolute_path_checked(executable).ok()?;
-        crate::sandbox_executable::supports_sandbox_state(&executable)
-            .await
-            .then_some(executable)
+        crate::sandbox_metadata::sandbox_codex_executable(
+            &self.config,
+            self.server_key(),
+            self.server_environment_id(),
+        )
+        .await
     }
 
     pub fn server_name(&self) -> &str {
-        &self.server_name
+        self.tool_info().server_name()
     }
 
     /// Returns whether this call is bound to the host-owned Codex Apps server.
     pub fn is_host_owned_apps(&self) -> bool {
         self.config
             .mcp_server_catalog
-            .server(&self.server_name)
+            .server(self.server_key())
             .is_some_and(|registration| {
                 registration
                     .source()
-                    .is_host_owned_apps(&self.server_name, registration.config())
+                    .is_host_owned_apps(self.server_name(), registration.config())
             })
     }
 
@@ -475,7 +453,7 @@ impl PreparedMcpCall {
     pub fn output_token_limit(&self) -> Option<usize> {
         self.config
             .mcp_server_catalog
-            .server(&self.server_name)?
+            .server(self.server_key())?
             .config()
             .tools
             .get(self.tool_info().tool.name.as_ref())?
@@ -507,7 +485,7 @@ impl PreparedMcpCall {
 
     fn check_tool_list_revision(&self, tool_list_revision: Option<u64>) -> Result<()> {
         // Apps may opt out of shared catalogs; their explicit refresh path still owns updates.
-        if self.server_name == crate::mcp::CODEX_APPS_MCP_SERVER_NAME {
+        if self.is_host_owned_apps() {
             return Ok(());
         }
         if let Some(tool_list_revision) = tool_list_revision
@@ -532,10 +510,27 @@ impl PreparedMcpCall {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(Option<JsonValue>, Option<JsonValue>)>>,
     {
+        self.call_with_admission(requested_timeout, || Ok(()), prepare)
+            .await
+    }
+
+    /// Checks the issuing connection and owner's policy at the final handoff.
+    pub async fn call_with_admission<F, Fut>(
+        &self,
+        requested_timeout: Option<Duration>,
+        admit: impl Fn() -> Result<()> + Send + Sync,
+        prepare: F,
+    ) -> Result<CallToolResult>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(Option<JsonValue>, Option<JsonValue>)>>,
+    {
+        let server_name = self.server_name();
+        let tool_name = self.tool_info().tool.name.to_string();
         if self
             .lease_guard
             .as_ref()
-            .is_some_and(|guard| !guard.is_valid(&self.server_name))
+            .is_some_and(|guard| !guard.is_valid(self.server_key()))
         {
             anyhow::bail!("extension MCP lease revoked");
         }
@@ -546,11 +541,11 @@ impl PreparedMcpCall {
                 }
                 (server_timeout, requested_timeout) => server_timeout.or(requested_timeout),
             };
-            let tool_name = self.tool_info().tool.name.to_string();
             let operation = self.client.tool_catalog.run_with_snapshot(
                 &self.catalog_snapshot,
                 |tool_list_revision| {
                     let tool_name = &tool_name;
+                    let admit = &admit;
                     async move {
                         self.check_tool_list_revision(tool_list_revision)?;
                         let (arguments, meta) = prepare().await?;
@@ -596,33 +591,45 @@ impl PreparedMcpCall {
                         if self
                             .lease_guard
                             .as_ref()
-                            .is_some_and(|guard| !guard.is_valid(&self.server_name))
+                            .is_some_and(|guard| !guard.is_valid(self.server_key()))
                         {
                             anyhow::bail!("extension MCP lease revoked");
                         }
+                        let policy_meta = self.connections.network_policy_meta_for_call(
+                            &self.client,
+                            Some(self.permission_profile()),
+                            self.server_environment_id(),
+                            meta,
+                        );
                         self.client
                             .call_tool(
                                 tool_name.clone(),
                                 arguments,
-                                self.connections.network_policy_meta_for_call(
-                                    &self.client,
-                                    Some(self.permission_profile()),
-                                    self.server_environment_id(),
-                                    meta,
-                                ),
+                                |capabilities| {
+                                    self.check_tool_list_revision(tool_list_revision)?;
+                                    if self
+                                        .lease_guard
+                                        .as_ref()
+                                        .is_some_and(|guard| !guard.is_valid(self.server_key()))
+                                    {
+                                        anyhow::bail!("extension MCP lease revoked");
+                                    }
+                                    let meta = policy_meta(capabilities)?;
+                                    admit()?;
+                                    Ok(meta)
+                                },
                                 remaining_timeout,
                             )
                             .await
                             .with_context(|| {
-                                format!("tool call failed for `{}/{tool_name}`", self.server_name)
+                                format!("tool call failed for `{server_name}/{tool_name}`")
                             })
                     }
                 },
             );
             self.client.with_active_shared_lease(operation).await?
             .ok_or_else(|| anyhow::anyhow!(
-                "tool call rejected because the catalog changed after `{}/{tool_name}` was prepared",
-                self.server_name
+                "tool call rejected because the catalog changed after `{server_name}/{tool_name}` was prepared"
             ))?
             .map(call_tool_result_from_rmcp)
         };

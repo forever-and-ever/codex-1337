@@ -20,7 +20,7 @@ pub(super) fn issuing_permission_profile(
         .find(|environment| environment.selection.environment_id == call.server_environment_id())
         .map(TurnEnvironment::permission_profile_with_workspace_roots);
     call.config()
-        .server_permission_profile(call.server_name(), &thread_profile, |_| {
+        .server_permission_profile(call.server_key(), &thread_profile, |_| {
             environment_profile.as_ref()
         })
         .cloned()

@@ -5,13 +5,27 @@ use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use anyhow::ensure;
+use codex_app_server_protocol::InitializeResponse;
 use codex_app_server_protocol::JSONRPCMessage;
 use futures::SinkExt;
 use futures::StreamExt;
 use serde_json::json;
 use tokio::net::UnixListener;
+use tokio::net::UnixStream;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
+
+async fn read_version_probe_message(
+    probe: &mut WebSocketStream<UnixStream>,
+) -> Result<JSONRPCMessage> {
+    let frame = probe
+        .next()
+        .await
+        .context("daemon version probe disconnected")??;
+    Ok(serde_json::from_str(frame.to_text()?)?)
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<()> {
@@ -22,6 +36,13 @@ async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<
         let socket = codex_app_server_client::app_server_control_socket_path(home.path())?;
         std::fs::create_dir_all(socket.parent().unwrap())?;
         let listener = UnixListener::bind(socket.as_path())?;
+        let initialize = InitializeResponse {
+            user_agent: "daemon-test/0.0.0".into(),
+            codex_home: home.path().try_into()?,
+            platform_family: std::env::consts::FAMILY.into(),
+            platform_os: std::env::consts::OS.into(),
+            thread_coordination: None,
+        };
         let server = tokio::spawn(async move {
             let mut socket = loop {
                 let (stream, _) = listener.accept().await?;
@@ -29,32 +50,63 @@ async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<
                     break socket;
                 }
             };
-            while let Some(Ok(Message::Text(text))) = socket.next().await {
-                let JSONRPCMessage::Request(request) = serde_json::from_str(&text)? else {
-                    continue;
-                };
-                let response = match request.method.as_str() {
-                    "initialize" => {
-                        json!({"id": request.id, "result": {"userAgent": "daemon-test/0.0.0"}})
-                    }
-                    "config/read" => {
-                        json!({"id": request.id, "result": {"config": {}, "layers": []}})
-                    }
-                    "configRequirements/read" => {
-                        json!({"id": request.id, "result": {"requirements": null}})
-                    }
-                    "experimentalFeature/list" => json!({"id": request.id, "result": {"data": [{
+            // The reload host keeps its compatibility connection alive while the TUI
+            // worker probes the daemon on a second socket. Serve both concurrently.
+            let compatibility_initialize = initialize.clone();
+            let compatibility = tokio::spawn(async move {
+                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let JSONRPCMessage::Request(request) = serde_json::from_str(&text)? else {
+                        continue;
+                    };
+                    let response = match request.method.as_str() {
+                        "initialize" => {
+                            json!({"id": request.id, "result": compatibility_initialize})
+                        }
+                        "config/read" => {
+                            json!({"id": request.id, "result": {"config": {}, "layers": []}})
+                        }
+                        "configRequirements/read" => {
+                            json!({"id": request.id, "result": {"requirements": null}})
+                        }
+                        "experimentalFeature/list" => {
+                            json!({"id": request.id, "result": {"data": [{
                         "name": "api_key_model_discovery", "stage": "stable",
                         "displayName": null, "description": null, "announcement": null,
                         "enabled": scenario == "explicit disable", "defaultEnabled": true,
-                    }], "nextCursor": null}}),
-                    _ => panic!("unexpected request: {}", request.method),
-                };
-                socket
-                    .send(Message::Text(response.to_string().into()))
-                    .await?;
-            }
-            Ok::<_, anyhow::Error>(())
+                    }], "nextCursor": null}})
+                        }
+                        _ => panic!("unexpected request: {}", request.method),
+                    };
+                    socket
+                        .send(Message::Text(response.to_string().into()))
+                        .await?;
+                }
+                Ok::<_, anyhow::Error>(())
+            });
+            // Recovery checks the daemon version on a new connection before offering a choice.
+            let (stream, _) = listener.accept().await?;
+            let mut probe = tokio_tungstenite::accept_async(stream).await?;
+            let JSONRPCMessage::Request(request) = read_version_probe_message(&mut probe).await?
+            else {
+                bail!("expected initialize request from the daemon version probe");
+            };
+            ensure!(
+                request.method == "initialize"
+                    && request.params.as_ref().is_some_and(
+                        |params| params["clientInfo"]["name"] == "codex_app_server_daemon"
+                    ),
+                "expected the daemon version probe after the compatibility check",
+            );
+            let response = json!({"id": request.id, "result": initialize});
+            probe
+                .send(Message::Text(response.to_string().into()))
+                .await?;
+            let initialized = read_version_probe_message(&mut probe).await?;
+            ensure!(
+                matches!(initialized, JSONRPCMessage::Notification(n) if n.method == "initialized"),
+                "daemon version probe did not acknowledge initialize",
+            );
+            Ok::<_, anyhow::Error>((listener.into_std()?, compatibility))
         });
         let args = if scenario == "explicit disable" {
             vec!["-c", "features.api_key_model_discovery=false"]
@@ -64,6 +116,15 @@ async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<
         // The PTY grants emergency embedded mode; a disabled reason must not veto that grant.
         let mut terminal = PtyCodex::start(&cwd, home, &args)?;
         terminal.wait_for_screen("Background server has incompatible feature settings")?;
+        let (_listener, compatibility) =
+            tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), server)
+                .await
+                .with_context(|| {
+                    format!(
+                        "daemon version probe did not complete:\n{}",
+                        terminal.screen_contents()
+                    )
+                })???;
         terminal.write_input(b"1")?;
         terminal.wait_for_startup()?;
         terminal.wait_for_screen("warning")?;
@@ -90,16 +151,11 @@ async fn incompatible_daemon_can_run_embedded_for_explicit_features() -> Result<
         terminal.write_input(b"\x14")?;
         terminal.write_input(b"/status")?;
         terminal.wait_for_screen("show current session configuration")?;
-        terminal.read_output(std::time::Duration::from_millis(/*millis*/ 200))?;
         terminal.write_input(b"\r")?;
         terminal.wait_for_screen("Model:")?;
         ensure!(!terminal.screen_contains("unix://"));
-        if scenario == "host policy" {
-            server.abort();
-            continue;
-        }
         drop(terminal);
-        tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), server).await???;
+        tokio::time::timeout(std::time::Duration::from_secs(5), compatibility).await???;
     }
     Ok(())
 }

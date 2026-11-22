@@ -404,7 +404,10 @@ impl ChatWidget {
         // Stopping may prevent final transcript events from arriving.
         self.finish_realtime_partial_transcripts();
 
-        if let Some(handle) = self.realtime_conversation.handle.take() {
+        if self.realtime_conversation.startup_abort.is_some() {
+            // Core has no attachment to stop until the provider answer is accepted.
+            self.reset_realtime_conversation();
+        } else if let Some(handle) = self.realtime_conversation.handle.take() {
             handle.close();
             self.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
             self.refresh_terminal_title();
@@ -457,7 +460,6 @@ impl ChatWidget {
                 return;
             }
         };
-        self.realtime_conversation.startup_abort = None;
         if self.realtime_conversation.microphone_muted
             && let Err(error) = offer.handle.set_microphone_muted(/*muted*/ true)
         {
@@ -491,7 +493,7 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn on_realtime_conversation_sdp(&mut self, answer_sdp: String) {
+    pub(crate) fn on_realtime_conversation_sdp(&mut self, answer_sdp: String) {
         if self.realtime_conversation.phase != RealtimeConversationPhase::Starting {
             return;
         }
@@ -1957,7 +1959,8 @@ impl ChatWidget {
         }
         // The helper may already have exited while app-server still owns the
         // voice session. An acknowledged backend start still needs a stop RPC.
-        let backend_thread_id = if self.realtime_conversation.handle.is_some()
+        let backend_thread_id = if (self.realtime_conversation.handle.is_some()
+            && self.realtime_conversation.startup_abort.is_none())
             || self.realtime_conversation.backend_started
         {
             self.realtime_conversation.thread_id

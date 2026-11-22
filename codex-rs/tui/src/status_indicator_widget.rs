@@ -23,12 +23,14 @@ use crate::app_event_sender::AppEventSender;
 use crate::key_hint;
 use crate::key_hint::ShortcutHint;
 use crate::line_truncation::line_width;
+use crate::line_truncation::truncate_line_with_ellipsis;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
 use crate::render::renderable::Renderable;
 use crate::text_formatting::capitalize_first;
+use crate::text_formatting::contains_rtl_or_arabic_number;
 use crate::tui::FrameRequester;
 use crate::width::display_width;
 use crate::wrapping::RtOptions;
@@ -203,13 +205,8 @@ impl StatusIndicatorWidget {
 
         if out.len() > self.details_max_lines {
             out.truncate(self.details_max_lines);
-            let content_width = usize::from(width).saturating_sub(prefix_width).max(1);
-            let max_base_len = content_width.saturating_sub(1);
-            if let Some(last) = out.last_mut()
-                && let Some(span) = last.spans.last_mut()
-            {
-                let trimmed: String = span.content.as_ref().chars().take(max_base_len).collect();
-                *span = format!("{trimmed}…").dim();
+            if let Some(last) = out.last_mut() {
+                *last = truncate_line_with_ellipsis(std::mem::take(last), usize::from(width)).dim();
             }
         }
 
@@ -235,7 +232,9 @@ impl StatusIndicator<'_> {
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let animated = row.animations_enabled && row.frame_requester.mode().glints();
         let progress = MotionMode::from_animations_enabled(animated && row.effects.progress);
-        let shimmer = MotionMode::from_animations_enabled(animated && row.effects.shimmer);
+        let shimmer = MotionMode::from_animations_enabled(
+            animated && row.effects.shimmer && !contains_rtl_or_arabic_number(&row.header),
+        );
 
         let mut spans = Vec::with_capacity(5);
         if let Some(indicator) = activity_indicator(
@@ -342,6 +341,39 @@ mod tests {
         assert_eq!(row.header_started_at, previous);
         row.update_header("Mapping the app structure".to_owned());
         assert!(row.header_started_at > previous);
+    }
+
+    #[test]
+    fn static_bidi_headers_only_schedule_clock_ticks_without_progress() {
+        for (header, progress, expected_ms) in [
+            ("שלום עולם", false, 1_000),
+            ("Checking lines ١٢-٣٤", false, 1_000),
+            ("Working", false, 0),
+            ("שלום עולם", true, 0),
+        ] {
+            let (tx, _rx) = unbounded_channel();
+            let (requester, mut requests) = FrameRequester::test_channel();
+            let mut row = StatusIndicatorWidget::new(
+                AppEventSender::new(tx),
+                requester,
+                /*animations_enabled*/ true,
+                codex_config::types::TuiEffects {
+                    progress,
+                    shimmer: true,
+                    ..Default::default()
+                },
+            );
+            row.update_header(header.to_owned());
+            let timer = StatusTimer::default();
+            let area = Rect::new(0, 0, 80, 1);
+            let before = Instant::now();
+            row.with_timer(&timer)
+                .render(area, &mut Buffer::empty(area));
+            let after = Instant::now();
+            let requested = requests.try_recv().expect("scheduled frame");
+            let interval = Duration::from_millis(expected_ms);
+            assert!((before + interval..=after + interval).contains(&requested.at));
+        }
     }
 
     #[test]
@@ -541,8 +573,24 @@ mod tests {
         assert_eq!(lines.len(), STATUS_DETAILS_DEFAULT_MAX_LINES);
         let last = lines.last().expect("expected last details line");
         assert!(
-            last.spans[1].content.as_ref().ends_with("…"),
+            last.to_string().ends_with('…'),
             "expected ellipsis in last line: {last:?}"
+        );
+
+        w.update_details(
+            Some("界".repeat(20)),
+            StatusDetailsCapitalization::Preserve,
+            STATUS_DETAILS_DEFAULT_MAX_LINES,
+        );
+        let lines = w.wrapped_details_lines(/*width*/ 10);
+        assert!(lines.iter().all(|line| line_width(line) <= 10));
+        insta::assert_snapshot!(
+            lines.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"),
+            @r###"
+          └ 界界界
+            界界界
+            界界…
+        "###
         );
     }
 

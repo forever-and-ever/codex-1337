@@ -218,6 +218,8 @@ async fn tmpdir_uses_command_environment_over_rpc(
         cwd.clone(),
     );
     sandbox.windows_sandbox_selection = selection;
+    // The session must enforce the command TEMP grant even with no workspace roots.
+    sandbox.workspace_roots.clear();
     let env = HashMap::from([
         ("SystemRoot".to_owned(), std::env::var("SystemRoot")?),
         (

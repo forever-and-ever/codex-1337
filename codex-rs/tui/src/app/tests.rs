@@ -770,6 +770,7 @@ async fn handle_mcp_inventory_result_respects_origin_thread() {
             tool_list_meta: None,
             tools_error: None,
             name: "docs".to_string(),
+            environment_id: None,
             runtime_status: None,
             plugin_id: None,
             http_origin: None,
@@ -1467,6 +1468,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
             cost: None,
             input_tokens: 4,
             cached_input_tokens: 1,
+            cache_write_input_tokens: 0,
             output_tokens: 5,
             reasoning_output_tokens: 0,
             total_tokens: 10,
@@ -1496,6 +1498,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
             cost: None,
             input_tokens: 4,
             cached_input_tokens: 1,
+            cache_write_input_tokens: 0,
             output_tokens: 10,
             reasoning_output_tokens: 0,
             total_tokens: 15,
@@ -2518,7 +2521,6 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
 #[tokio::test]
 async fn token_usage_update_refreshes_status_line_with_runtime_context_window() {
     use crate::bottom_pane::StatusLineItem;
-    use crate::bottom_pane::footer_content::FooterContent;
 
     let mut app = make_test_app().await;
     app.chat_widget.setup_status_line(
@@ -2536,23 +2538,13 @@ async fn token_usage_update_refreshes_status_line_with_runtime_context_window() 
     assert_eq!(app.chat_widget.status_line_text(), None);
 
     let thread_id = ThreadId::new();
-    for (extensions, window, expected) in [
-        (false, 950_000, "950K window · 8 used"),
-        (true, 800_000, "800K window · 8 used"),
-        (false, 900_000, "900K window · 8 used"),
+    for (window, expected) in [
+        (950_000, "950K window · 8 used"),
+        (800_000, "800K window · 8 used"),
     ] {
-        let before = render_bottom_popup(&app.chat_widget, /*width*/ 60);
-        app.chat_widget
-            .set_feature_enabled(Feature::TuiExtensionsStatusLine, extensions);
-        app.refresh_status_line();
-        assert_eq!(render_bottom_popup(&app.chat_widget, /*width*/ 60), before);
         app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
             token_usage_notification(thread_id, "turn-1", Some(window)),
         )));
-        assert!(matches!(
-            app.chat_widget.status_line_content(),
-            Some(FooterContent::HyperlinkLine(_))
-        ));
         let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 60);
         assert!(
             rendered.lines().any(|row| row.trim() == expected),
@@ -8235,6 +8227,7 @@ async fn inactive_thread_url_elicitation_routes_to_app_link() {
         params: McpServerElicitationRequestParams {
             thread_id: thread_id.to_string(),
             turn_id: Some("turn-auth".to_string()),
+            environment_id: None,
             server_name: "payments".to_string(),
             request: McpServerElicitationRequest::Url {
                 meta: None,
@@ -8275,6 +8268,7 @@ async fn inactive_thread_invalid_url_elicitation_is_declined() {
         params: McpServerElicitationRequestParams {
             thread_id: thread_id.to_string(),
             turn_id: Some("turn-auth".to_string()),
+            environment_id: None,
             server_name: "payments".to_string(),
             request: McpServerElicitationRequest::Url {
                 meta: None,
@@ -8378,6 +8372,9 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_cwd = test_path_buf("/tmp/main").abs();
     let shared_root = test_path_buf("/tmp/shared").abs();
     let primary_session = ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
@@ -8722,7 +8719,7 @@ fn agent_picker_item_name_snapshot() {
 async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let app = make_test_app().await;
     let original_approval_policy = app.config.permissions.approval_policy.value();
-    let original_sandbox_policy = app.config.legacy_sandbox_policy();
+    let original_profile = app.config.permissions.effective_permission_profile();
 
     let mut fork_config = app.side_fork_config();
     crate::app_server_session::SideChatStorage::Temporary.configure_fork(&mut fork_config);
@@ -8732,7 +8729,10 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
         fork_config.permissions.approval_policy.value(),
         original_approval_policy
     );
-    assert_eq!(fork_config.legacy_sandbox_policy(), original_sandbox_policy);
+    assert_eq!(
+        fork_config.permissions.effective_permission_profile(),
+        original_profile
+    );
     let developer_instructions = fork_config
         .developer_instructions
         .as_deref()
@@ -9118,6 +9118,9 @@ async fn side_thread_snapshot_hides_forked_parent_transcript() {
     let side_thread_id = ThreadId::new();
     let mut store = ThreadEventStore::new(/*capacity*/ 4);
     let session = ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         forked_from_id: Some(parent_thread_id),
@@ -9189,6 +9192,9 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
     let snapshot = ThreadEventSnapshot {
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             forked_from_id: Some(parent_thread_id),
@@ -9252,6 +9258,7 @@ async fn primary_thread_ignores_child_mcp_startup_notifications() {
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
                 thread_id: Some(child_thread_id.to_string()),
+                environment_id: None,
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
                 error: Some("sentry is not logged in".to_string()),
@@ -9336,6 +9343,7 @@ async fn app_scoped_mcp_startup_notifications_do_not_render_in_active_thread() {
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
                 thread_id: None,
+                environment_id: None,
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
                 error: Some("sentry is not logged in".to_string()),
@@ -9419,6 +9427,7 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
             codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
                 ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
                     thread_id: Some(side_thread_id.to_string()),
+                    environment_id: None,
                     name: name.to_string(),
                     status,
                     error: matches!(status, McpServerStartupState::Failed)
@@ -9791,6 +9800,9 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: ThreadId::new(),
@@ -10290,13 +10302,20 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
     let thread_id = started.session.thread_id;
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS + 1);
+    let long_paste = "한글".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS / 2);
+    let long_placeholder = "[Pasted Content 4000 chars]";
+    let objective = format!("Prefix {long_paste} suffix");
 
     app.set_thread_goal_draft(
         &mut app_server,
         thread_id,
         crate::goal_files::GoalDraft {
-            objective: objective.clone(),
+            objective: format!("Prefix {long_placeholder} suffix"),
+            text_elements: vec![TextElement::new(
+                (7..7 + long_placeholder.len()).into(),
+                Some(long_placeholder.to_string()),
+            )],
+            pending_pastes: vec![(long_placeholder.to_string(), long_paste)],
             ..Default::default()
         },
         crate::app_event::ThreadGoalSetMode::ConfirmIfExists,
@@ -10393,13 +10412,11 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         .await?
         .goal
         .expect("replacement goal should be set");
-    let paste_path = goal
-        .objective
-        .strip_prefix("Use pasted text file: ")
-        .and_then(|text| text.strip_suffix(". Read this file before continuing."))
-        .expect("paste file reference");
-    assert_eq!(std::fs::read_to_string(paste_path)?, "hello");
-    let attachment_count = std::fs::read_dir(&attachments_dir)?.count();
+    assert_eq!(goal.objective, "Use hello");
+    assert_eq!(
+        std::fs::read_dir(&attachments_dir)?.count(),
+        attachment_count
+    );
 
     let stale_paste = (placeholder.to_string(), "hello".to_string());
     app.set_thread_goal_draft(
@@ -10461,11 +10478,19 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         &mut app_server,
         thread_id,
         crate::goal_files::GoalDraft {
-            objective: format!("Describe {image_placeholder}"),
-            text_elements: vec![TextElement::new(
-                (9..9 + image_placeholder.len()).into(),
-                Some(image_placeholder.to_string()),
-            )],
+            objective: format!("Describe {placeholder} {image_placeholder}"),
+            text_elements: vec![
+                TextElement::new(
+                    (9..9 + placeholder.len()).into(),
+                    Some(placeholder.to_string()),
+                ),
+                TextElement::new(
+                    (10 + placeholder.len()..10 + placeholder.len() + image_placeholder.len())
+                        .into(),
+                    Some(image_placeholder.to_string()),
+                ),
+            ],
+            pending_pastes: vec![(placeholder.to_string(), "hello".to_string())],
             local_images: vec![crate::bottom_pane::LocalImageAttachment {
                 placeholder: image_placeholder.to_string(),
                 path: image_path,
@@ -10474,7 +10499,6 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
                 "https://example.com/first.png".to_string(),
                 "https://example.com/second.png".to_string(),
             ],
-            ..Default::default()
         },
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
@@ -10488,7 +10512,7 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         .expect("image goal should be set")
         .objective;
     let copied_image = objective
-        .strip_prefix("Describe image file: ")
+        .strip_prefix("Describe hello image file: ")
         .and_then(|text| text.split_once("\n\n"))
         .map(|(path, _)| path)
         .expect("copied image path");
@@ -10502,6 +10526,9 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
 
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -11239,7 +11266,7 @@ async fn resizing_empty_transcript_schedules_settled_size_recheck() {
     );
 }
 
-fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -> Turn {
+pub(super) fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -> Turn {
     Turn {
         id: turn_id.to_string(),
         root_turn_id: None,
@@ -11531,6 +11558,9 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: ThreadId::new(),
@@ -11604,6 +11634,9 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: base_id,
@@ -12964,6 +12997,9 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,
@@ -13789,6 +13825,9 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            read_only_history: false,
+            thread_settings_confirmed: true,
+            primary_environment_cwd: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,

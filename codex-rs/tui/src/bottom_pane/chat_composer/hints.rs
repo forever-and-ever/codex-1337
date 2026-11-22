@@ -180,10 +180,11 @@ impl ChatComposer {
                         Some(line)
                     } else if status_line_active
                         && options.separate_status_line
-                        && !matches!(
-                            self.footer.status_line_value,
-                            Some(super::FooterContent::Extension { .. })
-                        )
+                        && self
+                            .footer
+                            .status_line_value
+                            .as_ref()
+                            .is_none_or(|line| line.as_native().is_some())
                     {
                         None
                     } else if status_line_active {

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use codex_core::ThreadManager;
+use codex_core::SharedModelsManager;
 use codex_core::config::Config;
 use codex_core::cyber_access_program::ApiKeyCyberAccessPrograms;
 use codex_extension_api::ThreadOriginator;
@@ -107,10 +107,7 @@ pub(super) fn valid_implicit_decisions_key(key: &str) -> bool {
     !key.is_empty() && key.trim() == key && !codex_login::auth::is_fedramp_api_key(key)
 }
 
-pub(super) async fn sampler_config(
-    input: &ThreadStartInput<'_, Config>,
-    manager: Option<Arc<ThreadManager>>,
-) -> LunaSamplerConfig {
+pub(super) async fn sampler_config(input: &ThreadStartInput<'_, Config>) -> LunaSamplerConfig {
     #[expect(clippy::expect_used, reason = "Required thread startup invariant")]
     let auth = input
         .thread_store
@@ -123,19 +120,10 @@ pub(super) async fn sampler_config(
     // Native discovery waits for the classification's committed conversation identity.
     let luna_model = if native {
         None
-    } else if let Some(thread_manager) = manager {
+    } else if let Some(catalog) = input.thread_store.get::<SharedModelsManager>() {
         let mut model_config = input.config.to_models_manager_config();
         model_config.model_context_window = None;
-        Some(
-            input
-                .thread_store
-                .get::<codex_models_manager::manager::SharedModelsManager>()
-                .as_deref()
-                .cloned()
-                .unwrap_or_else(|| thread_manager.get_models_manager())
-                .get_model_info(MODEL, &model_config)
-                .await,
-        )
+        Some(catalog.get_model_info(MODEL, &model_config).await)
     } else {
         None
     };

@@ -125,7 +125,7 @@ impl ChatWidget {
                     QuestionSubmission::Queue(text) => (text, true),
                 };
                 if self.blocks_direct_input
-                    && (!self.is_parent_owned_thread() || self.external_writer_view)
+                    && (!self.is_parent_owned_thread() || self.is_read_only_view())
                 {
                     self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
                     return true;
@@ -189,6 +189,7 @@ impl ChatWidget {
                     let cursor = main.cursor;
                     self.restore_composer_state(ThreadComposerState {
                         text: main.text,
+                        shell_mode: Some(main.shell_mode.unwrap_or(false)),
                         text_elements: main.text_elements,
                         local_images: main.local_images,
                         remote_image_urls: main.remote_image_urls,

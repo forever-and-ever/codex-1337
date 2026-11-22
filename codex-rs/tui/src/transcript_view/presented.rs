@@ -246,6 +246,7 @@ impl TranscriptView {
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         if self.cache.frames.is_none() {
             self.render_prepared(area, buf, cells);
+            self.finish_collapse_layout(cells);
             self.paint_tool_marks(buf);
             return;
         }

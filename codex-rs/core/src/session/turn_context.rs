@@ -606,6 +606,11 @@ impl TurnContext {
         Arc::clone(&self.next_step_settings.load().model_info)
     }
 
+    /// Country captured when this turn was admitted. Subsequent steps capture their own settings.
+    pub fn request_country(&self) -> &codex_protocol::RequestCountry {
+        self.initial_settings.request_country()
+    }
+
     /// Legacy: returns the frozen initial-turn model metadata.
     /// Step-scoped consumers should use their captured `StepContext::settings`.
     pub(crate) fn model_info(&self) -> &Arc<CatalogModel> {
@@ -1488,7 +1493,7 @@ impl Session {
         turn_context.cyber_access_program =
             cyber_access_program::for_provider(&turn_context.config, options.cyber_access_program);
         if let Some(admission) = options.helper_admission {
-            admission.capture_intent(self, &turn_context).await;
+            admission.capture_intent(self, &mut turn_context).await;
         }
         // Tool observers retain this turn's selection even after a later turn starts.
         if let Some(program) = turn_context.cyber_access_program {

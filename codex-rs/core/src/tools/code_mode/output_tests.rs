@@ -80,7 +80,7 @@ fn completed_timing_preserves_content_and_distinguishes_zero_from_unavailable() 
                 result: Box::new(output),
                 post_tool_use_payload: None,
             }
-            .into_response();
+            .into_response(/*file_backed_tool_audio*/ false);
             let mut history = crate::context_manager::ContextManager::new(
                 codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
             );

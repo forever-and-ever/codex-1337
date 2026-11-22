@@ -269,7 +269,7 @@ async fn supervise(
                 };
                 let _ = reply.send(response);
             }
-            ready = terminal.input.readable(), if host.reload.replacing() || host.reload.failed() || host.input.len() <= 65536 - 4096 => {
+            ready = terminal.input().readable(), if host.reload.replacing() || host.reload.failed() || host.input.len() <= 65536 - 4096 => {
                 let mut ready = ready?;
                 let mut bytes = [0; 4096];
                 if let Ok(result) = ready.try_io(|fd| worker_process::read(fd.get_ref(), &mut bytes)) {
@@ -306,7 +306,7 @@ async fn supervise(
                     }
                 }
             }
-            ready = terminal.output.writable(), if !host.output.is_empty() => {
+            ready = terminal.output().writable(), if !host.output.is_empty() => {
                 let mut ready = ready?;
                 let bytes = host.output.as_slices().0;
                 if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref(), bytes)) {
@@ -316,7 +316,7 @@ async fn supervise(
             }
             ready = async {
                 match &host.worker {
-                    Some(worker) => worker.terminal.readable().await,
+                    Some(worker) => worker.terminal().readable().await,
                     None => std::future::pending().await,
                 }
             }, if host.output_open && (
@@ -337,7 +337,7 @@ async fn supervise(
             }
             ready = async {
                 match &host.worker {
-                    Some(worker) => worker.terminal.writable().await,
+                    Some(worker) => worker.terminal().writable().await,
                     None => std::future::pending().await,
                 }
             }, if !host.input.is_empty() => {

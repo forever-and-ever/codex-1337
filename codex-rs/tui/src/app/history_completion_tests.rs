@@ -30,6 +30,17 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
     }
 }
 
+fn history_items(turn: &Turn, items: &[ThreadItem]) -> Vec<HistoryItem> {
+    items
+        .iter()
+        .cloned()
+        .map(|item| HistoryItem {
+            turn_id: turn.id.clone(),
+            item,
+        })
+        .collect()
+}
+
 #[test]
 fn split_turn_only_completes_on_the_page_with_its_last_item() {
     let turns = vec![turn(
@@ -38,11 +49,11 @@ fn split_turn_only_completes_on_the_page_with_its_last_item() {
         &["first", "second", "last"],
     )];
     assert_eq!(
-        group_turn_items(&turns[0].items[1..], &turns),
+        group_turn_items(&history_items(&turns[0], &turns[0].items[1..]), &turns),
         vec![(0..2, Some(&turns[0]))],
     );
     assert_eq!(
-        group_turn_items(&turns[0].items[..1], &turns),
+        group_turn_items(&history_items(&turns[0], &turns[0].items[..1]), &turns),
         vec![(0..1, None)],
     );
 }
@@ -50,17 +61,21 @@ fn split_turn_only_completes_on_the_page_with_its_last_item() {
 #[test]
 fn multiple_turns_keep_item_groups_and_completion_order() {
     let turns = vec![
-        turn("first", TurnStatus::Completed, &["a", "b"]),
-        turn("second", TurnStatus::Completed, &["c", "d"]),
+        turn("first", TurnStatus::Completed, &["a", "shared"]),
+        turn("second", TurnStatus::Completed, &["middle"]),
+        turn("last", TurnStatus::Completed, &["shared"]),
     ];
     let items = turns
         .iter()
-        .flat_map(|turn| turn.items.iter())
-        .cloned()
+        .flat_map(|turn| history_items(turn, &turn.items))
         .collect::<Vec<_>>();
     assert_eq!(
         group_turn_items(&items, &turns),
-        vec![(0..2, Some(&turns[0])), (2..4, Some(&turns[1])),],
+        vec![
+            (0..2, Some(&turns[0])),
+            (2..3, Some(&turns[1])),
+            (3..4, Some(&turns[2]))
+        ],
     );
 }
 
@@ -73,7 +88,7 @@ fn itemless_interruptions_keep_their_position_on_the_owning_page() {
         turn("running", TurnStatus::InProgress, &["b"]),
     ];
     assert_eq!(
-        group_turn_items(&turns[1].items, &turns),
+        group_turn_items(&history_items(&turns[1], &turns[1].items), &turns),
         vec![
             (0..0, Some(&turns[0])),
             (0..1, Some(&turns[1])),
@@ -81,13 +96,13 @@ fn itemless_interruptions_keep_their_position_on_the_owning_page() {
         ],
     );
     assert_eq!(
-        group_turn_items(&turns[3].items, &turns),
+        group_turn_items(&history_items(&turns[3], &turns[3].items), &turns),
         vec![(0..1, Some(&turns[3]))],
     );
     turns[0].status = TurnStatus::Failed;
     turns[2].status = TurnStatus::Failed;
     assert_eq!(
-        group_turn_items(&turns[1].items, &turns),
+        group_turn_items(&history_items(&turns[1], &turns[1].items), &turns),
         vec![
             (0..0, Some(&turns[0])),
             (0..1, Some(&turns[1])),
@@ -97,7 +112,7 @@ fn itemless_interruptions_keep_their_position_on_the_owning_page() {
     turns[0].items_view = TurnItemsView::NotLoaded;
     turns[2].items_view = TurnItemsView::NotLoaded;
     assert_eq!(
-        group_turn_items(&turns[3].items, &turns),
+        group_turn_items(&history_items(&turns[3], &turns[3].items), &turns),
         vec![(0..1, Some(&turns[3]))],
     );
 }

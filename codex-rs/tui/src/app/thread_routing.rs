@@ -191,6 +191,7 @@ impl App {
         target_session: &crate::resume_picker::SessionTarget,
     ) -> bool {
         if self.chat_widget.has_provider_error()
+            || self.thread_unavailable(target_session.thread_id)
             || self.active_thread_id != Some(target_session.thread_id)
             || self
                 .thread_event_channels
@@ -300,6 +301,7 @@ impl App {
                 if let Some(params) = AppLinkViewParams::from_url_app_server_request(
                     thread_id,
                     &params.server_name,
+                    params.environment_id.as_deref(),
                     request_id.clone(),
                     &params.request,
                 ) {
@@ -322,6 +324,7 @@ impl App {
                                 thread_id,
                                 thread_label,
                                 server_name: params.server_name.clone(),
+                                environment_id: params.environment_id.clone(),
                                 request_id: request_id.clone(),
                                 message: message.clone(),
                             }),
@@ -333,6 +336,7 @@ impl App {
                             request: crate::bottom_pane::user_verification::UserVerificationRequest {
                                 thread_label,
                                 server_name: params.server_name.clone(),
+                                environment_id: params.environment_id.clone(),
                                 request_id: request_id.clone(),
                                 title: title.clone(),
                                 description: description.clone(),
@@ -890,7 +894,14 @@ impl App {
                 input_generation,
                 offer_sdp,
             } => {
-                if *realtime_thread_id != thread_id {
+                let attempt_id = *attempt_id;
+                if *realtime_thread_id != thread_id
+                    || !self.chat_widget.is_starting_realtime_attempt(
+                        thread_id,
+                        attempt_id,
+                        *input_generation,
+                    )
+                {
                     return Ok(true);
                 }
                 let model = self
@@ -905,7 +916,7 @@ impl App {
                     ServerOperation::Realtime(
                         super::turn_submissions::RealtimeOperation::Prepare {
                             identity: super::turn_submissions::RealtimeIdentity {
-                                attempt_id: *attempt_id,
+                                attempt_id,
                                 input_generation: *input_generation,
                             },
                             offer_sdp: String::from(offer_sdp.clone()),
@@ -1170,6 +1181,7 @@ impl App {
         {
             return Ok(());
         }
+        archived_thread::update_archived_thread(self, thread_id, &notification);
         let mut confirmed_profile = None;
         if let ServerNotification::ThreadSettingsUpdated(notification) = &notification {
             self.apply_thread_settings_to_cached_session(thread_id, &notification.thread_settings)
@@ -1429,11 +1441,27 @@ impl App {
         notification: &ThreadStartedNotification,
     ) -> Option<ThreadSessionState> {
         let mut session = self.primary_session_configured.clone()?;
+        session.read_only_history = false;
+        session.thread_settings_confirmed = false;
+        session.primary_environment_cwd = crate::session_state::primary_environment_cwd(
+            notification
+                .thread
+                .environments
+                .as_deref()
+                .unwrap_or_default(),
+        );
         session.thread_id = thread_id;
+        // The primary session supplies defaults. The new thread supplies its own fork parent.
+        session.set_fork_parent(notification.thread.forked_from_id.as_deref());
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),
         );
+        // A parent’s collaboration mode can override the child’s reported model and effort.
+        session.collaboration_mode = None;
+        session
+            .reasoning_effort
+            .clone_from(&notification.thread.reasoning_effort);
         session.thread_name = notification.thread.name.clone();
         session.model_provider_id = notification.thread.model_provider.clone();
         session
@@ -1812,6 +1840,12 @@ impl App {
         resume_restored_queue: bool,
         mut settings_authority: crate::chatwidget::ThreadInputSettingsAuthority,
     ) {
+        if let Some(root) = self.primary_thread_id
+            && snapshot
+                .session
+                .as_ref()
+                .is_some_and(|s| s.thread_id == root)
+        {}
         let mut reasoning_replay = reasoning_replay::ReasoningReplay::new(&mut snapshot);
         let replayed_final_items = realtime_delivery::completed_agent_items(&snapshot);
         let replayed_voice_texts = realtime_delivery::replayed_voice_texts(&snapshot);
@@ -2020,6 +2054,7 @@ impl App {
                 AppLinkViewParams::from_url_app_server_request(
                     thread_id,
                     &params.server_name,
+                    params.environment_id.as_deref(),
                     request_id.clone(),
                     request,
                 )
@@ -2203,18 +2238,7 @@ impl App {
             && let ServerNotification::ItemCompleted(notification) = notification.as_ref()
             && let ThreadItemPayload::UserMessage { content, .. } = &notification.item.payload
         {
-            Some(
-                content
-                    .iter()
-                    .filter_map(|item| match item {
-                        codex_app_server_protocol::UserInput::Text { text, .. } => {
-                            Some(crate::prompt_request::extract_prompt_request_with_offset(text).0)
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
+            super::thread_title::user_message_text(content)
         } else {
             None
         };
@@ -2222,14 +2246,13 @@ impl App {
         self.handle_thread_event_now_recovering_file_changes(event)
             .await;
         if let Some(user_message) = automatic_title_user_message
-            && !user_message.trim().is_empty()
             && let Some(thread_id) = self.active_thread_id
         {
             self.generate_thread_title(
                 app_server,
                 thread_id,
                 ThreadTitleDestination::Automatic,
-                super::thread_title::thread_title_prompt(&user_message),
+                &user_message,
             );
         }
         if !had_active_modal

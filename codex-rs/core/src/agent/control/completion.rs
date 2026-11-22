@@ -107,8 +107,6 @@ impl LocalAgentControl {
         let Some(message) = message else {
             return;
         };
-        // `communication` owns the message. Keep a second copy only when the
-        // recorder will actually need it after parent delivery succeeds.
         let trace_message = trace.is_enabled().then(|| message.clone());
         let communication = InterAgentCommunication::new(
             child_agent_path.clone(),

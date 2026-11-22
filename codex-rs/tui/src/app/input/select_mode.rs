@@ -93,6 +93,7 @@ impl App {
                             | (
                                 crate::keymap::KeymapContext::Pager,
                                 "find"
+                                    | "mark_markdown"
                                     | "scroll_up"
                                     | "scroll_down"
                                     | "page_up"
@@ -113,7 +114,7 @@ impl App {
                     && crate::keymap::dispatch_event(binding.action) == Some(dispatch)
             })
         };
-        if fixed_search_control || fixed_select_control || pager_motion {
+        if fixed_search_control {
             false
         } else if self.key_chord_matcher.is_pending() {
             match self
@@ -137,10 +138,12 @@ impl App {
                 | crate::keymap::KeyChordMatch::Cancelled => false,
             }
         } else {
-            self.keymap.chords.bindings.iter().any(|binding| {
-                active_action(binding.action)
-                    && crate::keymap::chord_stroke_matches(binding.chord.prefix, key_event)
-            })
+            !fixed_select_control
+                && !pager_motion
+                && self.keymap.chords.bindings.iter().any(|binding| {
+                    active_action(binding.action)
+                        && crate::keymap::chord_stroke_matches(binding.chord.prefix, key_event)
+                })
         }
     }
 }

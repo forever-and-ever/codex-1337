@@ -236,7 +236,7 @@ async fn command_start_before_message_completion_does_not_duplicate_preamble() -
             app.active_thread_rx = Some(receiver);
             app.render_thread_snapshot(
                 &mut tui,
-                &app_server,
+                &mut app_server,
                 thread_id,
                 snapshot,
                 /*resume_restored_queue*/ false,

@@ -17,6 +17,8 @@ use sha1::Digest;
 use sha1::Sha1;
 use tracing::warn;
 
+use crate::McpServerExposure;
+use crate::McpServerKey;
 use crate::mcp::sanitize_responses_api_tool_name;
 
 const LEGACY_MCP_TOOL_NAME_PREFIX: &str = "mcp__";
@@ -32,8 +34,9 @@ pub enum AnnotationSource {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolInfo {
-    /// Raw MCP server name used for routing the tool call.
-    pub server_name: String,
+    /// Exact registration identity, serialized with the legacy flattened fields.
+    #[serde(flatten)]
+    pub server_key: McpServerKey,
     /// Whether calls routed to this server may run in parallel.
     #[serde(default)]
     pub supports_parallel_tool_calls: bool,
@@ -70,9 +73,18 @@ impl ToolInfo {
     pub fn unavailable_to_model_error(&self) -> anyhow::Error {
         anyhow::anyhow!(
             "MCP tool `{}/{}` is not available to the model",
-            self.server_name,
+            self.server_name(),
             self.tool.name
         )
+    }
+
+    /// Runtime identity, independent of the shortened name shown to the model.
+    pub fn server_key(&self) -> &McpServerKey {
+        &self.server_key
+    }
+
+    pub fn server_name(&self) -> &str {
+        self.server_key.name()
     }
 
     pub fn canonical_tool_name(&self) -> ToolName {
@@ -137,6 +149,7 @@ pub(crate) fn normalize_tools_for_model_with_prefix<I>(
     prefix_mcp_tool_names: bool,
     non_prefixed_mcp_tool_servers: &[String],
     reserved_native_tool_namespaces: &[String],
+    exposure: McpServerExposure,
 ) -> Vec<ToolInfo>
 where
     I: IntoIterator<Item = ToolInfo>,
@@ -144,9 +157,14 @@ where
     let mut seen_raw_names = HashSet::new();
     let mut candidates = Vec::new();
     for tool in tools {
+        // Preserve existing model-name hashes without using their encoding as a runtime key.
+        let namespace_server_identity = match exposure.environment_id(tool.server_key()) {
+            Some(environment) => serde_json::json!([environment, tool.server_name()]).to_string(),
+            None => tool.server_name().to_owned(),
+        };
         let raw_namespace_identity = format!(
             "{}\0{}\0{}",
-            tool.server_name,
+            namespace_server_identity,
             tool.callable_namespace,
             tool.connector_id.as_deref().unwrap_or_default()
         );
@@ -159,9 +177,22 @@ where
             continue;
         }
 
+        // Until shared short IDs land, put a stable hash of the environment before the
+        // server name. Adding another executor must not rename existing tools.
+        let namespace = match exposure.environment_id(tool.server_key()) {
+            Some(environment) => format!(
+                "{}{MCP_TOOL_NAME_DELIMITER}{}",
+                &sha1_hex(environment)[..CALLABLE_NAME_HASH_LEN],
+                tool.callable_namespace,
+            ),
+            None => tool.callable_namespace.clone(),
+        };
         let mut callable_namespace = callable_namespace_with_prefix(
-            &sanitize_responses_api_tool_name(&tool.callable_namespace),
-            prefix_mcp_tool_names && !non_prefixed_mcp_tool_servers.contains(&tool.server_name),
+            &sanitize_responses_api_tool_name(&namespace),
+            prefix_mcp_tool_names
+                && !non_prefixed_mcp_tool_servers
+                    .iter()
+                    .any(|name| name == tool.server_name()),
         );
         while reserved_native_tool_namespaces.contains(&callable_namespace) {
             callable_namespace = format!("{LEGACY_MCP_TOOL_NAME_PREFIX}{callable_namespace}");

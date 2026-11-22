@@ -21,12 +21,12 @@ use codex_protocol::openai_models::AnthropicThinkingMode;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
-use codex_protocol::user_input::UserInput;
 use codex_tools::FreeformTool;
 use codex_tools::FreeformToolFormat;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolSpec;
+use codex_user_input::ResolvedUserInput;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use std::sync::Weak;
@@ -250,7 +250,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         supported_efforts: vec![ReasoningEffort::Medium, ReasoningEffort::High],
         supports_structured_outputs: false,
     });
-    let mut prompt = Prompt {
+    let mut prompt = Arc::new(Prompt {
         input: vec![ResponseItem::Message {
             encrypted_content: None,
             status: None,
@@ -276,7 +276,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             })],
         })]),
         ..Default::default()
-    };
+    });
     let mut session = client.new_session();
     let metadata = test_responses_metadata_for_client(
         &client,
@@ -330,8 +330,9 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         "encrypted_content":"retained-signature/=="
     }))?;
     assert_eq!(calls, vec![expected_reasoning, expected_call]);
-    prompt.input.extend(calls);
-    prompt.input.push(ResponseItem::from(
+    let input = &mut Arc::make_mut(&mut prompt).input;
+    input.extend(calls);
+    input.push(ResponseItem::from(
         ResponseInputItem::CustomToolCallOutput {
             call_id: "exec-call".into(),
             name: Some("exec".into()),
@@ -681,10 +682,7 @@ async fn native_regular_replay_profiles(
             vec![TurnInput::UserInput {
                 metadata: UserInputMetadata::default(),
                 client_id: None,
-                content: vec![UserInput::Text {
-                    text: "continue native replay".into(),
-                    text_elements: Vec::new(),
-                }],
+                content: vec![ResolvedUserInput::text("continue native replay".into())],
             }],
             RegularTask::new(),
         ))

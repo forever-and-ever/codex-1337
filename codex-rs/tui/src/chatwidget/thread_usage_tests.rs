@@ -2,6 +2,7 @@ use super::THREAD_USAGE_RETRY_DELAYS;
 use super::THREAD_USAGE_SETTLEMENT_DELAYS;
 use super::ThreadUsageOutcome;
 use crate::app_event::AppEvent;
+use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ReplayKind;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
 use crate::status::format_estimated_usd_micros;
@@ -21,8 +22,9 @@ use pretty_assertions::assert_eq;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedReceiver;
+use uuid::Uuid;
 
-fn thread_usage_request_id(events: &mut UnboundedReceiver<AppEvent>) -> u64 {
+fn thread_usage_request_id(events: &mut UnboundedReceiver<AppEvent>) -> Uuid {
     match events.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected a thread usage request, got {event:?}"),
@@ -41,6 +43,123 @@ fn thread_usage(
         estimated_usage_usd_micros,
         groups: Vec::new(),
     }
+}
+
+async fn widget_with_pending_billing_read(thread_id: ThreadId) -> (ChatWidget, Uuid) {
+    let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
+    chat.thread_id = Some(thread_id);
+    chat.set_test_chatgpt_account(true);
+    chat.set_test_backend_auth(true);
+    chat.test_account_mut().plan = Some(PlanType::Business);
+    chat.ensure_thread_usage_requested();
+    let request_id = thread_usage_request_id(&mut events);
+    (chat, request_id)
+}
+
+#[tokio::test]
+async fn replacement_widget_rejects_a_previous_widgets_read_for_the_same_thread() {
+    let thread = ThreadId::new();
+    let (_, old_request) = widget_with_pending_billing_read(thread).await;
+    let (mut replacement, current) = widget_with_pending_billing_read(thread).await;
+    assert!(!replacement.finish_thread_usage_refresh(
+        thread,
+        old_request,
+        Ok(ThreadUsageOutcome::Disabled)
+    ));
+    assert!(replacement.is_pending_thread_usage(thread, current));
+}
+
+#[tokio::test]
+async fn billing_prefers_a_known_quota_plan_in_either_reply_order() {
+    for (account, quota_plan, expected) in [
+        (PlanType::Plus, PlanType::Business, PlanType::Business),
+        (PlanType::Unknown, PlanType::Business, PlanType::Business),
+        (PlanType::Business, PlanType::Unknown, PlanType::Business),
+    ] {
+        for quota_first in [true, false] {
+            let (mut chat, ..) = make_chatwidget_manual_with_sender().await;
+            chat.set_test_chatgpt_account(true);
+            let quota =
+                serde_json::from_value(serde_json::json!({"planType": quota_plan})).unwrap();
+            if quota_first {
+                chat.on_rate_limit_snapshot(Some(quota));
+                chat.test_account_mut().plan = Some(account);
+            } else {
+                chat.test_account_mut().plan = Some(account);
+                assert_eq!(chat.current_plan_type(), Some(account));
+                chat.on_rate_limit_snapshot(Some(quota));
+            }
+            assert_eq!(chat.current_plan_type(), Some(expected));
+        }
+    }
+}
+
+#[tokio::test]
+async fn pending_status_card_uses_the_corrected_plan_for_its_usage_reply() {
+    let mut rows = Vec::new();
+    for original_plan in [PlanType::Business, PlanType::Plus] {
+        let (mut chat, _, mut events, _) = make_chatwidget_manual_with_sender().await;
+        let thread = ThreadId::new();
+        chat.thread_id = Some(thread);
+        chat.set_test_backend_auth(true);
+        chat.test_account_mut().plan = Some(original_plan);
+        let status_request = 1;
+        chat.add_status_output(/*refreshing_rate_limits*/ true, Some(status_request));
+        assert_eq!(
+            events.len(),
+            usize::from(original_plan == PlanType::Business)
+        );
+        let corrected_ent26 =
+            serde_json::from_value(serde_json::json!({"planType": PlanType::Ent26})).unwrap();
+        chat.finish_status_rate_limit_refresh(status_request, vec![corrected_ent26]);
+        let usage = ThreadUsage {
+            native_usage_usd_micros: Some(1_800_000),
+            ..thread_usage(
+                thread,
+                /*estimated_usage_credits_micros*/ 50_000_000,
+                Some(2_000_000),
+            )
+        };
+        let request = thread_usage_request_id(&mut events);
+        assert!(chat.finish_thread_usage_refresh(
+            thread,
+            request,
+            Ok(ThreadUsageOutcome::Available(usage))
+        ));
+        let AppEvent::InsertHistoryCell(card) = events.try_recv().unwrap() else {
+            panic!("expected a /status card");
+        };
+        let row = card
+            .display_lines(/*width*/ 90)
+            .into_iter()
+            .map(|line| line.to_string())
+            .find(|line| line.contains("Thread usage:"))
+            .unwrap();
+        rows.push(format!("{original_plan:?} → Ent26: {}", row.trim()));
+    }
+    insta::assert_snapshot!(rows.join("\n"), @r"
+    Business → Ent26: Thread usage:        ~$1.80
+    Plus → Ent26: Thread usage:        ~$1.80
+    ");
+}
+
+#[tokio::test]
+async fn rolling_quota_cannot_restore_an_obsolete_billing_plan() {
+    let (mut chat, _, mut events, _) = make_chatwidget_manual_with_sender().await;
+    let thread = ThreadId::new();
+    chat.thread_id = Some(thread);
+    chat.set_test_backend_auth(true);
+    chat.local_settings.tui.status_line = Some(vec!["estimated-thread-cost".into()]);
+    chat.set_test_chatgpt_account(true);
+    let quota = |plan| serde_json::from_value(serde_json::json!({"planType": plan})).unwrap();
+    chat.on_rate_limit_snapshot(Some(quota(PlanType::Business)));
+    let pending = thread_usage_request_id(&mut events);
+    chat.on_rate_limit_snapshot(Some(quota(PlanType::Plus)));
+    let rolling = serde_json::from_value(serde_json::json!({"planType": "business"})).unwrap();
+    chat.on_rolling_rate_limit_snapshot(rolling);
+
+    assert_eq!(chat.current_plan_type(), Some(PlanType::Plus));
+    assert!(!chat.finish_thread_usage_refresh(thread, pending, Ok(ThreadUsageOutcome::Disabled)));
 }
 
 #[test]
@@ -162,7 +281,7 @@ async fn status_history_survives_exhausted_billing_retries() {
 }
 
 #[tokio::test]
-async fn status_history_updates_again_after_billing_settles() {
+async fn billing_settlement_updates_live_cost_without_rewriting_published_status() {
     for (selected_item, stale_credits_micros, stale_usd_micros) in [
         ("estimated-thread-cost", 40_000_000, 1_820_000),
         ("thread-credits", 50_000_000, 1_820_000),
@@ -200,12 +319,13 @@ async fn status_history_updates_again_after_billing_settles() {
                 Some(stale_usd_micros),
             ))),
         ));
-        assert_eq!(chat.thread_usage.status_history_handles.len(), 1);
+        assert!(chat.thread_usage.status_history_handles.is_empty());
         let status_cell = match rx.try_recv() {
             Ok(AppEvent::InsertHistoryCell(cell)) => cell,
             event => panic!("expected a refreshed /status card, got {event:?}"),
         };
 
+        let published = status_cell.display_lines(/*width*/ 90);
         chat.thread_usage.settlement_refresh_due_at = Some(Instant::now());
         chat.refresh_thread_usage_if_settlement_due();
         let request_id = thread_usage_request_id(&mut rx);
@@ -219,13 +339,9 @@ async fn status_history_updates_again_after_billing_settles() {
             ))),
         ));
 
-        let rendered = status_cell
-            .display_lines(/*width*/ 90)
-            .into_iter()
-            .flat_map(|line| line.spans)
-            .map(|span| span.content.into_owned())
-            .collect::<String>();
-        assert!(rendered.contains("50 credits · ~$2.10"));
+        assert_eq!(status_cell.display_lines(/*width*/ 90), published);
+        assert_eq!(chat.status_line_thread_credits_micros(), Some(50_000_000));
+        assert_eq!(chat.status_line_thread_cost_micros(), Some(2_100_000));
         assert!(chat.thread_usage.status_history_handles.is_empty());
     }
 }

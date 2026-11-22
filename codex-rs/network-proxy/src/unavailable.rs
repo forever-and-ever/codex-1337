@@ -8,6 +8,8 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::Ready;
+use std::future::ready;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -29,8 +31,7 @@ pub struct NetworkProxyBuilder;
 
 #[expect(
     clippy::needless_pass_by_value,
-    clippy::unused_async,
-    reason = "The inert builder preserves the removed upstream proxy API, including owned arguments and futures"
+    reason = "The inert builder preserves the removed upstream proxy API's owned arguments"
 )]
 impl NetworkProxyBuilder {
     pub fn state(self, state: Arc<NetworkProxyState>) -> Self {
@@ -53,14 +54,15 @@ impl NetworkProxyBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<NetworkProxy> {
-        Err(crate::unsupported_error().into())
+    pub fn build(self) -> Ready<Result<NetworkProxy>> {
+        let Self = self;
+        ready(Err(crate::unsupported_error().into()))
     }
 }
 
 /// Portable managed-network facts needed by an operating-system sandbox.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "LaunchRoute")]
 pub struct ManagedNetworkSandboxContext {
     /// Loopback proxy ports that sandboxed commands may connect to.
     #[serde(default)]
@@ -74,6 +76,41 @@ pub struct ManagedNetworkSandboxContext {
     /// Whether the effective policy permits connections to all Unix-domain sockets.
     #[serde(default)]
     pub dangerously_allow_all_unix_sockets: bool,
+}
+
+// Keep the retired setting only on input. Ignoring it would turn a requested
+// capture policy into an ordinary proxy route.
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct LaunchRoute {
+    loopback_ports: Vec<u16>,
+    allow_local_binding: bool,
+    allow_unix_sockets: Vec<String>,
+    dangerously_allow_all_unix_sockets: bool,
+    transparent_tcp: bool,
+}
+
+impl TryFrom<LaunchRoute> for ManagedNetworkSandboxContext {
+    type Error = std::io::Error;
+
+    fn try_from(route: LaunchRoute) -> std::io::Result<Self> {
+        let LaunchRoute {
+            loopback_ports,
+            allow_local_binding,
+            allow_unix_sockets,
+            dangerously_allow_all_unix_sockets,
+            transparent_tcp,
+        } = route;
+        if transparent_tcp {
+            return Err(crate::unsupported_error());
+        }
+        Ok(Self {
+            loopback_ports,
+            allow_local_binding,
+            allow_unix_sockets,
+            dangerously_allow_all_unix_sockets,
+        })
+    }
 }
 
 /// Environment-specific managed-network settings prepared for one command launch.
@@ -91,7 +128,6 @@ pub enum NetworkProxy {}
 
 #[expect(
     clippy::needless_pass_by_value,
-    clippy::unused_async,
     reason = "The uninhabited stub preserves upstream proxy call signatures"
 )]
 #[allow(
@@ -112,21 +148,21 @@ impl NetworkProxy {
     pub fn network_proxy_restricting_sid(&self, environment_id: Option<&str>) -> Option<String> {
         match *self {}
     }
-    pub async fn current_cfg(&self) -> Result<config::NetworkProxyConfig> {
+    pub fn current_cfg(&self) -> Ready<Result<config::NetworkProxyConfig>> {
         match *self {}
     }
-    pub async fn remote_launch_config(
+    pub fn remote_launch_config(
         &self,
         local_binding_policy: crate::LocalBindingPolicy,
         credential_masking: crate::RemoteCredentialMasking,
-    ) -> Result<crate::RemoteNetworkProxyLaunchConfig> {
+    ) -> Ready<Result<crate::RemoteNetworkProxyLaunchConfig>> {
         match *self {}
     }
-    pub async fn bind_credential_broker_environment(
+    pub fn bind_credential_broker_environment(
         &self,
         credential_brokers: &crate::RemoteCredentialBrokerCache,
         environment: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Ready<Result<()>> {
         match *self {}
     }
     pub fn apply_to_env_for_snapshot(&self, env: &mut HashMap<String, String>) {
@@ -200,7 +236,7 @@ impl NetworkProxy {
     ) -> Result<PreparedManagedNetwork> {
         match *self {}
     }
-    pub async fn run(&self) -> Result<NetworkProxyHandle> {
+    pub fn run(&self) -> Ready<Result<NetworkProxyHandle>> {
         match *self {}
     }
     pub fn for_execution(
@@ -219,15 +255,11 @@ impl NetworkProxy {
 #[derive(Debug)]
 pub enum NetworkProxyHandle {}
 
-#[expect(
-    clippy::unused_async,
-    reason = "The uninhabited stub preserves the upstream async shutdown signature"
-)]
 impl NetworkProxyHandle {
     pub fn proxy(&self) -> Option<&NetworkProxy> {
         match *self {}
     }
-    pub async fn shutdown(self) -> Result<()> {
+    pub fn shutdown(self) -> Ready<Result<()>> {
         match self {}
     }
 }

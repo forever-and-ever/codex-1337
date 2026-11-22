@@ -1,13 +1,14 @@
 ---
 source: core/tests/suite/scenarios_exec_tools.rs
+assertion_line: 494
 expression: snapshot
 ---
 Scenario: Configured exec updates and removals use the catalog wording. Empty overrides omit that wording while retaining the changed definitions and removal keys. Compaction restores the current catalog.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=53e1b546b7616e09):
-        - namespace/functions; hash=e913b1f6a61dce4f
+00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
+        - namespace/functions; hash=c0252986b104f5e0
           - custom/exec
           - function/wait
           - custom/python
@@ -47,8 +48,8 @@ Scenario: Configured exec updates and removals use the catalog wording. Empty ov
 
 ## Window 2 (after request 4: settings changed (model))
 -- request 5 (turn) --
-00:additional_tools/developer (1; hash=53e1b546b7616e09):
-        - namespace/functions; hash=e913b1f6a61dce4f
+00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
+        - namespace/functions; hash=c0252986b104f5e0
           - custom/exec
           - function/wait
           - custom/python
@@ -132,8 +133,8 @@ Scenario: Configured exec updates and removals use the catalog wording. Empty ov
 
 ## Window 3 (after request 10: settings changed (model))
 -- request 11 (turn) --
-00:additional_tools/developer (1; hash=53e1b546b7616e09):
-        - namespace/functions; hash=e913b1f6a61dce4f
+00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
+        - namespace/functions; hash=c0252986b104f5e0
           - custom/exec
           - function/wait
           - custom/python
@@ -221,8 +222,8 @@ Scenario: Configured exec updates and removals use the catalog wording. Empty ov
 
 ## Window 4 (after request 11: settings changed (model))
 -- request 12 (turn) --
-00:additional_tools/developer (1; hash=53e1b546b7616e09):
-        - namespace/functions; hash=e913b1f6a61dce4f
+00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
+        - namespace/functions; hash=c0252986b104f5e0
           - custom/exec
           - function/wait
           - custom/python
@@ -318,8 +319,8 @@ Scenario: Configured exec updates and removals use the catalog wording. Empty ov
 
 ## Window 5 (after request 13: input diverged at item 00)
 -- request 14 (turn) --
-00:additional_tools/developer (1; hash=7046bd320f80df5a):
-        - namespace/functions; hash=297f9e5b35eb6c08
+00:additional_tools/developer (1; hash=7ed9540dc1f2ec3b):
+        - namespace/functions; hash=3a2f953caa95101d
           - custom/exec
           - function/wait
           - custom/python

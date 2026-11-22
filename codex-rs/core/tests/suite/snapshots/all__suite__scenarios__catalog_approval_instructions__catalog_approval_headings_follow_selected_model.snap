@@ -15,8 +15,8 @@ Settings:
   stream: true
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=c3f2f4f7b2dc30ae):
-        - namespace/functions; hash=80a579e58246e996
+00:additional_tools/developer (2; hash=bdf3ee3860a5f2e9):
+        - namespace/functions; hash=42fd8ea7daad85c3
           - custom/python
           - custom/bash
           - function/exec_command
@@ -67,8 +67,8 @@ Settings:
 Settings: relative to window 1
   model: "catalog-approval-headings-b"
 -- request 2 (turn) --
-00:additional_tools/developer (2; hash=c3f2f4f7b2dc30ae):
-        - namespace/functions; hash=80a579e58246e996
+00:additional_tools/developer (2; hash=bdf3ee3860a5f2e9):
+        - namespace/functions; hash=42fd8ea7daad85c3
           - custom/python
           - custom/bash
           - function/exec_command

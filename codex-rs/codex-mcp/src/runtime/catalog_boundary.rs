@@ -4,10 +4,11 @@ use std::sync::Arc;
 use super::CachedMcpBinding;
 use super::McpBinding;
 use super::PublishedMcpRuntime;
+use crate::McpServerKey;
 
 pub(super) async fn binding_from_published_runtime(
     current: Arc<PublishedMcpRuntime>,
-    required_servers: &[String],
+    required_servers: &[McpServerKey],
     required_plugins: &HashSet<String>,
     mode: crate::client_tool_catalog::CatalogReadMode,
 ) -> Option<Arc<McpBinding>> {

@@ -153,6 +153,7 @@ pub fn model_info_with_local_defaults(slug: &str) -> ModelInfo {
         tool_mode: None,
         multi_agent_version: None,
         multi_agent_reasoning_effort: None,
+        multi_agent_tools_in_code_mode: None,
     }
 }
 

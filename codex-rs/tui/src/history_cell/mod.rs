@@ -215,9 +215,11 @@ pub(crate) use work_status::WorkStatusCell;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub(crate) enum HistoryRenderMode {
+    #[serde(rename = "standard")]
     Rich,
+    #[serde(rename = "raw")]
     Raw,
 }
 

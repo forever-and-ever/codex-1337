@@ -237,6 +237,7 @@ async fn new_account_thread_loads_api_curated_mcp_after_sync() -> Result<()> {
         .request(|request_id| ClientRequest::McpServerToolCall {
             request_id,
             params: McpServerToolCallParams {
+                environment_id: None,
                 thread_id: thread_id.clone(),
                 server: TEST_SERVER_NAME.to_string(),
                 tool: TEST_TOOL_NAME.to_string(),

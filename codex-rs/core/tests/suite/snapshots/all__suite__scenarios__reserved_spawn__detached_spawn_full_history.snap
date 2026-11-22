@@ -1,13 +1,14 @@
 ---
 source: core/tests/suite/scenarios_reserved_spawn.rs
+assertion_line: 707
 expression: history
 ---
 Scenario: A prepares a child. After A and its manager shut down, a second manager creates the idle child and then starts its first turn.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=ea85edaa1ab75197):
-        - namespace/functions; hash=65ef2be5780ae473
+00:additional_tools/developer (1; hash=184e7427f51ad6bc):
+        - namespace/functions; hash=5f1050f70baa85dc
           - custom/exec
           - function/wait
           - custom/python
@@ -34,8 +35,8 @@ Scenario: A prepares a child. After A and its manager shut down, a second manage
 
 ## Window 2 (after request 2: input diverged at item 03)
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=ea85edaa1ab75197):
-        - namespace/functions; hash=65ef2be5780ae473
+00:additional_tools/developer (1; hash=184e7427f51ad6bc):
+        - namespace/functions; hash=5f1050f70baa85dc
           - custom/exec
           - function/wait
           - custom/python

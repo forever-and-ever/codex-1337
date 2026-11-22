@@ -45,7 +45,11 @@ use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
+use codex_rollout_trace::ConversationPart;
 use codex_rollout_trace::InferenceTraceContext;
+use codex_rollout_trace::RawTraceEventPayload;
+use codex_rollout_trace::TraceWriter;
+use codex_rollout_trace::replay_bundle;
 use core_test_support::TestCodexResponsesRequestKind;
 use core_test_support::ThreadIdle;
 use core_test_support::load_default_config_for_test;
@@ -610,6 +614,7 @@ async fn responses_websocket_request_prewarm_reuses_connection() {
             harness.summary,
             /*service_tier*/ None,
             &responses_metadata,
+            /*reuse_response*/ true,
         )
         .await
         .expect("websocket prewarm failed");
@@ -699,6 +704,7 @@ async fn responses_websocket_request_prewarm_uses_caller_supplied_metadata() {
             harness.summary,
             /*service_tier*/ None,
             &responses_metadata,
+            /*reuse_response*/ true,
         )
         .await
         .expect("websocket prewarm failed");
@@ -715,6 +721,170 @@ async fn responses_websocket_request_prewarm_uses_caller_supplied_metadata() {
     )
     .expect("valid warmup turn metadata");
     assert_eq!(warmup_turn_metadata["request_kind"].as_str(), Some("turn"));
+
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_websocket_request_prewarm_traces_logical_request() {
+    skip_if_no_network!();
+
+    let server = start_websocket_server(vec![vec![
+        vec![ev_response_created("warm-1"), ev_completed("warm-1")],
+        vec![ev_response_created("resp-1"), ev_completed("resp-1")],
+        vec![ev_response_created("resp-2"), ev_completed("resp-2")],
+    ]])
+    .await;
+
+    let harness = websocket_harness_with_options(&server, /*runtime_metrics_enabled*/ true).await;
+    let mut client_session = harness.client.new_session();
+    let mut prompt = prompt_with_input_and_instructions(vec![message_item("hello")], "Base rules");
+    let prewarm_responses_metadata = prewarm_metadata(&harness, /*turn_id*/ None);
+
+    client_session
+        .prewarm_websocket(
+            &prompt,
+            &harness.model_info,
+            &harness.session_telemetry,
+            harness.effort.clone(),
+            harness.summary,
+            /*service_tier*/ None,
+            &prewarm_responses_metadata,
+            /*reuse_response*/ true,
+        )
+        .await
+        .expect("websocket prewarm failed");
+
+    let trace_dir = TempDir::new().expect("trace dir");
+    let writer = Arc::new(
+        TraceWriter::create(
+            trace_dir.path(),
+            "trace-1".to_string(),
+            harness.session_id.to_string(),
+            harness.thread_id.to_string(),
+        )
+        .expect("trace writer"),
+    );
+    writer
+        .append(RawTraceEventPayload::ThreadStarted {
+            thread_id: harness.thread_id.to_string(),
+            agent_path: "/root".to_string(),
+            metadata_payload: None,
+        })
+        .expect("thread started");
+    writer
+        .append(RawTraceEventPayload::CodexTurnStarted {
+            codex_turn_id: "turn-1".to_string(),
+            thread_id: harness.thread_id.to_string(),
+        })
+        .expect("turn started");
+
+    let inference_trace = InferenceTraceContext::enabled(
+        Arc::clone(&writer),
+        harness.thread_id.to_string(),
+        "turn-1".to_string(),
+        harness.model_info.slug.clone(),
+        "test-provider".to_string(),
+    );
+
+    let responses_metadata = turn_metadata(&harness, /*turn_id*/ None);
+    let mut stream = client_session
+        .stream(
+            &prompt,
+            &harness.model_info,
+            &harness.session_telemetry,
+            harness.effort.clone(),
+            harness.summary,
+            /*service_tier*/ None,
+            &responses_metadata,
+            &inference_trace,
+        )
+        .await
+        .expect("websocket stream failed");
+
+    while let Some(event) = stream.next().await {
+        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+            break;
+        }
+    }
+
+    let attribution = serde_json::json!([{"provenance": {"type": "user"}}]);
+    Arc::make_mut(&mut prompt).input.push(serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "user", "content": [{"type": "input_text", "text": "follow up"}],
+        "internal_chat_message_metadata_passthrough": {"content_item_metadata": attribution}
+    })).unwrap());
+    let mut next = client_session
+        .stream(
+            &prompt,
+            &harness.model_info,
+            &harness.session_telemetry,
+            harness.effort.clone(),
+            harness.summary,
+            /*service_tier*/ None,
+            &responses_metadata,
+            &inference_trace,
+        )
+        .await
+        .expect("second websocket stream");
+    while let Some(event) = next.next().await {
+        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+            break;
+        }
+    }
+    let connection = server.single_connection();
+    let follow_up = connection
+        .get(1)
+        .expect("missing follow-up request")
+        .body_json();
+    assert_eq!(follow_up["previous_response_id"].as_str(), Some("warm-1"));
+    assert_eq!(follow_up["input"], serde_json::json!([]));
+
+    writer.flush().expect("publish the live trace");
+    let rollout = replay_bundle(trace_dir.path()).expect("replay trace");
+    let mut reader = codex_rollout_trace::PayloadReader::new(trace_dir.path());
+    assert_eq!(rollout.inference_calls.len(), 2);
+    for (index, response_id, previous, wire_items, prepared_items) in
+        [(1, "resp-1", "warm-1", 0, 1), (2, "resp-2", "resp-1", 1, 2)]
+    {
+        let call = rollout
+            .inference_calls
+            .values()
+            .find(|call| call.response_id.as_deref() == Some(response_id))
+            .unwrap();
+        let outgoing = connection[index].body_json();
+        assert_eq!(
+            reader
+                .read_json(&rollout.raw_payloads[&call.raw_request_payload_id])
+                .unwrap(),
+            outgoing
+        );
+        assert_eq!(outgoing["previous_response_id"], previous);
+        assert_eq!(outgoing["input"].as_array().unwrap().len(), wire_items);
+        let prepared = reader
+            .read_json(&rollout.raw_payloads[&call.prepared_prompt_payload_id])
+            .unwrap();
+        assert_eq!(prepared["base_instructions"]["text"], "Base rules");
+        assert_eq!(
+            prepared["input"],
+            serde_json::to_value(&prompt.input[..prepared_items]).unwrap()
+        );
+        if index == 2 {
+            assert_eq!(
+                prepared["input"][1]["internal_chat_message_metadata_passthrough"]["content_item_metadata"],
+                attribution
+            );
+            assert!(outgoing["input"][0]["internal_chat_message_metadata_passthrough"]["content_item_metadata"].is_null());
+        }
+        assert_eq!(call.request_item_ids.len(), prepared_items + 1);
+        assert_eq!(
+            rollout.conversation_items[&call.request_item_ids[1]]
+                .body
+                .parts,
+            vec![ConversationPart::Text {
+                text: "hello".to_string()
+            }]
+        );
+    }
 
     server.shutdown().await;
 }
@@ -941,6 +1111,7 @@ async fn responses_websocket_prewarm_reuses_advisory_model_and_tier_routing_hint
             harness.summary,
             warmup_tier.map(str::to_string),
             &responses_metadata,
+            /*reuse_response*/ true,
         )
         .await
         .expect("websocket prewarm failed");
@@ -1554,11 +1725,15 @@ async fn responses_websocket_uses_incremental_create_on_prefix() {
 
     let harness = websocket_harness(&server).await;
     let mut client_session = harness.client.new_session();
-    let audio = ResponseItem::from(ResponseInputItem::from(vec![UserInput::Audio {
-        audio: AudioReference::File {
-            file_id: "file_audio".to_string(),
-        },
-    }]));
+    let audio = ResponseItem::from(ResponseInputItem::Message {
+        role: "user".to_string(),
+        content: vec![ContentItem::InputAudio {
+            audio: AudioReference::File {
+                file_id: "file_audio".to_string(),
+            },
+        }],
+        phase: None,
+    });
     let prompt_one = prompt_with_input(vec![audio.clone()]);
     let prompt_two = prompt_with_input(vec![
         audio,
@@ -1985,7 +2160,7 @@ async fn responses_websocket_v2_creates_without_previous_response_id_when_non_in
     let mut session = harness.client.new_session();
     let prompt_one = prompt_with_input(vec![message_item("hello")]);
     let mut prompt_two = prompt_with_input(vec![message_item("hello"), message_item("second")]);
-    prompt_two.output_schema = output_schema;
+    Arc::make_mut(&mut prompt_two).output_schema = output_schema;
     let mut model_info = harness.model_info.clone();
     if let Some(model) = model {
         model_info.slug = model.to_string();
@@ -2248,20 +2423,18 @@ fn assistant_message_item(id: &str, text: &str) -> ResponseItem {
     }
 }
 
-fn prompt_with_input(input: Vec<ResponseItem>) -> Prompt {
-    let mut prompt = Prompt::default();
-    prompt.input = input;
-    prompt.base_instructions.text.clear();
-    prompt
+fn prompt_with_input(input: Vec<ResponseItem>) -> Arc<Prompt> {
+    prompt_with_input_and_instructions(input, "")
 }
 
-fn prompt_with_input_and_instructions(input: Vec<ResponseItem>, instructions: &str) -> Prompt {
-    let mut prompt = prompt_with_input(input);
+fn prompt_with_input_and_instructions(input: Vec<ResponseItem>, instructions: &str) -> Arc<Prompt> {
+    let mut prompt = Prompt::default();
+    prompt.input = input;
     prompt.base_instructions = BaseInstructions {
         text: instructions.to_string(),
         provenance: None,
     };
-    prompt
+    Arc::new(prompt)
 }
 
 fn websocket_provider(server: &WebSocketTestServer) -> ModelProviderInfo {
@@ -2545,7 +2718,7 @@ async fn websocket_harness_with_provider_factory(
 async fn stream_until_complete(
     client_session: &mut ModelClientSession,
     harness: &WebsocketTestHarness,
-    prompt: &Prompt,
+    prompt: &Arc<Prompt>,
 ) {
     stream_until_complete_with_service_tier(
         client_session,
@@ -2559,7 +2732,7 @@ async fn stream_until_complete(
 async fn stream_until_complete_with_model_info(
     client_session: &mut ModelClientSession,
     harness: &WebsocketTestHarness,
-    prompt: &Prompt,
+    prompt: &Arc<Prompt>,
     model_info: &ModelInfo,
     expected_response_id: &str,
 ) {
@@ -2592,7 +2765,7 @@ async fn stream_until_complete_with_model_info(
 async fn stream_until_complete_with_service_tier(
     client_session: &mut ModelClientSession,
     harness: &WebsocketTestHarness,
-    prompt: &Prompt,
+    prompt: &Arc<Prompt>,
     service_tier: Option<ServiceTier>,
 ) {
     let responses_metadata = turn_metadata(harness, /*turn_id*/ None);
@@ -2609,7 +2782,7 @@ async fn stream_until_complete_with_service_tier(
 async fn stream_until_complete_with_metadata(
     client_session: &mut ModelClientSession,
     harness: &WebsocketTestHarness,
-    prompt: &Prompt,
+    prompt: &Arc<Prompt>,
     service_tier: Option<ServiceTier>,
     responses_metadata: &CodexResponsesMetadata,
 ) {

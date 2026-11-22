@@ -10,8 +10,9 @@ use tracing_subscriber::EnvFilter;
 #[test]
 fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<()> {
     let home = tempdir()?;
-    // Fail before accessing the real keyring, then allow the plaintext fallback to succeed.
-    std::fs::write(home.path().join("secrets"), "not a directory")?;
+    let secrets_path = home.path().join("secrets").join("codex_auth.age");
+    // Reading a directory fails before accessing the real keyring on every platform.
+    std::fs::create_dir_all(&secrets_path)?;
     let log_path = home.path().join("login.log");
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -37,7 +38,7 @@ fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<(
         failure.contains("failed to save auth to keyring, falling back to file storage"),
         "{logs}"
     );
-    assert!(failure.contains("failed to create secrets dir"), "{logs}");
+    assert!(failure.contains("failed to read secrets file"), "{logs}");
     assert!(
         logs.contains("credential storage file fallback completed"),
         "{logs}"
@@ -53,11 +54,9 @@ fn login_default_filter_records_sanitized_storage_fallback() -> anyhow::Result<(
 #[test]
 fn login_storage_error_displays_context_and_cause() -> anyhow::Result<()> {
     let home = tempdir()?;
-    let secrets_path = home.path().join("secrets");
-    std::fs::write(&secrets_path, "not a directory")?;
-    let cause = std::fs::create_dir_all(&secrets_path)
-        .unwrap_err()
-        .to_string();
+    let secrets_path = home.path().join("secrets").join("codex_auth.age");
+    std::fs::create_dir_all(&secrets_path)?;
+    let cause = std::fs::read(&secrets_path).unwrap_err().to_string();
     let error = login_with_api_key(
         home.path(),
         "private-api-key",
@@ -66,6 +65,7 @@ fn login_storage_error_displays_context_and_cause() -> anyhow::Result<()> {
     )
     .unwrap_err();
     let message = error.to_string();
+    assert!(message.contains("failed to read secrets file"), "{message}");
     assert!(message.contains(&cause), "{message}");
     assert!(!message.contains("private-api-key"));
     Ok(())

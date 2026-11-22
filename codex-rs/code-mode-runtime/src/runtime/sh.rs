@@ -27,20 +27,17 @@ const FACTORY: &str = r#"(exec, print, hold) => (...commands) => hold((async () 
 /// `sh` over the cell's `exec_command`, or nothing when the cell has none.
 pub(super) fn helper<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    tools: v8::Local<'s, v8::Object>,
 ) -> Result<Option<v8::Local<'s, v8::Value>>, String> {
-    let Some(global_name) = scope.get_slot::<RuntimeState>().and_then(|state| {
+    let Some(index) = scope.get_slot::<RuntimeState>().and_then(|state| {
         state
             .enabled_tools
             .iter()
-            .find(|tool| is_exec_command(&tool.tool_name))
-            .map(|tool| tool.global_name.clone())
+            .position(|tool| is_exec_command(&tool.tool_name))
     }) else {
         return Ok(None);
     };
     let fail = || "failed to install sh".to_string();
-    let key = v8::String::new(scope, &global_name).ok_or_else(fail)?;
-    let exec = tools.get(scope, key.into()).ok_or_else(fail)?;
+    let exec = super::globals::tool_function(scope, index)?.into();
     let print = native(scope, print_callback).ok_or_else(fail)?;
     let hold = native(scope, hold_callback).ok_or_else(fail)?;
     let source = v8::String::new(scope, FACTORY).ok_or_else(fail)?;

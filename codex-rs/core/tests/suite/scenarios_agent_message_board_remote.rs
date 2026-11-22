@@ -1,4 +1,4 @@
-//! Runs existing board tools against a research-provisioned remote board.
+//! Runs the board tools against a remote message board.
 
 use super::super::super::code_mode::custom_tool_output_last_non_empty_text;
 use super::BoardClock;
@@ -39,7 +39,7 @@ async fn remote_board_uses_the_existing_tools_and_session_identity() -> anyhow::
     let server = responses::start_mock_server().await;
     let board = responses::start_mock_server().await;
     mock_server::run(&[&server, &board], async {
-    let token = "research-board-credential-for-runtime-test";
+    let token = "remote-board-credential-for-runtime-test";
     let url = board.uri();
     let root = test_codex()
         .with_config(move |config| {

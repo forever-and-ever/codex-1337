@@ -72,6 +72,49 @@ fn ctrl(ch: char) -> KeyEvent {
 }
 
 #[tokio::test]
+async fn focused_sidebar_chooser_keeps_tab_with_shortcut_guide_open() -> Result<()> {
+    use crate::app::sidebar::PaneFocus;
+    use crate::app::sidebar::SidebarContent;
+
+    let mut app = make_test_app().await;
+    app.local_settings.tui.keymap = toml::from_str(r#"list.move_down = "tab""#)?;
+    super::enable_side_retention(&mut app)?;
+    app.chat_widget
+        .apply_keymap_update(app.local_settings.tui.keymap.clone(), &app.keymap);
+    let mut server = start_config_write_test_app_server(&app).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(/*owned*/ true)?;
+    app.chat_widget.handle_thread_session(test_thread_session(
+        ThreadId::new(),
+        app.config.cwd.to_path_buf(),
+    ));
+    app.chat_widget.replay_thread_turns(
+        vec![super::test_turn(
+            "parent-turn",
+            TurnStatus::Completed,
+            Vec::new(),
+        )],
+        ReplayKind::ResumeInitialMessages,
+    );
+
+    press(&mut app, &mut tui, &mut server, KeyCode::Char('?').into()).await?;
+    assert!(app.chat_widget.shortcut_overlay_visible());
+    let second_chat = ThreadId::new();
+    let pane = app.sidebar_mut();
+    pane.update_saved_chats(vec![ThreadId::new().into(), second_chat.into()]);
+    pane.show(SidebarContent::Chooser, PaneFocus::Sidebar);
+
+    press(&mut app, &mut tui, &mut server, KeyCode::Tab.into()).await?;
+    let pane = app.sidebar().expect("open sidebar chooser");
+    assert_eq!(pane.chat_tabs().choice(pane.choice), Some(second_chat));
+    assert!(app.chat_widget.shortcut_overlay_visible());
+
+    server.shutdown().await?;
+    tui.set_owned_screen(/*owned*/ false)?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn vim_buffer_jumps_route_default_chords_in_normal_and_operator_contexts() -> Result<()> {
     for (input, command, expected) in [
         ("one\ntwo\nthree", "gg", "!one\ntwo\nthree"),

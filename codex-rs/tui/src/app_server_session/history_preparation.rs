@@ -120,7 +120,7 @@ pub(super) async fn merge_thread_item_page(
     page: ThreadItemsListResponse,
     state: &mut ThreadHistoryPagination,
     turns: &mut Vec<Turn>,
-) -> Result<Vec<ThreadItem>> {
+) -> Result<Vec<super::HistoryItem>> {
     let mut missing_turn_ids = page
         .data
         .iter()
@@ -153,7 +153,10 @@ pub(super) async fn merge_thread_item_page(
             && !turn.items.iter().any(|item| item.id() == entry.item.id())
         {
             let item = ThreadItem::try_from(entry)?;
-            items.push(item.clone());
+            items.push(super::HistoryItem {
+                turn_id: turn.id.clone(),
+                item: item.clone(),
+            });
             turn.items.insert(/*index*/ 0, item);
             turn.items_view = TurnItemsView::Summary;
         }

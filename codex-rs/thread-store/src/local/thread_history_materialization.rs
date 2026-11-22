@@ -51,12 +51,48 @@ pub(super) async fn materialize_to_sqlite_with_reads(
     rollout_path: &Path,
     reads: &AncestorReads,
 ) -> ThreadStoreResult<()> {
+    materialize_projection(
+        store,
+        thread_id,
+        ProjectionRollout {
+            path: rollout_path.to_owned(),
+            reads: reads.clone(),
+        },
+        /*flushed_len*/ None,
+    )
+    .await
+}
+
+pub(super) async fn materialize_durable_suffix(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    rollout_path: &Path,
+    flushed_len: Option<u64>,
+) -> ThreadStoreResult<()> {
+    materialize_projection(
+        store,
+        thread_id,
+        ProjectionRollout {
+            path: rollout_path.to_owned(),
+            reads: AncestorReads::default(),
+        },
+        flushed_len,
+    )
+    .await
+}
+
+async fn materialize_projection(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    rollout: ProjectionRollout,
+    flushed_len: Option<u64>,
+) -> ThreadStoreResult<()> {
     if store.state_db.is_none() {
         return Ok(());
     }
     // TELOS(history-pruning): all passes over one rollout hold the projection warden.
     let _projection = store.projection_warden.lock(thread_id).await;
-    materialize_to_sqlite_locked(store, thread_id, rollout_path, reads).await
+    materialize_projection_locked(store, thread_id, rollout, flushed_len).await
 }
 
 /// Caller already owns the rollout's projection lock.
@@ -66,11 +102,25 @@ pub(super) async fn materialize_to_sqlite_locked(
     rollout_path: &Path,
     reads: &AncestorReads,
 ) -> ThreadStoreResult<()> {
-    let rollout = ProjectionRollout {
-        path: rollout_path.to_owned(),
-        reads: reads.clone(),
-    };
-    let result = materialize_to_sqlite_with_state_db(store, thread_id, rollout).await;
+    materialize_projection_locked(
+        store,
+        thread_id,
+        ProjectionRollout {
+            path: rollout_path.to_owned(),
+            reads: reads.clone(),
+        },
+        /*flushed_len*/ None,
+    )
+    .await
+}
+
+async fn materialize_projection_locked(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    rollout: ProjectionRollout,
+    flushed_len: Option<u64>,
+) -> ThreadStoreResult<()> {
+    let result = materialize_to_sqlite_with_state_db(store, thread_id, rollout, flushed_len).await;
     record_projection_outcome(&result);
     result
 }
@@ -79,11 +129,19 @@ async fn materialize_to_sqlite_with_state_db(
     store: &LocalThreadStore,
     thread_id: ThreadId,
     rollout: ProjectionRollout,
+    flushed_len: Option<u64>,
 ) -> ThreadStoreResult<()> {
     let projection_state = super::thread_history::projection_state(store, thread_id).await?;
     let start_offset = projection_state
         .as_ref()
         .map_or(0, |state| state.next_byte_offset);
+    if let Some(state) = &projection_state
+        && !state.rebuilding
+        && start_offset > 0
+        && Some(start_offset) == flushed_len
+    {
+        return Ok(());
+    }
     if rollout
         .reads
         .cutoff(&rollout.path)

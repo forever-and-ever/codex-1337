@@ -75,9 +75,8 @@ impl ChatWidget {
                     | AppCommand::Compact
             )
         {
-            self.add_error_message(if self.external_writer_view {
-                "This thread is open elsewhere. Close it there and retry resume to continue."
-                    .to_string()
+            self.add_error_message(if let Some(reason) = self.read_only_thread {
+                reason.message().to_string()
             } else {
                 PARENT_OWNED_INPUT_MESSAGE.to_string()
             });

@@ -11,7 +11,7 @@ use codex_protocol::protocol::NonSteerableTurnKind;
 use codex_protocol::turn_input::NotSubmittedReason;
 use codex_protocol::turn_input::PendingSteerMutationOutcome;
 use codex_protocol::turn_input::TurnStartOptions;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -38,6 +38,8 @@ pub struct UserInputMetadata {
     /// Optional host-assigned UUID for this particular Responses user item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_item_uuid: Option<uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_dictation: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "codex_history::UserInputOrigin::is_user"
@@ -49,7 +51,7 @@ pub struct UserInputMetadata {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TurnInput {
     UserInput {
-        content: Vec<UserInput>,
+        content: Vec<ResolvedUserInput>,
         client_id: Option<String>,
         #[serde(flatten)]
         metadata: UserInputMetadata,
@@ -315,11 +317,12 @@ impl InputQueue {
 
     /// Clear any pending waiters and input buffered for the current turn.
     pub(crate) async fn clear_pending(&self, active_turn: &ActiveTurn) {
-        let mut turn_state = active_turn.turn_state.lock().await;
-        turn_state.clear_pending_waiters();
         // Pending mail can own extension attachments whose destructors need the lock released.
-        let pending_input = std::mem::take(&mut turn_state.pending_input);
-        drop(turn_state);
+        let pending_input = {
+            let mut turn_state = active_turn.turn_state.lock().await;
+            turn_state.clear_pending_waiters();
+            std::mem::take(&mut turn_state.pending_input)
+        };
         drop(pending_input);
     }
 
@@ -327,7 +330,7 @@ impl InputQueue {
         &self,
         active_turn: &Mutex<Option<ActiveTurn>>,
         client_id: &str,
-        content: Vec<UserInput>,
+        content: Vec<ResolvedUserInput>,
     ) -> PendingSteerMutationOutcome {
         self.mutate_pending_steer(active_turn, |pending_input| {
             let Some(TurnInput::UserInput {
@@ -561,7 +564,7 @@ impl InputQueue {
 }
 
 impl TurnInputQueue {
-    fn has_user_input(&self) -> bool {
+    pub(crate) fn has_user_input(&self) -> bool {
         self.items
             .iter()
             .any(|input| matches!(input, TurnInput::UserInput { .. }))
@@ -590,7 +593,7 @@ mod tests {
     use codex_history::CodexHarnessMetadata;
     use codex_protocol::AgentPath;
     use codex_protocol::protocol::InterAgentCommunication;
-    use codex_protocol::user_input::UserInput;
+    use codex_user_input::ResolvedUserInput;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -826,10 +829,7 @@ mod tests {
                 &turn_state,
                 vec![TurnInput::UserInput {
                     metadata: Default::default(),
-                    content: vec![UserInput::Text {
-                        text: "steer".to_string(),
-                        text_elements: Vec::new(),
-                    }],
+                    content: vec![ResolvedUserInput::text("steer".to_string())],
                     client_id: None,
                 }],
             )
@@ -918,10 +918,7 @@ mod tests {
                 &turn_state,
                 vec![TurnInput::UserInput {
                     metadata: Default::default(),
-                    content: vec![UserInput::Text {
-                        text: "already pending".to_string(),
-                        text_elements: Vec::new(),
-                    }],
+                    content: vec![ResolvedUserInput::text("already pending".to_string())],
                     client_id: None,
                 }],
             )

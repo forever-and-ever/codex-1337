@@ -2463,6 +2463,7 @@ fn websocket_error_detail(err: &ApiError) -> String {
         // These variants format fixed text; retry metadata is typed and never printed.
         ApiError::AnthropicStream { .. } => "handshake error: Anthropic stream error".to_string(),
         ApiError::ContentFilter
+        | ApiError::WebsocketMessageTooLarge
         | ApiError::ContextWindowExceeded
         | ApiError::NativeStream(_)
         | ApiError::QuotaExceeded

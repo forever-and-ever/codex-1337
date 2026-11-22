@@ -18,7 +18,8 @@ use serde::Serialize;
 const MAX_GAP: u64 = (1 << 53) - 1;
 const MAX_TEXT_BYTES: usize = 16 * 1024;
 
-/// A nullable root with bounded depth, node count, and total UTF-8 leaf bytes.
+/// A nullable root. JSON is limited to 64 KiB, 256 non-null nodes, depth 16 (root at 0),
+/// and 16 KiB of UTF-8 text across all string leaves.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub(crate) struct UiTree(pub(crate) Option<UiNode>);
 

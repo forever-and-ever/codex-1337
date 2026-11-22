@@ -17,6 +17,7 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
@@ -423,22 +424,24 @@ impl App {
                             Ok(response) => {
                                 let mut latest_prompt = None;
                                 let mut last_message = None;
-                                if let Ok(turns) = request_handle
-                                    .request_typed::<ThreadTurnsListResponse>(
-                                        ClientRequest::ThreadTurnsList {
-                                            request_id: RequestId::String(
-                                                Uuid::new_v4().to_string(),
-                                            ),
-                                            params: ThreadTurnsListParams {
-                                                thread_id: thread_id.to_string(),
-                                                cursor: None,
-                                                limit: Some(1),
-                                                sort_direction: None,
-                                                items_view: None,
+                                // Legacy thread/turns/list replays the full rollout.
+                                if response.thread.history_mode == ThreadHistoryMode::Paginated
+                                    && let Ok(turns) = request_handle
+                                        .request_typed::<ThreadTurnsListResponse>(
+                                            ClientRequest::ThreadTurnsList {
+                                                request_id: RequestId::String(
+                                                    Uuid::new_v4().to_string(),
+                                                ),
+                                                params: ThreadTurnsListParams {
+                                                    thread_id: thread_id.to_string(),
+                                                    cursor: None,
+                                                    limit: Some(1),
+                                                    sort_direction: None,
+                                                    items_view: None,
+                                                },
                                             },
-                                        },
-                                    )
-                                    .await
+                                        )
+                                        .await
                                     && let Some(turn) = turns.data.first()
                                 {
                                     if let Some(ThreadItemPayload::UserMessage {

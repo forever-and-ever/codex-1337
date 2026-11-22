@@ -1,13 +1,13 @@
 ---
 source: core/tests/suite/scenarios.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Astra starts in one workspace, switches for the next step of the active turn, and returns to the original workspace on the next turn.\",\n&requests, &ContextSnapshotOptions::default(),)"
+expression: snapshot
 ---
-Scenario: Astra starts in one workspace, switches for the next step of the active turn, and returns to the original workspace on the next turn.
+Scenario: Astra sees two environments with different permissions. Only the second environment's workspace and permissions change for the next step; the original defaults return on the next turn.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=1aa11ccfebf77059):
-        - namespace/functions; hash=a7f0440bc6ab4537
+00:additional_tools/developer (2; hash=8373136656058785):
+        - namespace/functions; hash=c9e44482d82c7191
           - custom/exec
           - function/wait
           - custom/python
@@ -27,25 +27,35 @@ Scenario: Astra starts in one workspace, switches for the next step of the activ
 
     User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
 
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
+    <OMITTED 151 LINES; ~4851 TOKENS; hash=959762226fedfd0c>
+    ## Decision Boundary
 
-    - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
-    - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
-    - Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.
-    - Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.
-    - Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associa..., MCP tools, and apps exposed elsewhere in this turn. [hash=620459a4e7b590f0]
-    - Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for t..., say so briefly and continue with the best fallback. [hash=746b0469a8f6cb3e]
+    Discover and use relevant tools proactively when they may help carry out the requested task. For example...ng the user for information they may already contain. [hash=3af5c93cbc00b4c7]
 
-02:message/developer[2]:
-    [01] <permissions instructions>
+    When a plugin is available for a service and its tools are sufficient for completing the task, prefer th...er has an explicit preference, defer to that instead. [hash=936dbd7fe76c210f]
+
+    A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
+
+02:message/developer[3]:
+    [01] <permissions instructions><environment id="environment-a">
+
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 
         Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
 
         Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
-        </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+        </environment></permissions instructions>
+    [02] <permissions instructions><environment id="environment-b">
+
+        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: T...ctories requires approval. Network access is enabled. [hash=4bea877c3f99797a]
+        # Escalation Requests
+
+        Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
+
+        Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
+        </environment></permissions instructions>
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
@@ -83,11 +93,22 @@ Scenario: Astra starts in one workspace, switches for the next step of the activ
     <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 05:message/user:
     <environment_context>
-      <cwd><CWD></cwd>
-      <shell><HOST_SHELL></shell>
+      <environments>
+        <environment id="environment-a" primary="true">
+          <cwd><CWD></cwd>
+          <shell><HOST_SHELL></shell>
+          <network access="restricted" />
+          <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed...ntry></file_system></permission_profile></filesystem> [hash=63cf3068a193704d]
+        </environment>
+        <environment id="environment-b" primary="false">
+          <cwd><CWD 2></cwd>
+          <shell><HOST_SHELL></shell>
+          <network access="enabled" />
+          <filesystem><workspace_roots><root><CWD 2></root></workspace_roots><permission_profile type="manag...ntry></file_system></permission_profile></filesystem> [hash=a892275b37ddece0]
+        </environment>
+      </environments>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
     </environment_context>
 06:message/user:
     Ask before continuing in the other workspace.
@@ -95,24 +116,54 @@ Scenario: Astra starts in one workspace, switches for the next step of the activ
 -- request 2 (turn) --
 08:function_call/functions.request_user_input:{"questions":[{"header":"Continue","id":"continue","options":[{"description":"Continue working.","label"...o"}],"question":"Continue in the other workspace?"}]} [hash=028e565351844d96]
 09:function_call_output:{"answers":{"continue":{"answers":["Yes"]}}}
-10:message/user:
+10:message/developer:
+    <permissions instructions><environment id="environment-b">
+
+    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
+    # Escalation Requests
+
+    Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
+
+    Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
+    </environment></permissions instructions>
+11:message/user:
     <environment_context>
-      <cwd><CWD>/other-workspace</cwd>
-      <shell><HOST_SHELL></shell>
+      <environments>
+        <environment id="environment-b" primary="false">
+          <cwd><CWD 2>/other-workspace</cwd>
+          <shell><HOST_SHELL></shell>
+          <network access="restricted" />
+          <filesystem><workspace_roots><root><CWD 2>/other-workspace</root></workspace_roots><permission_pro...ntry></file_system></permission_profile></filesystem> [hash=018d5ca32808e0f8]
+        </environment>
+      </environments>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><workspace_roots><root><CWD>/other-workspace</root></workspace_roots><permission_profile t...ntry></file_system></permission_profile></filesystem> [hash=0be8191a0451377a]
     </environment_context>
 -- request 3 (turn) --
-11:message/assistant:
+12:message/assistant:
     I continued in the other workspace.
-12:message/user:
+13:message/developer:
+    <permissions instructions><environment id="environment-b">
+
+    Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: T...ctories requires approval. Network access is enabled. [hash=4bea877c3f99797a]
+    # Escalation Requests
+
+    Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
+
+    Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
+    </environment></permissions instructions>
+14:message/user:
     <environment_context>
-      <cwd><CWD></cwd>
-      <shell><HOST_SHELL></shell>
+      <environments>
+        <environment id="environment-b" primary="false">
+          <cwd><CWD 2></cwd>
+          <shell><HOST_SHELL></shell>
+          <network access="enabled" />
+          <filesystem><workspace_roots><root><CWD 2></root></workspace_roots><permission_profile type="manag...ntry></file_system></permission_profile></filesystem> [hash=a892275b37ddece0]
+        </environment>
+      </environments>
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
-      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
     </environment_context>
-13:message/user:
+15:message/user:
     Which workspace are you using now?

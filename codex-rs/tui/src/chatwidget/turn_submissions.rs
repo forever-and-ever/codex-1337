@@ -294,6 +294,7 @@ impl ChatWidget {
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
             text: draft.text,
+            shell_mode: Some(draft.shell_mode.unwrap_or(false)),
             text_elements: draft.text_elements,
             local_images: draft.local_images,
             remote_image_urls: draft.remote_image_urls,

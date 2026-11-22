@@ -104,6 +104,9 @@ impl ChatWidget {
             || !startup_message.local_images.is_empty()
             || !startup_message.remote_image_urls.is_empty()
             || !draft.pending_pastes.is_empty();
+        let startup_undo = (startup_has_content && !self.local_settings.tui.vim_mode_default)
+            .then(|| self.bottom_pane.startup_undo_draft())
+            .flatten();
 
         let cursor = if existing_has_content && startup_has_content {
             let mut used_paste_placeholders = HashSet::new();
@@ -151,6 +154,9 @@ impl ChatWidget {
             );
             draft.cursor
         };
+        if let Some(destination) = startup_undo {
+            self.bottom_pane.record_startup_undo(destination);
+        }
         self.bottom_pane.set_composer_cursor(cursor);
         self.bottom_pane.restore_startup_composer_state(
             draft.last_composer_activity_at,
@@ -383,12 +389,15 @@ impl ChatWidget {
             self.status_state.program_status_after_turn =
                 crate::terminal_program_status::ProgramStatus::Idle;
         }
-        let send_pending_steer_immediately =
-            self.input_queue.pending_steer.interrupt() == input_queue::SteerInterrupt::SubmitAsTurn;
+        let send_pending_steer_immediately = self.input_queue.pending_steer.interrupt()
+            == input_queue::SteerInterrupt::SubmitAsTurn
+            && !self.is_read_only_view();
         self.input_queue
             .pending_steer
             .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
-        self.input_queue.pending_steer.finish_replacement(true);
+        if !self.is_archived_view() {
+            self.input_queue.pending_steer.finish_replacement(true);
+        }
         if self.interrupted_turn_notice_mode != InterruptedTurnNoticeMode::Suppress {
             if send_pending_steer_immediately {
                 self.add_to_history(history_cell::new_info_event(
@@ -396,16 +405,24 @@ impl ChatWidget {
                     /*hint*/ None,
                 ));
             } else {
-                self.add_to_history(match reason {
-                    TurnAbortReason::BudgetLimited => history_cell::new_error_event(
-                        "Goal budget reached - the turn was stopped.".to_string(),
-                    ),
-                    TurnAbortReason::Interrupted => PlainHistoryCell::new(vec![
-                        Line::from("■ Conversation interrupted")
-                            .style(crate::style::secondary_text_style()),
-                    ]),
-                });
+                match reason {
+                    TurnAbortReason::BudgetLimited => {
+                        self.add_to_history(history_cell::new_error_event(
+                            "Goal budget reached - the turn was stopped.".to_string(),
+                        ))
+                    }
+                    TurnAbortReason::Interrupted => {
+                        self.add_to_history(history_cell::InterruptionNotice)
+                    }
+                }
             }
+        }
+
+        // Preserve the queue and its receipt identities until the archived view is reattached.
+        if self.is_archived_view() {
+            self.refresh_pending_input_preview();
+            self.request_redraw();
+            return;
         }
 
         // The server has already discarded pending input by the time the
@@ -434,6 +451,7 @@ impl ChatWidget {
         let composer = self.bottom_pane.composer_draft_snapshot();
         let current = ThreadComposerState {
             text: composer.text,
+            shell_mode: Some(composer.shell_mode.unwrap_or(false)),
             text_elements: composer.text_elements,
             local_images: composer.local_images,
             remote_image_urls: composer.remote_image_urls,
@@ -449,6 +467,7 @@ impl ChatWidget {
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
             text: draft.text,
+            shell_mode: Some(draft.shell_mode.unwrap_or(false)),
             text_elements: draft.text_elements,
             local_images: draft.local_images,
             remote_image_urls: draft.remote_image_urls,
@@ -459,7 +478,8 @@ impl ChatWidget {
     }
 
     pub(super) fn restore_composer_state(&mut self, composer: ThreadComposerState) {
-        self.restore_composer_state_with_shell_mode(composer, /*shell_mode*/ None);
+        let shell_mode = composer.shell_mode;
+        self.restore_composer_state_with_shell_mode(composer, shell_mode);
     }
 
     fn restore_composer_state_with_shell_mode(
@@ -469,6 +489,7 @@ impl ChatWidget {
     ) {
         let ThreadComposerState {
             text,
+            shell_mode: _,
             local_images,
             remote_image_urls,
             text_elements,
@@ -504,6 +525,7 @@ impl ChatWidget {
         } = user_message;
         ThreadComposerState {
             text,
+            shell_mode: Some(false),
             local_images,
             remote_image_urls,
             text_elements,
@@ -518,6 +540,8 @@ impl ChatWidget {
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
             text: draft.text,
+            // A disabled shell composer also treats a leading bang literally.
+            shell_mode: Some(draft.shell_mode.unwrap_or(false)),
             text_elements: draft.text_elements,
             local_images: draft.local_images,
             remote_image_urls: draft.remote_image_urls,
@@ -579,8 +603,14 @@ impl ChatWidget {
             .as_ref()
             .and_then(|state| state.provider_error.clone());
         let preserve_in_flight_turn = restore_mode.preserve_in_flight_turn;
-        let restored_task_running =
-            preserve_in_flight_turn && input_state.as_ref().is_some_and(|state| state.task_running);
+        let restored_task_running = preserve_in_flight_turn
+            && (self.bottom_pane.is_task_running()
+                || input_state.as_ref().is_some_and(|state| state.task_running));
+        let restored_agent_turn_running = preserve_in_flight_turn
+            && (self.turn_lifecycle.agent_turn_running
+                || input_state
+                    .as_ref()
+                    .is_some_and(|state| state.agent_turn_running));
         if let Some(input_state) = input_state {
             self.bottom_pane.restore_questions(input_state.questions);
             self.initial_user_message = input_state.initial_user_message;
@@ -588,10 +618,8 @@ impl ChatWidget {
             self.active_collaboration_mask = input_state.active_collaboration_mask;
             self.config.plan_mode_reasoning_effort = input_state.plan_mode_reasoning_effort;
             self.restore_status_surface_overrides(input_state.status_surface_overrides);
-            self.turn_lifecycle.restore_running(
-                preserve_in_flight_turn && input_state.agent_turn_running,
-                Instant::now(),
-            );
+            self.turn_lifecycle
+                .restore_running(restored_agent_turn_running, Instant::now());
             self.input_queue = input_state.input_queue;
             if !preserve_in_flight_turn {
                 self.input_queue
@@ -648,6 +676,7 @@ impl ThreadComposerState {
         let Some(second) = states.next() else {
             return first;
         };
+        let shell_mode = first.shell_mode;
         let mut used = HashSet::new();
         let mut messages = Vec::new();
         let mut pastes = Vec::new();
@@ -664,7 +693,10 @@ impl ThreadComposerState {
             messages.push(message);
             pastes.extend(pending_pastes);
         }
-        ChatWidget::composer_state_from_user_message(merge_user_messages(messages), pastes)
+        ThreadComposerState {
+            shell_mode,
+            ..ChatWidget::composer_state_from_user_message(merge_user_messages(messages), pastes)
+        }
     }
 }
 

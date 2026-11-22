@@ -13,6 +13,7 @@ async fn external_writer_snapshot_freezes_active_command_and_mcp_rows() {
             chat.transcript.active_cell = Some(Box::new(history_cell::new_active_mcp_tool_call(
                 "mcp-running".to_string(),
                 McpInvocation {
+                    environment_id: None,
                     server: "server".to_string(),
                     tool: "tool".to_string(),
                     arguments: None,
@@ -141,6 +142,7 @@ async fn replayed_completion_preserves_unrelated_running_command() {
             chat.transcript.active_cell = Some(Box::new(history_cell::new_active_mcp_tool_call(
                 "mcp-running".to_string(),
                 McpInvocation {
+                    environment_id: None,
                     server: "server".to_string(),
                     tool: "tool".to_string(),
                     arguments: None,
@@ -967,7 +969,6 @@ async fn image_generation_begin_restores_working_status_after_single_line_preamb
 #[tokio::test]
 async fn image_generation_call_adds_history_cell() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
     handle_image_generation_end(
         &mut chat,
         "call-image-generation",
@@ -1035,6 +1036,9 @@ async fn bang_shell_enter_while_task_running_submits_run_user_shell_command() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,

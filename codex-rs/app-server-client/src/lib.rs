@@ -23,6 +23,7 @@
 
 mod path;
 mod remote;
+mod remote_addr;
 mod remote_websocket;
 mod server_request;
 pub use server_request::AppServerReplyHandle;
@@ -63,6 +64,8 @@ pub use crate::path::AppServerPath;
 pub use crate::remote::RemoteAppServerClient;
 pub use crate::remote::RemoteAppServerConnectArgs;
 pub use crate::remote::RemoteAppServerEndpoint;
+pub use crate::remote_addr::resolve_remote_addr;
+pub use crate::remote_addr::resolve_remote_endpoint;
 
 /// Transitional access to core-only embedded app-server types.
 ///
@@ -279,13 +282,15 @@ impl InProcessAppServerClient {
                                 // this loop can keep draining runtime events
                                 // while the request is blocked on client input.
                                 tokio::spawn(async move {
-                                    // Device ceremonies belong to the waiting UI. Preserve
-                                    // its cancellation through this buffering task.
+                                    // Dropping the UI's request must drop the detached runtime
+                                    // future too: its drop guard cancels verification and search.
                                     let cancellable = matches!(*request,
                                         ClientRequest::UserVerificationStatus { .. }
                                         | ClientRequest::UserVerificationEnroll { .. }
                                         | ClientRequest::UserVerificationDelete { .. }
-                                        | ClientRequest::UserVerificationVerify { .. });
+                                        | ClientRequest::UserVerificationVerify { .. }
+                                        | ClientRequest::ThreadSearch { .. }
+                                        | ClientRequest::ThreadSearchStream { .. });
                                     let mut response_tx = response_tx;
                                     tokio::select! {
                                         _ = response_tx.closed(), if cancellable => {}
@@ -1711,6 +1716,7 @@ mod tests {
                 serde_json::from_value(
                     serde_json::to_value(ServerNotification::AccountUpdated(
                         AccountUpdatedNotification {
+                            reason: None,
                             auth_mode: None,
                             plan_type: None,
                         },

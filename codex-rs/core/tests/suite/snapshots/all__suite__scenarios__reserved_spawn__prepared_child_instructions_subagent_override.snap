@@ -1,0 +1,121 @@
+---
+source: core/tests/suite/scenarios_reserved_spawn.rs
+assertion_line: 284
+expression: "context_snapshot::format_request_history_snapshot(\"Host preparation preserves custom base instructions and applies the native subagent developer override when starting a child with a different model.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
+---
+Scenario: Host preparation preserves custom base instructions and applies the native subagent developer override when starting a child with a different model.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-6-astra"
+  parallel_tool_calls: false
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"context":"all_turns","effort":"low"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+-- request 1 (turn) --
+00:additional_tools/developer (1; hash=e6c5a5cd75267fa8):
+        - namespace/functions; hash=44152e84962ecbf8
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
+          - function/request_user_input
+          - function/request_user_input_async
+          - function/fence
+01:message/developer:
+    Keep the custom base instructions.
+02:message/developer[3]:
+    [01] Explain the reasoning behind your findings.
+    [02] <permissions instructions>
+        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
+        # Escalation Requests
+
+        Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
+
+        Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
+        </permissions instructions>
+    [03] <collaboration_mode># Collaboration Mode: Default
+
+        You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
+
+        Your active mode changes only when new developer instructions with a different `<collaboration_mode>...<...by themselves. Known mode names are Default and Plan. [hash=e75f6b12fc52d812]
+
+        ## request_user_input availability
+
+        Use the `request_user_input` tool only when it is listed in the available tools for this turn.
+
+        Use the `request_user_input` tool only for optional questions where the answer would materially improve the quality of the work.
+
+        If `request_user_input` returns no answers, continue with best judgment instead of asking again or treating the turn as blocked.
+
+        Never use the `request_user_input` tool for permission requests or permission-related escalations.
+        </collaboration_mode>
+03:message/developer:
+    <multi_agent_mode>
+    Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.
+
+    Before calling any multi-agent tool, read the full multi-agent skill using its listed package locator. S...context. If the read fails, make note of the blocker. [hash=104096cdd6a881da]
+    </multi_agent_mode>
+04:message/user:
+    <environment_context>
+      <cwd><CWD></cwd>
+      <shell><HOST_SHELL></shell>
+      <current_date><CURRENT_DATE></current_date>
+      <timezone><HOST_TIMEZONE></timezone>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
+    </environment_context>
+05:message/user:
+    Prepare a worker with my instructions.
+06:configuration_update:reasoning={"effort":"low"}
+-- request 2 (turn) --
+07:function_call/host_spawn:{}
+08:function_call_output:Done.
+
+## Window 2 (after request 2: input diverged at item 00)
+Settings: relative to window 1
+  model: "gpt-5.6-terra"
+  prompt_cache_key: "<PROMPT_CACHE_KEY 2>"
+  reasoning: {"context":"all_turns","effort":"medium"}
+-- request 3 (turn) --
+00:additional_tools/developer (1; hash=66e6cc82b9740a4d):
+        - namespace/functions; hash=efb5664864c5ad15
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
+          - function/request_user_input
+          - function/fence
+01:message/developer:
+    Keep the custom base instructions.
+02:message/developer[2]:
+    [01] Report worker findings concisely.
+    [02] <permissions instructions>
+        Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
+        # Escalation Requests
+
+        Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
+
+        Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
+        </permissions instructions>
+03:message/developer:
+    <multi_agent_mode>
+    Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.
+
+    Before calling any multi-agent tool, read the full multi-agent skill using its listed package locator. S...context. If the read fails, make note of the blocker. [hash=104096cdd6a881da]
+    </multi_agent_mode>
+04:message/user:
+    <environment_context>
+      <cwd><CWD></cwd>
+      <shell><HOST_SHELL></shell>
+      <current_date><CURRENT_DATE></current_date>
+      <timezone><HOST_TIMEZONE></timezone>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
+    </environment_context>
+05:message/user:
+    Report your findings.

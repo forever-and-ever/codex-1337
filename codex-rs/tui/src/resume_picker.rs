@@ -872,6 +872,11 @@ fn spawn_app_server_source(backend: AppServerPickerBackend) -> sources::Source {
         config,
     } = backend;
     let backend_id = app_server.backend_id();
+    let initial_mode = if app_server.uses_remote_workspace() {
+        PageLoadMode::StoreDefault
+    } else {
+        PageLoadMode::StateDbOnly
+    };
     let (bg_tx, events) = mpsc::unbounded_channel();
     let (request_tx, mut request_rx) = mpsc::unbounded_channel::<PickerLoadRequest>();
 
@@ -1012,6 +1017,7 @@ fn spawn_app_server_source(backend: AppServerPickerBackend) -> sources::Source {
 
     sources::Source {
         backend_id,
+        initial_mode,
         loader: Arc::new(move |request: PickerLoadRequest| {
             let _ = request_tx.send(request);
         }),
@@ -1314,38 +1320,66 @@ impl PickerState {
     }
 
     fn route_key_chord(&mut self, key: KeyEvent) -> Option<KeyEvent> {
-        if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.owns_interaction_key(key))
-        {
-            if self.chord_matcher.cancel() {
-                self.requester.schedule_frame();
-            }
-            return Some(key);
-        }
-        let context = if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_editing())
-        {
-            crate::keymap::KeymapContext::Editor
-        } else if self.overlay.is_some() {
-            crate::keymap::KeymapContext::Pager
+        use crate::keymap::KeyChordMatch;
+        use crate::keymap::KeymapContext;
+        use crate::keymap::KeymapContextSet;
+
+        let mut contexts = KeymapContextSet::new(if self.overlay.is_some() {
+            KeymapContext::Pager
         } else {
-            crate::keymap::KeymapContext::List
-        };
+            KeymapContext::List
+        });
+        if let Some(Overlay::Transcript(overlay)) = &self.overlay {
+            if overlay.is_search_editing() {
+                contexts = KeymapContextSet::new(KeymapContext::Editor);
+            }
+            let selecting = overlay.is_select_mode() && !overlay.is_search_editing();
+            if selecting {
+                contexts = contexts.with_transcript_select();
+            }
+            if overlay.owns_interaction_key(key) {
+                let markdown_chord = selecting
+                    && match self
+                        .chord_matcher
+                        .clone()
+                        .advance(key, &self.keymap.chords, contexts)
+                    {
+                        KeyChordMatch::Completed(key) => {
+                            self.keymap.pager.mark_markdown.is_pressed(key)
+                        }
+                        KeyChordMatch::Pending(prefix) => {
+                            self.keymap.chords.bindings.iter().any(|binding| {
+                                binding.action.action == "mark_markdown"
+                                    && binding.chord.prefix == prefix
+                            })
+                        }
+                        KeyChordMatch::PassThrough
+                        | KeyChordMatch::Cancelled
+                        | KeyChordMatch::Ignored => false,
+                    };
+                if !markdown_chord {
+                    if self.chord_matcher.cancel() {
+                        self.requester.schedule_frame();
+                    }
+                    return Some(key);
+                }
+            }
+        }
         let was_pending = self.chord_matcher.is_pending();
-        let result = self.chord_matcher.advance(
-            key,
-            &self.keymap.chords,
-            crate::keymap::KeymapContextSet::new(context),
-        );
+        let result = self
+            .chord_matcher
+            .advance(key, &self.keymap.chords, contexts);
         if was_pending && !self.chord_matcher.is_pending() {
             self.requester.schedule_frame();
         }
         match result {
-            crate::keymap::KeyChordMatch::PassThrough => Some(key),
-            crate::keymap::KeyChordMatch::Completed(dispatch_event) => Some(dispatch_event),
-            crate::keymap::KeyChordMatch::Pending(_) | crate::keymap::KeyChordMatch::Cancelled => {
+            KeyChordMatch::PassThrough => Some(key),
+            KeyChordMatch::Completed(dispatch_event) => Some(dispatch_event),
+            KeyChordMatch::Pending(_) | KeyChordMatch::Cancelled => {
                 self.requester.schedule_frame();
                 None
             }
-            crate::keymap::KeyChordMatch::Ignored => None,
+            KeyChordMatch::Ignored => None,
         }
     }
 
@@ -2459,6 +2493,7 @@ fn thread_list_params(
     ThreadListParams {
         include_attached_threads: false,
         current_account_only: true,
+        included_thread_ids: None,
         excluded_thread_ids: None,
         attached_to_thread_id: None,
         originators: None,
@@ -3354,13 +3389,13 @@ fn dense_summary_line(input: DenseSummaryInput<'_>) -> Line<'static> {
     let marker_width = input.marker.width();
     let available = (input.width as usize).saturating_sub(marker_width);
     let columns = dense_columns(available);
+    let title_width = columns
+        .title_width
+        .saturating_sub(2 * usize::from(input.unread));
+    let title = truncate_text(input.title, title_width.saturating_sub(1));
+    let title = pad_dense_column(title, title_width);
     let title = session_title_span(
-        dense_column_text(
-            input.title,
-            columns
-                .title_width
-                .saturating_sub(2 * usize::from(input.unread)),
-        ),
+        title,
         input.thread_id,
         input.use_theme_colors,
         input.is_selected,
@@ -3436,7 +3471,10 @@ fn dense_row_background_style(selected: bool) -> Style {
 }
 
 fn dense_column_text(text: &str, width: usize) -> String {
-    let text = truncate_text(text, width.saturating_sub(1));
+    pad_dense_column(truncate_text(text, width.saturating_sub(1)), width)
+}
+
+fn pad_dense_column(text: String, width: usize) -> String {
     let padding = width.saturating_sub(UnicodeWidthStr::width(text.as_str()));
     format!("{text}{}", " ".repeat(padding))
 }
@@ -3854,17 +3892,25 @@ fn conversation_user_style() -> Style {
 }
 
 fn expanded_detail_line(label: &'static str, value: &str, width: u16) -> Line<'static> {
+    expanded_detail_line_with(label, width, |value_width| {
+        truncate_text(value, value_width)
+    })
+}
+
+fn expanded_detail_line_with(
+    label: &'static str,
+    width: u16,
+    render_value: impl FnOnce(usize) -> String,
+) -> Line<'static> {
     const LABEL_WIDTH: usize = 10;
-    let prefix_width = 4;
-    let gap_width = 2;
-    let value_width = (width as usize)
-        .saturating_sub(prefix_width + LABEL_WIDTH + gap_width)
+    let value_width = usize::from(width)
+        .saturating_sub("  │ ".width() + LABEL_WIDTH + "  ".width())
         .max(1);
     vec![
         "  │ ".set_style(secondary_text_style()),
         format!("{label:<LABEL_WIDTH$}").set_style(secondary_text_style()),
         "  ".set_style(secondary_text_style()),
-        truncate_text(value, value_width).into(),
+        render_value(value_width).into(),
     ]
     .into()
 }

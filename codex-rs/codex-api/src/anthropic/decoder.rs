@@ -499,6 +499,7 @@ impl<'a> Decoder<'a> {
                     metadata["stop_details"] = details;
                 }
                 events.push(ResponseEvent::Completed {
+                    reasoning_removals: None,
                     response_id,
                     token_usage: Some(token_usage),
                     usage_metadata: Some(ResponseUsageMetadata {

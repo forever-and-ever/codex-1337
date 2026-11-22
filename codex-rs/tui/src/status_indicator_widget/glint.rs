@@ -12,7 +12,10 @@ impl StatusIndicator<'_> {
         if !row.animations_enabled && self.timer.display_started_at.is_none() {
             return;
         }
-        let moving = row.animations_enabled && (row.effects.progress || row.effects.shimmer);
+        let moving = row.animations_enabled
+            && (row.effects.progress
+                || (row.effects.shimmer
+                    && !crate::text_formatting::contains_rtl_or_arabic_number(&row.header)));
         let after = if moving {
             Duration::ZERO
         } else {

@@ -15,10 +15,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (12; hash=c3babdd5d705c531):
+  tools (12; hash=4a06bf36ec500a4c):
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=4f7c39179889a9c6
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e1b0d0970dc2b5bb
-    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, environment_id, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=60337fc51792d9a0
+    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, environment_id, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=d9f055bcf33dc89b
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=bf80c8a46f862d10
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=a9d43b5bf9e672b5
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6

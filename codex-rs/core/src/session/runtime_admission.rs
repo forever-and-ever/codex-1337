@@ -25,6 +25,8 @@ impl Session {
     pub(crate) fn reserve_runtime_turn(&self) -> Option<ActiveTurn> {
         Some(ActiveTurn {
             task: None,
+            turn_id: None,
+            sampling_interrupt: None,
             finishing: None,
             turn_state: Arc::new(Mutex::new(TurnState::default())),
             runtime_hold: Arc::new(self.runtime_holds.acquire()?),

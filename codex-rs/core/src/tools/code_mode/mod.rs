@@ -25,6 +25,7 @@ use codex_code_mode::CellId;
 use codex_code_mode::CodeModeNestedToolCall;
 use codex_code_mode::CodeModeOutputTruncation;
 use codex_code_mode::CodeModeSession;
+use codex_code_mode::CodeModeSessionOptions;
 use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::RuntimeResponse;
@@ -80,6 +81,7 @@ pub(crate) struct CodeModeService {
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
     dispatch_broker: Arc<CodeModeDispatchBroker>,
+    heartbeat_interval_s: u32,
     shutdown_token: CancellationToken,
     unavailable_warning_emitted: AtomicBool,
     output_retention: output_sections::OutputRetention,
@@ -90,6 +92,7 @@ impl CodeModeService {
         thread_id: ThreadId,
         session_provider: Arc<dyn CodeModeSessionProvider>,
         executed_tool_calls: ExecutedToolCalls,
+        heartbeat_interval_s: u32,
     ) -> Self {
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
         let availability = session_provider.availability();
@@ -99,6 +102,7 @@ impl CodeModeService {
             session_provider,
             availability,
             dispatch_broker,
+            heartbeat_interval_s,
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
             output_retention: output_sections::OutputRetention::default(),
@@ -327,9 +331,16 @@ impl CodeModeService {
                     _ = self.shutdown_token.cancelled() => {
                         return Err("code mode session is shutting down".to_string());
                     }
-                    session = self
-                        .session_provider
-                        .create_session() => session?,
+                    session = async {
+                        if self.heartbeat_interval_s == 0 {
+                            self.session_provider.create_session().await
+                        } else {
+                            self.session_provider.create_session_with_options(CodeModeSessionOptions {
+                                heartbeat_interval_s: self.heartbeat_interval_s,
+                                ..self.session_provider.default_session_options()
+                            }).await
+                        }
+                    } => session?,
                 };
                 if self.shutdown_token.is_cancelled() {
                     let _ = session.shutdown().await;

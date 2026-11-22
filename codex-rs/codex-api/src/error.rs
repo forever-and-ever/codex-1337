@@ -26,6 +26,8 @@ pub enum ApiError {
         #[source]
         source: AnthropicStreamError,
     },
+    #[error("websocket request exceeds the peer's message size limit")]
+    WebsocketMessageTooLarge,
     #[error("stream error: Incomplete response returned, reason: content_filter")]
     ContentFilter,
     #[error(transparent)]

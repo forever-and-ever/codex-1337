@@ -183,6 +183,7 @@ async fn widget_reads_survive_history_modes_compaction_restarts_and_app_only_vis
                         thread_id,
                         origin_call_id: Some(call_id.to_string()),
                         server: "codex_apps".to_string(),
+                        environment_id: None,
                         uri: uri.to_string(),
                         connector_id: None,
                         target: None,
@@ -307,6 +308,7 @@ async fn read_widget(
         .request(|request_id| ClientRequest::McpResourceRead {
             request_id,
             params: McpResourceReadParams {
+                environment_id: None,
                 meta: Some(serde_json::Map::from_iter([(
                     "example/trace".into(),
                     json!(call_id),

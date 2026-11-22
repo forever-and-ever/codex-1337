@@ -245,11 +245,6 @@ impl CodexThread {
                                     turn.history_mode,
                                 )
                                 .await?
-                                .ok_or_else(|| {
-                                    CodexErr::InvalidRequest(
-                                        "parent history unavailable for farm".to_owned(),
-                                    )
-                                })?
                                 .items,
                             ))
                         }
@@ -356,11 +351,12 @@ impl CodexThread {
                 .services
                 .agent_control
                 .check_turn_admission(turn.multi_agent_version, &source)?;
+            let input = crate::codex_thread::resolve_client_inputs(request.input).await?;
             Ok::<_, CodexErr>(FarmSpawnRequest {
                 spawn: SpawnRequest {
                     caller: self.session.thread_id,
                     config,
-                    input: AgentInput::UserInput(request.input),
+                    input: AgentInput::UserInput(input),
                     source,
                     options: SpawnAgentOptions {
                         fork_mode,

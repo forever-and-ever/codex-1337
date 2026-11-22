@@ -7,8 +7,9 @@ use crate::render::renderable::Renderable;
 use crate::tui::FrameRequester;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::layout::Size;
 
-pub(super) const MAX_FOOTER_ROWS: u16 = 4;
+const MAX_FOOTER_ROWS: u16 = 4;
 
 struct ComposerRows {
     input: u16,
@@ -188,7 +189,8 @@ impl ChatComposer {
         width: u16,
         options: ComposerRenderOptions<'_>,
     ) -> u16 {
-        let rows = self.composer_rows(width, options.max_height.unwrap_or(u16::MAX), options);
+        let height = self.height_budget(width, options);
+        let rows = self.composer_rows(width, height, options);
         [
             rows.input,
             rows.above_input,
@@ -257,7 +259,7 @@ impl ChatComposer {
         let reserved_hints = wanted_hints.min(if find_active { 2 } else { 1 });
         let has_required_hints = find_active || matches!(
             self.footer_mode(),
-            FooterMode::HistorySearch | FooterMode::ShortcutOverlay
+            FooterMode::HistorySearch | FooterMode::ShortcutOverlay(_)
                 | FooterMode::QuitShortcutReminder | FooterMode::EscHint
         ) || options.footer.is_some_and(|footer| footer.is_interactive)
             // Inline warnings outrank optional status; native status keeps its ruled minimum.
@@ -291,10 +293,12 @@ impl ChatComposer {
             2
         };
         let wanted_status = self.status_surface_height(
-            width,
-            available.min(cap).saturating_sub(
-                required_hints
-                    .max(reserved_hints.min(available.min(cap).saturating_sub(basic_status))),
+            Size::new(
+                width,
+                available.min(cap).saturating_sub(
+                    required_hints
+                        .max(reserved_hints.min(available.min(cap).saturating_sub(basic_status))),
+                ),
             ),
             options,
         );
@@ -310,6 +314,23 @@ impl ChatComposer {
         .min(available.saturating_sub(reserved_hints.saturating_add(basic_status)));
         available = available.saturating_sub(above_input);
         let limit = cap.min(available);
+
+        // Reserve passive hints only below the composer, when their row can stay
+        // fixed on input transitions without displacing the draft, popup, or ruled status.
+        let wanted_hints = if options.hint_placement == ComposerHintPlacement::BelowComposer
+            && wanted_hints == 0
+            && wanted_status > 0
+            && wanted_status < limit
+            && self.draft.input_enabled
+            && !self.blocks_direct_input
+            && self.attachments.is_empty()
+            && !options.is_dialog_backdrop
+            && self.passive_hints(options).is_some()
+        {
+            1
+        } else {
+            wanted_hints
+        };
         let reserved_status = wanted_status
             .min(basic_status)
             .min(limit.saturating_sub(required_hints));

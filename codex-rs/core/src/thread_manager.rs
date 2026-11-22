@@ -171,6 +171,7 @@ type AgentControlFactory =
 fn capture_test_op(op: &Op) -> Option<Op> {
     match op {
         Op::Interrupt => Some(Op::Interrupt),
+        Op::InterruptAgent => Some(Op::InterruptAgent),
         Op::InterAgentCommunication {
             communication,
             start_options,
@@ -218,6 +219,16 @@ pub enum ThreadRegistration {
     Current,
     Absent,
     Replaced,
+}
+
+/// A manager-started runtime's receipt stays committed across unload. A runtime
+/// started without a manager has no receipt in its thread extension store.
+pub struct ThreadRegistrationReceipt(Arc<AtomicBool>);
+
+impl ThreadRegistrationReceipt {
+    pub fn was_registered(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 // TODO(ccunningham): Add an explicit non-interrupting live-turn snapshot once
@@ -337,6 +348,8 @@ pub enum PromptCacheKey {
 
 pub struct StartThreadOptions {
     pub config: Config,
+    /// Trusted host country for the initial thread settings.
+    pub request_country: codex_protocol::RequestCountry,
     pub credentials: crate::StartCredentials,
     /// Request-body cache key policy for this thread and its children. Hosts must reapply it on cold resume.
     pub prompt_cache_key: PromptCacheKey,
@@ -435,6 +448,7 @@ impl StartThreadOptions {
     pub fn new(config: Config) -> Self {
         Self {
             config,
+            request_country: codex_protocol::RequestCountry::default(),
             credentials: crate::StartCredentials::Inherit,
             prompt_cache_key: PromptCacheKey::default(),
             thread_instructions_provider: None,
@@ -561,6 +575,7 @@ fn effective_originator_value(
 
 pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) config: Config,
+    pub(crate) request_country: codex_protocol::RequestCountry,
     pub(crate) prompt_cache_key: Option<PromptCacheKey>,
     pub(crate) initial_history: InitialHistory,
     pub(crate) agent_control: LocalAgentControl,
@@ -1032,6 +1047,10 @@ impl ThreadManager {
         Arc::clone(&self.state.image_store)
     }
 
+    pub fn thread_store(&self) -> Arc<dyn ThreadStore> {
+        Arc::clone(&self.state.thread_store)
+    }
+
     /// Starts the local rollout migration path after a runtime feature enablement.
     ///
     /// Startup config handles the initial launch in [`crate::ThreadStoreBuilder::build`]. This covers
@@ -1145,6 +1164,8 @@ impl ThreadManager {
         Arc::clone(&self.state.git_root_discovery)
     }
 
+    /// Returns the startup catalog. Use [`CodexThread::model_info`] for a live chat or
+    /// [`Self::models_manager_for_config`] for a new destination.
     pub fn get_models_manager(&self) -> SharedModelsManager {
         self.state.model_catalog.manager.clone()
     }
@@ -1863,6 +1884,7 @@ impl ThreadManager {
             .insert(accounts::ForkAccountScope::capture(&parent.session, &config).await?);
         Ok((
             StartThreadOptions {
+                request_country: settings.request_country,
                 prompt_cache_key: parent
                     .session
                     .services
@@ -2198,6 +2220,22 @@ impl ThreadManagerState {
             })
     }
 
+    pub(crate) async fn load_legacy_model_context(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> CodexResult<StoredModelContext> {
+        let history = self
+            .thread_store
+            .load_history(params)
+            .await
+            .map_err(thread_store_rollout_read_error)?;
+        Ok(StoredModelContext {
+            thread_id: history.thread_id,
+            revision: history.revision,
+            items: history.items,
+        })
+    }
+
     pub(crate) async fn load_latest_model_context(
         &self,
         params: LoadThreadHistoryParams,
@@ -2492,6 +2530,7 @@ impl ThreadManagerState {
     ) -> CodexResult<NewThread> {
         let ResumeThreadWithHistoryOptions {
             config,
+            request_country,
             prompt_cache_key,
             initial_history,
             agent_control,
@@ -2509,6 +2548,7 @@ impl ThreadManagerState {
         let prompt_cache_key = prompt_cache_key.unwrap_or(inherited_prompt_cache_key);
         let thread_source = initial_history.get_resumed_thread_source();
         let options = StartThreadOptions {
+            request_country,
             prompt_cache_key,
             initial_history,
             session_source: Some(session_source),
@@ -2584,6 +2624,15 @@ impl ThreadManagerState {
             .config_layer_stack
             .with_mcp_ema_cancellation(cancellation);
         let runtime = request.agent_control.runtime().clone();
+        let options = &request.options;
+        let source = options
+            .session_source
+            .as_ref()
+            .unwrap_or(&self.session_source);
+        request.parent_thread_id = request
+            .parent_thread_id
+            .or_else(|| options.initial_history.get_resumed_parent_thread_id())
+            .or_else(|| source.parent_thread_id());
         let membership = runtime.admit_start()?;
         let owns_startup = request.startup.is_none();
         let startup_state = Arc::clone(
@@ -2630,6 +2679,7 @@ impl ThreadManagerState {
         };
         let StartThreadOptions {
             mut config,
+            request_country,
             credentials,
             prompt_cache_key,
             allow_provider_model_fallback,
@@ -2663,11 +2713,13 @@ impl ThreadManagerState {
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         if thread_extension_init.get::<InheritedSessionId>().is_some()
-            && (!matches!(&initial_history, InitialHistory::New)
-                || session_source.is_non_root_agent())
+            && (!matches!(
+                &initial_history,
+                InitialHistory::New | InitialHistory::Forked(_)
+            ) || session_source.is_non_root_agent())
         {
             return Err(CodexErr::InvalidRequest(
-                "an inherited agent session ID requires a fresh thread started directly by the host"
+                "an inherited agent session ID requires a new or forked thread started directly by the host"
                     .to_string(),
             ));
         }
@@ -2782,14 +2834,6 @@ impl ThreadManagerState {
             }
             (_, control) => control,
         };
-        let parent_thread_id = parent_thread_id
-            .or_else(|| initial_history.get_resumed_parent_thread_id())
-            .or(match &session_source {
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                    parent_thread_id, ..
-                }) => Some(*parent_thread_id),
-                _ => None,
-            });
         // Both resume entry points must restore identities before children can be loaded lazily.
         if let InitialHistory::Resumed(resumed) = &initial_history
             && (initial_history.get_multi_agent_version() == Some(MultiAgentVersion::V2)
@@ -3028,12 +3072,15 @@ impl ThreadManagerState {
             ) => manager,
             },
         };
+        let registered = Arc::new(AtomicBool::new(false));
+        thread_extension_init.insert(ThreadRegistrationReceipt(Arc::clone(&registered)));
         let spawn_result = Session::spawn(SessionSpawnArgs {
             credentials,
             prompt_cache_observer: self.prompt_cache_observer.get().cloned(),
             attached_thread,
             startup,
             config,
+            request_country,
             prompt_cache_key,
             allow_provider_model_fallback,
             instructions: startup_context.instructions,
@@ -3123,7 +3170,7 @@ impl ThreadManagerState {
             }
         }
         let finalize_result = self
-            .finalize_thread_spawn(session, io, tracked_session_source)
+            .finalize_thread_spawn(session, io, tracked_session_source, &registered)
             .await;
         let (new_thread, tier_acceptance) = match finalize_result {
             Ok(registered) => registered,
@@ -3166,6 +3213,7 @@ impl ThreadManagerState {
         session: Arc<Session>,
         io: SessionIo,
         session_source: SessionSource,
+        registered: &AtomicBool,
     ) -> CodexResult<(NewThread, Option<ServiceTierAcceptance>)> {
         let thread_id = session.thread_id();
         let event = io.next_event().await?;
@@ -3206,6 +3254,8 @@ impl ThreadManagerState {
                     session_configured.rollout_path.clone(),
                     session_source,
                 ));
+                // All registration checks passed; publish the receipt with this insertion.
+                registered.store(true, Ordering::Release);
                 e.insert(thread.clone());
                 let tier_acceptance = pending_service_tier.and_then(|(mut state, update)| {
                     state.service_tier_acceptance =
@@ -3411,14 +3461,18 @@ fn append_interrupted_boundary(
     match history {
         InitialHistory::New | InitialHistory::Cleared => {
             let mut history = Vec::new();
-            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+            if let Some(marker) =
+                interrupted_turn_history_marker(interrupted_marker, /*cause*/ None)
+            {
                 history.push(RolloutItem::ResponseItem(marker.into()));
             }
             history.push(aborted_event);
             InitialHistory::Forked(history)
         }
         InitialHistory::Forked(mut history) => {
-            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+            if let Some(marker) =
+                interrupted_turn_history_marker(interrupted_marker, /*cause*/ None)
+            {
                 history.push(RolloutItem::ResponseItem(marker.into()));
             }
             history.push(aborted_event);
@@ -3426,7 +3480,9 @@ fn append_interrupted_boundary(
         }
         InitialHistory::Resumed(resumed) => {
             let mut history = Arc::unwrap_or_clone(resumed.history);
-            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+            if let Some(marker) =
+                interrupted_turn_history_marker(interrupted_marker, /*cause*/ None)
+            {
                 history.push(RolloutItem::ResponseItem(marker.into()));
             }
             history.push(aborted_event);

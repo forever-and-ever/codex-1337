@@ -258,7 +258,17 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
                 ),
                 approval_policy: Some(AskForApproval::OnRequest),
                 approvals_reviewer: None,
-                sandbox_policy: (!preserve).then(|| config.legacy_sandbox_policy().into()),
+                sandbox_policy: if preserve {
+                    None
+                } else {
+                    Some(
+                        config
+                            .permissions
+                            .effective_permission_profile()
+                            .to_legacy_sandbox_policy(config.cwd.as_path())?
+                            .into(),
+                    )
+                },
                 cyber_access_program: rollout_enabled.then_some(if daybreak {
                     CyberAccessProgram::DaybreakBlue.into()
                 } else {

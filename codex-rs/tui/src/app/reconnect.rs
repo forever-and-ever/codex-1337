@@ -30,6 +30,7 @@ pub(super) struct Reconnected {
     bootstrap: AppServerBootstrap,
     thread:
         Result<Option<AppServerStartedThread>, codex_protocol::sign_in_required::SignInRequired>,
+    archived_thread: Option<ThreadId>,
 }
 
 #[expect(
@@ -91,6 +92,7 @@ pub(super) async fn reconnect(
                 }
                 result => result?,
             };
+            let mut archived_thread = None;
             let thread = if let Some(thread_id) = thread_id {
                 stage = "resuming the conversation";
                 match session
@@ -103,6 +105,12 @@ pub(super) async fn reconnect(
                     .await
                 {
                     Ok(thread) => Ok(Some(thread)),
+                    Err(error)
+                        if super::archived_thread::resume_reports_archived(&error, thread_id) =>
+                    {
+                        archived_thread = Some(thread_id);
+                        Ok(None)
+                    }
                     Err(error) if super::sign_in_required::from_report(&error).is_some() => {
                         Err(super::sign_in_required::from_report(&error)
                             .expect("matched sign-in error"))
@@ -144,6 +152,7 @@ pub(super) async fn reconnect(
                 session,
                 bootstrap,
                 thread,
+                archived_thread,
             })
         };
         let result = tokio::time::timeout_at(deadline, attempt).await;
@@ -154,7 +163,7 @@ pub(super) async fn reconnect(
         }
     }
     tracing::warn!(stage, "automatic reconnect timed out");
-    color_eyre::eyre::bail!("Automatic reconnect timed out while {stage}.")
+    color_eyre::eyre::bail!("Automatic reconnect timed out while {stage}.");
 }
 
 impl App {
@@ -391,6 +400,7 @@ impl App {
             mut session,
             bootstrap,
             thread,
+            archived_thread,
         } = connected;
         let (mut thread, sign_in_required) = match thread {
             Ok(thread) => (thread, None),
@@ -508,13 +518,15 @@ impl App {
         );
         // Move cached UI state into fresh channels. Old producers retain the old sender/store,
         // so their late requests cannot leak into recovery. Background threads attach on selection.
-        for channel in self.thread_event_channels.values_mut() {
+        for (&thread_id, channel) in &mut self.thread_event_channels {
             let mut replacement = ThreadEventChannel::for_connection_epoch(
                 THREAD_EVENT_CHANNEL_CAPACITY,
                 self.reconnect.connection_epoch,
             );
             replacement.backend_id = channel.backend_id;
-            if channel.attachment() == ThreadEventAttachment::ExternalWriter {
+            if archived_thread == Some(thread_id) || channel.is_archived() {
+                replacement.mark_archived();
+            } else if channel.attachment() == ThreadEventAttachment::ExternalWriter {
                 replacement.mark_external_writer();
             } else if let ThreadEventAttachment::SignInRequired(required) = channel.attachment() {
                 replacement.require_sign_in(required);
@@ -597,6 +609,12 @@ impl App {
             }
             self.thread_event_channels.insert(id, channel);
         }
+        if let Some(id) = archived_thread
+            && let Some(channel) = self.thread_event_channels.get(&id)
+            && let Some(session) = &mut channel.store.lock().await.session
+        {
+            session.read_only_history = true;
+        }
         if let Some(id) = displayed
             && let Some((receiver, snapshot)) = self.activate_thread_for_replay(id).await
         {
@@ -619,7 +637,7 @@ impl App {
                 return Err(err);
             }
             self.config = self.chat_widget.config_ref().clone();
-            if self.thread_unavailable(id) && !self.chat_widget.is_external_writer_view() {
+            if self.thread_unavailable(id) && !self.chat_widget.is_read_only_view() {
                 self.agent_navigation.mark_stopped(id);
                 self.chat_widget.pause_unavailable_thread();
                 let message = if let Some(required) = sign_in_required {

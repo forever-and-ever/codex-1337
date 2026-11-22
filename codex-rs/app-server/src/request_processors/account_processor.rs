@@ -314,6 +314,7 @@ impl AccountRequestProcessor {
     fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
         let auth = self.auth_manager.auth_cached();
         AccountUpdatedNotification {
+            reason: None,
             auth_mode: auth
                 .as_ref()
                 .map(CodexAuth::api_auth_mode)

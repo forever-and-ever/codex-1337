@@ -3,13 +3,12 @@
 use super::AuthRequestTelemetryContext;
 use super::ModelClient;
 use super::ModelClientSession;
+use super::OpenedModelResponse;
 use super::PendingUnauthorizedRetry;
 use super::RequestRouteTelemetry;
 use super::anthropic_tools::project_tools;
-use super::map_response_stream;
 use crate::agent::control::ProviderAccountSelection;
 use crate::client_common::Prompt;
-use crate::client_common::ResponseStream;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use codex_api::AnthropicCachePolicy;
@@ -165,13 +164,13 @@ impl ModelClientSession {
         fields(model = %model.slug, transport = "anthropic_http", api.path = "/messages"))]
     pub(super) async fn stream_anthropic(
         &self,
-        prompt: &Prompt,
+        prompt: &Arc<Prompt>,
         model: &ModelInfo,
         telemetry: &SessionTelemetry,
         effort: Option<ReasoningEffort>,
         metadata: &CodexResponsesMetadata,
         trace: &InferenceTraceContext,
-    ) -> Result<ResponseStream> {
+    ) -> Result<OpenedModelResponse> {
         let warm_account = self.client.provider_account_id();
         let mut captured = self.client.capture_anthropic_auth().await?;
         let operation = match metadata.request_kind {
@@ -248,21 +247,28 @@ impl ModelClientSession {
             let attempt = trace.start_attempt();
             let mut options = AnthropicStreamOptions::default();
             attempt.add_request_headers(&mut options.extra_headers);
-            attempt.record_started_with_protocol(
-                &request.body(),
-                codex_rollout_trace::ModelRequestProtocol::Messages,
-            );
-            match client.stream_request(request.clone(), options).await {
+            match client
+                .stream_request_with_body_observer(request.clone(), options, |body| {
+                    if attempt.is_recording_request() {
+                        attempt.record_started_with_protocol(
+                            body.shared_bytes().clone(),
+                            Arc::clone(prompt),
+                            codex_rollout_trace::ModelRequestProtocol::Messages,
+                        );
+                    }
+                })
+                .await
+            {
                 Ok(stream) => {
-                    let stream = map_response_stream(
+                    return Ok(OpenedModelResponse {
                         stream,
-                        request_telemetry,
-                        attempt,
-                        &self.client.state,
+                        telemetry: request_telemetry,
+                        trace: attempt,
+                        client: Arc::clone(&self.client.state),
                         interceptors,
-                        /*last_response_tx*/ None,
-                    );
-                    return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
+                        continuation: None,
+                        prompt_cache: dispatch,
+                    });
                 }
                 Err(
                     error @ (ApiError::Transport(TransportError::Http {

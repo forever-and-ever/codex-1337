@@ -286,6 +286,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     super::tests::buffer_text(buffer)
                 ));
             }
+
             insta::assert_snapshot!(
                 "running_copy_feedback_spacing",
                 crate::chatwidget::tests::helpers::normalize_working_snapshot(

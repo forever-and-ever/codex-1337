@@ -1,5 +1,4 @@
 //! Reopens an agent only when its runtime is absent, then returns its effective state.
-//! Rollout and descendant restoration remain in the existing local startup path.
 
 use super::LocalAgentControl;
 use crate::agent::types::LiveAgent;

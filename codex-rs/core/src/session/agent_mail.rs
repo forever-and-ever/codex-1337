@@ -639,15 +639,15 @@ impl Session {
                 })?;
             return Ok(None);
         }
-        let response = communication.to_model_input_item();
+        let response = ResponseItemEnvelope::new(communication.to_model_input_item());
         let (items, _) = self
-            .prepare_conversation_items_for_history(
-                turn_context,
-                model_info,
-                std::slice::from_ref(&response),
-            )
+            .prepare_conversation_items_for_history(turn_context, model_info, vec![response])
             .await;
-        let mut envelope = ResponseItemEnvelope::new(items[0].clone());
+        let Ok([mut envelope]) = <[_; 1]>::try_from(items) else {
+            return Err(CodexErr::Fatal(
+                "accepted agent mail did not prepare to one history item".to_owned(),
+            ));
+        };
         let (order, pending) = {
             let mut state = self.state.lock().await;
             (

@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_context_management_tools.rs
+assertion_line: 86
 expression: "context_snapshot::format_request_history_snapshot(\"Context tool descriptions and parameters use the captured model; selecting a model with explicit empty descriptions preserves empty text and prior history.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Context tool descriptions and parameters use the captured model; selecting a model with explicit empty descriptions preserves empty text and prior history.
@@ -15,10 +16,10 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (13; hash=0bf7a8b04ecd6880):
+  tools (13; hash=ebb0482747dad40b):
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
-    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=383228a84558a0ce
+    - function/exec_command: Runs a command, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=cc03a6502c6a5cd9
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=bf80c8a46f862d10
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=a9d43b5bf9e672b5
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
@@ -50,7 +51,7 @@ Settings:
 ## Window 2 (after request 1)
 Settings: relative to window 1
   model: "context-tools-updated"
-  tools (13; hash=823122f91bd56336):
+  tools (13; hash=fbaf3ac937ca0665):
     ~ function/new_context; args=[]; hash=b9263827b0adbb78
     ~ function/get_context_remaining; args=[]; hash=3e96d66806c56bdd
 -- request 2 (turn) --

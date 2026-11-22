@@ -23,7 +23,7 @@ fn external_editors_keep_the_screen_and_return_the_draft() -> Result<()> {
             &editor,
             &format!(
                 "#!/bin/sh\n{editor_output}\n: > \"$0.ready\"\nIFS= read -r ignored\n\
-                 {exit_screen}\nprintf 'edited draft' > \"$1\"\n",
+                 stty sane || exit 1\n{exit_screen}\nprintf 'edited draft' > \"$1\"\n",
                 exit_screen = if editor_output.contains("1049h") {
                     "printf '\\033[?1049l'"
                 } else {

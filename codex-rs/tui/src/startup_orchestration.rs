@@ -308,6 +308,7 @@ pub(super) async fn run_main_inner(
                 .bootstrap_config
                 .config_layer_stack
                 .requirements_toml(),
+            codex_cloud_config::ConfigServerLoginMethod::Browser,
         )
         .await?;
     }

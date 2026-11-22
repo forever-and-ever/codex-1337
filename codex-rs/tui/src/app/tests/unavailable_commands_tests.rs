@@ -162,6 +162,7 @@ async fn unavailable_thread_new_and_clear_start_a_writable_session() -> Result<(
             ),
             "mcp" => app.chat_widget.handle_server_notification(
                 ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                    environment_id: None,
                     thread_id: Some(id.to_string()),
                     name: "slow".into(),
                     status: McpServerStartupState::Starting,
@@ -176,6 +177,7 @@ async fn unavailable_thread_new_and_clear_start_a_writable_session() -> Result<(
 
         let mut session = start_config_write_test_app_server(&app).await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        tui.pause_events();
         while events.try_recv().is_ok() {}
         app.chat_widget
             .restore_user_message_to_composer(command.into());

@@ -1,6 +1,8 @@
 //! Native extensions use the existing policy and pending-approval machinery,
 //! without manufacturing an MCP transport or trusting a frontend's identity.
 
+use codex_mcp::McpServerKey;
+
 use std::sync::Arc;
 
 use codex_config::types::AppToolApproval;
@@ -120,8 +122,11 @@ pub(crate) async fn approve_extension_tool(
         ToolApprovalMode::Approve => AppToolApproval::Approve,
     });
     let policy = McpToolApprovalPolicy::for_server(mode);
+    // Native and user-configured extension policy is host-owned, not a scoped MCP peer.
+    let server_key = McpServerKey::unscoped(&approval.namespace);
     let invocation = McpInvocation {
         server: approval.namespace,
+        environment_id: None,
         tool: tool.clone(),
         arguments: Some(arguments),
     };
@@ -142,6 +147,7 @@ pub(crate) async fn approve_extension_tool(
     };
     let _metadata = call.session.register_mcp_tool_approval_metadata(
         &call.call_id,
+        &server_key,
         &invocation,
         metadata.clone(),
         Arc::clone(&call.step_context),
@@ -151,13 +157,13 @@ pub(crate) async fn approve_extension_tool(
     let mcp_config = config
         .to_mcp_config(&call.session.services.plugins_manager)
         .await;
-    if mcp_config.requires_read_only_mcp_tools && !approval.read_only {
+    if mcp_config.client.requires_read_only_mcp_tools && !approval.read_only {
         return Err(FunctionCallError::RespondToModel(
             "tool is disabled by read-only policy".into(),
         ));
     }
     let permission_profile = mcp_config
-        .permission_profile_for_server(&invocation.server)
+        .permission_profile_for_server(&server_key)
         .filter(|_| !native_policy_owner)
         .unwrap_or(&mcp_config.permission_profile);
     // Native coordination is controller-owned; a legacy policy keeps its configured owner.
@@ -180,6 +186,7 @@ pub(crate) async fn approve_extension_tool(
             host_cwd: &mcp_config.host_cwd,
         },
         environment_id,
+        &server_key,
         policy,
     ))
     .await;
@@ -225,7 +232,12 @@ pub(crate) async fn approve_extension_tool(
                 &call.session,
                 &call.turn,
                 &decision,
-                session_mcp_tool_approval_key(&invocation, Some(&metadata), policy.mode),
+                session_mcp_tool_approval_key(
+                    &server_key,
+                    &invocation,
+                    Some(&metadata),
+                    policy.mode,
+                ),
                 persistent_mcp_tool_approval_key(&invocation, Some(&metadata), policy.mode),
             ))
             .await;

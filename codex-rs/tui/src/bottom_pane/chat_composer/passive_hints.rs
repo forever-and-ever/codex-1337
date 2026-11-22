@@ -260,10 +260,11 @@ impl ChatComposer {
         // TELOS(fullscreen-only): native mode indicators live in the ruled status section.
         let native_modes = options.separate_status_line
             && self.footer.status_line_enabled
-            && !matches!(
-                self.footer.status_line_value,
-                Some(FooterContent::Extension { .. })
-            );
+            && self
+                .footer
+                .status_line_value
+                .as_ref()
+                .is_none_or(|line| line.as_native().is_some());
         if !native_modes {
             hints.add(Vim, self.vim_mode_indicator_span().map(Line::from));
         }
@@ -333,7 +334,7 @@ impl ChatComposer {
         }
         let show_warning = self.show_warning_notice(options);
         if !self.footer.status_line_enabled
-            && !self.footer.context_window_pending
+            && !self.footer.context_window_hidden
             && self.footer.side_conversation_context_label.is_none()
             && !self.is_bang_shell_command()
         {

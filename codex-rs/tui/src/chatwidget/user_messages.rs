@@ -144,6 +144,8 @@ pub(super) enum QueueDrain {
 #[serde(deny_unknown_fields)]
 pub(super) struct ThreadComposerState {
     pub(super) text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) shell_mode: Option<bool>,
     pub(super) local_images: Vec<LocalImageAttachment>,
     pub(super) remote_image_urls: Vec<String>,
     pub(super) text_elements: Vec<TextElement>,

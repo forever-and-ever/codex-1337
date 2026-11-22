@@ -115,6 +115,7 @@ impl Diagnostics {
             ApiError::Transport(_) | ApiError::Stream(_) => {
                 json!({"kind":"uncertain_transport","message":self.text(&error.to_string())})
             }
+            ApiError::WebsocketMessageTooLarge => json!({"kind":"websocket_message_too_large"}),
             ApiError::ResponseIncomplete(_) => {
                 json!({"kind":"response_incomplete","message":self.text(&error.to_string())})
             }

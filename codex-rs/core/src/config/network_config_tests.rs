@@ -72,12 +72,25 @@ action = ['redact']
         "[unix_sockets]\n'relative.sock' = 'allow'",
         "[unix_sockets]\n'~/allowed.sock' = 'allow'",
         "[unix_sockets]\n\"/tmp/\\u0000allowed.sock\" = 'allow'",
-        "[domains]\n'[' = 'allow'",
+        "[domains]\n'api[12].example' = 'allow'",
     ] {
         let network: NetworkToml = toml::from_str(raw).unwrap();
         let projected = project_environment_profile_network(Some(network.clone()))
             .unwrap()
             .unwrap();
         assert_eq!(projected, network);
+        let policy = EnvironmentNetworkPolicy::from_config(
+            &projected.to_network_proxy_config(),
+            /*managed_allowed_domains_only*/ false,
+        );
+        assert_eq!(
+            validate_environment_network_policy(
+                &policy,
+                &PermissionProfile::read_only(),
+                Platform::Unknown,
+            ),
+            Err(EnvironmentNetworkConfigError),
+            "{raw}"
+        );
     }
 }

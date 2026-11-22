@@ -21,6 +21,7 @@ use codex_mcp::ElicitationReviewRequest;
 use codex_mcp::ElicitationReviewer;
 use codex_mcp::ElicitationReviewerHandle;
 use codex_mcp::MCP_TOOL_CODEX_APPS_META_KEY;
+use codex_mcp::McpServerKey;
 use codex_otel::auth_storage::AuthStorageOriginator;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
@@ -89,6 +90,38 @@ impl Session {
         &self,
         config: &Config,
     ) -> (McpConfig, McpRuntimeContext) {
+        let environments = self.services.turn_environments.snapshot().await;
+        self.project_mcp_config_and_context(config, &environments)
+            .await
+    }
+
+    /// Compares status requests against the permission and environment inputs used at publication.
+    pub(crate) async fn mcp_status_config_and_context(
+        &self,
+        config: &Config,
+    ) -> (McpConfig, McpRuntimeContext) {
+        let environments = self.services.turn_environments.snapshot().await;
+        let (mut mcp_config, context) = self
+            .project_mcp_config_and_context(config, &environments)
+            .await;
+        // Runtime publication uses the per-turn config, whose cwd follows the local selection.
+        mcp_config.host_cwd = environments
+            .local_environment_cwd()
+            .unwrap_or_else(|| config.cwd.clone());
+        Self::bind_mcp_server_environments(
+            &mut mcp_config,
+            config,
+            &environments,
+            self.services.auth_manager.auth_cached().as_ref(),
+        );
+        (mcp_config, context)
+    }
+
+    async fn project_mcp_config_and_context(
+        &self,
+        config: &Config,
+        environments: &TurnEnvironmentSnapshot,
+    ) -> (McpConfig, McpRuntimeContext) {
         let originator = self.originator().await;
         let (session_source, host_fallback_cwd, disabled_plugin_ids) = {
             let state = self.state.lock().await;
@@ -98,17 +131,16 @@ impl Session {
                 state.active_disabled_plugin_ids.clone(),
             )
         };
-        let environments = self.services.turn_environments.snapshot().await;
         let environment_selections = environments.all_selections();
         let selected_capability_roots = self
-            .resolve_selected_capability_roots_for_step(&environments)
+            .resolve_selected_capability_roots_for_step(environments)
             .await;
         let ready_selected_capability_roots =
             Self::ready_selected_capability_roots(&selected_capability_roots);
         let (executor_capability_discovery_v2, inventory_changed) = self
             .executor_capability_discovery_for_step_v2(
                 config,
-                &environments,
+                environments,
                 /*skill_turn*/ None,
             )
             .await;
@@ -116,7 +148,7 @@ impl Session {
             .executor_capability_discovery_for_step(
                 config,
                 &selected_capability_roots,
-                &environments,
+                environments,
                 executor_capability_discovery_v2.as_deref(),
                 /*skill_turn*/ None,
             )
@@ -149,10 +181,10 @@ impl Session {
                 )
                 .await;
         let mcp_config = self
-            .project_selected_environment_mcp_servers(config, &environments, mcp_projection)
+            .project_selected_environment_mcp_servers(config, environments, mcp_projection)
             .await
             .config;
-        let runtime_context = self.mcp_runtime_context(&environments, &host_fallback_cwd);
+        let runtime_context = self.mcp_runtime_context(environments, &host_fallback_cwd);
         (mcp_config, runtime_context)
     }
 
@@ -405,7 +437,11 @@ impl Session {
             Some(self.mcp_elicitation_reviewer()),
         );
         anyhow::ensure!(
-            input.mcp_servers.contains_key(CODEX_APPS_MCP_SERVER_NAME),
+            input
+                .mcp_servers
+                .contains_key(&codex_mcp::McpServerKey::unscoped(
+                    CODEX_APPS_MCP_SERVER_NAME
+                )),
             "unknown MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"
         );
         let refreshed = AuthStorageOriginator::from_client_name(&desired.originator)
@@ -476,32 +512,38 @@ impl Session {
         };
         if is_active_regular_turn {
             // Refresh cloud catalogs without holding the MCP permit or active-turn lock.
-            for contributor in self.services.extensions.turn_lifecycle_contributors() {
-                if contributor
-                    .refresh_catalog_for_step(codex_extension_api::CatalogRefreshInput {
-                        turn_id: &turn_context.sub_id,
-                        session_store: &self.services.session_extension_data,
-                        thread_store: &self.services.thread_extension_data,
-                        turn_store: turn_context.extension_data.as_ref(),
-                    })
-                    .await
-                {
-                    // Preserve MCP updates if a later refresh is cancelled.
-                    self.mark_mcp_runtime_dirty(McpRefreshReason::ExtensionCatalogChanged);
-                }
-            }
+            futures::future::join_all(
+                self.services
+                    .extensions
+                    .turn_lifecycle_contributors()
+                    .iter()
+                    .map(|contributor| async move {
+                        if contributor
+                            .refresh_catalog_for_step(codex_extension_api::CatalogRefreshInput {
+                                turn_id: &turn_context.sub_id,
+                                session_store: &self.services.session_extension_data,
+                                thread_store: &self.services.thread_extension_data,
+                                turn_store: turn_context.extension_data.as_ref(),
+                            })
+                            .await
+                        {
+                            // Preserve each publication if the refresh batch is cancelled.
+                            self.mark_mcp_runtime_dirty(McpRefreshReason::ExtensionCatalogChanged);
+                        }
+                    }),
+            )
+            .await;
             self.refresh_mcp_if_dirty().await;
         }
-        let required_servers = required_servers
-            .iter()
-            .chain(&recovered_oauth_servers)
-            .cloned()
-            .collect::<Vec<_>>();
         self.wait_for_apps_tool_refresh().await;
         if let Some(binding) = self
             .services
             .mcp_runtime
-            .current_binding_with_requirements(&required_servers, required_plugins)
+            .current_binding_with_requirements(
+                required_servers,
+                &recovered_oauth_servers,
+                required_plugins,
+            )
             .await
         {
             return binding;
@@ -778,10 +820,11 @@ impl Session {
     pub async fn request_mcp_server_elicitation(
         &self,
         turn_context: &TurnContext,
-        server_name: String,
+        server_key: McpServerKey,
         request_id: RequestId,
         request: ElicitationRequest,
     ) -> Option<ElicitationResponse> {
+        let server_name = server_key.name().to_owned();
         // This callback carries a request ID, not a reliable tool invocation owner.
         // Do not report its human wait as ordinary tool execution.
         if turn_context
@@ -823,6 +866,7 @@ impl Session {
         let event = EventMsg::ElicitationRequest(ElicitationRequestEvent {
             turn_id: Some(turn_context.sub_id.clone()),
             server_name,
+            environment_id: server_key.scoped_environment_id().map(str::to_owned),
             id,
             request,
         });

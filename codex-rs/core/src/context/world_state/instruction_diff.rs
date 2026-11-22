@@ -54,9 +54,10 @@ impl Entry {
         stored: Option<&WorldStateSnapshot>,
         retained: &[WorldStateHash],
         snapshot: &mut WorldStateSnapshot,
+        latest: Option<&str>,
     ) -> SectionTransition {
         let Self::Instruction(section, amendment) = self else {
-            return render_eloquent(self.renderer(), previous);
+            return render_eloquent(self.renderer(), previous, latest);
         };
         let instruction_id = match amendment {
             Amendment::Unified(identity) => *identity,
@@ -67,10 +68,11 @@ impl Entry {
             .filter(|revision| revision.retained(retained));
         let (current, state, rendered) = match amendment {
             Amendment::Unified(_) => {
-                let (state, full) = render_eloquent(section.as_ref(), PreviousSectionState::Absent);
+                let (state, full) =
+                    render_eloquent(section.as_ref(), PreviousSectionState::Absent, None);
                 let Canonical::Instruction(current) = canonical(&full) else {
                     // Native declarations are not replaceable instruction text.
-                    return render_eloquent(section.as_ref(), previous);
+                    return render_eloquent(section.as_ref(), previous, latest);
                 };
                 if prior.is_none()
                     && current.is_none()
@@ -79,7 +81,7 @@ impl Entry {
                     // Legacy history has no canonical predecessor to revoke by diff.
                     // Keep its explicit revocation outside materialization until a full
                     // instruction value establishes ownership of the older fragments.
-                    return render_eloquent(section.as_ref(), previous);
+                    return render_eloquent(section.as_ref(), previous, latest);
                 }
                 (current, state, full)
             }
@@ -89,7 +91,7 @@ impl Entry {
                 } else {
                     PreviousSectionState::Absent
                 };
-                let (state, updates) = render_eloquent(section.as_ref(), previous);
+                let (state, updates) = render_eloquent(section.as_ref(), previous, latest);
                 (
                     current
                         .as_ref()
@@ -366,9 +368,10 @@ fn canonical(updates: &[WorldStateUpdate]) -> Canonical {
 fn render_eloquent(
     section: &dyn ErasedWorldStateSection,
     previous: PreviousSectionState<'_, serde_json::Value>,
+    latest: Option<&str>,
 ) -> SectionTransition {
     let first = matches!(previous, PreviousSectionState::Absent);
-    let (state, mut updates) = section.render_diff(previous);
+    let (state, mut updates) = section.render_diff(previous, latest);
     if first {
         updates.retain(|update| match &update.content {
             WorldStateUpdateContent::Fragment(fragment) => !vacuous(fragment.as_ref()),

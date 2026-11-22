@@ -23,6 +23,24 @@ fn snapshots() {
     let read_only = permissions_state(PermissionProfile::read_only(), AskForApproval::OnRequest);
     let full_access = permissions_state(PermissionProfile::Disabled, AskForApproval::OnRequest);
     let never_ask = permissions_state(PermissionProfile::read_only(), AskForApproval::Never);
+    let scoped = PermissionsState::new(
+        BTreeMap::from([
+            (Some("A".to_string()), read_only.descriptions[&None].clone()),
+            (
+                Some("B".to_string()),
+                full_access.descriptions[&None].clone(),
+            ),
+        ]),
+        /*per_environment*/ true,
+    );
+    let only_a = PermissionsState::new(
+        BTreeMap::from([(Some("A".to_string()), read_only.descriptions[&None].clone())]),
+        /*per_environment*/ true,
+    );
+    let fallback = PermissionsState::new(
+        read_only.descriptions.clone(),
+        /*per_environment*/ true,
+    );
 
     insta::assert_snapshot!(render_section_cases(&[
         (Absent, Absent),
@@ -31,6 +49,11 @@ fn snapshots() {
         (Known(&read_only), Known(&full_access)),
         (Known(&read_only), Known(&never_ask)),
         (Unknown, Known(&read_only)),
+        (Known(&read_only), Known(&only_a)),
+        (Known(&scoped), Known(&only_a)),
+        (Known(&only_a), Known(&only_a)),
+        (Known(&only_a), Known(&fallback)),
+        (Known(&only_a), Known(&read_only)),
     ]));
 }
 
@@ -41,10 +64,11 @@ fn legacy_snapshot_deserializes_and_only_suppresses_matching_full_permissions() 
 
     let read_only = permissions_state(PermissionProfile::read_only(), AskForApproval::OnRequest);
     let full_access = permissions_state(PermissionProfile::Disabled, AskForApproval::OnRequest);
-    let current_hash = WorldStateHash::from_fragment(&full_access.instructions);
-    let stale_hash = WorldStateHash::from_fragment(&read_only.instructions);
-    let expected_permissions = full_access.instructions.render();
-    let retained = ContextualUserFragment::into(full_access.instructions.clone());
+    let current_hash = WorldStateHash::from_fragment(&full_access.descriptions[&None].instructions);
+    let stale_hash = WorldStateHash::from_fragment(&read_only.descriptions[&None].instructions);
+    let expected_permissions = full_access.descriptions[&None].instructions.render();
+    let retained =
+        ContextualUserFragment::into(full_access.descriptions[&None].instructions.clone());
     let mut world_state = WorldState::default();
     world_state.add_section(full_access);
 
@@ -82,7 +106,7 @@ fn legacy_snapshot_deserializes_and_only_suppresses_matching_full_permissions() 
 #[test]
 fn persisted_permissions_are_detected_inside_bundled_developer_messages() {
     let state = permissions_state(PermissionProfile::read_only(), AskForApproval::OnRequest);
-    let retained = ContextualUserFragment::into(state.instructions.clone());
+    let retained = ContextualUserFragment::into(state.descriptions[&None].instructions.clone());
     let mut world_state = super::super::WorldState::default();
     world_state.add_section(state);
     let snapshot = world_state.render_full().0;
@@ -145,13 +169,18 @@ fn permissions_state(
         ..Default::default()
     });
     let model_messages = ResolvedModelMessages::from_model(&model);
-    PermissionsState::new(
+    let approval_context = ApprovalPromptContext::new(ApprovalsReviewer::User, model_messages);
+    let description = PermissionDescription::new(
         &permission_profile,
         approval_policy,
-        ApprovalPromptContext::new(ApprovalsReviewer::User, model_messages),
+        approval_context,
         Path::new("/workspace"),
         /*paths*/ None,
         /*exec_permission_approvals_enabled*/ false,
         /*request_permissions_tool_enabled*/ false,
+    );
+    PermissionsState::new(
+        BTreeMap::from([(None, description)]),
+        /*per_environment*/ false,
     )
 }

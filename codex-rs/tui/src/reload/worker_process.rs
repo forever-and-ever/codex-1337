@@ -19,7 +19,7 @@ use tokio::io::unix::AsyncFd;
 const WORKER_LIMIT: usize = 3;
 
 pub(super) struct Worker {
-    pub(super) terminal: AsyncFd<OwnedFd>,
+    terminal: AsyncFd<OwnedFd>,
     pub(super) executable: PathBuf,
     child: Option<Child>,
     slot: Option<Slot>,
@@ -145,7 +145,8 @@ impl Launch {
             rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
         }
         set_nonblocking(&master)?;
-        let terminal = AsyncFd::new(master)?;
+        // SAFETY: The registration owns the PTY master; callers can only borrow it.
+        let terminal = unsafe { AsyncFd::register(master)? };
         let mut command = Command::new(&executable);
         command
             .args(self.args)
@@ -175,6 +176,10 @@ impl Launch {
 }
 
 impl Worker {
+    pub(super) fn terminal(&self) -> &AsyncFd<OwnedFd> {
+        &self.terminal
+    }
+
     pub(super) fn resize(&self, size: (u16, u16)) -> io::Result<()> {
         rustix::termios::tcsetwinsize(
             self.terminal.get_ref(),

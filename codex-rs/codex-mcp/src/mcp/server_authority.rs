@@ -4,6 +4,7 @@
 use codex_protocol::models::PermissionProfile;
 
 use super::McpConfig;
+use crate::McpServerKey;
 use crate::McpServerSource;
 
 impl McpConfig {
@@ -12,23 +13,23 @@ impl McpConfig {
     /// `None` means that owner holds no authority over the server.
     pub fn server_permission_profile<'a>(
         &self,
-        server_name: &str,
+        server_key: &McpServerKey,
         thread_profile: &'a PermissionProfile,
         environment_profile: impl FnOnce(&str) -> Option<&'a PermissionProfile>,
     ) -> Option<&'a PermissionProfile> {
-        self.server_authority(server_name, || thread_profile, environment_profile)
+        self.server_authority(server_key, || thread_profile, environment_profile)
     }
 
     pub fn server_permission_source(
         &self,
-        server_name: &str,
+        server_key: &McpServerKey,
         environment: impl FnOnce(
             &str,
         )
             -> Option<std::sync::Arc<codex_exec_server::FileSystemSandboxContext>>,
     ) -> Option<super::McpServerPermissions> {
         self.server_authority(
-            server_name,
+            server_key,
             || super::McpServerPermissions::Thread,
             |id| environment(id).map(super::McpServerPermissions::Environment),
         )
@@ -36,14 +37,14 @@ impl McpConfig {
 
     fn server_authority<T>(
         &self,
-        server_name: &str,
+        server_key: &McpServerKey,
         thread: impl FnOnce() -> T,
         environment: impl FnOnce(&str) -> Option<T>,
     ) -> Option<T> {
-        let server = self.mcp_server_catalog.server(server_name)?;
+        let server = self.mcp_server_catalog.server(server_key)?;
         if server
             .source()
-            .is_host_owned_apps(server_name, server.config())
+            .is_host_owned_apps(server_key.name(), server.config())
         {
             return Some(thread());
         }

@@ -66,8 +66,8 @@ pub(super) async fn prepare_fresh_startup_config(
         }
     };
     let defaults = crate::config_update::read_effective_config_with_layers(
-        app_server.request_handle(),
-        defaults_cwd,
+        &app_server.request_handle(),
+        defaults_cwd.display().to_string(),
     )
     .await?;
     super::new_session::overlay_new_session_defaults(
@@ -176,7 +176,9 @@ impl App {
         if tui.presentation_mode() == crate::tui::PresentationMode::Frozen {
             return Ok(());
         }
-        self.render_chat_widget_frame(tui, tui.terminal.last_known_screen_size)?;
+        let screen_size = tui.prepare_draw_size()?;
+        self.handle_draw_pre_render(tui, screen_size)?;
+        self.render_chat_widget_frame(tui, screen_size)?;
         if self.chat_widget.has_active_modal() && self.startup_protected_input_boundary {
             self.discard_startup_modal_input(tui)?;
         }
