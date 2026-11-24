@@ -4,6 +4,7 @@ use codex_utils_path as path_utils;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::num::NonZero;
@@ -38,6 +39,7 @@ use codex_protocol::SanitizedGitUrl;
 use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
@@ -263,8 +265,7 @@ struct FilesByCreatedAtVisitor<'a> {
     page_size: usize,
     anchor_state: AnchorState,
     more_matches_available: bool,
-    config: ThreadListConfig<'a>,
-    provider_matcher: Option<&'a ProviderMatcher<'a>>,
+    filters: SummaryFilters<'a>,
 }
 
 impl<'a> RolloutFileVisitor for FilesByCreatedAtVisitor<'a> {
@@ -292,12 +293,9 @@ impl<'a> RolloutFileVisitor for FilesByCreatedAtVisitor<'a> {
             .and_then(format_rfc3339);
         if let Some(item) = build_thread_item(
             path,
-            self.config.allowed_sources,
-            self.provider_matcher,
-            self.config.cwd_filters,
+            &mut self.filters,
             updated_at,
             PreviewFilter::RequirePreview,
-            self.config.include_attached_threads,
         )
         .await
         {
@@ -398,31 +396,24 @@ pub async fn get_threads_in_root(
         .model_providers
         .and_then(|filters| ProviderMatcher::new(filters, config.default_provider));
 
-    let result = match config.layout {
+    let filters = SummaryFilters {
+        allowed_sources: config.allowed_sources,
+        provider_matcher: provider_matcher.as_ref(),
+        cwd: config.cwd_filters.map(|wanted| CwdMatcher {
+            wanted,
+            matches: HashMap::new(),
+        }),
+        include_attached_threads: config.include_attached_threads,
+    };
+
+    match config.layout {
         ThreadListLayout::NestedByDate => {
-            traverse_directories_for_paths(
-                root.clone(),
-                page_size,
-                anchor,
-                sort_key,
-                config,
-                provider_matcher.as_ref(),
-            )
-            .await?
+            traverse_directories_for_paths(root, page_size, anchor, sort_key, filters).await
         }
         ThreadListLayout::Flat => {
-            traverse_flat_paths(
-                root.clone(),
-                page_size,
-                anchor,
-                sort_key,
-                config,
-                provider_matcher.as_ref(),
-            )
-            .await?
+            traverse_flat_paths(root, page_size, anchor, sort_key, filters).await
         }
-    };
-    Ok(result)
+    }
 }
 
 /// Load thread file paths from disk using directory traversal.
@@ -434,29 +425,14 @@ async fn traverse_directories_for_paths(
     page_size: usize,
     anchor: Option<Cursor>,
     sort_key: ThreadSortKey,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     match sort_key {
         ThreadSortKey::CreatedAt => {
-            traverse_directories_for_paths_created(
-                root,
-                page_size,
-                anchor,
-                config,
-                provider_matcher,
-            )
-            .await
+            traverse_directories_for_paths_created(root, page_size, anchor, filters).await
         }
         ThreadSortKey::UpdatedAt | ThreadSortKey::RecencyAt => {
-            traverse_directories_for_paths_updated(
-                root,
-                page_size,
-                anchor,
-                config,
-                provider_matcher,
-            )
-            .await
+            traverse_directories_for_paths_updated(root, page_size, anchor, filters).await
         }
     }
 }
@@ -466,15 +442,14 @@ async fn traverse_flat_paths(
     page_size: usize,
     anchor: Option<Cursor>,
     sort_key: ThreadSortKey,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     match sort_key {
         ThreadSortKey::CreatedAt => {
-            traverse_flat_paths_created(root, page_size, anchor, config, provider_matcher).await
+            traverse_flat_paths_created(root, page_size, anchor, filters).await
         }
         ThreadSortKey::UpdatedAt | ThreadSortKey::RecencyAt => {
-            traverse_flat_paths_updated(root, page_size, anchor, config, provider_matcher).await
+            traverse_flat_paths_updated(root, page_size, anchor, filters).await
         }
     }
 }
@@ -489,8 +464,7 @@ async fn traverse_directories_for_paths_created(
     root: PathBuf,
     page_size: usize,
     anchor: Option<Cursor>,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -500,8 +474,7 @@ async fn traverse_directories_for_paths_created(
         page_size,
         anchor_state: AnchorState::new(anchor),
         more_matches_available,
-        config,
-        provider_matcher,
+        filters,
     };
     walk_rollout_files(&root, &mut scanned_files, &mut visitor).await?;
     more_matches_available = visitor.more_matches_available;
@@ -538,8 +511,7 @@ async fn traverse_directories_for_paths_updated(
     root: PathBuf,
     page_size: usize,
     anchor: Option<Cursor>,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    mut filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -565,12 +537,9 @@ async fn traverse_directories_for_paths_updated(
         let updated_at_fallback = format_rfc3339(ts);
         if let Some(item) = build_thread_item(
             candidate.path,
-            config.allowed_sources,
-            provider_matcher,
-            config.cwd_filters,
+            &mut filters,
             updated_at_fallback,
             PreviewFilter::RequirePreview,
-            config.include_attached_threads,
         )
         .await
         {
@@ -602,8 +571,7 @@ async fn traverse_flat_paths_created(
     root: PathBuf,
     page_size: usize,
     anchor: Option<Cursor>,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    mut filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -623,16 +591,8 @@ async fn traverse_flat_paths_created(
             .await
             .unwrap_or(None)
             .and_then(format_rfc3339);
-        if let Some(item) = build_thread_item(
-            path,
-            config.allowed_sources,
-            provider_matcher,
-            config.cwd_filters,
-            updated_at,
-            PreviewFilter::IncludeEmpty,
-            config.include_attached_threads,
-        )
-        .await
+        if let Some(item) =
+            build_thread_item(path, &mut filters, updated_at, PreviewFilter::IncludeEmpty).await
         {
             items.push(item);
         }
@@ -662,8 +622,7 @@ async fn traverse_flat_paths_updated(
     root: PathBuf,
     page_size: usize,
     anchor: Option<Cursor>,
-    config: ThreadListConfig<'_>,
-    provider_matcher: Option<&ProviderMatcher<'_>>,
+    mut filters: SummaryFilters<'_>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -689,12 +648,9 @@ async fn traverse_flat_paths_updated(
         let updated_at_fallback = format_rfc3339(ts);
         if let Some(item) = build_thread_item(
             candidate.path,
-            config.allowed_sources,
-            provider_matcher,
-            config.cwd_filters,
+            &mut filters,
             updated_at_fallback,
             PreviewFilter::IncludeEmpty,
-            config.include_attached_threads,
         )
         .await
         {
@@ -784,21 +740,12 @@ enum PreviewFilter {
 
 async fn build_thread_item(
     path: PathBuf,
-    allowed_sources: &[SessionSource],
-    provider_matcher: Option<&ProviderMatcher<'_>>,
-    cwd_filters: Option<&[PathBuf]>,
+    filters: &mut SummaryFilters<'_>,
     updated_at: Option<String>,
     preview_filter: PreviewFilter,
-    include_attached_threads: bool,
 ) -> Option<ThreadItem> {
     // Read head and detect preview-bearing events; goal previews can appear before
     // the first normal user message.
-    let filters = SummaryFilters {
-        allowed_sources,
-        provider_matcher,
-        cwd_filters,
-        include_attached_threads,
-    };
     let summary = read_head_summary(&path, HEAD_RECORD_LIMIT, filters)
         .await
         .ok()??;
@@ -872,12 +819,14 @@ async fn build_thread_item(
 pub async fn read_thread_item_from_rollout(path: PathBuf) -> Option<ThreadItem> {
     build_thread_item(
         path,
-        &[],
-        /*provider_matcher*/ None,
-        /*cwd_filters*/ None,
+        &mut SummaryFilters {
+            allowed_sources: &[],
+            provider_matcher: None,
+            cwd: None,
+            include_attached_threads: true,
+        },
         /*updated_at*/ None,
         PreviewFilter::RequirePreview,
-        /*include_attached_threads*/ true,
     )
     .await
 }
@@ -960,39 +909,53 @@ impl<'a> ProviderMatcher<'a> {
     }
 }
 
+struct CwdMatcher<'a> {
+    wanted: &'a [PathBuf],
+    matches: HashMap<OsString, bool>,
+}
+
+impl CwdMatcher<'_> {
+    fn matches(&mut self, cwd: &Path) -> bool {
+        // Canonicalization can distinguish spellings that Path equality folds.
+        let raw = cwd.as_os_str();
+        if let Some(&matches) = self.matches.get(raw) {
+            return matches;
+        }
+        let matches = self
+            .wanted
+            .iter()
+            .any(|filter| path_utils::paths_match_after_normalization(cwd, filter));
+        self.matches.insert(raw.to_owned(), matches);
+        matches
+    }
+}
+
 struct SummaryFilters<'a> {
     allowed_sources: &'a [SessionSource],
     provider_matcher: Option<&'a ProviderMatcher<'a>>,
-    cwd_filters: Option<&'a [PathBuf]>,
+    cwd: Option<CwdMatcher<'a>>,
     include_attached_threads: bool,
 }
 
 impl SummaryFilters<'_> {
     /// Filters only the rollout's first session metadata; copied fork metadata cannot override it.
-    fn matches(&self, summary: &HeadTailSummary) -> bool {
-        (self.include_attached_threads || summary.attached_to_thread_id.is_none())
-            && (self.allowed_sources.is_empty()
-                || summary
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| self.allowed_sources.contains(source)))
+    fn matches(&mut self, meta: &SessionMeta, is_attached: bool) -> bool {
+        (self.include_attached_threads || !is_attached)
+            && (self.allowed_sources.is_empty() || self.allowed_sources.contains(&meta.source))
             && self
                 .provider_matcher
-                .is_none_or(|matcher| matcher.matches(summary.model_provider.as_deref()))
-            && self.cwd_filters.is_none_or(|filters| {
-                summary.cwd.as_ref().is_some_and(|cwd| {
-                    filters
-                        .iter()
-                        .any(|filter| path_utils::paths_match_after_normalization(cwd, filter))
-                })
-            })
+                .is_none_or(|matcher| matcher.matches(meta.model_provider.as_deref()))
+            && self
+                .cwd
+                .as_mut()
+                .is_none_or(|matcher| matcher.matches(&meta.cwd))
     }
 }
 
 async fn read_head_summary(
     path: &Path,
     head_limit: usize,
-    filters: SummaryFilters<'_>,
+    filters: &mut SummaryFilters<'_>,
 ) -> io::Result<Option<HeadTailSummary>> {
     let mut lines = compression::open_rollout_line_reader(path).await?;
     let mut summary = HeadTailSummary::default();
@@ -1030,47 +993,39 @@ async fn read_head_summary(
         match rollout_line.item {
             RolloutItem::SessionMeta(session_meta_line) => {
                 if !summary.saw_session_meta {
-                    summary.originator = (!session_meta_line.meta.originator.is_empty())
-                        .then(|| session_meta_line.meta.originator.clone());
-                    summary.source = Some(session_meta_line.meta.source.clone());
-                    summary.attached_to_thread_id = session_meta_line
-                        .meta
-                        .forked_from_id
-                        .filter(|_| session_meta_line.meta.attached_thread);
-                    // A reference-backed fork can have a stored preview before its first local message.
-                    summary.has_fork_history = session_meta_line.meta.forked_from_id.is_some()
-                        && session_meta_line
-                            .meta
-                            .history_base
-                            .is_some_and(|base| base.end_ordinal_exclusive > 0)
-                        && !session_meta_line.meta.source.is_non_root_agent();
-                    summary.history_mode = session_meta_line.meta.history_mode;
-                    summary.parent_thread_id = session_meta_line.meta.parent_thread_id;
-                    summary.agent_nickname = session_meta_line.meta.agent_nickname.clone();
-                    summary.agent_role = session_meta_line.meta.agent_role.clone();
-                    summary.model_provider = session_meta_line.meta.model_provider.clone();
-                    summary.thread_id = Some(session_meta_line.meta.id);
-                    summary.cwd = Some(session_meta_line.meta.cwd.clone());
-                    summary.git_branch = session_meta_line
-                        .git
-                        .as_ref()
-                        .and_then(|git| git.branch.clone());
-                    summary.git_sha = session_meta_line
-                        .git
-                        .as_ref()
-                        .and_then(|git| git.commit_hash.as_ref().map(|sha| sha.0.clone()));
-                    summary.git_origin_url = session_meta_line
-                        .git
-                        .as_ref()
-                        .and_then(|git| git.repository_url.clone());
-                    summary.cli_version = Some(session_meta_line.meta.cli_version);
-                    summary.created_at = Some(session_meta_line.meta.timestamp.clone());
-                    summary.saw_session_meta = true;
-                    if !filters.matches(&summary) {
+                    let SessionMetaLine { meta, git } = *session_meta_line;
+                    let attached_to_thread_id =
+                        meta.forked_from_id.filter(|_| meta.attached_thread);
+                    if !filters.matches(&meta, attached_to_thread_id.is_some()) {
                         return Ok(None);
                     }
 
-                    if codex_state::is_guardian_review_source(&session_meta_line.meta.source) {
+                    let is_guardian_review = codex_state::is_guardian_review_source(&meta.source);
+                    summary.originator = (!meta.originator.is_empty()).then_some(meta.originator);
+                    summary.attached_to_thread_id = attached_to_thread_id;
+                    // A reference-backed fork can have a stored preview before its first local message.
+                    summary.has_fork_history = meta.forked_from_id.is_some()
+                        && meta
+                            .history_base
+                            .is_some_and(|base| base.end_ordinal_exclusive > 0)
+                        && !meta.source.is_non_root_agent();
+                    summary.source = Some(meta.source);
+                    summary.history_mode = meta.history_mode;
+                    summary.parent_thread_id = meta.parent_thread_id;
+                    summary.agent_nickname = meta.agent_nickname;
+                    summary.agent_role = meta.agent_role;
+                    summary.model_provider = meta.model_provider;
+                    summary.thread_id = Some(meta.id);
+                    summary.cwd = Some(meta.cwd);
+                    if let Some(git) = git {
+                        summary.git_branch = git.branch;
+                        summary.git_sha = git.commit_hash.map(|sha| sha.0);
+                        summary.git_origin_url = git.repository_url;
+                    }
+                    summary.cli_version = Some(meta.cli_version);
+                    summary.created_at = Some(meta.timestamp);
+                    summary.saw_session_meta = true;
+                    if is_guardian_review {
                         // The synthetic prompt is not needed for the thread summary.
                         summary.preview = Some(codex_state::GUARDIAN_THREAD_PREVIEW.to_string());
                         break;

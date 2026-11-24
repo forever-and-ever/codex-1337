@@ -1978,10 +1978,11 @@ impl PickerState {
                     unread_revision(read_states.remove(&thread_id.to_string())),
                 );
             }
-            if let Some(cwd) = row.cwd.as_ref()
+            if self.filter_mode != SessionFilterMode::All
+                && let (Some(cwd), Some(filter_cwd)) = (&row.cwd, &self.local_filter_cwd)
                 && !self.local_cwd_matches.contains_key(cwd)
             {
-                let matches = self.row_matches_local_cwd(&row);
+                let matches = paths_match(cwd, filter_cwd);
                 self.local_cwd_matches.insert(cwd.clone(), matches);
             }
             if let Some(seen_key) = row.seen_key() {
@@ -2077,16 +2078,6 @@ impl PickerState {
                 .and_then(|cwd| self.local_cwd_matches.get(cwd))
                 .copied()
                 .unwrap_or(false)
-    }
-
-    fn row_matches_local_cwd(&self, row: &Row) -> bool {
-        let Some(filter_cwd) = self.local_filter_cwd.as_ref() else {
-            return true;
-        };
-        let Some(row_cwd) = row.cwd.as_ref() else {
-            return false;
-        };
-        paths_match(row_cwd, filter_cwd)
     }
 
     fn set_query(&mut self, new_query: String) {

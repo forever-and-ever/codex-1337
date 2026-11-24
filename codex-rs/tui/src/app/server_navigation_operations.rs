@@ -63,7 +63,6 @@ use super::ThreadId;
 use super::ThreadInputState;
 use super::ThreadSessionState;
 use super::ThreadStartSource;
-use super::TomlValue;
 use super::Turn;
 use super::TurnStatus;
 use super::UserMessage;
@@ -76,7 +75,6 @@ use super::apply_managed_new_thread_defaults;
 use super::detach;
 use super::find_loaded_subagent_threads_for_primary;
 use super::navigation_config;
-use super::new_session;
 use super::recap;
 use super::session_lifecycle;
 use super::tui;
@@ -130,7 +128,6 @@ enum NavigationIntent {
     Discover(discovery::DiscoveryIntent),
     Select(SelectStage),
     Transitioning,
-    PickerDefaults(Box<PickerPreparation>),
     PickerStarting,
     ClosePicker,
     Fresh(fresh::FreshStage),
@@ -145,12 +142,6 @@ enum NavigationIntent {
     Fork(fork::ForkStage),
 }
 
-struct PickerPreparation {
-    config: Config,
-    cli_kv_overrides: Vec<(String, TomlValue)>,
-    session: AppServerSession,
-}
-
 pub(crate) struct NavigationCompletion {
     id: Uuid,
     order: u64,
@@ -160,8 +151,7 @@ pub(crate) struct NavigationCompletion {
 }
 
 enum NavigationReceipt {
-    PickerDefaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
-    Picker(Result<AppServerSession, String>),
+    Picker(AppServerSession),
     PickerClosed,
     Discovered(discovery::DiscoveryReceipt),
     Selected(selection::SelectionReceipt),
@@ -263,7 +253,6 @@ impl NavigationOwner {
             && !matches!(
                 operation.intent,
                 NavigationIntent::Discover(_)
-                    | NavigationIntent::PickerDefaults(_)
                     | NavigationIntent::Select(
                         SelectStage::Liveness { .. } | SelectStage::Fallback(_)
                     )
@@ -528,48 +517,7 @@ impl App {
             matches!(operation.intent, NavigationIntent::Picker),
             "only admitted navigation intents are queued"
         );
-        // Config is captured only after earlier connection mutations have settled.
-        let preparation = Box::new(PickerPreparation {
-            config: self.config.clone(),
-            cli_kv_overrides: self.cli_kv_overrides.clone(),
-            session: server.request_view(),
-        });
-        let cwd = match server.thread_params_mode() {
-            crate::app_server_session::ThreadParamsMode::Embedded => {
-                preparation.config.cwd.to_path_buf()
-            }
-            crate::app_server_session::ThreadParamsMode::Remote => server
-                .remote_cwd_override()
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
-        };
-        operation.intent = NavigationIntent::PickerDefaults(preparation);
-        let (id, order, epoch, generation) = (
-            operation.id,
-            operation.order,
-            operation.epoch,
-            operation.generation,
-        );
-        let completions = self.server_operations.control_tx.clone();
-        let handle = server.request_handle();
-        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let result = std::panic::AssertUnwindSafe(
-                crate::config_update::read_effective_config_if_supported(handle, &cwd),
-            )
-            .catch_unwind()
-            .await
-            .map_err(|_| "Picker defaults task terminated unexpectedly".to_string())
-            .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = completions.send(ServerCompletion::Navigation(Box::new(
-                NavigationCompletion {
-                    id,
-                    order,
-                    epoch,
-                    generation,
-                    receipt: NavigationReceipt::PickerDefaults(result),
-                },
-            )));
-        })));
+        self.spawn_picker_preparation(&mut operation, server.request_view());
         self.server_operations.navigation.current = Some(operation);
     }
 
@@ -632,7 +580,7 @@ impl App {
                 ),
                 "resource-producing navigation receipt lost its owner"
             );
-            if let NavigationReceipt::Picker(Ok(session)) = completion.receipt {
+            if let NavigationReceipt::Picker(session) = completion.receipt {
                 self.close_stale_picker_session(
                     completion.id,
                     completion.order,
@@ -681,38 +629,7 @@ impl App {
                 )
                 .await?;
             }
-            NavigationReceipt::PickerDefaults(Ok(defaults)) if matching => {
-                let NavigationIntent::PickerDefaults(mut preparation) =
-                    std::mem::replace(&mut operation.intent, NavigationIntent::PickerStarting)
-                else {
-                    unreachable!("only the defaults stage emits a defaults receipt");
-                };
-                if let Some(defaults) = defaults {
-                    crate::projectless::apply_defaults(
-                        &mut preparation.config,
-                        &self.harness_overrides,
-                        server,
-                        &self.environment_manager,
-                        &defaults,
-                    );
-                    new_session::overlay_new_session_defaults(
-                        &mut preparation.config,
-                        &defaults.config,
-                        &preparation.cli_kv_overrides,
-                        &self.harness_overrides,
-                    );
-                }
-                self.spawn_picker_preparation(&mut operation, *preparation);
-                self.server_operations.navigation.current = Some(operation);
-            }
-            NavigationReceipt::PickerDefaults(Err(error)) if matching => {
-                self.add_agents_overview_error(format!(
-                    "Failed to read session picker defaults: {error}"
-                ));
-                self.chat_widget.maybe_send_next_queued_input();
-            }
-
-            NavigationReceipt::Picker(Ok(mut picker)) if matching => {
+            NavigationReceipt::Picker(mut picker) if matching => {
                 picker.model_provider_override = self.harness_overrides.model_provider.clone();
                 self.drive_server_operations(server);
                 self.refresh_submission_preview();
@@ -747,20 +664,12 @@ impl App {
                     )),
                 }
             }
-            NavigationReceipt::Picker(Ok(picker)) => {
+            NavigationReceipt::Picker(picker) => {
                 operation.intent = NavigationIntent::ClosePicker;
                 self.spawn_picker_cleanup(&mut operation, picker);
                 self.server_operations.navigation.retired.push(operation);
             }
-            NavigationReceipt::Picker(Err(error)) if matching => {
-                self.add_agents_overview_error(format!(
-                    "Failed to start TUI session picker: {error}"
-                ));
-                self.chat_widget.maybe_send_next_queued_input();
-            }
             NavigationReceipt::Discovered(_)
-            | NavigationReceipt::PickerDefaults(_)
-            | NavigationReceipt::Picker(Err(_))
             | NavigationReceipt::PickerClosed => {}
         }
         self.drive_server_operations(server);
@@ -791,7 +700,7 @@ impl App {
     fn spawn_picker_preparation(
         &self,
         operation: &mut PendingNavigation,
-        preparation: PickerPreparation,
+        session: AppServerSession,
     ) {
         let completions = self.server_operations.control_tx.clone();
         let (id, order, epoch, generation) = (
@@ -804,14 +713,13 @@ impl App {
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
             // Inventory belongs to the captured backend. A request-only view
             // keeps the live event receiver and transport owner in the scheduler.
-            let result = Ok(preparation.session);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
                 NavigationCompletion {
                     id,
                     order,
                     epoch,
                     generation,
-                    receipt: NavigationReceipt::Picker(result),
+                    receipt: NavigationReceipt::Picker(session),
                 },
             )));
         })));
