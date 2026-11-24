@@ -7,6 +7,7 @@ use super::local_links::is_local_path_like_link;
 use crate::assistant_directives::AssistantDirective;
 use crate::assistant_directives::QuoteEscaping;
 use crate::assistant_directives::parse_assistant_directive_with_budget;
+use crate::terminal_hyperlinks::web_destination;
 use itertools::Either;
 use pulldown_cmark::Event;
 use pulldown_cmark::LinkType;
@@ -216,6 +217,10 @@ impl<'a> InlineDirectives<'a> {
                     continue;
                 }
                 let path = directive.attributes["path"].as_ref();
+                if let Some(url) = web_destination(path) {
+                    events.push((Event::Text(url.into()), span.clone()));
+                    continue;
+                }
                 let destination = if is_local_path_like_link(path) {
                     path.to_string()
                 } else {

@@ -32,6 +32,25 @@ fn file_citation_paths_preserve_markdown_significant_characters() {
 }
 
 #[test]
+fn hosted_file_citation_keeps_its_web_destination() {
+    let url = "https://docs.google.com/spreadsheets/d/example/edit?label=a%20b#gid=7";
+    let markdown = format!(r#":codex-file-citation{{path="{url}" purpose="output"}}"#);
+    for cwd in [Some(Path::new("/home/main/documents")), None] {
+        let lines = render_markdown_agent_with_links_and_cwd(&markdown, None, cwd);
+        assert_eq!(
+            lines.iter().map(|line| line.line.to_string()).join("\n"),
+            url
+        );
+        let destinations: Vec<_> = lines
+            .iter()
+            .flat_map(|line| &line.hyperlinks)
+            .map(|link| link.destination.as_str())
+            .collect();
+        assert_eq!(destinations, [url]);
+    }
+}
+
+#[test]
 fn file_url_citation_preserves_literal_query_delimiters() {
     for (cwd, directory, expected) in [
         ("/repo", "file:///repo/", "/repo/report?final.xlsx"),
