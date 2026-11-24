@@ -5,10 +5,41 @@
 use super::*;
 
 use crate::bottom_pane::footer::max_left_width_for_right;
+use crate::bottom_pane::footer::status_line_right_indicator_line;
 use crate::render::ruled_sections::HorizontalRule;
 use ratatui::layout::Size;
 
 impl ChatComposer {
+    pub(crate) fn status_line_area(&self) -> Rect {
+        self.footer.status_line_area.get()
+    }
+
+    pub(crate) fn status_line_content(&self) -> Option<&StatusLine> {
+        self.footer.status_line_value.as_ref()
+    }
+
+    pub(super) fn mode_indicator_line(&self, show_cycle_hint: bool) -> Option<Line<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if let Some(vim_mode) = self.vim_mode_indicator_span() {
+            spans.push(vim_mode);
+        }
+        if let Some(indicators) = status_line_right_indicator_line(
+            self.footer.collaboration_mode_indicator,
+            self.footer.goal_status_indicator.as_ref(),
+            show_cycle_hint,
+        ) {
+            if !spans.is_empty() {
+                spans.push(" | ".dim());
+            }
+            spans.extend(indicators.spans);
+        }
+        if spans.is_empty() {
+            None
+        } else {
+            Some(Line::from(spans))
+        }
+    }
+
     pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) -> bool {
         if self.footer.status_line_value == status_line {
             return false;
@@ -171,6 +202,7 @@ impl ChatComposer {
         buf: &mut Buffer,
         options: ComposerRenderOptions<'_>,
     ) {
+        self.footer.status_line_area.set(Rect::default());
         if area.is_empty() {
             return;
         }
@@ -198,12 +230,20 @@ impl ChatComposer {
             {
                 let target = status.and_then(StatusLine::as_native).cloned();
                 if let Some(frame) = transition.render_line(target, area.width) {
+                    self.footer
+                        .status_line_area
+                        .set(area.intersection(buf.area));
                     StatusLine::from(frame).render(area, buf, focus);
                 }
                 if let Some(requester) = &self.frame_requester {
                     requester.schedule_frame_in(EFFORT_STATUS_LINE_FRAME_TICK);
                 }
             } else if let Some(status) = status {
+                if focus == StatusLineFocus::Focused {
+                    self.footer
+                        .status_line_area
+                        .set(area.intersection(buf.area));
+                }
                 status.render(area, buf, focus);
             }
         });

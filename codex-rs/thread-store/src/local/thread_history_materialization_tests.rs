@@ -7,6 +7,7 @@ use std::time::Duration;
 use chrono::Utc;
 use codex_app_server_protocol::McpToolCallResult;
 use codex_app_server_protocol::ThreadItemPayload;
+use codex_protocol::ResponseItemId;
 use codex_protocol::ResponseThought;
 use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::ThreadId;
@@ -43,6 +44,7 @@ use codex_protocol::realtime::RealtimeItem;
 use codex_protocol::realtime::RealtimeItemContent;
 use codex_protocol::realtime::RealtimeSessionOutcome;
 use codex_protocol::realtime::RealtimeTranscriptRole;
+use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutConfig;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutLine;
@@ -793,6 +795,35 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
         .await
         .expect("persist thread metadata");
 
+    let mut handoff_input = ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
+        id: Some(ResponseItemId::from_server("msg_input_handoff".to_string())),
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText {
+            text: "use the smaller logo".to_string(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    };
+    handoff_input.set_turn_id_if_missing("turn-1");
+    let handoff_input = RolloutItem::ResponseItem(ResponseItemEnvelope {
+        item: handoff_input,
+        metadata: Some(
+            serde_json::from_value(serde_json::json!({
+                "realtime_handoff": {
+                    "event_id": "voice:handoff",
+                    "realtime_session_id": "voice",
+                    "observed_at_ms": 42,
+                    "handoff_id": "handoff",
+                    "mode": "start",
+                    "source_event_ids": ["voice:transcript:0"]
+                }
+            }))
+            .expect("deserialize handoff provenance"),
+        ),
+    });
+
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
@@ -813,6 +844,7 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
                     },
                 }),
                 turn_started("turn-1"),
+                handoff_input,
                 RolloutItem::RealtimeItem(RealtimeItem {
                     id: "voice:promoted:agent-1".to_string(),
                     realtime_session_id: "voice".to_string(),
@@ -843,6 +875,7 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
                     realtime_session_id: "voice".to_string(),
                     observed_at_ms: None,
                     content: RealtimeItemContent::RealtimeSessionClosed {
+                        final_frame_sequence: None,
                         outcome: RealtimeSessionOutcome::Ended,
                     },
                 }),
@@ -859,22 +892,23 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
         .expect("read canonical rollout")
         .lines()
         .map(|line| codex_rollout::parse_rollout_line(line).expect("parse rollout line"))
-        .filter_map(|line| match line.item {
-            RolloutItem::RealtimeItem(item) => Some((
-                item.id,
-                i64::try_from(line.ordinal.expect("paginated rollout ordinal"))
-                    .expect("ordinal fits SQLite integer"),
-                chrono::DateTime::parse_from_rfc3339(line.timestamp.as_str())
-                    .expect("valid rollout timestamp")
-                    .timestamp_millis(),
-                serde_json::to_value(item.content)
-                    .expect("serialize realtime content")
-                    .get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .expect("realtime content discriminator")
-                    .to_string(),
-            )),
-            _ => None,
+        .filter_map(|line| {
+            line.item.realtime_item().map(|item| {
+                (
+                    item.id.clone(),
+                    i64::try_from(line.ordinal.expect("paginated rollout ordinal"))
+                        .expect("ordinal fits SQLite integer"),
+                    chrono::DateTime::parse_from_rfc3339(line.timestamp.as_str())
+                        .expect("valid rollout timestamp")
+                        .timestamp_millis(),
+                    serde_json::to_value(&item.content)
+                        .expect("serialize realtime content")
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .expect("realtime content discriminator")
+                        .to_string(),
+                )
+            })
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -885,8 +919,9 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
         vec![
             ("voice:started", 1, "realtime_session_started"),
             ("voice:transcript:0", 2, "transcript_segment"),
-            ("voice:promoted:agent-1", 4, "bem_item_promoted"),
-            ("voice:closed", 6, "realtime_session_closed"),
+            ("voice:handoff", 4, "turn_input_accepted"),
+            ("voice:promoted:agent-1", 5, "bem_item_promoted"),
+            ("voice:closed", 7, "realtime_session_closed"),
         ]
     );
 
@@ -2616,19 +2651,19 @@ async fn catch_up_preserves_committed_batches_on_reader_or_writer_failure() {
             .await
             .expect("rollout path");
         // More than the producer, queue and consumer can hold: failures exercise backpressure.
-        append_suffix(rollout_path.as_path(), "\nnot-json\n");
+        // Append the valid prefix together to avoid reopening the framed writer for each record.
+        let mut suffix = String::from("\nnot-json\n");
         for index in 1..=2049 {
             // The gap and following record cross the step limit, but must commit together.
             let ordinal = if index >= 256 { index + 1 } else { index };
-            append_suffix(
-                rollout_path.as_path(),
-                &format!(
-                    "{}\n",
-                    rollout_line(Some(ordinal), turn_started(&format!("turn-{index}")))
-                ),
-            );
+            suffix.push_str(&rollout_line(
+                Some(ordinal),
+                turn_started(&format!("turn-{index}")),
+            ));
+            suffix.push('\n');
         }
-        append_suffix(rollout_path.as_path(), "\n");
+        suffix.push('\n');
+        append_suffix(rollout_path.as_path(), &suffix);
         let valid_len = rollout_logical_len(rollout_path.as_path());
         let valid_file_len = fs::metadata(codex_rollout::test_support::rollout_file(&rollout_path))
             .expect("rollout metadata")

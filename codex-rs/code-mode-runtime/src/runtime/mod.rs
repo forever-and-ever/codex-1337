@@ -18,6 +18,7 @@ use std::sync::mpsc as std_mpsc;
 use std::thread;
 
 use crate::TaskFailureHandler;
+use crate::ToolPreload;
 use crate::session_runtime::CreateCellRequest;
 use crate::session_runtime::OutputItem;
 use crate::session_runtime::ToolCatalog;
@@ -99,6 +100,7 @@ pub(crate) fn spawn_runtime(
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
         enabled_tools: request.enabled_tools,
+        tool_preloads: request.tool_preloads,
         source: request.source,
         stored_values,
     };
@@ -143,6 +145,7 @@ fn spawn_supervised_runtime_thread(
 struct RuntimeConfig {
     tool_call_id: String,
     enabled_tools: ToolCatalog,
+    tool_preloads: &'static [ToolPreload],
     source: String,
     stored_values: HashMap<String, Arc<JsonValue>>,
 }
@@ -210,7 +213,7 @@ fn run_runtime(
         sh_calls: Vec::new(),
     });
 
-    if let Err(error_text) = globals::install_globals(scope) {
+    if let Err(error_text) = globals::install_globals(scope, config.tool_preloads) {
         send_result(&event_tx, HashMap::new(), Some(error_text));
         return;
     }
@@ -366,6 +369,7 @@ mod tests {
         CreateCellRequest {
             tool_call_id: "call_1".to_string(),
             enabled_tools: Default::default(),
+            tool_preloads: &[],
             source: source.to_string(),
             output_truncation: codex_code_mode_protocol::CodeModeOutputTruncation::Client,
         }

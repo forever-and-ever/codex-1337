@@ -174,25 +174,37 @@ impl TranscriptView {
         }
     }
 
+    pub(crate) fn disclosure_hover_area(&self, point: ratatui::layout::Position) -> Option<Rect> {
+        let (visible, target) = self.disclosure_at(point)?;
+        let (_, columns, _) = visible.layout.fold_position(&target)?;
+        Some(Rect::new(
+            self.area.x + columns.start,
+            point.y,
+            columns.end - columns.start,
+            /*height*/ 1,
+        ))
+    }
+
+    fn disclosure_at(&self, point: ratatui::layout::Position) -> Option<(&VisibleRow, FoldTarget)> {
+        if self.is_select_mode()
+            || self.detailed
+            || self.mode != HistoryRenderMode::Rich
+            || !self.area.contains(point)
+        {
+            return None;
+        }
+        let visible = self.visible.get(usize::from(point.y - self.area.y))?;
+        let target = visible.layout.fold_at(visible.row, point.x - self.area.x)?;
+        Some((visible, target))
+    }
+
     pub(super) fn toggle_disclosure_at(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
         column: u16,
         row: u16,
     ) -> bool {
-        if self.detailed || self.mode != HistoryRenderMode::Rich {
-            return false;
-        }
-        let Some(visible) = row
-            .checked_sub(self.area.y)
-            .and_then(|row| self.visible.get(usize::from(row)))
-        else {
-            return false;
-        };
-        let Some(target) = column
-            .checked_sub(self.area.x)
-            .and_then(|column| visible.layout.fold_at(visible.row, column))
-        else {
+        let Some((visible, target)) = self.disclosure_at((column, row).into()) else {
             return false;
         };
         let ids = Arc::clone(&visible.activity_ids);

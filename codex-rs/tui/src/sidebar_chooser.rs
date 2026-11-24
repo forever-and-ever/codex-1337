@@ -13,6 +13,7 @@ use crate::sidebar_tab_strip::TabTarget;
 use codex_protocol::ThreadId;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -365,6 +366,7 @@ pub(crate) fn choice_at(area: Rect, tabs: ChatTabs<'_>, choice: usize, y: u16) -
 
 pub(crate) struct SidebarStyle<'a> {
     pub(crate) new_chat: NewChatState,
+    pub(crate) hovered_chat: Option<ThreadId>,
     pub(crate) use_theme_colors: bool,
     pub(crate) motion: crate::motion::MotionMode,
     pub(crate) frames: &'a crate::tui::FrameRequester,
@@ -456,8 +458,9 @@ pub(crate) fn paint(
         );
     }
     let width = usize::from(row(area.y).width);
+    let mut hover_fill = None;
     for (index, lines) in rows.visible_chats(tabs, choice) {
-        let (marker, fill, subtitle) = row_style(index);
+        let (marker, mut fill, mut subtitle) = row_style(index);
         if tabs.retry_row(index) {
             let label = if tabs.discovery.request().is_some() {
                 "Retrying…"
@@ -471,6 +474,15 @@ pub(crate) fn paint(
             continue;
         }
         let chat = &tabs.choices[index - 1];
+        if sidebar_style.hovered_chat == Some(chat.id) {
+            fill = crate::style::hover_style(fill);
+            subtitle = fill.not_bold();
+            if let Some(background) = fill.bg {
+                let top = row(area.y + lines.start);
+                let hover_area = Rect::new(top.x, top.y, top.width, lines.end - lines.start);
+                hover_fill = Some((hover_area, background));
+            }
+        }
         let selected = index == choice && focused;
         let title = if let Some(label) = side_chat_label(chat) {
             label.to_owned()
@@ -534,6 +546,10 @@ pub(crate) fn paint(
                 truncate_line_with_ellipsis_if_overflow(line, width),
             );
         }
+    }
+    if let Some((area, background)) = hover_fill {
+        // A saved chat is one control, including the padding of its optional preview.
+        buf.set_style(area, Style::default().bg(background));
     }
     if footer_y > area.y {
         footer.render(row(footer_y), buf);

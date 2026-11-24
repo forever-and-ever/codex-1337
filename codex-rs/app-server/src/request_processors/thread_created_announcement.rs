@@ -27,7 +27,13 @@ pub(super) async fn announce_created_thread(
         .thread_watch_manager
         .upsert_thread(&thread_id.to_string())
         .await;
-    let mut summary = build_thread_from_loaded_snapshot(thread_id, snapshot, thread);
+    let mut summary = match build_thread_from_loaded_snapshot(thread, snapshot) {
+        Ok(summary) => summary,
+        Err(error) => {
+            tracing::warn!(%thread_id, message = %error.message, "cannot announce thread");
+            return;
+        }
+    };
     summary.status = context
         .thread_watch_manager
         .loaded_status_for_thread(&summary.id)

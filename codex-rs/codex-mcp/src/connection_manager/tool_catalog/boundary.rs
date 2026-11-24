@@ -4,6 +4,7 @@ use crate::McpServerKey;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tracing::Instrument;
 
 use super::AnnotationSource;
 use super::BindingCatalogRevision;
@@ -31,6 +32,7 @@ pub(crate) enum CatalogReadMode {
     Current,
 }
 
+#[instrument(name = "mcp.binding.catalog_revision_wait", skip_all)]
 pub(crate) async fn catalog_revisions(
     connections: &McpConnectionSet,
     required_servers: &[McpServerKey],
@@ -211,6 +213,7 @@ pub(crate) async fn capture_binding_with_mode(
         }
         (server_name, view, None)
     }))
+    .instrument(tracing::info_span!("mcp.binding.startup_wait"))
     .await;
     let server_results = join_all(server_snapshots.into_iter().map(|(server_name, view, cached_tools)| async move {
         let startup_pending = !view
@@ -304,6 +307,7 @@ pub(crate) async fn capture_binding_with_mode(
             raw_definition_json_bytes,
         ))
     }))
+    .instrument(tracing::info_span!("mcp.binding.catalog_capture"))
     .await;
     let mut raw_definition_json_bytes = 0usize;
     for (server_name, client, server_tools, server_definition_json_bytes) in

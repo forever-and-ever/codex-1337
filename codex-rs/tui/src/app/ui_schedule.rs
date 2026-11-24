@@ -421,6 +421,10 @@ pub(super) async fn drive(
     let mut reconnect = None;
     let mut scheduled_owner = backend.owner();
     let mut waiting_for_initial_session_header = true;
+    #[cfg(target_os = "linux")]
+    let mut desktop_presence = crate::desktop_thread::DesktopPresence::new();
+    #[cfg(target_os = "linux")]
+    let mut desktop_route = None;
     let exit_reason_result = 'ui: loop {
         let displayed_owner = backend.owner();
         if scheduled_owner != displayed_owner {
@@ -624,6 +628,31 @@ pub(super) async fn drive(
                     .set_queue_autosend_suppressed(/*suppressed*/ false);
                 app.chat_widget.maybe_send_next_queued_input();
                 ui_host_ready = true;
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let identity = (displayed_owner, app.reconnect.connection_epoch);
+            if desktop_route
+                .as_ref()
+                .is_none_or(|(known, _)| *known != identity)
+            {
+                desktop_route = Some((
+                    identity,
+                    crate::desktop_thread::DesktopRoute::from_target(
+                        &app.app_server_target,
+                        backend.session().uses_embedded_app_server(),
+                        app.config.codex_home.as_path(),
+                    ),
+                ));
+            }
+            if let Some((_, route)) = desktop_route.as_ref() {
+                let displayed_thread = (!app.reconnect.offline
+                    && !app.pending_startup_thread_start
+                    && app.pending_thread_switch_resets == 0)
+                    .then(|| app.current_displayed_thread_id())
+                    .flatten();
+                desktop_presence.show(route, displayed_thread);
             }
         }
         idle_restart.set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());

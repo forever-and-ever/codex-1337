@@ -106,6 +106,7 @@ pub(super) struct GuardianReviewSessionConfig {
     pub(super) spawn_config: crate::config::Config,
     pub(super) node_repl_policy: GuardianNodeReplPolicy,
     review_model: ReviewModel,
+    default_reasoning_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
 }
 
 /// Selects the thread's reviewer and leaves configuration resolution under the caller's deadline.
@@ -187,6 +188,7 @@ pub(super) async fn guardian_review_session_config_for_route(
         spawn_config,
         node_repl_policy: GuardianNodeReplPolicy::from_messages(model_messages),
         review_model,
+        default_reasoning_effort: guardian_model_info.default_reasoning_level.clone(),
     })
 }
 
@@ -216,8 +218,6 @@ impl ReviewInput {
             reviewer_route: config.reviewer_route,
             parent_session: self.session,
             parent_history: self.history,
-            reasoning_summary: self.context.reasoning_summary,
-            personality: self.context.personality,
             parent_context: self.context,
             spawn_config: config.spawn_config,
             node_repl_policy: config.node_repl_policy,

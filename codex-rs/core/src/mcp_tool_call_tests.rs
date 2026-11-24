@@ -2641,6 +2641,7 @@ async fn persist_codex_app_tool_approval_writes_tool_override() {
                             AppToolConfig {
                                 enabled: None,
                                 approval_mode: Some(AppToolApproval::Approve),
+                                approvals_reviewer: None,
                             },
                         )]),
                     }),
@@ -2854,6 +2855,7 @@ async fn maybe_persist_mcp_tool_approval_reloads_session_config() {
         &AppToolConfig {
             enabled: None,
             approval_mode: Some(AppToolApproval::Approve),
+            approvals_reviewer: None,
         }
     );
 }
@@ -3941,8 +3943,12 @@ async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
     assert_eq!(
         session
             .mcp_tool_approval_metadata(&McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME), "call")
-            .map(|context| (context.invocation, context.metadata.connector_id)),
-        Some((Some(invocation.clone()), Some("connector".to_string()))),
+            .as_ref()
+            .map(|context| (
+                context.invocation.as_ref(),
+                context.metadata.connector_id.as_deref()
+            )),
+        Some((Some(&invocation), Some("connector"))),
     );
     assert!(
         session

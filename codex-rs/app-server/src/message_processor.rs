@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 
 use crate::attestation::app_server_attestation_provider;
@@ -119,6 +120,17 @@ const CONNECTION_RPC_DRAIN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
 fn deserialize_client_request(request: JSONRPCRequest) -> Result<ClientRequest, JSONRPCErrorError> {
     reject_obsolete_request_fields(&request)?;
+    if request.method == "thread/sample"
+        && request
+            .params
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|params| params.contains_key("modelProvider"))
+    {
+        return Err(invalid_params(
+            "thread/sample cannot change the source model provider",
+        ));
+    }
 
     ClientRequest::try_from(request)
         .map_err(|err| invalid_request(format!("Invalid request: {err}")))
@@ -844,6 +856,10 @@ impl MessageProcessor {
 
     pub(crate) fn threads_retired_receiver(&self) -> broadcast::Receiver<Vec<ThreadId>> {
         self.thread_processor.threads_retired_receiver()
+    }
+
+    pub(crate) fn thread_manager(&self) -> Weak<ThreadManager> {
+        Arc::downgrade(&self.thread_processor.thread_manager)
     }
 
     pub(crate) async fn daemon_recovery_snapshot(

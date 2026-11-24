@@ -232,6 +232,11 @@ pub(crate) fn invest(terminal: &mut impl Write) -> io::Result<()> {
     with_warpaint(|warpaint| warpaint.invest(terminal).map(|_| ()))
 }
 
+/// True when dimmed ink is rendered as a faint pack color rather than a terminal modifier.
+pub(crate) fn dimmed_ink_binds_to_faint(foreground: Color) -> bool {
+    Depth::current().shows_packs() && bind::is_ink(foreground)
+}
+
 /// Binds a rendered frame in place, before it is diffed against the frame on screen.
 pub(crate) fn bind_frame(buffer: &mut Buffer, terminal: &mut impl Write) -> io::Result<()> {
     #[cfg(test)]

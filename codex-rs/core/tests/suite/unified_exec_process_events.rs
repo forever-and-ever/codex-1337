@@ -86,7 +86,7 @@ enum PushedExecScenario {
     CodexPathDisabledFeature,
     CodexPathWithExplicitOverride,
     UnusableCodexPath,
-    DirectDenied,
+    DirectDenied { output_closed: bool },
     DenyWin,
     DenyWinUnchanged,
     DenyOldLinux,
@@ -576,7 +576,7 @@ async fn serve_exec_with_pushed_events(
         PushedExecScenario::RejectedLongWindowsDangerousCommand => {
             panic!("dangerous command must not reach the executor")
         }
-        PushedExecScenario::DirectDenied => {
+        PushedExecScenario::DirectDenied { output_closed } => {
             send_exec_server_json(
                 &mut websocket,
                 json!({
@@ -590,6 +590,16 @@ async fn serve_exec_with_pushed_events(
                 }),
             )
             .await;
+            if output_closed {
+                send_exec_server_json(
+                    &mut websocket,
+                    json!({
+                        "method": "process/closed",
+                        "params": { "processId": &process_id, "seq": 2 }
+                    }),
+                )
+                .await;
+            }
         }
         PushedExecScenario::SandboxedInterceptedPatch
         | PushedExecScenario::SandboxedDirectPatch
@@ -704,12 +714,12 @@ async fn serve_exec_with_pushed_events(
                         "failure": null,
                         "sandboxDenied": false,
                     }),
-                    PushedExecScenario::DirectDenied => json!({
+                    PushedExecScenario::DirectDenied { output_closed } => json!({
                         "chunks": [],
-                        "nextSeq": 2,
+                        "nextSeq": if output_closed { 3 } else { 2 },
                         "exited": true,
                         "exitCode": 1,
-                        "closed": false,
+                        "closed": output_closed,
                         "failure": null,
                         "sandboxDenied": true,
                     }),
@@ -817,7 +827,8 @@ async fn serve_exec_with_pushed_events(
 #[test_case(PushedExecScenario::CodexPathDisabledFeature, false ; "disabled_codex_path_preserves_original_login_command")]
 #[test_case(PushedExecScenario::CodexPathWithExplicitOverride, false ; "explicit_path_override_preserves_original_login_command")]
 #[test_case(PushedExecScenario::UnusableCodexPath, false ; "unusable_codex_path_preserves_requested_login_shell")]
-#[test_case(PushedExecScenario::DirectDenied, false ; "direct_sandbox_denial")]
+#[test_case(PushedExecScenario::DirectDenied { output_closed: false }, false ; "direct_sandbox_denial")]
+#[test_case(PushedExecScenario::DirectDenied { output_closed: true }, false ; "direct_sandbox_denial_with_closed_output")]
 #[test_case(PushedExecScenario::LegacyExit, false ; "legacy_exit_metadata")]
 #[test_case(PushedExecScenario::ReplayGap, false ; "truncated_event_replay")]
 #[cfg_attr(not(windows), test_case(PushedExecScenario::Complete, true ; "foreign_windows_workspace_sandbox"))]
@@ -1684,7 +1695,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
         PushedExecScenario::RejectedLongWindowsDangerousCommand => {
             unreachable!("dangerous command returned early")
         }
-        PushedExecScenario::DirectDenied => {
+        PushedExecScenario::DirectDenied { .. } => {
             assert!(!saw_exec_command_begin);
             assert_eq!(output, "Exit 1");
             assert_eq!(process_read_requests, 0, "unexpected compatibility read");

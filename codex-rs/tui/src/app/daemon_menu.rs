@@ -31,10 +31,16 @@ impl App {
             self.chat_widget.remote_connection.as_ref(),
         ) {
             (AppServerTarget::LocalDaemon { .. }, Some(connection)) => {
-                format!("Local shared service: {}", connection.version)
+                format!(
+                    "Local shared service: {}",
+                    connection.version.as_deref().unwrap_or("unknown")
+                )
             }
             (AppServerTarget::Remote { .. }, Some(connection)) => {
-                format!("Remote shared service: {}", connection.version)
+                format!(
+                    "Remote shared service: {}",
+                    connection.version.as_deref().unwrap_or("unknown")
+                )
             }
             (AppServerTarget::Remote { .. }, None) => {
                 "Not connected to the remote shared service.".to_string()

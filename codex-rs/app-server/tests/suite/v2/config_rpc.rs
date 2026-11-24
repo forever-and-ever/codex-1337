@@ -1291,6 +1291,7 @@ omit_tools_from = ["deferred"]
 approvals_reviewer = "user"
 destructive_enabled = false
 default_tools_approval_mode = "prompt"
+tools.list.approvals_reviewer = "auto_review"
 
 [apps.app1.links.link_work]
 approvals_reviewer = "auto_review"
@@ -1338,6 +1339,10 @@ enabled = false
         response["config"]["apps"]["app_with_empty_links"].get("links"),
         Some(&json!({})),
     );
+    assert_eq!(
+        response["config"]["apps"]["app1"]["tools"]["list"].get("approvals_reviewer"),
+        Some(&json!("auto_review")),
+    );
     let ConfigReadResponse {
         config,
         origins,
@@ -1365,7 +1370,9 @@ enabled = false
                         open_world_enabled: None,
                         default_tools_approval_mode: Some(AppToolApproval::Prompt),
                         default_tools_enabled: None,
-                        tools: Some(serde_json::from_value(json!({"list": {"enabled": false}}))?),
+                        tools: Some(serde_json::from_value(json!({
+                            "list": {"enabled": false, "approvals_reviewer": "auto_review"}
+                        }))?),
                         links: Some(AppLinksConfig {
                             links: std::collections::HashMap::from([
                                 (

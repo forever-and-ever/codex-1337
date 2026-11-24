@@ -262,6 +262,7 @@ impl super::ChatComposer {
         match &self.popups.active {
             ActivePopup::None => composer,
             ActivePopup::Command(_)
+            | ActivePopup::Argument(_)
             | ActivePopup::File(_)
             | ActivePopup::Skill(_)
             | ActivePopup::MentionV2(_) => None,
@@ -447,6 +448,7 @@ pub(super) struct FooterState {
     pub(super) goal_status_indicator: Option<GoalStatusIndicator>,
     pub(super) status_line_value: Option<StatusLine>,
     pub(super) labeled_status_line: std::cell::RefCell<Option<StatusLine>>,
+    pub(super) status_line_area: std::cell::Cell<Rect>,
     pub(super) status_line_enabled: bool,
     pub(super) side_conversation_context_label: Option<String>,
     pub(super) active_agent_label: Option<String>,

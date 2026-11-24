@@ -66,7 +66,7 @@ mod alternate_screen;
 #[cfg(target_os = "linux")]
 #[cfg_attr(test, allow(dead_code))]
 // Unit tests inject attention; they never contact the live desktop.
-mod desktop_attention;
+pub(crate) mod desktop_attention;
 mod event_stream;
 mod frame_rate_limiter;
 mod frame_requester;

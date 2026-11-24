@@ -669,8 +669,7 @@ impl App {
                 self.spawn_picker_cleanup(&mut operation, picker);
                 self.server_operations.navigation.retired.push(operation);
             }
-            NavigationReceipt::Discovered(_)
-            | NavigationReceipt::PickerClosed => {}
+            NavigationReceipt::Discovered(_) | NavigationReceipt::PickerClosed => {}
         }
         self.drive_server_operations(server);
         self.refresh_submission_preview();

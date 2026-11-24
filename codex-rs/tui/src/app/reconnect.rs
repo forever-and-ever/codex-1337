@@ -262,6 +262,7 @@ impl App {
         if !self.reconnect.offline {
             self.reconnect.sign_in_recovery = Default::default();
             self.retire_work_connection();
+            self.pending_thread_links.clear();
             if self.chat_widget.session_draft.is_some() {
                 self.config = self.chat_widget.config_ref().clone();
                 self.config.model = Some(self.chat_widget.current_model().to_owned());
@@ -371,6 +372,7 @@ impl App {
         self.chat_widget.windows_sandbox_local_server =
             !self.app_server_target.uses_remote_workspace()
                 && app_server.app_server_platform_os() == Some("windows");
+        self.chat_widget.app_server_path_convention = app_server.path_convention();
         self.chat_widget.remote_connection =
             crate::status::remote_connection::remote_connection_status_value(
                 &self.app_server_target,

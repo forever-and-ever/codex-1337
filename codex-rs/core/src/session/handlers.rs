@@ -51,7 +51,7 @@ use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_protocol::turn_input::TurnInputSubmission;
 use codex_thread_store::PersistContext;
 
-use crate::context_manager::is_user_turn_boundary;
+use crate::context_manager::is_instruction_turn_boundary;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::mcp::RequestId as ProtocolRequestId;
 use codex_rmcp_client::ElicitationAction;
@@ -359,8 +359,13 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
-    let _ = sess.conversation.shutdown().await;
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    let (conversation_shutdown, ()) = tokio::join!(
+        sess.conversation.shutdown(),
+        sess.abort_all_tasks(TurnAbortReason::Interrupted),
+    );
+    if let Err(err) = conversation_shutdown {
+        warn!("failed to shut down realtime conversation: {err}");
+    }
     if let Some(reporting) = &sess.outcome_reporting {
         reporting.handoffs.wait().await;
     }
@@ -404,8 +409,9 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     info!("Shutting down Codex instance");
     let history = sess.clone_history().await;
     let turn_count = history
-        .raw_items()
-        .filter(|item| is_user_turn_boundary(item))
+        .annotated_items()
+        .iter()
+        .filter(|item| is_instruction_turn_boundary(item))
         .count();
     sess.services.session_telemetry.counter(
         "codex.conversation.turn.count",
@@ -645,17 +651,16 @@ pub(super) async fn submission_loop(
                     let _ = reply.send(result);
                     false
                 }
+                Op::RealtimeConversationEnd { realtime_session_id, reply } => {
+                    crate::realtime_conversation::handle_end(&sess, sub.id, &realtime_session_id, reply).await;
+                    false
+                }
                 Op::RealtimeConversationDetach {
                     realtime_session_id,
                     reply,
                 } => {
-                    crate::realtime_conversation::handle_detach(
-                        &sess,
-                        Some(&realtime_session_id),
-                        &sub.id,
-                    )
-                    .await;
-                    let _ = reply.send(Ok(()));
+                    crate::realtime_conversation::handle_detach(&sess, &realtime_session_id, reply)
+                        .await;
                     false
                 }
                 Op::RealtimeConversationAudio(params) => {

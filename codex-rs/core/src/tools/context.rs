@@ -16,6 +16,7 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::ToolResultMetadata;
 use codex_protocol::models::function_call_output_content_items_to_text;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ToolName;
@@ -220,11 +221,15 @@ impl ToolOutput for McpToolOutput {
         self.result.code_mode_result(payload)
     }
 
-    fn tool_result_metadata(&self) -> Option<&JsonValue> {
+    fn tool_result_metadata(&self) -> ToolResultMetadata {
         if !self.result_metadata_capture_allowed {
-            return None;
+            return ToolResultMetadata::default();
         }
-        self.result.meta.as_ref()
+        self.result
+            .meta
+            .as_ref()
+            .map(ToolResultMetadata::new)
+            .unwrap_or_default()
     }
 }
 

@@ -23,6 +23,7 @@ use crate::model::ConversationRole;
 use crate::model::InferenceCallId;
 use crate::model::ProducerRef;
 use crate::payload::RawPayloadRef;
+use crate::shard::ObservedJson;
 
 mod normalize;
 
@@ -40,8 +41,8 @@ impl TraceReducer {
         if self.receivable_ids.contains_key(&key) {
             return Ok(());
         }
-        let item =
-            normalize::normalize_model_item(&self.payload_reader.observed_json(payload)?, payload)?;
+        let ObservedJson { mut value, missing } = self.payload_reader.observed_json(payload)?;
+        let item = normalize::normalize_model_item(&mut value, payload, &missing)?;
         if !item.is_delivery_or_tool_output() || item.responses_item_id.as_deref() != Some(wire_id)
         {
             bail!("accepted item payload does not match {wire_id}");
@@ -82,9 +83,12 @@ impl TraceReducer {
         if !request_payload.capture.is_complete() {
             return Ok(Vec::new());
         }
-        let mut payload = self.payload_reader.observed_json(request_payload)?;
+        let ObservedJson {
+            value: mut payload,
+            missing,
+        } = self.payload_reader.observed_json(request_payload)?;
         let items = if request_protocol == crate::ModelRequestProtocol::Messages {
-            normalize::normalize_messages_request(&payload, request_payload)?
+            normalize::normalize_messages_request(&payload, request_payload, &missing)?
         } else {
             let Some(input) = payload.get_mut("input") else {
                 bail!(
@@ -105,6 +109,9 @@ impl TraceReducer {
                 let item = request_items
                     .get_mut(index)
                     .context("stripped tool output index outside request")?;
+                if missing["input"][index].is_string() {
+                    continue; // There is no captured item to receive the history ID.
+                }
                 if item.get("id").is_some()
                     || !matches!(
                         item["type"].as_str(),
@@ -117,7 +124,7 @@ impl TraceReducer {
                 }
                 item["id"] = Value::String(history_id);
             }
-            normalize::normalize_model_items(request_items, request_payload)?
+            normalize::normalize_model_items(request_items, request_payload, &missing["input"])?
         };
         let previous_response_id = match request_protocol {
             crate::ModelRequestProtocol::Responses => {
@@ -212,7 +219,10 @@ impl TraceReducer {
         if !response_payload.capture.is_complete() {
             return Ok(Vec::new());
         }
-        let payload = self.payload_reader.observed_json(response_payload)?;
+        let ObservedJson {
+            value: payload,
+            missing,
+        } = self.payload_reader.observed_json(response_payload)?;
         let Some(output_items) = payload.get("output_items").and_then(Value::as_array) else {
             bail!(
                 "inference response payload {} did not contain output_items",
@@ -239,6 +249,7 @@ impl TraceReducer {
             output_items,
             response_payload,
             request_protocol,
+            &missing["output_items"],
         )?;
         // A later request or compaction can be recorded before this response.
         // Only match items with source IDs, so retries with identical text stay distinct.
@@ -399,7 +410,10 @@ impl TraceReducer {
         checkpoint_payload: &RawPayloadRef,
     ) -> Result<ReducedCompactionCheckpoint> {
         let (input_items, replacement_items) = if checkpoint_payload.capture.is_complete() {
-            let payload = self.payload_reader.observed_json(checkpoint_payload)?;
+            let ObservedJson {
+                value: payload,
+                missing,
+            } = self.payload_reader.observed_json(checkpoint_payload)?;
             let input = required_array(&payload, "input_history", checkpoint_payload)?;
             let replacement = required_array(&payload, "replacement_history", checkpoint_payload)?;
             let request_protocol = serde_json::from_value::<crate::ModelRequestProtocol>(
@@ -414,11 +428,13 @@ impl TraceReducer {
                     input,
                     checkpoint_payload,
                     request_protocol,
+                    &missing["input_history"],
                 )?,
                 normalize::normalize_model_items_for_protocol(
                     replacement,
                     checkpoint_payload,
                     request_protocol,
+                    &missing["replacement_history"],
                 )?,
             )
         } else {
@@ -448,6 +464,7 @@ impl TraceReducer {
             Some(codex_turn_id.to_string()),
             wall_time_unix_ms,
             NormalizedConversationItem {
+                structured_output_hash: None,
                 responses_item_id: None,
                 role: ConversationRole::Assistant,
                 channel: None,
@@ -551,6 +568,9 @@ impl TraceReducer {
             }
         }
         let item_id = self.next_conversation_item_id();
+        if let Some(hash) = item.structured_output_hash {
+            self.structured_output_hashes.insert(item_id.clone(), hash);
+        }
         self.rollout.conversation_items.insert(
             item_id.clone(),
             ConversationItem {
@@ -600,6 +620,12 @@ impl TraceReducer {
             if accepted_id.as_deref() == Some(item_id) {
                 *accepted_id = None;
                 item.body.clone_from(&normalized.body);
+                if let Some(hash) = normalized.structured_output_hash {
+                    self.structured_output_hashes
+                        .insert(item_id.to_owned(), hash);
+                } else {
+                    self.structured_output_hashes.remove(item_id);
+                }
                 if normalized.agent_message.is_none() {
                     self.snapshot_output_anchors.insert(item_id.to_owned());
                 }
@@ -697,6 +723,10 @@ impl TraceReducer {
             && existing != incoming
         {
             return false;
+        }
+        let existing_hash = self.structured_output_hashes.get(item_id);
+        if existing_hash.is_some() || normalized.structured_output_hash.is_some() {
+            return existing_hash == normalized.structured_output_hash.as_ref();
         }
         conversation_item_matches(item, normalized)
     }

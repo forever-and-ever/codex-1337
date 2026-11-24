@@ -110,13 +110,13 @@ impl App {
     pub(in crate::app) fn admit_dashboard_trust(
         &mut self,
         server: &AppServerSession,
-        consent: agents_overview::trust::DashboardTrustAdmission,
+        consent: Box<agents_overview::trust::DashboardTrustAdmission>,
     ) {
         self.enqueue_connection_operation(
             server,
             ServerOperation::Connection(ConnectionMutation::Trust(TrustOperation {
                 generation: self.server_operations.navigation.generation,
-                consent: Arc::new(TrustConsent::Dashboard(Box::new(consent))),
+                consent: Arc::new(TrustConsent::Dashboard(consent)),
             })),
         );
     }

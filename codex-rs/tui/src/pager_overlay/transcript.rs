@@ -12,6 +12,8 @@ use crate::transcript_view::TranscriptBookmark;
 use crate::transcript_view::TranscriptView;
 use crate::transcript_view::ViewAction;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
+use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
 pub(crate) struct TranscriptOverlay {
@@ -24,6 +26,8 @@ pub(crate) struct TranscriptOverlay {
     content_area: Rect,
     cursor: Option<(u16, u16)>,
     notice: Option<String>,
+    pub(crate) pending_thread_link: Option<codex_protocol::ThreadId>,
+    pub(crate) thread_link_source: Option<crate::app::thread_link_handoff::ThreadLinkSource>,
     pub(crate) browsing_footer: Option<Line<'static>>,
     find_transcript: Vec<crate::key_hint::KeyBinding>,
     select_transcript: Vec<crate::key_hint::KeyBinding>,
@@ -33,6 +37,23 @@ pub(crate) struct TranscriptOverlay {
 }
 
 impl TranscriptOverlay {
+    pub(crate) fn set_notice(&mut self, notice: String) {
+        self.notice = Some(notice);
+    }
+
+    pub(crate) fn thread_link_hover_area(&self, mouse: MouseEvent) -> Option<Rect> {
+        if !(mouse.modifiers.is_empty()
+            || mouse
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER))
+            || self.thread_link_source.is_none()
+        {
+            return None;
+        }
+        self.view
+            .thread_link_hover_area((mouse.column, mouse.row).into())
+    }
+
     pub(crate) fn bookmark(&mut self) -> TranscriptBookmark {
         self.view.bookmark(&self.cells)
     }
@@ -64,6 +85,8 @@ impl TranscriptOverlay {
             content_area: Rect::default(),
             cursor: None,
             notice: None,
+            pending_thread_link: None,
+            thread_link_source: None,
             browsing_footer: None,
             find_transcript: Vec::new(),
             select_transcript: Vec::new(),
@@ -76,6 +99,7 @@ impl TranscriptOverlay {
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
         let browsing = self.browsing_footer.is_some()
+            && self.notice.is_none()
             && !self.pending_select_mode
             && !self.view.has_active_interaction()
             && self.view.history != TranscriptHistoryState::Failed;
@@ -164,10 +188,14 @@ impl TranscriptOverlay {
 
     pub(crate) fn draw(&mut self, tui: &mut tui::Tui) -> Result<()> {
         let mut scanning = false;
+        let hover_mouse = tui.link_hover.mouse;
         tui.draw(u16::MAX, |frame| {
             self.view.prepare_width(frame.area().width);
             scanning = self.view.advance_search(&self.cells);
             self.render(frame.area(), frame.buffer);
+            if let Some(area) = hover_mouse.and_then(|mouse| self.thread_link_hover_area(mouse)) {
+                crate::terminal_hyperlinks::paint_hover_foreground(area, frame.buffer);
+            }
             if let Some(cursor) = self.cursor {
                 frame.set_cursor_position(cursor);
             }
@@ -574,10 +602,16 @@ impl TranscriptOverlay {
                 Ok(status) => status.message("selection"),
                 Err(error) => error,
             });
-        } else if let ViewAction::OpenLink(url) = action
-            && let Err(error) = webbrowser::open(&url)
-        {
-            self.notice = Some(format!("Could not open link: {error}"));
+        } else {
+            match action {
+                ViewAction::OpenThreadLink(thread_id) => self.pending_thread_link = Some(thread_id),
+                ViewAction::OpenLink(url) => {
+                    if let Err(error) = webbrowser::open(&url) {
+                        self.notice = Some(format!("Could not open link: {error}"));
+                    }
+                }
+                _ => {}
+            }
         }
     }
 

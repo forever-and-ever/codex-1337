@@ -1841,7 +1841,7 @@ async fn realtime_conversation_stop_emits_closed_notification(
             realtime_start_instructions: None,
             realtime_end_instructions: None,
             prompt: Some(Some("backend prompt".to_string())),
-            realtime_session_id: None,
+            realtime_session_id: Some("call:Voice/one".into()),
             voice_session_id: None,
             transport: None,
             version: Some(RealtimeConversationVersion::V1),
@@ -1903,6 +1903,22 @@ async fn realtime_conversation_stop_emits_closed_notification(
             assert_eq!(&tails[0].turn_id, id);
         }
         let request = mcp
+            .send_request(
+                "thread/realtime/list",
+                Some(serde_json::json!({"threadId": started.thread_id})),
+            )
+            .await?;
+        let history: codex_app_server_protocol::ThreadRealtimeListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
+        assert!(
+            history.data.iter().all(|entry| !matches!(
+                entry.item.content,
+                ThreadRealtimeItemContent::Frame { .. }
+                    | ThreadRealtimeItemContent::SessionInputSaved { .. }
+            )),
+            "the local voice path must not enroll new frame history"
+        );
+        let request = mcp
             .send_thread_turns_list_request(ThreadTurnsListParams {
                 thread_id: started.thread_id.clone(),
                 cursor: None,
@@ -1932,15 +1948,20 @@ async fn realtime_conversation_stop_emits_closed_notification(
         history.thread.turns
     };
     assert_eq!(turns.len(), 1);
-    assert_eq!(
-        turns[0].status,
-        if running {
-            TurnStatus::InProgress
-        } else {
-            TurnStatus::Completed
+    if let Some(turn) = turns.first() {
+        assert_eq!(
+            turn.status,
+            if running {
+                TurnStatus::InProgress
+            } else {
+                TurnStatus::Completed
+            }
+        );
+        assert_eq!(Uuid::parse_str(&turn.id)?.get_version_num(), 7);
+        if let Some(id) = &running_turn_id {
+            assert_eq!(&turn.id, id);
         }
-    );
-    assert_eq!(Uuid::parse_str(&turns[0].id)?.get_version_num(), 7);
+    }
 
     response_tx.send(())?;
     if running {

@@ -376,6 +376,14 @@ impl App {
                         if let Some(required) = crate::app::sign_in_required::from_report(&error) {
                             self.ensure_thread_channel(context.thread_id)
                                 .require_sign_in(required);
+                        } else if matches!(kind, SelectionKind::Attach)
+                            && matches!(custody, SubscriptionCustody::None)
+                            && crate::app_server_session::is_active_writer_error(&error)
+                        {
+                            let channel = self.ensure_thread_channel(context.thread_id);
+                            if !channel.is_archived() {
+                                channel.mark_external_writer();
+                            }
                         }
                         match custody {
                             SubscriptionCustody::Uncertain(thread_id) => {
@@ -624,10 +632,10 @@ impl App {
                 ThreadEventAttachment::SignInRequired(required) => Some(required),
                 _ => None,
             });
-        let was_external_writer = self
+        let attachment = self
             .thread_event_channels
             .get(&thread_id)
-            .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ExternalWriter);
+            .map(ThreadEventChannel::attachment);
         if self.active_thread_id == Some(thread_id) {
             self.store_active_thread_receiver().await;
         }
@@ -638,10 +646,12 @@ impl App {
             channel.mark_live();
         } else if let Some(required) = sign_in_required {
             channel.require_sign_in(required);
-        } else if was_external_writer {
-            channel.mark_external_writer();
         } else {
-            channel.mark_replay_only();
+            match attachment {
+                Some(ThreadEventAttachment::Archived) => channel.mark_archived(),
+                Some(ThreadEventAttachment::ExternalWriter) => channel.mark_external_writer(),
+                _ => channel.mark_replay_only(),
+            }
         }
         let mut store = channel.store.lock().await;
         store.at_connection_epoch(epoch).set_session(session, turns);
@@ -836,7 +846,14 @@ impl App {
             SelectedThread::Refreshed(started) => (false, false, Ok(None), Some(started)),
             SelectedThread::ReadOnly(thread) => {
                 let turns = thread.turns.clone();
-                let mut session = self.session_state_for_thread_read(thread_id, &thread).await;
+                let cwd = crate::app_server_session::decode_thread_cwd(
+                    &thread.cwd,
+                    app_server.path_convention(),
+                )
+                .ok();
+                let mut session = self
+                    .session_state_for_thread_read(thread_id, &thread, cwd)
+                    .await;
                 if let Some(channel) = self.thread_event_channels.get(&thread_id)
                     && let Some(cached) = channel.store.lock().await.session.as_ref()
                 {

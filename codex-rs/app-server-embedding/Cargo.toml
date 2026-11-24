@@ -24,5 +24,6 @@ codex-login = { workspace = true }
 codex-protocol = { workspace = true }
 codex-rollout = { workspace = true }
 codex-state = { workspace = true }
+codex-utils-path-uri = { workspace = true }
 futures = { workspace = true }
 toml = { workspace = true }

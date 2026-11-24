@@ -1675,6 +1675,16 @@
             }
           ]
         },
+        "approvals_reviewer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalsReviewer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "enabled": {
           "type": [
             "boolean",
@@ -6251,6 +6261,9 @@
             "contextWindowExceeded",
             "sessionBudgetExceeded",
             "usageLimitExceeded",
+            "apiKeySpendLimitExceeded",
+            "projectSpendLimitExceeded",
+            "organizationSpendLimitExceeded",
             "rateLimitExceeded",
             "flexUnavailable",
             "serverOverloaded",
@@ -8764,6 +8777,16 @@
         "standard",
         "daybreakBlue",
         "daybreakRed"
+      ],
+      "type": "string"
+    },
+    "DaybreakAvailability": {
+      "description": "Server-resolved Daybreak availability for this caller and model.",
+      "enum": [
+        "available",
+        "enrollmentRequired",
+        "unavailableForModel",
+        "default"
       ],
       "type": "string"
     },
@@ -14752,7 +14775,7 @@
       "type": "object"
     },
     "ModelAccessPrograms": {
-      "description": "Caller-specific explicit access programs advertised by model discovery.",
+      "description": "Caller-specific access programs and Daybreak availability from model discovery.",
       "properties": {
         "cyber": {
           "description": "Accepted explicit selections.",
@@ -14760,6 +14783,15 @@
             "$ref": "#/definitions/CyberAccessProgram"
           },
           "type": "array"
+        },
+        "daybreakAvailability": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DaybreakAvailability"
+            }
+          ],
+          "default": "default",
+          "description": "Server-resolved Daybreak availability for this caller and model."
         }
       },
       "required": [
@@ -29181,7 +29213,7 @@
       "type": "object"
     },
     "ThreadRealtimeFrameChannels": {
-      "description": "A frame holds one or more payloads, at most one per channel. They share one ID, observation time, and seal. V1 requires its only channel, `voice_transcript`.",
+      "description": "A frame holds one or more payloads, at most one per channel. They share one ID, observation time, and seal. Currently, `voice_transcript` is required.",
       "properties": {
         "voice_transcript": {
           "$ref": "#/definitions/ThreadRealtimeVoiceTranscript"
@@ -29377,6 +29409,9 @@
             "input_item_id": {
               "type": "string"
             },
+            "reason": {
+              "$ref": "#/definitions/ThreadRealtimeSessionInputReason"
+            },
             "source_event_ids": {
               "items": {
                 "type": "string"
@@ -29385,19 +29420,20 @@
             },
             "type": {
               "enum": [
-                "sessionEndInputSaved"
+                "sessionInputSaved"
               ],
-              "title": "SessionEndInputSavedThreadRealtimeItemType",
+              "title": "SessionInputSavedThreadRealtimeItemType",
               "type": "string"
             }
           },
           "required": [
             "input",
             "input_item_id",
+            "reason",
             "source_event_ids",
             "type"
           ],
-          "title": "SessionEndInputSavedThreadRealtimeItem",
+          "title": "SessionInputSavedThreadRealtimeItem",
           "type": "object"
         }
       ],
@@ -29550,6 +29586,13 @@
       ],
       "title": "ThreadRealtimeSdpNotification",
       "type": "object"
+    },
+    "ThreadRealtimeSessionInputReason": {
+      "enum": [
+        "chunk",
+        "sessionEnd"
+      ],
+      "type": "string"
     },
     "ThreadRealtimeSessionOutcome": {
       "enum": [

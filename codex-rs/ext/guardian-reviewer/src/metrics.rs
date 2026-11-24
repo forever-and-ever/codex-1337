@@ -42,6 +42,7 @@ pub(crate) fn emit_guardian_review_metrics(
     result: &GuardianReviewAnalyticsResult,
     approval_request_source: GuardianApprovalRequestSource,
     reviewed_action: &GuardianReviewedAction,
+    turn_origin: &'static str,
     elapsed: Duration,
 ) {
     let tags = guardian_review_metric_tags(result, approval_request_source, reviewed_action);
@@ -63,6 +64,7 @@ pub(crate) fn emit_guardian_review_metrics(
     let mut counter_tag_refs = tag_refs.clone();
     counter_tag_refs.extend(mcp_tags.iter().map(|(key, value)| (*key, value.as_str())));
     counter_tag_refs.push(("context_changed", bool_tag(result.context_changed)));
+    counter_tag_refs.push(("turn_origin", turn_origin));
     session_telemetry.counter(
         GUARDIAN_REVIEW_COUNT_METRIC,
         /*inc*/ 1,

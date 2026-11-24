@@ -70,14 +70,11 @@ fn test_exec_request(
     env: HashMap<String, String>,
 ) -> ExecRequest {
     let permission_profile = turn.permission_profile();
-    let network = None;
     let arg0 = None;
     ExecRequest::new(
         command,
         cwd,
         env,
-        network,
-        /*network_environment_id*/ None,
         ExecExpiration::DefaultTimeout,
         ExecCapturePolicy::ShellTool,
         SandboxType::None,
@@ -900,18 +897,15 @@ async fn completed_local_commands_preserve_exit_code(tty: bool) -> anyhow::Resul
         let cwd = turn.cwd.clone();
         let mut env = shell_env();
         env.insert("COMPLETED_OUTPUT".to_string(), text.to_string());
-        let mut request = test_exec_request(
-            &turn,
-            vec![
-                "bash".to_string(),
-                "-lc".to_string(),
-                "printf '%s' \"$COMPLETED_OUTPUT\"; exit 17".to_string(),
-            ],
-            cwd,
-            env,
-        );
+        let cwd = PathUri::from_abs_path(&cwd);
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "printf '%s' \"$COMPLETED_OUTPUT\"; exit 17".to_string(),
+        ];
+        let native_program = None;
         #[cfg(target_os = "linux")]
-        let _helper_dir = if tty {
+        let (command, native_program, _helper_dir) = if tty {
             use std::ffi::OsStr;
             use std::os::unix::ffi::OsStrExt;
             use std::os::unix::fs::PermissionsExt;
@@ -923,15 +917,37 @@ async fn completed_local_commands_preserve_exit_code(tty: bool) -> anyhow::Resul
             )?;
             std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700))?;
             std::os::unix::fs::symlink("/bin/false", helper.to_string_lossy().as_ref())?;
-            request.command[0] = helper.to_string_lossy().into_owned();
-            request.native_program = Some(helper.into());
-            request.command.truncate(1);
-            Some(dir)
+            (
+                vec![helper.to_string_lossy().into_owned()],
+                Some(helper.into_os_string()),
+                Some(dir),
+            )
         } else {
-            None
+            (command, native_program, None)
         };
         // The prepared-launch boundary owns classification, not policy setup.
-        request.sandbox = sandbox;
+        let request = ExecRequest::from_sandbox_exec_request(
+            codex_sandboxing::SandboxExecRequest {
+                command,
+                native_program,
+                cwd: cwd.clone(),
+                sandbox_policy_cwd: cwd,
+                env,
+                network: None,
+                network_environment_id: None,
+                sandbox,
+                sandbox_override: codex_protocol::sandbox::SandboxOverride::NoOverride,
+                windows_sandbox_level: turn.windows_sandbox_level,
+                permission_profile: turn.permission_profile(),
+                arg0: None,
+            },
+            crate::sandboxing::ExecOptions {
+                expiration: ExecExpiration::DefaultTimeout,
+                capture_policy: ExecCapturePolicy::ShellTool,
+            },
+            &[],
+        )
+        .await?;
         let environment = codex_exec_server::Environment::default_for_tests();
         let result = UnifiedExecProcessManager::default()
             .open_session_with_prepared_exec_env(

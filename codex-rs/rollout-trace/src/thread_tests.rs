@@ -377,8 +377,9 @@ fn compaction_contexts_share_identity_across_models() -> anyhow::Result<()> {
     );
     assert_eq!(native.execution.status, crate::ExecutionStatus::Completed);
     let raw = &replayed.raw_payloads[&native.raw_request_payload_id];
-    let request =
-        crate::shard::PayloadReader::new(&single_bundle_dir(temp.path())?).observed_json(raw)?;
+    let request = crate::shard::PayloadReader::new(&single_bundle_dir(temp.path())?)
+        .observed_json(raw)?
+        .value;
     assert!(request.get("messages").is_some());
     assert!(request.get("input").is_none());
 
@@ -586,7 +587,9 @@ fn mcp_trace_excludes_human_receipt_but_preserves_fault() -> anyhow::Result<()> 
         1,
         "the UI event must not duplicate backend completion"
     );
-    let trace = crate::shard::PayloadReader::new(&bundle).observed_json(&completions[0])?;
+    let trace = crate::shard::PayloadReader::new(&bundle)
+        .observed_json(&completions[0])?
+        .value;
     assert_eq!(
         trace["result"]["Ok"]["_meta"],
         serde_json::json!({"other":"kept"})

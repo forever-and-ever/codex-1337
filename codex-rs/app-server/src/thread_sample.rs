@@ -12,6 +12,7 @@ use codex_app_server_protocol::TurnStatus;
 use codex_core::CodexThread;
 use codex_core::ForkSnapshot;
 use codex_core::ThreadManager;
+use codex_core::config::Config;
 use codex_extension_api::ModelRequestContributor;
 use codex_extension_api::ModelRequestInput;
 use codex_extension_api::ModelRequestKind;
@@ -19,10 +20,14 @@ use codex_extension_api::ModelResponseInterceptor;
 use codex_extension_api::ModelResponseStream;
 use codex_extension_api::ResponseEvent;
 use codex_features::Feature;
+use codex_model_provider_info::ModelProviderAdapter;
+use codex_models_manager::manager::RefreshStrategy;
 use codex_otel::auth_storage::AuthStorageOriginator;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::CatalogModel;
+use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind;
 use codex_protocol::protocol::AgentStatus;
@@ -55,8 +60,6 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 const SAMPLE_TIMEOUT: Duration = Duration::from_secs(30);
-// Bytes conservatively bound tokens, including for byte-fallback tokenizers.
-const MAX_PROMPT_BYTES: usize = 4_000;
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 const THREAD_SNAPSHOT_NOTE: &str = concat!(
     "\nThis snapshot is a copy of the source thread’s history taken while its turn was still running. ",
@@ -79,19 +82,63 @@ pub(crate) struct SampleTask {
     pub(crate) cancellation: CancellationToken,
 }
 
+async fn resolve_sample_model(
+    thread: &CodexThread,
+    config: &Config,
+    inherited: &str,
+    requested: Option<&str>,
+) -> Result<CatalogModel, JSONRPCErrorError> {
+    let alternate = requested.filter(|requested| *requested != inherited);
+    if alternate.is_some()
+        && config.model_provider.adapter != ModelProviderAdapter::OpenaiCompatible
+    {
+        return Err(invalid_request(
+            "this source provider does not support sampling with a different model",
+        ));
+    }
+    let models = thread
+        .models_manager(config)
+        .await
+        .map_err(invalid_request)?;
+    let models_config = config.to_models_manager_config();
+    let source_model = models.get_model_info(inherited, &models_config).await;
+    let Some(requested) = alternate else {
+        return Ok(source_model);
+    };
+    // Metadata lookup accepts generic or prefix matches; only exact entries in the
+    // auth-filtered catalog with admitted provenance can authorize an override.
+    let available = models
+        .list_models(RefreshStrategy::Offline, config.http_client_factory())
+        .await;
+    let target = models.get_model_info(requested, &models_config).await;
+    if !available.iter().any(|preset| preset.model == requested)
+        || !matches!(
+            target.origin,
+            ModelOrigin::Provider | ModelOrigin::ExplicitConfig
+        )
+    {
+        return Err(invalid_request(
+            "sample model is not available for the source provider and account",
+        ));
+    }
+    if target.use_responses_lite != source_model.use_responses_lite {
+        return Err(invalid_request(
+            "sample model uses a different request protocol from the source model",
+        ));
+    }
+    Ok(target)
+}
+
 pub(crate) async fn generate_sample(
     task: SampleTask,
     tasks: &TaskTracker,
     rpc_gate: Arc<ConnectionRpcGate>,
 ) -> SampleResult {
     let deadline = Instant::now() + SAMPLE_TIMEOUT;
-    if task.params.expected_turn_id.trim().is_empty()
-        || task.params.prompt.trim().is_empty()
-        || task.params.prompt.len() > MAX_PROMPT_BYTES
-    {
-        return Err(invalid_request(format!(
-            "thread/sample requires expectedTurnId and a prompt of at most {MAX_PROMPT_BYTES} bytes",
-        )));
+    if task.params.expected_turn_id.trim().is_empty() || task.params.prompt.trim().is_empty() {
+        return Err(invalid_request(
+            "thread/sample requires a nonblank expectedTurnId and prompt",
+        ));
     }
     let (sender, receiver) = oneshot::channel();
     let originator = AuthStorageOriginator::current();
@@ -182,15 +229,14 @@ impl SampleTask {
         })
         .await
         .map_err(|error| internal_error(error.to_string()))?;
-        let model = parent
-            .models_manager(&options.config)
-            .await
-            .map_err(invalid_request)?
-            .get_model_info(
-                options.config.model.as_deref().unwrap_or(&snapshot.model),
-                &options.config.to_models_manager_config(),
-            )
-            .await;
+        let inherited = options.config.model.clone().unwrap_or(snapshot.model);
+        let model = resolve_sample_model(
+            &parent,
+            &options.config,
+            &inherited,
+            params.model.as_deref(),
+        )
+        .await?;
         options.config.ephemeral = true;
         if params.allow_in_progress_turn {
             // Mid-turn copy receives a custom interruption marker THREAD_SNAPSHOT_NOTE
@@ -223,9 +269,7 @@ impl SampleTask {
                 .insert(codex_core::McpServersDisabled);
         }
         options.thread_extension_init.insert(SampleThread);
-        let effort = params.effort.filter(|_| {
-            model.supports_reasoning_effort_updates && options.config.model_provider.is_openai()
-        });
+        let is_openai = options.config.model_provider.is_openai();
         options.session_source = Some(SessionSource::Custom("thread_sample".to_string()));
         options.thread_source = Some(
             params
@@ -266,12 +310,33 @@ impl SampleTask {
             Box::pin(fork.thread.restore_thread_settings(*settings))
                 .await
                 .map_err(|error| internal_error(error.to_string()))?;
+            let model = if let Some(requested) = params.model.as_deref().filter(|m| *m != inherited)
+            {
+                // The parent can switch accounts after capture. The fork has the frozen
+                // credentials that will actually send the sample.
+                let config = fork.thread.config().await;
+                let target =
+                    resolve_sample_model(&fork.thread, &config, &inherited, Some(requested))
+                        .await?;
+                if target.use_responses_lite != model.use_responses_lite {
+                    return Err(invalid_request(
+                        "sample model request protocol changed during startup",
+                    ));
+                }
+                target
+            } else {
+                model
+            };
             let mut input = TurnInputRequest::user_input(vec![UserInput::Text {
                 text: params.prompt,
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                effort: effort.map(Some),
+                model: params.model,
+                effort: params
+                    .effort
+                    .filter(|_| model.supports_reasoning_effort_updates && is_openai)
+                    .map(Some),
                 ..Default::default()
             })
             .on_start(TurnStartOptions {

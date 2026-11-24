@@ -95,6 +95,7 @@ use codex_user_input::ResolvedUserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
+use futures::future::BoxFuture;
 use rmcp::model::ReadResourceRequestParams;
 use std::any::Any;
 use std::path::PathBuf;
@@ -1165,9 +1166,12 @@ impl CodexThread {
         crate::guardian::review_admitted(&self.session, captured, cancellation).await
     }
 
-    /// Record raw Responses API items without starting a new turn.
-    pub async fn inject_response_items(&self, items: Vec<ResponseItem>) -> CodexResult<()> {
-        self.inject_response_items_with_retention(items).await
+    /// Inject Responses items as history, without admitting agent mail.
+    pub fn inject_response_items(
+        &self,
+        items: Vec<ResponseItem>,
+    ) -> BoxFuture<'_, CodexResult<()>> {
+        Box::pin(self.inject_response_items_with_retention(items))
     }
 
     /// Inject Responses items with explicit, persisted retention policies.
@@ -1249,6 +1253,13 @@ impl CodexThread {
     /// Returns startup metadata without the one-time initial message replay.
     pub fn startup_metadata(&self) -> &ThreadStartupMetadata {
         &self.startup_metadata
+    }
+
+    /// Whether this live thread joined the Daybreak propagation experiment at startup.
+    pub fn daybreak_program_propagation_enrolled(&self) -> bool {
+        self.thread_extension_data()
+            .get::<crate::agent::helper_daybreak::Enrollment>()
+            .is_some()
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -1530,6 +1541,15 @@ impl CodexThread {
     /// Revokes enterprise MCP authority from the current owner after a failed reload.
     pub async fn disable_mcp_enterprise_auth(&self) {
         self.session.disable_mcp_enterprise_auth().await;
+    }
+
+    /// Refresh managed Guardian policy for future turns without changing MCP state.
+    /// Session and user policy fallbacks remain pinned until their own reload.
+    pub async fn refresh_guardian_policy(
+        &self,
+        snapshot: &codex_config::GuardianPolicySnapshot,
+    ) -> ConfigRefreshOutcome {
+        self.session.refresh_guardian_policy(snapshot).await
     }
 
     /// Refresh MCP configuration, managed requirements, and session plugin and app overrides.

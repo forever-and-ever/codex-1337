@@ -661,6 +661,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50389 (configured keybindings before transcript navigation), #49517 (fork shortcut) and #51500 (task pinning) edit `keymap.rs` and `tui_keymap.rs`; #50467 edits `clipboard_copy.rs`.
 - Evidence: 86600d9708, d174f70315, 39fba99ad1, f36947b64a.
 
+### saved-thread-window
+
+- Telos: visiting a saved thread must not consume the window or draft where its link was read.
+- Holds: a typed saved-thread link stays bound to its source backend. A click activates an i3 window showing the exact thread, or opens Alacritty there; it cannot switch the source TUI in place, resolve a remote ID locally, or pass the internal scheme to a browser.
+- Owners: `codex-rs/tui/src/app/thread_link_handoff.rs` binds the click to its source; `codex-rs/tui/src/desktop_thread.rs` and its `windows` module own desktop handoff and presence.
+- Tripwire: `linked_thread_read_uses_the_captured_connection_without_replacing_the_draft` checks source authority; `thread_mark_tracks_the_focused_terminal` checks focus and mark lifetime under isolated i3/Alacritty.
+- Pressure: upstream 0.172 #62332 opens the linked thread in the current TUI.
+- Evidence: owner decision, 2026-11-24.
+
 ### literal-local-paths
 
 - Telos: a local-file reference is useful as copyable path text, without a navigation policy to maintain.
@@ -1100,6 +1109,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/idle_restart.rs`: reload-host
 - `codex-rs/tui/src/app/presentation.rs`: attention-gated-painting
 - `codex-rs/tui/src/app/queued_messages.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/thread_link_handoff.rs`: saved-thread-window
+- `codex-rs/tui/src/desktop_thread.rs`, `codex-rs/tui/src/desktop_thread/windows.rs`: saved-thread-window
 - `codex-rs/tui/src/app/transcript_splice.rs`: fullscreen-only, stable-feed-publication
 - `codex-rs/tui/src/app/ui_reload.rs`: reload-host
 - `codex-rs/tui/src/app_server_session/account.rs`: pinned-accounts

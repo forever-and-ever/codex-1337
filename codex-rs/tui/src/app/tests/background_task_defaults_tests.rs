@@ -361,7 +361,9 @@ async fn command_center_new_reads_server_defaults_for_actual_destination() -> Re
         app.new_agents_overview_session(
             &mut tui,
             &mut server,
-            explicit_cwd.then(|| destination.path().to_path_buf().abs()),
+            explicit_cwd
+                .then(|| AbsolutePathBuf::try_from(destination.path()))
+                .transpose()?,
         )
         .await?;
         let cwd = match expected_cwd {

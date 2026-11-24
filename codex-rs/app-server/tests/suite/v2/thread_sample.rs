@@ -55,6 +55,8 @@ use tokio::time::timeout;
 use wiremock::ResponseTemplate;
 
 const WAIT: Duration = Duration::from_secs(40);
+const SAMPLE_MODEL: &str = "gpt-5.4-mini";
+const SAMPLE_OTHER_PROTOCOL_MODEL: &str = "another-sampling-protocol";
 
 async fn client(
     home: &TempDir,
@@ -89,10 +91,16 @@ async fn client_with_effort_updates(
         name: "Fast".to_string(),
         description: "Priority processing.".to_string(),
     }];
+    let mut sample_model = model.clone();
+    sample_model.slug = SAMPLE_MODEL.to_string();
+    sample_model.supports_reasoning_effort_updates = false;
+    let mut other_protocol_model = model.clone();
+    other_protocol_model.slug = SAMPLE_OTHER_PROTOCOL_MODEL.to_string();
+    other_protocol_model.use_responses_lite = false;
     let catalog = home.path().join("catalog.json");
     std::fs::write(
         &catalog,
-        serde_json::to_string(&json!({"models": [model]}))?,
+        serde_json::to_string(&json!({"models": [model, sample_model, other_protocol_model]}))?,
     )?;
     let mut config = MockResponsesConfig::new(&server.uri()).with_model("gpt-5.4").with_provider_name("OpenAI")
         .with_root_config(&format!("model_catalog_json = {}\nmodel_reasoning_effort = \"high\"\nmodel_post_turn_compact_threshold_percent = 0", serde_json::to_string(&catalog)?));
@@ -171,6 +179,93 @@ async fn prediction_fork(client: &mut TestAppServer, parent: &str) -> Result<Str
         .await?;
     let fork: ThreadForkResponse = timeout(WAIT, client.read_response(id)).await??;
     Ok(fork.thread.id)
+}
+
+#[tokio::test]
+async fn sample_model_override_is_local_to_the_sample() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let mock = responses::mount_sse_sequence(
+        &server,
+        ["parent", "override", "inherited", "follow-up"]
+            .map(|id| {
+                responses::sse(vec![
+                    responses::ev_assistant_message(id, "Ready."),
+                    responses::ev_completed(id),
+                ])
+            })
+            .to_vec(),
+    )
+    .await;
+    let home = TempDir::new()?;
+    let mut client = client(&home, &server, /*overrides*/ true).await?;
+    let (thread_id, turn_id) = ready_parent(&mut client, ThreadStartParams::default()).await?;
+    let extra_prompt = format!("Predict the next message.{}", " Carefully".repeat(420));
+
+    let result = sample(
+        &mut client,
+        ThreadSampleParams {
+            thread_id: thread_id.clone(),
+            expected_turn_id: turn_id.clone(),
+            prompt: extra_prompt.clone(),
+            model: Some(SAMPLE_MODEL.to_string()),
+            effort: Some(ReasoningEffort::Medium),
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(result.text.as_deref(), Some("Ready."));
+
+    let request_id = client
+        .send_raw_request(
+            "thread/sample",
+            Some(json!({
+                "threadId": thread_id,
+                "expectedTurnId": turn_id,
+                "prompt": "Predict with inherited settings.",
+            })),
+        )
+        .await?;
+    let _: ThreadSampleResponse = timeout(WAIT, client.read_response(request_id)).await??;
+    client
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id,
+            input: input("Follow-up"),
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = mock.requests();
+    let models: Vec<_> = requests
+        .iter()
+        .map(|request| request.body_json()["model"].clone())
+        .collect();
+    assert_eq!(
+        models,
+        ["gpt-5.4", SAMPLE_MODEL, "gpt-5.4", "gpt-5.4"].map(|model| json!(model)),
+    );
+    assert_eq!(
+        requests[1].body_json()["reasoning"]["effort"],
+        json!("high")
+    );
+    let announcement = requests[1]
+        .message_input_texts("developer")
+        .into_iter()
+        .find(|text| text.starts_with("<model_instructions>"))
+        .expect("sample model announcement");
+    insta::assert_snapshot!(announcement, @"
+    <model_instructions>
+    The current model is gpt-5.4-mini.
+    </model_instructions>
+    ");
+    assert!(
+        !requests[2].body_contains_text("<model_instructions>")
+            && !requests[2].body_contains_text("<model_switch>"),
+        "sample without a model override should not announce a model switch"
+    );
+    assert!(requests[1].body_contains_text("Initial turn"));
+    assert!(requests[1].body_contains_text(&extra_prompt));
+    assert!(!requests[3].body_contains_text("Predict the next message."));
+    Ok(())
 }
 
 #[test_matrix(
@@ -1378,39 +1473,36 @@ async fn sample_rejects_invalid_sources_and_prompts() -> Result<()> {
         .thread
         .id;
     let (parent, turn) = ready_parent(&mut client, ThreadStartParams::default()).await?;
-    for (id, expected_turn, prompt, expected_error) in [
+    for (mut params, expected_error) in [
         (
-            codex_protocol::ThreadId::new().to_string(),
-            turn.clone(),
-            "Predict".to_string(),
+            json!({"threadId": codex_protocol::ThreadId::new().to_string()}),
             "loaded source",
         ),
-        (fresh, turn.clone(), "Predict".to_string(), "rollout"),
+        (json!({"threadId": fresh}), "rollout"),
+        (json!({"threadId": ephemeral}), "persistent root"),
+        (json!({"expectedTurnId": "stale"}), "latest finished turn"),
+        (json!({"prompt": ""}), "prompt"),
         (
-            ephemeral,
-            turn.clone(),
-            "Predict".to_string(),
-            "persistent root",
+            json!({"model": "gpt-5.4-not-in-catalog"}),
+            "not available for the source provider and account",
         ),
         (
-            parent.clone(),
-            "stale".to_string(),
-            "Predict".to_string(),
-            "latest finished turn",
+            json!({"model": SAMPLE_OTHER_PROTOCOL_MODEL}),
+            "different request protocol",
         ),
-        (parent.clone(), turn.clone(), String::new(), "prompt"),
         (
-            parent.clone(),
-            turn.clone(),
-            "x".repeat(4_001),
-            "at most 4000 bytes",
+            json!({"modelProvider": "anthropic", "model": SAMPLE_MODEL}),
+            "cannot change the source model provider",
         ),
     ] {
+        let object = params.as_object_mut().expect("test request object");
+        object.entry("threadId").or_insert_with(|| json!(parent));
+        object
+            .entry("expectedTurnId")
+            .or_insert_with(|| json!(turn));
+        object.entry("prompt").or_insert_with(|| json!("Predict"));
         let id = client
-            .send_raw_request(
-                "thread/sample",
-                Some(json!({"threadId": id, "expectedTurnId": expected_turn, "prompt": prompt})),
-            )
+            .send_raw_request("thread/sample", Some(params))
             .await?;
         let error = timeout(
             WAIT,

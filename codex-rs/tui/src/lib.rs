@@ -134,6 +134,7 @@ mod config_update;
 mod copy_input_guard;
 pub(crate) mod custom_terminal;
 mod daybreak;
+mod desktop_thread;
 mod device_login;
 #[cfg(test)]
 mod embedded_runtime_for_tests;

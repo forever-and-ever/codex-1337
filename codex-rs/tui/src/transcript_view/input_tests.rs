@@ -284,9 +284,12 @@ fn shift_click_preserves_selection_units_and_allows_dragging() {
 
 #[test]
 fn ordinary_click_opens_bare_and_markdown_links_on_release() {
-    for markdown in [
-        "https://example.com/docs",
-        "[docs](https://example.com/docs)",
+    for (markdown, destination) in [
+        ("https://example.com/docs", "https://example.com/docs"),
+        (
+            "[docs](https://example.com/docs)",
+            "https://example.com/docs",
+        ),
     ] {
         for width in [GUTTER_COLUMNS + 8, GUTTER_COLUMNS + 56] {
             let (mut view, cells) = transcript(markdown, width);
@@ -315,10 +318,65 @@ fn ordinary_click_opens_bare_and_markdown_links_on_release() {
                     view.selected_text(&cells),
                     view.is_following()
                 ),
-                ("https://example.com/docs", None, true)
+                (destination, None, true)
             );
             assert!(view.handle_mouse(up, &cells).is_none());
         }
+    }
+}
+
+#[test]
+fn saved_thread_link_uses_the_painted_hit_region_but_not_terminal_osc8() {
+    let id = ThreadId::new();
+    let destination = format!("codex://threads/{id}");
+    let markdown = format!("[other thread]({destination})");
+    for width in [GUTTER_COLUMNS + 8, GUTTER_COLUMNS + 56] {
+        let (mut view, cells) = transcript(&markdown, width);
+        let area = view.area;
+        let down = mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            /*column*/ 2,
+            TEXT_ROW,
+        );
+        let point = ScreenPosition::new(down.column, down.row);
+
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf, &cells);
+        assert_eq!(
+            view.link_at(point.x, point.y).as_deref(),
+            Some(destination.as_str())
+        );
+        assert!(
+            view.thread_link_hover_area(point)
+                .is_some_and(|area| area.contains(point))
+        );
+        assert!(!buf[point].symbol().contains('\x1b'));
+
+        assert!(matches!(
+            view.handle_mouse(down, &cells),
+            Some(ViewAction::Changed)
+        ));
+        view.render(area, &mut buf, &cells);
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..down
+        };
+        assert!(matches!(
+            view.handle_mouse(up, &cells),
+            Some(ViewAction::OpenThreadLink(target)) if target == id
+        ));
+        assert_eq!(view.selected_text(&cells), None);
+        assert!(view.is_following());
+        assert!(view.handle_mouse(up, &cells).is_none());
+
+        let ctrl_click = MouseEvent {
+            modifiers: KeyModifiers::CONTROL,
+            ..down
+        };
+        assert!(matches!(
+            view.handle_mouse(ctrl_click, &cells),
+            Some(ViewAction::OpenThreadLink(target)) if target == id
+        ));
     }
 }
 

@@ -38,7 +38,7 @@ use tokio::sync::oneshot;
 
 const ALLOW: &str = r#"{"outcome":"allow","rationale":"completed seed assessment"}"#;
 
-fn sync_config(responses_url: &str) -> MockResponsesConfig {
+pub(super) fn sync_config(responses_url: &str) -> MockResponsesConfig {
     MockResponsesConfig::new(responses_url)
         .with_provider_config("supports_websockets = false")
         .with_approval_policy("on-request")
@@ -854,6 +854,10 @@ async fn v3_config_does_not_collect_live_evidence(prior_message: Option<&str>) -
             .await;
     let home = TempDir::new()?;
     sync_config(&server.uri())
+        .with_root_config(&format!(
+            "sqlite_home = {}",
+            serde_json::to_string(home.path())?
+        ))
         .with_extra_config("[features.guardianv3]\nenabled = true")
         .write(home.path())?;
     let mut app = TestAppServer::builder()
@@ -914,5 +918,9 @@ async fn v3_config_does_not_collect_live_evidence(prior_message: Option<&str>) -
         );
     };
     assert!(actor.header("x-openai-subagent").is_none());
+    assert!(
+        !tokio::fs::try_exists(home.path().join("message_board_guardian_1.sqlite")).await?,
+        "a dormant collector must not open a board"
+    );
     Ok(())
 }

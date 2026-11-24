@@ -144,6 +144,7 @@ pub(crate) fn filter_tools(tools: Vec<ToolInfo>, filter: &ToolFilter) -> Vec<Too
 /// prefix is added except for tools from `non_prefixed_mcp_tool_servers`.
 /// Canonical namespaces owned by native tools receive an additional MCP prefix
 /// before collision hashing. Unaffected names and raw MCP identities are unchanged.
+#[tracing::instrument(name = "mcp.binding.normalize_tools", skip_all)]
 pub(crate) fn normalize_tools_for_model_with_prefix<I>(
     tools: I,
     prefix_mcp_tool_names: bool,

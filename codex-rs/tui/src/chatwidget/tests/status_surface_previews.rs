@@ -174,7 +174,7 @@ async fn status_surface_preview_lines_hardcoded_only_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.remote_connection = Some(RemoteConnectionStatus {
         address: "unix:///test/codex.sock".into(),
-        version: "v0.157.0".into(),
+        version: Some("v0.157.0".into()),
         is_local_daemon: true,
         is_managed_daemon: false,
     });
@@ -560,6 +560,19 @@ async fn missing_project_root_uses_different_status_and_title_preview_sources() 
 
     assert_eq!(status_preview, "my-project");
     assert_eq!(title_preview, "project");
+
+    chat.remote_connection = Some(RemoteConnectionStatus {
+        address: "wss://server.example".into(),
+        version: None,
+        is_local_daemon: false,
+        is_managed_daemon: false,
+    });
+    chat.current_cwd = PathUri::try_from(LegacyAppPathString::from_string(r"D:\workspace\remote"))
+        .expect("absolute server path");
+    assert_snapshot!(
+        title_preview_line(&mut chat, &[TerminalTitleItem::Project]),
+        @"remote"
+    );
 }
 
 #[tokio::test]

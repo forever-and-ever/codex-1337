@@ -123,6 +123,7 @@ use codex_app_server_protocol::SandboxMode as AppServerSandboxMode;
 use codex_app_server_protocol::SendAddCreditsNudgeEmailParams;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+#[cfg(test)]
 use codex_app_server_protocol::SkillErrorInfo;
 use codex_app_server_protocol::SkillsListParams;
 use codex_app_server_protocol::SkillsListResponse;
@@ -242,6 +243,7 @@ mod loaded_threads;
 mod local_ui_requests;
 mod misalignment_policy;
 mod model_defaults;
+pub(crate) mod thread_link_handoff;
 pub(crate) use turn_submissions::ui_requests::UiReply;
 mod navigation_config;
 mod new_session;
@@ -566,15 +568,6 @@ fn rollout_path_is_resumable(rollout_path: &Path) -> bool {
         .is_some_and(|(_, metadata)| metadata.len() > 0)
 }
 
-fn errors_for_cwd(cwd: &Path, response: &SkillsListResponse) -> Vec<SkillErrorInfo> {
-    response
-        .data
-        .iter()
-        .find(|entry| entry.cwd.as_path() == cwd)
-        .map(|entry| entry.errors.clone())
-        .unwrap_or_default()
-}
-
 #[derive(Debug, Default)]
 struct InitialHistoryReplayBuffer {
     retained_lines: VecDeque<crate::terminal_hyperlinks::HyperlinkLine>,
@@ -705,6 +698,7 @@ pub(crate) struct App {
     divider_drag: Option<side_pane::DividerDrag>,
     pane_resize: Option<side_pane::PaneResize>,
     passive_link_drag: Option<(ThreadId, Rect)>,
+    pending_thread_links: HashMap<ThreadId, thread_link_handoff::ThreadLinkRequest>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,
@@ -937,14 +931,7 @@ impl App {
             tui.frame_requester().schedule_frame();
             return Ok(AppRunControl::Continue);
         }
-        let previous = tui.link_hover.position();
-        tui.link_hover.observe(&event);
-        let current = tui.link_hover.position();
-        if previous != current
-            && self.hovered_sidebar_target(previous) != self.hovered_sidebar_target(current)
-        {
-            tui.frame_requester().schedule_frame();
-        }
+        self.observe_pointer(tui, &event);
         if Box::pin(sidebar_close::handle(self, tui, app_server, &event)).await {
             return Ok(AppRunControl::Continue);
         }
@@ -1004,7 +991,7 @@ impl App {
             }
             self.backtrack.select_exit_key = None;
         }
-        if self.continue_passive_link_drag(tui, &event)?
+        if self.continue_passive_link_drag(tui, app_server, &event)?
             || self.handle_divider_event(tui, &event).await?
             || self.handle_rendered_selection_event(tui, &event)?
         {
@@ -1025,9 +1012,9 @@ impl App {
                 .pause_clock();
         }
         let transcript_owns_input = match (&event, &self.overlay) {
-            (TuiEvent::Key(key), Some(Overlay::Transcript(overlay))) => {
-                overlay.owns_interaction_key(*key)
-            }
+            (TuiEvent::Key(key), Some(overlay)) => overlay
+                .input_transcript()
+                .is_some_and(|view| view.owns_interaction_key(*key)),
             (TuiEvent::Key(key), None) => {
                 tui.is_owned_screen()
                     && self.chat_widget.no_modal_or_popup_active()
@@ -1046,7 +1033,7 @@ impl App {
             && let Some(current) =
                 side_pane::layout(self, tui, tui.terminal.last_known_screen_size.into())
             && current.passive_thread == painted.passive_thread
-            && self.handle_passive_transcript_event(tui, current.passive_thread, &event)
+            && self.handle_passive_transcript_event(tui, app_server, current.passive_thread, &event)
         {
             self.cancel_pending_key_chord();
             return Ok(AppRunControl::Continue);
@@ -1156,13 +1143,16 @@ impl App {
                 && painted.passive.union(painted.focused) == Rect::from(size)
             {
                 let painted_area = painted.passive;
-                if let Some(url) = self.transcript_link_at(*press) {
+                if self.transcript_link_at(*press).is_some() {
                     if press.modifiers.is_empty() {
                         self.passive_link_drag = Some((current.passive_thread, painted.passive));
-                        self.handle_passive_transcript_event(tui, current.passive_thread, &event);
-                    } else {
-                        self.open_url_in_browser(url);
                     }
+                    self.handle_passive_transcript_event(
+                        tui,
+                        app_server,
+                        current.passive_thread,
+                        &event,
+                    );
                     return Ok(AppRunControl::Continue);
                 }
                 if self.reconnect.offline {
@@ -1265,10 +1255,11 @@ impl App {
         {
             if self.overlay.is_none()
                 && self.chat_widget.no_modal_or_popup_active()
-                && self.chat_widget.is_read_only_view()
-                && (crate::key_hint::plain(KeyCode::Esc).is_press(*key)
-                    || (crate::key_hint::plain(KeyCode::Left).is_press(*key)
-                        && self.chat_widget.agents_navigation_key_available()))
+                && ((self.chat_widget.is_read_only_view()
+                    && crate::key_hint::plain(KeyCode::Esc).is_press(*key))
+                    || self
+                        .chat_widget
+                        .blocked_thread_command_center_key_pressed(*key))
             {
                 self.open_agents_overview(app_server);
             } else if self

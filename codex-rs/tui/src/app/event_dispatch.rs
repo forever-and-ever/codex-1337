@@ -259,7 +259,7 @@ impl App {
             }
             AppEvent::CloseMisalignmentReview => self.chat_widget.show_misalignment_policy_precaution(),
             AppEvent::SkillsListLoaded { ref cwd, .. }
-                if cwds_differ(cwd, self.chat_widget.config_ref().cwd.as_path()) =>
+                if cwd != self.chat_widget.session_cwd() =>
             {
                 self.skill_load_warnings.startup_complete = true;
             }
@@ -512,7 +512,20 @@ impl App {
                 }
             }
             AppEvent::ResumeUnarchivedThread(thread_id) => {
-                if self.current_displayed_thread_id() == Some(thread_id) {
+                if self.current_displayed_thread_id() == Some(thread_id)
+                    && self.chat_widget.is_archived_view()
+                    && self.thread_event_channels.get(&thread_id).is_some_and(|channel| {
+                        channel.attachment() == super::ThreadEventAttachment::ReplayOnly
+                    })
+                {
+                    if self.primary_thread_id != Some(thread_id) {
+                        self.enqueue_thread_selection(
+                            app_server,
+                            thread_id,
+                            super::turn_submissions::SelectionAfter::SelectOnly,
+                        );
+                        return Ok(AppRunControl::Continue);
+                    }
                     let target = SessionTarget {
                         backend_id: app_server.backend_id(),
                         path: None,
@@ -757,8 +770,9 @@ impl App {
                 let start = trailing_run_start::<history_cell::ProposedPlanStreamCell>(
                     &self.transcript_cells,
                 );
+                let cwd = self.chat_widget.session_cwd().to_path_buf();
                 let consolidated: Arc<dyn HistoryCell> =
-                    Arc::new(history_cell::new_proposed_plan(source, &self.config.cwd));
+                    Arc::new(history_cell::new_proposed_plan(source, &cwd));
 
                 if start < end {
                     self.native_history.consolidate(&self.transcript_cells[start..end], &consolidated);
@@ -877,15 +891,14 @@ impl App {
             AppEvent::ImagesPrepared(id) => {
                 self.chat_widget.on_images_prepared(id);
             }
-            AppEvent::CodexOp(AppCommand::ListSkills { cwds, force_reload: true })
+            AppEvent::CodexOp(AppCommand::ListSkills { cwd, force_reload: true })
                 if self.awaiting_side_replay(tui)
                     && let Some(thread_id) = self.active_thread_id
                     && self.side_pair_key(thread_id).is_some()
                     && !self.thread_unavailable(thread_id) =>
             {
                 // Session replay refreshes skill metadata. Let focus paint while that RPC is pending.
-                let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
-                if cwds.contains(&cwd) {
+                if &cwd == self.chat_widget.session_cwd() {
                     let request_id = Uuid::new_v4();
                     app_server.pending_side_skills_refresh = Some(request_id);
                     let rpc_id = app_server.next_request_id();
@@ -895,7 +908,7 @@ impl App {
                         let result = background_requests::fetch_skills_list(
                             request_handle,
                             rpc_id,
-                            SkillsListParams { cwds, force_reload: true },
+                            SkillsListParams { cwds: vec![cwd.to_path_buf()], force_reload: true },
                         )
                         .await
                         .map_err(|err| format!("{err:#}"));
@@ -1097,7 +1110,7 @@ impl App {
                 self.submit_thread_op(app_server, thread_id, op).await?;
             }
             AppEvent::DiffResult(cwd, text) => {
-                if cwds_differ(&cwd, self.chat_widget.config_ref().cwd.as_path()) {
+                if &cwd != self.chat_widget.session_cwd() {
                     return Ok(AppRunControl::Continue);
                 }
                 // Clear the in-progress state in the bottom pane
@@ -1147,6 +1160,16 @@ impl App {
             }
             AppEvent::OpenUrlInBrowser { url } => {
                 self.open_url_in_browser(url);
+            }
+            AppEvent::OpenThreadLink(request) => {
+                self.open_thread_link(app_server, request);
+            }
+            AppEvent::ThreadLinkOpenCompleted { request, result } => {
+                let failed = result.is_err();
+                self.finish_thread_link(app_server, request, result);
+                if failed {
+                    tui.frame_requester().schedule_frame();
+                }
             }
             AppEvent::OpenDesktopThread { thread_id } => {
                 self.open_desktop_thread(thread_id);
@@ -1500,13 +1523,17 @@ impl App {
             } => {
                 self.handle_mcp_inventory_result(result, detail, thread_id);
             }
-            AppEvent::RefreshSkills => self.refresh_skills(app_server),
+            AppEvent::RefreshSkills { thread_id } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.refresh_skills(app_server);
+                }
+            }
             AppEvent::SideReplaySkillsLoaded { request_id, thread_id, cwd, result } => {
                 if app_server.pending_side_skills_refresh == Some(request_id) {
                     app_server.pending_side_skills_refresh = None;
                     if !self.awaiting_side_replay(tui)
                         && self.current_displayed_thread_id() == Some(thread_id)
-                        && !cwds_differ(&cwd, self.chat_widget.config_ref().cwd.as_path())
+                        && self.chat_widget.session_cwd() == &cwd
                     {
                         self.handle_skills_list_result(
                             result.map_err(|err| color_eyre::eyre::eyre!(err)),

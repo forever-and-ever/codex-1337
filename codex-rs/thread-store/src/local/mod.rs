@@ -41,6 +41,8 @@ mod pending_thread_metadata_tests;
 #[cfg(test)]
 #[path = "read_thread_tests.rs"]
 mod read_thread_tests;
+#[cfg(all(test, unix))]
+mod realtime_input_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -49,12 +51,15 @@ mod timestamp_metadata_tests;
 
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_protocol::realtime::RealtimeItem;
+use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::StateDbHandle;
 use codex_rollout::WriterLockCoordinator;
 use codex_state::SqliteConfig;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -181,6 +186,13 @@ struct LiveRecorderEntry {
     // so missing SQLite rows can still be seeded.
     history_mode: ThreadHistoryMode,
     writer_lock: WriterLockGuard,
+    realtime_seals: Arc<Mutex<RealtimeSeals>>,
+}
+
+#[derive(Default)]
+struct RealtimeSeals {
+    pending: Option<String>,
+    committed: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -310,6 +322,7 @@ impl LocalThreadStore {
         self
     }
 
+    /// Controls new realtime-frame enrollment without changing existing enrolled threads.
     /// Return the state DB handle used by local rollout writers.
     pub async fn state_db(&self) -> Option<StateDbHandle> {
         self.state_db.clone()
@@ -413,6 +426,7 @@ impl LocalThreadStore {
                     rollout_id,
                     history_mode,
                     writer_lock,
+                    realtime_seals: Arc::new(Mutex::new(RealtimeSeals::default())),
                 });
                 Ok(())
             }
@@ -513,6 +527,25 @@ impl LocalThreadStore {
 impl ThreadStore for LocalThreadStore {
     fn ensure_thread_name_claims(&self) -> ThreadStoreFuture<'_, ()> {
         Box::pin(thread_names::ensure_thread_name_claims(self))
+    }
+
+    fn seal_realtime_items(
+        &self,
+        thread_id: ThreadId,
+        items: Vec<RealtimeItem>,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async move { live_writer::seal_realtime_items(self, thread_id, items).await })
+    }
+
+    fn seal_realtime_input(
+        &self,
+        thread_id: ThreadId,
+        frames: Vec<RealtimeItem>,
+        input: ResponseItemEnvelope,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(
+            async move { live_writer::seal_realtime_input(self, thread_id, frames, input).await },
+        )
     }
 
     fn model_ids(&self) -> Option<Arc<dyn codex_state::SessionModelIdStore>> {
@@ -818,6 +851,25 @@ impl ThreadStore for LocalThreadStore {
         params: crate::ListRealtimeParams,
     ) -> ThreadStoreFuture<'_, crate::RealtimePage> {
         Box::pin(LocalThreadStore::list_realtime(self, params))
+    }
+
+    fn load_realtime_session(
+        &self,
+        thread_id: ThreadId,
+        realtime_session_id: String,
+    ) -> ThreadStoreFuture<'_, Option<Vec<codex_protocol::realtime::RealtimeItem>>> {
+        Box::pin(thread_history::load_realtime_session(
+            self,
+            thread_id,
+            realtime_session_id,
+        ))
+    }
+
+    fn load_realtime_session_head(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadStoreFuture<'_, Option<String>> {
+        Box::pin(thread_history::load_realtime_session_head(self, thread_id))
     }
 
     fn search_threads(

@@ -8,6 +8,7 @@ use codex_app_server_embedding::EmbeddedServer;
 use codex_app_server_embedding::InProcessClientStartArgs;
 use codex_app_server_embedding::InProcessServerEvent;
 use codex_app_server_embedding::RequestResult;
+use codex_app_server_embedding::ThreadPermissionsReader;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -58,6 +59,14 @@ fn runtime_start_args(args: InProcessClientStartArgs) -> InProcessStartArgs {
 impl EmbeddedServer for InProcessClientHandle {
     fn connection(&self) -> Arc<dyn EmbeddedConnection> {
         Arc::new(self.sender())
+    }
+
+    fn thread_permissions_reader(&self) -> ThreadPermissionsReader {
+        let reader = InProcessClientHandle::thread_permissions_reader(self);
+        Arc::new(move |thread_id| {
+            let reader = reader.clone();
+            Box::pin(async move { reader.read(thread_id).await })
+        })
     }
 
     fn next_event(&mut self) -> BoxFuture<'_, Option<InProcessServerEvent>> {

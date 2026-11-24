@@ -17,6 +17,7 @@ use std::num::NonZeroU16;
 use std::ops::Range;
 use std::path::Path;
 
+use codex_protocol::ThreadId;
 use ratatui::buffer::Buffer;
 use ratatui::buffer::CellDiffOption;
 use ratatui::buffer::CellWidth;
@@ -74,6 +75,7 @@ impl std::fmt::Debug for TerminalHyperlink {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DestinationKind {
     Web,
+    SavedThread(ThreadId),
     /// A generated visualization, validated workspace artifact, or locally viewed image.
     TrustedFile,
 }
@@ -126,6 +128,17 @@ impl TerminalHyperlink {
             columns,
             destination,
             destination_kind: DestinationKind::Web,
+            markdown_source: None,
+        }
+    }
+
+    fn markdown(columns: Range<usize>, destination: String) -> Self {
+        let destination_kind = saved_thread_id(&destination)
+            .map_or(DestinationKind::Web, DestinationKind::SavedThread);
+        Self {
+            columns,
+            destination,
+            destination_kind,
             markdown_source: None,
         }
     }
@@ -193,9 +206,25 @@ impl TerminalHyperlink {
         }
     }
 
+    pub(crate) fn thread_id(&self) -> Option<ThreadId> {
+        match self.destination_kind {
+            DestinationKind::SavedThread(id) => Some(id),
+            DestinationKind::Web | DestinationKind::TrustedFile => None,
+        }
+    }
+
+    pub(crate) fn interaction_destination(&self) -> Option<String> {
+        match self.destination_kind {
+            DestinationKind::SavedThread(_) => Some(self.destination.clone()),
+            DestinationKind::Web | DestinationKind::TrustedFile => self.terminal_destination(),
+        }
+    }
+
     pub(crate) fn terminal_destination(&self) -> Option<String> {
         match self.destination_kind {
             DestinationKind::Web => web_destination(&self.destination),
+            // Never expose a server-local thread ID to an OSC 8 shell/desktop handler.
+            DestinationKind::SavedThread(_) => None,
             DestinationKind::TrustedFile => trusted_file_destination(&self.destination),
         }
     }
@@ -270,7 +299,7 @@ impl HyperlinkLine {
     }
 
     pub(crate) fn push_span(&mut self, span: Span<'static>, destination: Option<&str>) {
-        if let Some(destination) = destination.and_then(web_destination) {
+        if let Some(destination) = destination.and_then(markdown_destination) {
             self.push_linked_span(span, self.source_width(), destination);
         } else {
             self.source = None;
@@ -289,7 +318,7 @@ impl HyperlinkLine {
         self.line.push_span(span);
         if end > start {
             self.hyperlinks
-                .push(TerminalHyperlink::web(start..end, destination));
+                .push(TerminalHyperlink::markdown(start..end, destination));
         }
     }
 
@@ -741,6 +770,20 @@ fn trailing_url_end(candidate: &str) -> usize {
     end
 }
 
+fn saved_thread_id(destination: &str) -> Option<ThreadId> {
+    // Check the unsanitized, exact spelling: no controls, query, fragment, or host normalization.
+    let id = destination.strip_prefix("codex://threads/")?;
+    let thread_id = ThreadId::from_string(id).ok()?;
+    (thread_id.to_string() == id).then_some(thread_id)
+}
+
+pub(crate) fn markdown_destination(destination: &str) -> Option<String> {
+    if saved_thread_id(destination).is_some() {
+        return Some(destination.to_string());
+    }
+    web_destination(destination)
+}
+
 pub(crate) fn web_destination(destination: &str) -> Option<String> {
     let safe_destination = sanitized_destination(destination)?;
     let parsed = Url::parse(&safe_destination).ok()?;
@@ -975,6 +1018,23 @@ pub(crate) fn mark_buffer_hyperlinks(
     }
 }
 
+/// Paint only the foreground of an admitted click target; selected cells retain priority.
+pub(crate) fn paint_hover_foreground(area: Rect, buf: &mut Buffer) {
+    for point in area.intersection(buf.area).positions() {
+        let cell = &mut buf[point];
+        if !cell.modifier.contains(Modifier::REVERSED)
+            && let Some(foreground) = crate::style::hover_foreground(cell.fg, cell.bg)
+        {
+            // A dim ink's faintness is encoded in its bound foreground. Do not apply
+            // the latent terminal modifier to the replacement accent.
+            if crate::warpaint::dimmed_ink_binds_to_faint(cell.fg) {
+                cell.modifier.remove(Modifier::DIM);
+            }
+            cell.set_fg(foreground);
+        }
+    }
+}
+
 pub(crate) fn mark_url_hyperlink(buf: &mut Buffer, area: Rect, destination: &str) {
     mark_matching_cells(buf, area, destination, |cell| {
         cell.fg == Color::Cyan && cell.modifier.contains(Modifier::UNDERLINED)
@@ -1033,6 +1093,40 @@ mod tests {
             strip_osc8(&osc8_hyperlink("https://example.com/a", "visible")),
             "visible"
         );
+    }
+
+    #[test]
+    fn only_exact_saved_thread_destinations_have_typed_links() {
+        let id = ThreadId::new();
+        let uri = format!("codex://threads/{id}");
+        let mut line = HyperlinkLine::default();
+        line.push_span("saved thread".into(), Some(&uri));
+        let [link] = line.hyperlinks.as_slice() else {
+            panic!("expected one saved-thread link");
+        };
+        assert_eq!(link.thread_id(), Some(id));
+        assert_eq!(
+            link.interaction_destination().as_deref(),
+            Some(uri.as_str())
+        );
+        assert_eq!(link.terminal_destination(), None);
+
+        for invalid in [
+            format!("{uri}/extra"),
+            format!("{uri}?different=1"),
+            format!("{uri}#fragment"),
+            format!("codex://threads/\u{7}{id}"),
+            format!("codex://threads@elsewhere/{id}"),
+            format!("codex://threads/{}", id.to_string().to_uppercase()),
+            "codex://threads/not-a-thread".to_string(),
+        ] {
+            assert_eq!(markdown_destination(&invalid), None, "{invalid:?}");
+            assert_eq!(osc8_hyperlink(&invalid, "saved thread"), "saved thread");
+        }
+
+        let web = TerminalHyperlink::web(0..5, format!("https://threads/{id}"));
+        assert_eq!(web.thread_id(), None);
+        assert!(web.terminal_destination().is_some());
     }
 
     #[test]

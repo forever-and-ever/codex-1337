@@ -65,10 +65,10 @@ async fn owned_startup_hides_tip_in_transcript() -> Result<()> {
             .join("\n");
         snapshots.push(format!("{width} columns\n{screen}"));
     }
-    insta::assert_snapshot!(
-        "startup_tip_in_transcript",
-        normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.join("\n\n"))),
-    );
+    let rendered =
+        normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.join("\n\n")))
+            .replace(crate::version::CODEX_DISPLAY_VERSION, "<VERSION>");
+    insta::assert_snapshot!("startup_tip_in_transcript", rendered);
     // The source remains available to terminal scrollback in both presentation modes.
     for mode in [HistoryRenderMode::Rich, HistoryRenderMode::Raw] {
         let lines = app.transcript_cells[0].display_lines_for_mode(/*width*/ 80, mode);

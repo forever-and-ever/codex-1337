@@ -12,6 +12,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use codex_config::McpStartupReadiness;
 use codex_connectors::ConnectorRuntimeFetchSource;
+use futures::future::BoxFuture;
 use futures::future::join_all;
 use rmcp::model::Tool;
 use tracing::Instrument;
@@ -102,8 +103,11 @@ impl McpServerView {
                         self.catalog_item_limit,
                         client.server_instructions.as_deref(),
                     );
-                    // Bound relist layouts for both revision checks and binding capture.
-                    Box::pin(client.with_active_shared_lease(relist)).await?
+                    // Check the lease and pagination future's Send bound here, rather than
+                    // carrying the concrete OAuth recovery future into Core's turn task.
+                    let relist: BoxFuture<'_, _> =
+                        Box::pin(client.with_active_shared_lease(relist));
+                    relist.await?
                 },
             )
             .await
@@ -554,6 +558,7 @@ impl McpConnectionSet {
         let managed_client = view
             .connection
             .client()
+            .instrument(tracing::info_span!("mcp.apps.client_ready_wait"))
             .await
             .context("failed to get client")?;
         let Some((tools, list_start)) = managed_client

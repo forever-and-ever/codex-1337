@@ -20,19 +20,20 @@ use codex_core::exec_env::create_env;
 use codex_core::spawn::CODEX_SANDBOX_ENV_VAR;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_core::windows_sandbox::local_binding_policy_for_sandbox;
-use codex_core::windows_sandbox::managed_proxy_routing_for_windows_sandbox;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_sandboxing::SandboxCommand;
+use codex_sandboxing::SandboxExecutables;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType as SandboxBackend;
 use codex_sandboxing::SandboxType::WindowsMxc;
+use codex_sandboxing::managed_proxy_routing_for_windows_sandbox;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_path_uri::PathUri;
@@ -125,7 +126,7 @@ pub async fn run_command_under_landlock(
         command,
         config_overrides,
         codex_linux_sandbox_exe,
-        SandboxType::Landlock,
+        SandboxType::Linux,
         /*log_denials*/ false,
         &[],
     )
@@ -171,7 +172,7 @@ pub async fn run_command_under_windows_sandbox(
 enum SandboxType {
     #[cfg(target_os = "macos")]
     Seatbelt,
-    Landlock,
+    Linux,
     Windows,
 }
 
@@ -310,7 +311,7 @@ async fn run_command_under_sandbox(
         SandboxEnforcement::Managed => match sandbox_type {
             #[cfg(target_os = "macos")]
             SandboxType::Seatbelt => SandboxBackend::MacosSeatbelt,
-            SandboxType::Landlock => SandboxBackend::LinuxSeccomp,
+            SandboxType::Linux => SandboxBackend::LinuxSeccomp,
             #[cfg(windows)]
             SandboxType::Windows if windows_sandbox_type == WindowsMxc => WindowsMxc,
             #[cfg(windows)]
@@ -414,7 +415,6 @@ async fn run_command_under_sandbox(
         },
         permissions: &permission_profile,
         workspace_roots: workspace_roots.as_deref(),
-        runtime_readable_paths: None,
         selection: SandboxSelection::Explicit(sandbox),
         network: SandboxNetwork::new(
             network.is_some(),
@@ -422,7 +422,7 @@ async fn run_command_under_sandbox(
             /*environment_id*/ None,
         ),
         sandbox_policy_cwd: &cwd,
-        sandbox_exe: sandbox_exe.as_deref(),
+        executables: SandboxExecutables::Launcher(sandbox_exe.as_deref()),
         use_legacy_landlock,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
     })?;
@@ -439,7 +439,6 @@ async fn run_command_under_sandbox(
     }
 
     let status = child.wait().await?;
-
     #[cfg(target_os = "macos")]
     if let Some(denial_logger) = denial_logger {
         let denials = denial_logger.finish().await;
@@ -452,7 +451,7 @@ async fn run_command_under_sandbox(
             }
         }
     }
-
+    drop(network_proxy);
     handle_exit_status(status);
 }
 

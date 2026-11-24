@@ -1,12 +1,23 @@
 use super::*;
+use crate::exec::ExecCapturePolicy;
+use crate::exec::ExecExpiration;
+use crate::sandboxing::ExecOptions;
 use crate::shell::ShellType;
+use crate::tools::sandboxing::SandboxAttempt;
+use crate::tools::sandboxing::SandboxOverride;
 #[cfg(target_os = "macos")]
 use codex_network_proxy::CODEX_PROXY_GIT_SSH_COMMAND_MARKER;
 use codex_network_proxy::PROXY_ACTIVE_ENV_KEY;
 use codex_network_proxy::PROXY_ENV_KEYS;
 #[cfg(target_os = "macos")]
 use codex_network_proxy::PROXY_GIT_SSH_COMMAND_ENV_KEY;
+use codex_protocol::config_types::WindowsSandboxLevel;
+use codex_protocol::models::PermissionProfile;
+use codex_sandboxing::SandboxManager;
+use codex_sandboxing::SandboxSelection;
+use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
@@ -25,6 +36,84 @@ fn shell_with_snapshot(
         },
         snapshot_path,
     )
+}
+
+#[tokio::test]
+async fn explicit_escalation_prepares_exec_without_managed_network() -> anyhow::Result<()> {
+    let dir = tempdir().expect("create temp dir");
+    let command_cwd = dir.path().join("command").abs();
+    let native_sandbox_policy_cwd = dir.path().join("sandbox-policy").abs();
+    let mut env = HashMap::from([
+        ("CUSTOM_ENV".to_string(), "kept".to_string()),
+        (PROXY_ACTIVE_ENV_KEY.to_string(), "1".to_string()),
+    ]);
+    for key in PROXY_ENV_KEYS {
+        env.insert((*key).to_string(), "http://127.0.0.1:43123".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    env.insert(
+        PROXY_GIT_SSH_COMMAND_ENV_KEY.to_string(),
+        format!("{CODEX_PROXY_GIT_SSH_COMMAND_MARKER}ssh"),
+    );
+
+    let command = codex_sandboxing::SandboxCommand {
+        program: "/bin/echo".into(),
+        args: vec!["ok".to_string()],
+        cwd: PathUri::from_abs_path(&command_cwd),
+        env: exec_env_for_sandbox_permissions(&env, SandboxPermissions::RequireEscalated),
+        managed_network: None,
+        additional_permissions: None,
+    };
+    assert_eq!(command.cwd, PathUri::from_abs_path(&command_cwd));
+    let sandbox_policy_cwd = PathUri::from_abs_path(&native_sandbox_policy_cwd);
+    let options = ExecOptions {
+        expiration: ExecExpiration::DefaultTimeout,
+        capture_policy: ExecCapturePolicy::ShellTool,
+    };
+    let permissions = PermissionProfile::Disabled;
+    let manager = SandboxManager::new();
+    let attempt = SandboxAttempt {
+        sandbox_override: SandboxOverride::NoOverride,
+        local_selection: SandboxSelection::Explicit(SandboxType::None),
+        sandbox_requested: false,
+        permissions: &permissions,
+        exec_server_permissions: &permissions,
+        enforce_managed_network: false,
+        manager: &manager,
+        sandbox_cwd: &sandbox_policy_cwd,
+        workspace_roots: std::slice::from_ref(&sandbox_policy_cwd),
+        sandbox_exe: None,
+        use_legacy_landlock: false,
+        windows_sandbox_type: SandboxType::None,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        network_denial_cancellation_token: None,
+        network_proxy: None,
+    };
+
+    let exec_request = attempt
+        .env_for(
+            command, options, /*network*/ None, /*environment_id*/ None,
+        )
+        .await
+        .expect("prepare exec request");
+
+    assert_eq!(*exec_request.cwd(), PathUri::from_abs_path(&command_cwd));
+    assert_eq!(
+        *exec_request.sandbox_policy_cwd(),
+        PathUri::from_abs_path(&native_sandbox_policy_cwd)
+    );
+    assert!(!exec_request.has_network_proxy());
+    for key in PROXY_ENV_KEYS {
+        assert_eq!(exec_request.env().get(*key), None, "{key} should be unset");
+    }
+    #[cfg(target_os = "macos")]
+    assert_eq!(exec_request.env().get(PROXY_GIT_SSH_COMMAND_ENV_KEY), None);
+    assert_eq!(
+        exec_request.env().get("CUSTOM_ENV"),
+        Some(&"kept".to_string())
+    );
+
+    Ok(())
 }
 
 #[test]

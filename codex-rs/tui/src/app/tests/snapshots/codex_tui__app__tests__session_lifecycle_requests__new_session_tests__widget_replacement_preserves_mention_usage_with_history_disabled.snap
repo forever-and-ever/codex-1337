@@ -1,8 +1,8 @@
 ---
 source: tui/src/app/tests/new_session_tests.rs
-expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))"
+expression: rendered
 ---
-  >_ OpenAI Codex (v0.171.0-1337)
+  >_ OpenAI Codex (v<VERSION>)
      /tmp/project
 
   • Ready

@@ -75,7 +75,7 @@ impl ThreadManager {
                 return Ok(ThreadEvictionOutcome::Contended);
             }
         }
-        let threads = Arc::clone(&self.state.threads);
+        let threads = self.state.threads.clone();
         tokio::spawn(async move {
             let _gate = gate;
             thread.shutdown_and_wait().await?;

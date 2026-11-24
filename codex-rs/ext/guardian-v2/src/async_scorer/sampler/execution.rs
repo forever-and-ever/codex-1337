@@ -159,6 +159,7 @@ impl SamplingExecution {
                 | ApiError::NativeStream(_)
                 | ApiError::AnthropicStream { .. }
                 | ApiError::ResponseIncomplete(_)
+                | ApiError::SpendLimitExceeded(_)
                 | ApiError::QuotaExceeded
                 | ApiError::UsageNotIncluded
                 | ApiError::SessionBudgetExceeded

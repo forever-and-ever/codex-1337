@@ -255,34 +255,50 @@ async fn review_bound_elicitation(
             .and_then(|meta| meta.get(MCP_ELICITATION_STRICT_AUTO_REVIEW_KEY)),
         Some(Value::Bool(true))
     );
+    let connector_id = elicitation_connector_id(&request.elicitation);
+    let review_outer_invocation =
+        request.server_name == CODEX_APPS_MCP_SERVER_NAME && originating_call_id.is_none();
+    let verified_invocation = if review_outer_invocation
+        && let Some(call_id) = call_id
+        && let Some(McpToolApprovalContext {
+            invocation: Some(invocation),
+            metadata,
+            ..
+        }) = approval_context.as_ref()
+        && invocation.server == request.server_name
+        && metadata.connector_id.as_deref() == connector_id
+        && request
+            .elicitation
+            .meta()
+            .and_then(|meta| metadata_str(meta, MCP_ELICITATION_TOOL_NAME_KEY))
+            == Some(invocation.tool.as_str())
+    {
+        Some((call_id, invocation, metadata))
+    } else {
+        None
+    };
+    let link_id = verified_invocation.and_then(|(_, _, meta)| meta.link_id.as_deref());
+    let tool = verified_invocation
+        .map(|(_, invocation, meta)| (invocation.tool.as_str(), meta.tool_title.as_deref()));
+    let requirements = turn_context.config.config_layer_stack.requirements();
+    let reviewer_for = |layers, default_reviewer| {
+        crate::connectors::mcp_approvals_reviewer_from_layers(
+            layers,
+            requirements,
+            default_reviewer,
+            Some(model_info.slug.as_str()),
+            request.server_name.as_str(),
+            connector_id,
+            link_id,
+            tool,
+        )
+    };
+
     let mut guardian_request: crate::guardian::ReviewAction = if strict_auto_review {
-        let connector_id = elicitation_connector_id(&request.elicitation);
-        // A live Browser invocation can review a nested action with its own identity.
-        // Other hosted connectors must still review their registered outer invocation.
-        let review_outer_invocation =
-            request.server_name == CODEX_APPS_MCP_SERVER_NAME && originating_call_id.is_none();
         let trusted_guardian_request = if review_outer_invocation {
-            let Some(call_id) = call_id else {
+            let Some((call_id, invocation, metadata)) = verified_invocation else {
                 return Ok(None);
             };
-            let Some(McpToolApprovalContext {
-                invocation: Some(invocation),
-                metadata,
-                ..
-            }) = approval_context.as_ref()
-            else {
-                return Ok(None);
-            };
-            if invocation.server != request.server_name
-                || connector_id != metadata.connector_id.as_deref()
-                || request
-                    .elicitation
-                    .meta()
-                    .and_then(|meta| metadata_str(meta, MCP_ELICITATION_TOOL_NAME_KEY))
-                    != Some(invocation.tool.as_str())
-            {
-                return Ok(None);
-            }
             Some(
                 crate::mcp_tool_call::build_guardian_mcp_tool_review_request(
                     call_id,
@@ -297,26 +313,14 @@ async fn review_bound_elicitation(
             .config
             .features
             .enabled(Feature::GuardianApproval)
-            || [
-                &turn_context.config.config_layer_stack,
+            || requirements
+                .approvals_reviewer
+                .can_set(&ApprovalsReviewer::AutoReview)
+                .is_err()
+            || reviewer_for(
                 &mcp_config.config_layer_stack,
-            ]
-            .into_iter()
-            .any(|layers| {
-                layers
-                    .requirements()
-                    .approvals_reviewer
-                    .can_set(&ApprovalsReviewer::AutoReview)
-                    .is_err()
-                    || crate::connectors::mcp_approvals_reviewer_from_layers(
-                        layers,
-                        ApprovalsReviewer::AutoReview,
-                        Some(model_info.slug.as_str()),
-                        request.server_name.as_str(),
-                        connector_id,
-                        /*link_id*/ None,
-                    ) != ApprovalsReviewer::AutoReview
-            })
+                ApprovalsReviewer::AutoReview,
+            ) != ApprovalsReviewer::AutoReview
             || request
                 .elicitation
                 .meta()
@@ -372,28 +376,13 @@ async fn review_bound_elicitation(
             | AskForApproval::Granular(_) => {}
         }
 
-        let approvals_reviewer = crate::connectors::mcp_approvals_reviewer_from_layers(
-            &turn_context.config.config_layer_stack,
-            review_context.approvals_reviewer,
-            Some(model_info.slug.as_str()),
-            request.server_name.as_str(),
-            elicitation_connector_id(&request.elicitation),
-            /*link_id*/ None,
-        );
-        let mcp_reviewer = crate::connectors::mcp_approvals_reviewer_from_layers(
+        // Reviewer choice and managed requirements follow the issuing call, not a later
+        // transport refresh. Verified invocations also carry the captured app tool and link.
+        review_context.approval_policy = approval_policy;
+        review_context.approvals_reviewer = reviewer_for(
             &mcp_config.config_layer_stack,
             review_context.approvals_reviewer,
-            Some(model_info.slug.as_str()),
-            request.server_name.as_str(),
-            elicitation_connector_id(&request.elicitation),
-            /*link_id*/ None,
         );
-        review_context.approval_policy = approval_policy;
-        review_context.approvals_reviewer = if approvals_reviewer == mcp_reviewer {
-            approvals_reviewer
-        } else {
-            ApprovalsReviewer::User
-        };
         match guardian_elicitation_review_request(&request, originating_call_id) {
             GuardianElicitationReview::NotRequested => return Ok(None),
             GuardianElicitationReview::Decline(reason) => {

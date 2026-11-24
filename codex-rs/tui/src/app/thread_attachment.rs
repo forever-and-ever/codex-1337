@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_server_session::ResumeModelSettings;
 use crate::backend_id::BackendId;
+use crate::chatwidget::ReadOnlyThread;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
 use futures::future::BoxFuture;
@@ -23,7 +24,11 @@ impl Target {
 #[derive(Debug)]
 pub(crate) enum PreparedAttachment {
     Live(Box<AppServerStartedThread>),
-    ReplayOnly(Box<Thread>),
+    ReplayOnly {
+        thread: Box<Thread>,
+        cwd: Option<codex_utils_path_uri::PathUri>,
+        read_only: Option<ReadOnlyThread>,
+    },
 }
 
 #[derive(Debug)]
@@ -235,7 +240,26 @@ pub(super) async fn prepare(
                     "Agent thread {thread_id} is not yet available for replay or live attach."
                 ));
             }
-            Ok(PreparedAttachment::ReplayOnly(Box::new(thread)))
+            let convention = app_server.path_convention();
+            let cwd = match crate::app_server_session::decode_thread_cwd(&thread.cwd, convention) {
+                Ok(cwd) => Some(cwd),
+                Err(error) if convention.is_some() => return Err(error.into()),
+                Err(_) => None,
+            };
+            Ok(PreparedAttachment::ReplayOnly {
+                thread: Box::new(thread),
+                cwd,
+                read_only: if crate::session_start::is_archived_session_error(
+                    &resume_err,
+                    thread_id,
+                ) {
+                    Some(ReadOnlyThread::Archived)
+                } else if crate::app_server_session::is_active_writer_error(&resume_err) {
+                    Some(ReadOnlyThread::ExternalWriter)
+                } else {
+                    None
+                },
+            })
         }
     }
 }
@@ -264,15 +288,21 @@ impl App {
             },
         );
         let closed = updates.close == CloseState::Closed;
-        let (mut session, turns, live) = match attachment {
+        let (mut session, turns, live, read_only) = match attachment {
             PreparedAttachment::Live(started) => {
                 if started.blocks_direct_input {
                     self.agent_navigation.mark_parent_owned(child);
                 }
-                (started.session, started.turns, !closed)
+                (started.session, started.turns, !closed, None)
             }
-            PreparedAttachment::ReplayOnly(thread) => {
-                let mut session = self.session_state_for_thread_read(child, &thread).await;
+            PreparedAttachment::ReplayOnly {
+                thread,
+                cwd,
+                read_only,
+            } => {
+                let mut session = self
+                    .session_state_for_thread_read(child, &thread, cwd)
+                    .await;
                 if let Some(channel) = self.thread_event_channels.get(&child)
                     && let Some(cached) = channel.store.lock().await.session.as_ref()
                 {
@@ -282,14 +312,19 @@ impl App {
                     session.approvals_reviewer = cached.approvals_reviewer;
                 }
                 session.model.clear();
-                (session, thread.turns, false)
+                (session, thread.turns, false, read_only)
             }
         };
         session.forked_from_id = None;
         session.fork_parent_title = None;
         session.daybreak_enabled = false;
-        if let Some(settings) = &updates.settings {
-            super::thread_settings::apply_thread_settings_to_session(&mut session, settings);
+        if let Some(settings) = &updates.settings
+            && let Ok(cwd) = crate::app_server_session::decode_thread_cwd(
+                &settings.cwd,
+                server.path_convention(),
+            )
+        {
+            super::thread_settings::apply_thread_settings_to_session(&mut session, settings, &cwd);
         }
         let channel = self.ensure_thread_channel(child);
         let (turn_state, replay_output) = {
@@ -310,6 +345,11 @@ impl App {
         self.install_selected_snapshot(child, session, turns, live)
             .await;
         let channel = self.ensure_thread_channel(child);
+        match read_only {
+            Some(ReadOnlyThread::Archived) => channel.mark_archived(),
+            Some(ReadOnlyThread::ExternalWriter) => channel.mark_external_writer(),
+            None => {}
+        }
         {
             let mut store = channel.store.lock().await;
             if let Some((active, latest, evicted, reasoning)) = turn_state {

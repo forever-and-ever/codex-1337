@@ -524,7 +524,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &mut server,
         other_id,
         AppCommand::ListSkills {
-            cwds: vec![app.config.cwd.to_path_buf()],
+            cwd: app.config.cwd.clone().into(),
             force_reload: false,
         },
     )
@@ -678,7 +678,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &mut server,
         other_id,
         AppCommand::ListSkills {
-            cwds: vec![app.config.cwd.to_path_buf()],
+            cwd: app.config.cwd.clone().into(),
             force_reload: false,
         },
     )
@@ -747,7 +747,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let writes_before_consent = recorded_params(&requests, "config/batchWrite").len();
     app.admit_dashboard_trust(
         &server,
-        agents_overview::trust::DashboardTrustAdmission::Directory {
+        Box::new(agents_overview::trust::DashboardTrustAdmission::Directory {
             consent: crate::onboarding::onboarding_screen::DirectoryTrustConsent::Path(
                 consent_cwd.to_path_buf(),
             ),
@@ -756,7 +756,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
                 remote_cwd: None,
             },
             plan: consent_plan,
-        },
+        }),
     );
     time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "config/batchWrite").len() == writes_before_consent {
@@ -846,7 +846,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &mut server,
         other_id,
         AppCommand::ListSkills {
-            cwds: vec![app.config.cwd.to_path_buf()],
+            cwd: app.config.cwd.clone().into(),
             force_reload: false,
         },
     )

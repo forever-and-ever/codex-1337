@@ -26,15 +26,21 @@ fn identical_text_from_a_discarded_attempt_does_not_gain_acceptance() -> anyhow:
         ModelRequestProtocol::Responses,
         ModelRequestProtocol::Messages,
     ] {
-        let temp = TempDir::new()?;
-        let writer = create_started_writer(&temp)?;
+        let (temp, writer) = crate::writer::capture_tests::limited_trace(
+            /*body*/ 512,
+            /*bundle*/ 64 << 10,
+        )?;
+        start_thread(&writer, "thread-root", "/root")?;
         start_turn(&writer, "turn-1")?;
         let input = message("user", "answer");
         let append_request = |inference_id: &str| -> anyhow::Result<()> {
             let request = match request_protocol {
                 ModelRequestProtocol::Responses => json!({"input": [input]}),
                 ModelRequestProtocol::Messages => json!({"messages": [{
-                    "role": "user", "content": [{"type": "text", "text": "answer"}],
+                    "role": "user", "content": [
+                        {"type": "text", "text": "answer"},
+                        {"type": "text", "text": "x".repeat(1024)},
+                    ],
                 }]}),
             };
             let request_payload =
@@ -107,6 +113,15 @@ fn identical_text_from_a_discarded_attempt_does_not_gain_acceptance() -> anyhow:
             Some("discarded-0")
         );
         if request_protocol == ModelRequestProtocol::Messages {
+            // The native adapter wraps each block in a separate normalized item;
+            // the missing slot must follow its block instead of dropping it.
+            let capped_item = &trace.conversation_items[&retry.request_item_ids[1]];
+            let [ConversationPart::PayloadRef { raw_payload_id, .. }] =
+                capped_item.body.parts.as_slice()
+            else {
+                anyhow::bail!("capped Messages text must remain a payload reference");
+            };
+            assert!(!trace.raw_payloads[raw_payload_id].is_complete());
             let reasoning = &trace.conversation_items[&retry.response_item_ids[1]];
             assert_eq!(reasoning.responses_item_id.as_deref(), Some("accepted-1"));
             assert!(
@@ -379,6 +394,41 @@ fn accepted_tool_results_survive_without_inference_and_reuse_their_ids() -> anyh
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn capped_tool_output_keeps_the_next_stripped_id_in_its_original_slot() -> anyhow::Result<()> {
+    let (temp, writer) =
+        crate::writer::capture_tests::limited_trace(/*body*/ 512, /*bundle*/ 64 << 10)?;
+    start_thread(&writer, "thread-root", "/root")?;
+    start_turn(&writer, "turn-1")?;
+    let request = json!({"input": [
+        {"type": "function_call_output", "output": "x".repeat(1024)},
+        {"type": "function_call_output", "output": "retained"}
+    ]});
+    writer.append(RawTraceEventPayload::InferenceStarted {
+        inference_call_id: "sample".into(),
+        thread_id: "thread-root".into(),
+        codex_turn_id: "turn-1".into(),
+        model: "model".into(),
+        provider_name: "test".into(),
+        request_protocol: ModelRequestProtocol::Responses,
+        request_payload: writer.write_json_payload(RawPayloadKind::InferenceRequest, &request)?,
+        prepared_prompt_payload: writer
+            .write_json_payload(RawPayloadKind::PreparedPrompt, &request)?,
+        warmup_context_payload: None,
+        stripped_tool_output_ids: vec![(0, "large".into()), (1, "small".into())],
+    })?;
+    let state = replay_bundle(temp.path())?;
+    let ids = &state.inference_calls["sample"].request_item_ids;
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        state.conversation_items[&ids[0]]
+            .responses_item_id
+            .as_deref(),
+        Some("small")
+    );
     Ok(())
 }
 

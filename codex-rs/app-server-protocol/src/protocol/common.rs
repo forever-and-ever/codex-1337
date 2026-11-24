@@ -3497,7 +3497,7 @@ mod tests {
                     recency_at: Some(3),
                     status: v2::ThreadStatus::Idle,
                     path: None,
-                    cwd: cwd.clone(),
+                    cwd: cwd.clone().into(),
                     cli_version: "0.0.0".to_string(),
                     source: v2::SessionSource::Exec,
                     can_accept_text_input: None,
@@ -3508,6 +3508,7 @@ mod tests {
                     git_info: None,
                     name: None,
                     daybreak_enabled: None,
+                    daybreak_program_propagation_enrolled: None,
                     comms: Default::default(),
                     context_role: None,
                     turns: Vec::new(),
@@ -3515,7 +3516,7 @@ mod tests {
                 model: "gpt-5".to_string(),
                 model_provider: "openai".to_string(),
                 service_tier: None,
-                cwd,
+                cwd: cwd.into(),
                 runtime_workspace_roots: Vec::new(),
                 instruction_sources: vec![
                     codex_utils_path_uri::LegacyAppPathString::from_abs_path(&absolute_path(
@@ -3594,6 +3595,8 @@ mod tests {
                 "multiAgentMode": "explicitRequestOnly"
             }
         });
+        expected["response"]["thread"]["daybreakProgramPropagationEnrolled"] =
+            serde_json::Value::Null;
         expected["response"]["thread"]["theme"] = serde_json::Value::Null;
         assert_eq!(expected, serde_json::to_value(&response)?);
         Ok(())
@@ -4692,7 +4695,7 @@ mod tests {
                 thread_settings: v2::ThreadSettings {
                     disabled_plugin_ids: Vec::new(),
                     environments: Some(Vec::new()),
-                    cwd: absolute_path("/tmp/repo"),
+                    cwd: absolute_path("/tmp/repo").into(),
                     approval_policy: v2::AskForApproval::Never,
                     approvals_reviewer: v2::ApprovalsReviewer::User,
                     sandbox_policy: v2::SandboxPolicy::DangerFullAccess,

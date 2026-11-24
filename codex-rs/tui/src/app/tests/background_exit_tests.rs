@@ -332,7 +332,9 @@ async fn remote_disconnect_exit_summary_does_not_require_a_local_rollout_or_prin
     app.app_server_target = AppServerTarget::Remote {
         endpoint: crate::RemoteAppServerEndpoint::WebSocket {
             websocket_url: "wss://user:secret@example.com:443/?token=private#secret".to_string(),
-            auth_token: Some("secret-token".to_string()),
+            auth_token: Some(codex_app_server_client::RemoteAuthToken::from_secret(
+                "secret-token".to_string(),
+            )),
         },
     };
     let thread_id = ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap();

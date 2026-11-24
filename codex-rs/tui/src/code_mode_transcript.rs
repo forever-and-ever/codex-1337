@@ -15,10 +15,10 @@ use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -268,7 +268,7 @@ impl Reducers {
         &mut self,
         display: ThreadId,
         admission: Admission,
-        cwd: &AbsolutePathBuf,
+        cwd: &Path,
         animations: bool,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
         image_origin: crate::history_cell::ImagePathOrigin,
@@ -523,7 +523,7 @@ impl ScopedCodeMode {
         &mut self,
         item: ThreadItemPayload,
         source: Source,
-        cwd: &AbsolutePathBuf,
+        cwd: &Path,
         wait: &mut Option<Arc<dyn HistoryCell>>,
         tokens: &mut Option<TokenBill>,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,

@@ -215,6 +215,15 @@ the choice unset. Ephemeral threads cannot save it.
 Use `thread/metadata/update` for later changes. This preference does not select
 `turn/start.cyberAccessProgram` or grant access to an access program.
 
+With `experimentalApi`, a client preparing a thread for later use can pass
+`daybreakProgramPropagationEnrolled: false` to `thread/start` to opt that root
+out of Daybreak propagation. A managed requirement to enable propagation takes
+precedence. Omitted, null, or true uses the configured enrollment rule.
+`thread.daybreakProgramPropagationEnrolled` reports actual enrollment for the
+live thread, including in the start response and `thread/started` notification.
+Stored metadata alone yields null. Reusing the same live session preserves its
+enrollment. Starting a new session from storage yields false.
+
 # Application network policy
 
 App-server loads application network policy at startup and existing explicit
@@ -456,31 +465,6 @@ validation layer supports the chosen new spelling. Older clients or intermediari
 strip constraints in `[network_proxy]` or `[permissions.network]`; intermediaries may also skip
 host-local validation. This reader change does not migrate or
 version-gate published policy bundles.
-
-# Amazon Bedrock authentication
-
-If `model_providers.amazon-bedrock.aws.credential_export` is configured, Bedrock setup and
-Bedrock login return an error without changing configuration or saved credentials. Remove the
-exporter configuration before selecting another credential source. `aws.credential_export` and
-`aws.profile` cannot be configured together.
-
-Application network restrictions apply to each AWS credential and region HTTP request and to
-the Bedrock destination. Static access keys with an explicit region need no credential discovery.
-AWS profile `credential_process` commands are run by the AWS SDK; their network traffic is outside
-the application's HTTP policy. Configured credential exporters and AWS reauthentication commands
-require unrestricted application policy; policy revocation cancels their active work.
-
-After Bedrock login or setup, clients can call the experimental
-`account/bedrock/checkGovCloudRequirements` with `{}`. The server reloads configuration and
-requirements and returns `{ isGovCloud, shouldWarn }`. An explicitly configured official
-Bedrock endpoint hostname determines the region; with no URL or a custom proxy URL, the check
-resolves the AWS region using the current authentication state. It does not reload saved
-credentials or change login policy.
-For GovCloud, the advisory check requires API-only login and enabled managed application
-network restrictions with an explicit allow entry for the active Bedrock endpoint's domain.
-Non-Bedrock providers and commercial regions return both fields as `false`. Configuration or
-region resolution failures return an RPC error. This check does not block login or certify
-the entire network configuration.
 
 ## Stored thread attachments
 
@@ -862,14 +846,11 @@ Clients can filter the complete list by `settings.type === "customGateway"`.
 `canChangeDefault` accounts for required selection and higher-precedence overrides.
 
 Every entry contains `id`, `name`, `canEdit`, `baseUrl`, and `settings`.
-The shared `baseUrl` includes a configured endpoint override, including for
-Bedrock and GCP. It is null if unset or unsuitable for display.
+The shared `baseUrl` reports a configured endpoint override. It is null if
+unset or unsuitable for display.
 The `settings.type` field selects the provider-specific fields.
 
 - `openai` has no additional settings.
-- `bedrock` contains `profile` and `region` for either Bedrock provider.
-- `gcp` contains `projectId`, `location`, and `credentialFile`. The last field
-  is a path on the server host.
 - `customGateway` contains an `auth` object. Mode `none` has no other fields.
   Mode `environmentVariable` includes the variable name in `envKey`. Mode
   `externallyConfigured` includes a nullable `envKey` and indicates that the
@@ -880,15 +861,10 @@ Settings include inherited values and use null for unset nullable fields.
 Credential values are never resolved.
 
 `canEdit` indicates that at least one supported configuration field can be changed
-in the active user layer. Supported built-in fields are AWS profile/region for
-Bedrock and project/location/credential file for GCP. Custom providers support
-name, URL, and environment-variable authentication where applicable. Individual
-writes still require validation. Lower-precedence definitions can be overridden;
-required definitions are read-only. Both capabilities are false when user
-configuration is ignored. The flag does not establish credential validity or
-whether a setup flow that also selects a default provider will succeed.
-`account/bedrock/setup` targets `amazon-bedrock`; edits to `amazon-bedrock-runtime`
-must use that provider's configuration paths instead.
+in the active user layer. Custom providers support name, URL, and
+environment-variable authentication where applicable. Individual writes require
+validation. Lower-precedence definitions can be overridden; required definitions
+are read-only. Both capabilities are false when user configuration is ignored.
 
 Use `modelProvider/config/write` with a tagged `settings` patch. To create a
 custom gateway, send `type: "customGateway"`, `name`, and `baseUrl`. Omit
@@ -906,33 +882,9 @@ include its ID inside `settings`.
 }
 ```
 
-The Bedrock branch requires `amazon-bedrock` or `amazon-bedrock-runtime` and
-accepts `profile` and `region`. This patch changes only the runtime region.
-
-```json
-{
-  "settings": {
-    "type": "bedrock",
-    "providerId": "amazon-bedrock-runtime",
-    "region": "us-east-1"
-  }
-}
-```
-
-The GCP branch requires `gcp` and accepts `projectId`, `location`, and
-`credentialFile`. This patch clears the credential-file override.
-
-```json
-{ "settings": { "type": "gcp", "providerId": "gcp", "credentialFile": null } }
-```
-
 Omitted patch fields preserve their values. Setting a nullable field such as
-`region` to `null` removes its user-level override, so any inherited value takes effect.
-A supplied name must be a string. A supported built-in can receive its first
-override even when absent from the list. Custom gateways can share a display
-name with a built-in, except for names that select built-in behavior
-(`OpenAI`, `Amazon Bedrock`, `Amazon Bedrock Runtime`, and `Google Cloud Vertex AI`).
-Built-in provider IDs remain reserved.
+`envKey` to `null` removes its user-level override, so any inherited value takes effect.
+A supplied name must be a string. Built-in provider IDs remain reserved.
 
 Send only edited configuration fields. A null `baseUrl` in a summary can mean
 that the endpoint was redacted. When `settings.auth.mode` is `externallyConfigured`,

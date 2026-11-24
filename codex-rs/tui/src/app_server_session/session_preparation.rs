@@ -8,7 +8,6 @@ use super::ClientRequest;
 use super::Config;
 use super::HistoryHydrationScope;
 use super::LocalSettings;
-use super::PermissionProfile;
 use super::PermissionProfileSelection;
 use super::RequestId;
 use super::Result;
@@ -25,6 +24,7 @@ use super::ThreadStartSource;
 use super::TypedRequestError;
 use super::Uuid;
 use super::bootstrap_request_error;
+use super::decode_thread_cwd;
 use super::history;
 use super::history::preparation::HistoryPaginationUpdate;
 use super::is_history_pagination_unsupported;
@@ -39,6 +39,8 @@ use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::TurnItemsView;
+use codex_utils_path_uri::LegacyAppPathString;
+use codex_utils_path_uri::Platform;
 
 pub(crate) async fn read_thread(
     policy: RequestPolicy,
@@ -330,14 +332,13 @@ impl StartPreparation {
             if support == ThreadHistorySupport::LegacyOnly {
                 observations.history_support = support;
             }
-            let permissions = selected_profile.then(|| {
-                PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-                    &response.sandbox.to_core(),
-                    response.cwd.as_path(),
-                )
-            });
+            let convention = Platform::from_platform_os(handle.platform_os()).path_convention();
+            let cwd = decode_thread_cwd(&response.cwd, convention)?;
+            let permissions = selected_profile
+                .then(|| response.sandbox.permission_profile_for_cwd(&cwd))
+                .transpose()?;
             let mut started =
-                started_thread_from_start_response(response, &local_settings, &config, mode)
+                started_thread_from_start_response(response, &local_settings, &config, mode, cwd)
                     .await?;
             if let Some(permissions) = permissions {
                 started.session.permission_profile = permissions;
@@ -449,8 +450,15 @@ impl ViewPreparation {
             config.approvals_reviewer,
             config.permissions.permission_profile().clone(),
             config.permissions.active_permission_profile(),
-            thread.cwd.clone(),
-            config.workspace_roots.clone(),
+            decode_thread_cwd(
+                &thread.cwd,
+                Platform::from_platform_os(handle.platform_os()).path_convention(),
+            )?,
+            if image_origin == crate::history_cell::ImagePathOrigin::Local {
+                LegacyAppPathString::from_abs_paths(&config.workspace_roots)
+            } else {
+                Vec::new()
+            },
             Vec::new(),
             thread.reasoning_effort,
             &local_settings,
@@ -770,7 +778,7 @@ impl ResumePreparation {
         let mut started = started_thread_from_resume_response(
             response,
             &local_settings,
-            mode,
+            Platform::from_platform_os(handle.platform_os()).path_convention(),
         )
         .await?;
         started.history_notice = history_notice;

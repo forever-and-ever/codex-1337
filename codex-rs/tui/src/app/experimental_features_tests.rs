@@ -3,24 +3,20 @@ use crate::app::tests::make_test_app_with_channels;
 use codex_app_server_client::AppServerClient;
 use pretty_assertions::assert_eq;
 
-#[tokio::test]
-async fn experimental_features_use_selected_server_profile_and_preserve_task_settings() -> Result<()>
-{
-    let home = tempfile::tempdir()?;
-    let selected = AbsolutePathBuf::from_absolute_path(home.path().join("work.config.toml"))?;
-    let managed = home.path().join("managed.toml");
-    std::fs::write(home.path().join("config.toml"), "# unselected\n")?;
-    std::fs::write(&selected, "[features]\nnetwork_proxy = true\n")?;
-    std::fs::write(&managed, "")?;
+async fn start_feature_server(
+    home: &Path,
+    selected: &AbsolutePathBuf,
+    managed: &Path,
+) -> Result<(AppServerSession, AppServerStartedThread)> {
     let loader = LoaderOverrides {
         user_config_path: Some(selected.clone()),
         user_config_profile: Some("work".parse()?),
-        managed_config_path: Some(managed.clone()),
+        managed_config_path: Some(managed.to_path_buf()),
         ignore_project_config: true,
         ..LoaderOverrides::without_managed_config_for_tests()
     };
     let config = ConfigBuilder::default()
-        .codex_home(home.path().to_path_buf())
+        .codex_home(home.to_path_buf())
         .loader_overrides(loader.clone())
         .build()
         .await?;
@@ -41,7 +37,21 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
         AppServerClient::InProcess(client),
         crate::app_server_session::ThreadParamsMode::Remote,
     );
-    let thread = server.start_thread(&config).await?.session.thread_id;
+    let started = server.start_thread(&config).await?;
+    Ok((server, started))
+}
+
+#[tokio::test]
+async fn experimental_features_use_selected_server_profile_and_preserve_task_settings() -> Result<()>
+{
+    let home = tempfile::tempdir()?;
+    let selected = AbsolutePathBuf::from_absolute_path(home.path().join("work.config.toml"))?;
+    let managed = home.path().join("managed.toml");
+    std::fs::write(home.path().join("config.toml"), "# unselected\n")?;
+    std::fs::write(&selected, "[features]\nnetwork_proxy = true\n")?;
+    std::fs::write(&managed, "")?;
+    let (mut server, started) = start_feature_server(home.path(), &selected, &managed).await?;
+    let thread = started.session.thread_id;
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let before = (app.config.clone(), app.chat_widget.config_ref().clone());
     let updates = vec![

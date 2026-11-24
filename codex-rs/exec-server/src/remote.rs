@@ -70,7 +70,6 @@ mod registration_retry;
 
 /// Wire transport used after registering a remote exec-server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-/// The transport used to connect a remote exec-server environment.
 pub enum RemoteEnvironmentTransport {
     #[default]
     Noise,

@@ -511,7 +511,7 @@ impl ChatWidget {
             client_user_message_id.clone(),
             items,
             pending_steer_replacement,
-            self.config.cwd.to_path_buf(),
+            self.session_cwd().to_path_buf(),
             AskForApproval::from(self.config.permissions.approval_policy.value()),
             active_permission_profile,
             effective_mode.model().to_string(),

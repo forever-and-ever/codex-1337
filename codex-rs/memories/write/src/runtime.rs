@@ -52,7 +52,7 @@ pub(crate) struct MemoryStartupContext {
     version: MemoryVersion,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
-    thread_manager: Arc<ThreadManager>,
+    pub(crate) thread_manager: Arc<ThreadManager>,
     provider: CapturedProvider,
     session_telemetry: SessionTelemetry,
 }

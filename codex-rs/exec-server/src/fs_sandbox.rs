@@ -5,6 +5,7 @@ use std::time::Duration;
 use codex_exec_server_protocol::JSONRPCErrorError;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxExecRequest;
+use codex_sandboxing::SandboxExecutables;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_utils_path_uri::PathUri;
@@ -124,14 +125,14 @@ impl FileSystemSandboxRunner {
                 command,
                 permissions: &sandbox.permissions,
                 workspace_roots: Some(&sandbox.workspace_roots),
-                runtime_readable_paths: Some(&helper_readable_paths),
                 selection,
                 network: Default::default(),
                 sandbox_policy_cwd: &sandbox.cwd,
-                sandbox_exe: if cfg!(windows) {
-                    Some(helper.as_path())
-                } else {
-                    self.runtime_paths.codex_linux_sandbox_exe.as_deref()
+                executables: SandboxExecutables::Executor {
+                    codex: helper,
+                    linux_sandbox: self.runtime_paths.codex_linux_sandbox_exe.as_ref(),
+                    arg0: None,
+                    file_system_helper_read_roots: &helper_readable_paths,
                 },
                 use_legacy_landlock: sandbox.use_legacy_landlock,
                 windows_sandbox_level,

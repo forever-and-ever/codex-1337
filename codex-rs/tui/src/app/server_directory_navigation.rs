@@ -697,6 +697,7 @@ impl App {
                 RequestPolicy::Interactive,
                 &ready.settings,
                 ready.context.config.clone(),
+                /*workspace_roots*/ None,
                 ready.context.input.thread_id(),
                 None,
                 None,
@@ -996,11 +997,16 @@ impl App {
                                         == config.permissions.active_permission_profile()
                             };
                         if session.thread_id == source
-                            || crate::session_resume::cwds_differ(
-                                session.cwd.as_path(),
-                                ready.context.input.cwd.as_path(),
-                            )
-                            || session.runtime_workspace_roots != config.workspace_roots
+                            || !session.cwd.to_abs_path().is_ok_and(|cwd| {
+                                !crate::session_resume::cwds_differ(
+                                    cwd.as_path(),
+                                    ready.context.input.cwd.as_path(),
+                                )
+                            })
+                            || !session.runtime_workspace_roots.iter().cloned().eq(config
+                                .workspace_roots
+                                .iter()
+                                .map(codex_utils_path_uri::PathUri::from_abs_path))
                             || !permissions_match
                         {
                             self.working_directory_error(

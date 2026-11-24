@@ -94,7 +94,8 @@ impl App {
                 store
                     .session
                     .as_ref()
-                    .map_or_else(|| self.config.cwd.clone(), |session| session.cwd.clone()),
+                    .map(|session| session.cwd.to_path_buf())
+                    .unwrap_or_else(|| self.config.cwd.to_path_buf()),
                 store.turns.clone(),
             )
         };
@@ -181,7 +182,7 @@ impl App {
         turns: &[Turn],
         hidden_item_ids: &HashSet<(&str, &str)>,
         thread_id: ThreadId,
-        cwd: &AbsolutePathBuf,
+        cwd: &std::path::Path,
         visibility: RawReasoningVisibility,
     ) {
         if hidden_item_ids.is_empty() {
@@ -294,7 +295,7 @@ impl App {
         turns: &[Turn],
         hidden_item_ids: &HashSet<(&str, &str)>,
         thread_id: ThreadId,
-        cwd: &AbsolutePathBuf,
+        cwd: &std::path::Path,
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
         for turn in turns {

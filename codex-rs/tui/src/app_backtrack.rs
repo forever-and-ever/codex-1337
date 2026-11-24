@@ -225,10 +225,12 @@ impl App {
                 self.local_settings.tui.copy_on_select_clear_selection,
             ),
         );
-        if self.scrollback_has_older_history
-            && let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut()
-        {
-            overlay.set_history_state(TranscriptHistoryState::Partial);
+        let source = self.capture_thread_link_source();
+        if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+            overlay.thread_link_source = source;
+            if self.scrollback_has_older_history {
+                overlay.set_history_state(TranscriptHistoryState::Partial);
+            }
         }
         tui.frame_requester().schedule_frame();
     }

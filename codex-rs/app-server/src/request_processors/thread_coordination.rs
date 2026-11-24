@@ -36,6 +36,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_utils_path_uri::LegacyAppPathString;
 use serde_json::json;
 
 use super::super::thread_input::ensure_direct_input_allowed;
@@ -337,6 +338,19 @@ impl ThreadCoordinationService {
             ));
         }
         let source_thread = self.read(&caller.to_string()).await?;
+        let cwd = snapshot
+            .cwd()
+            .to_str()
+            .ok_or_else(|| invalid_request("source cwd cannot be represented as an API path"))?;
+        if snapshot
+            .workspace_roots
+            .iter()
+            .any(|root| root.to_str().is_none())
+        {
+            return Err(invalid_request(
+                "source workspace roots cannot be represented as API paths",
+            ));
+        }
         // Independent tasks keep thread/start account semantics: resolve the
         // chosen provider's current/default account, not the caller's family
         // identity. Existing destinations instead resume their saved identity.
@@ -344,8 +358,10 @@ impl ThreadCoordinationService {
             model: Some(model.unwrap_or_else(|| snapshot.model.clone())),
             model_provider: Some(snapshot.model_provider_id.clone()),
             service_tier: Some(snapshot.service_tier.clone()),
-            cwd: Some(snapshot.cwd().to_string_lossy().into_owned()),
-            runtime_workspace_roots: Some(snapshot.workspace_roots.clone()),
+            cwd: Some(cwd.to_owned()),
+            runtime_workspace_roots: Some(LegacyAppPathString::from_abs_paths(
+                &snapshot.workspace_roots,
+            )),
             approval_policy: Some(snapshot.approval_policy.into()),
             approvals_reviewer: Some(snapshot.approvals_reviewer.into()),
             history_mode: Some(snapshot.history_mode.into()),

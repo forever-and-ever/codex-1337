@@ -129,7 +129,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         exit_requested: None,
         sh_calls: Vec::new(),
     });
-    super::super::globals::install_globals(scope).expect("install globals");
+    super::super::globals::install_globals(scope, &[]).expect("install globals");
     let promise = super::evaluate_main_module(scope, r#"
 const first = tools.exec_command({});
 const other = tools.mcp__fake__exec_command({});

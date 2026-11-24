@@ -19,7 +19,8 @@ impl ConfigManager {
                 .http_client_factory()
                 .with_network_policy(self.local_network_policy.policy()),
             config.config_layer_stack.requirements_toml(),
-        );
+        )
+        .await;
         let mut scoped = Self::new(
             self.codex_home.clone(),
             self.current_cli_overrides(),

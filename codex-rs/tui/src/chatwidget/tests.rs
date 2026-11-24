@@ -289,8 +289,6 @@ mod program_status;
 mod rate_limit_recovery_tests;
 #[path = "tests/reasoning_status_tests.rs"]
 mod reasoning_status_tests;
-#[path = "tests/replay_render_tests.rs"]
-mod replay_render_tests;
 mod review_mode;
 #[path = "tests/review_picker_tests.rs"]
 mod review_picker_tests;

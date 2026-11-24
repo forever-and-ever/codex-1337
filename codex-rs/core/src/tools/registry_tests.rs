@@ -749,7 +749,10 @@ fn post_tool_use_feedback_output_preserves_mcp_result_metadata(tool_error: bool)
         arguments: "{}".to_string(),
     };
     let original_result = result.original.code_mode_result(&payload);
-    assert_eq!(result.tool_result_metadata(), Some(&metadata));
+    assert_eq!(
+        result.tool_result_metadata(),
+        ToolResultMetadata::new(&metadata)
+    );
     assert_eq!(result.code_mode_result(&payload), original_result);
 }
 

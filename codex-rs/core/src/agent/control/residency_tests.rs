@@ -87,6 +87,16 @@ async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
     assert!(futures::poll!(delivery.as_mut()).is_pending());
     drop(eviction_gate);
     delivery.await.expect("submit after eviction gate releases");
+
+    // A model-shaped message is replay context, not another admitted mailbox entry.
+    let mut imported = communication.clone();
+    imported.id = None;
+    imported.content = "imported notice".into();
+    first
+        .thread
+        .inject_response_items(vec![imported.to_model_input_item()])
+        .await
+        .expect("import agent-shaped history during the retained-mail window");
     first
         .thread
         .update_thread_settings(ThreadSettingsOverrides::default())

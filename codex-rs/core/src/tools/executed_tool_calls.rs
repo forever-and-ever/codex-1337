@@ -453,13 +453,7 @@ impl ExecutedToolCalls {
         }
         if bytes > available {
             item.clear_executed_tool_calls();
-            metadata_metrics::record_shedding(
-                "direct_retained",
-                original_bytes,
-                executed_tool_call_metadata_bytes(item),
-                codex_otel::global().as_ref(),
-            );
-            return;
+            bytes = executed_tool_call_metadata_bytes(item);
         }
         // All Direct attachments share the recorder lock, including cloned handles.
         self.retained_direct_metadata_bytes
@@ -492,14 +486,10 @@ impl ExecutedToolCalls {
         call_id: &str,
         result: &dyn ToolOutput,
     ) {
-        if !matches!(source, ToolCallSource::CodeMode { .. }) {
+        if !matches!(source, ToolCallSource::CodeMode { .. }) || self.lock_state().is_none() {
             return;
         }
-        // Release the lock before calling the output's trait method.
-        let recording = self.lock_state().is_some();
-        if recording && let Some(metadata) = result.tool_result_metadata() {
-            self.record_tool_result_metadata(source, call_id, metadata);
-        }
+        self.record_result_metadata(source, call_id, result.tool_result_metadata());
     }
 
     fn record_call(&self, call: &ToolCall, source: &ToolCallSource, tool_mode: ToolMode) {
@@ -600,28 +590,27 @@ impl ExecutedToolCalls {
         }
     }
 
-    fn record_tool_result_metadata(
+    fn record_result_metadata(
         &self,
         source: &ToolCallSource,
         call_id: &str,
-        metadata: &JsonValue,
+        metadata: ToolResultMetadata,
     ) -> bool {
         let ToolCallSource::CodeMode { cell_id, .. } = source else {
             return false;
         };
-        let metadata = ToolResultMetadata::new(metadata);
-        let has_metadata = metadata.is_some();
+        if !metadata.is_some() {
+            return false;
+        }
         let mut state = self.lock_state();
         let Some(state) = state.as_mut() else {
             return false;
         };
-        let call = state
-            .cells
-            .get_mut(&CellId::new(cell_id.clone()))
-            .and_then(|cell| cell.pending_calls.get_mut(call_id));
-        if let Some(call) = call {
+        if let Some(cell) = state.cells.get_mut(&CellId::new(cell_id.clone()))
+            && let Some(call) = cell.pending_calls.get_mut(call_id)
+        {
             call.set_tool_result_metadata(metadata);
-            return has_metadata;
+            return true;
         }
         let retained_call = state.retained_calls.values_mut().find_map(|retained| {
             if retained.runtime_cell_id.as_ref()?.as_str() != cell_id.as_str() {
@@ -634,7 +623,7 @@ impl ExecutedToolCalls {
             // Older retry copies must not overwrite this output's accepted result metadata.
             retained.result_metadata_updated = true;
             retained.calls[index].set_tool_result_metadata(metadata);
-            return has_metadata;
+            return true;
         }
         let mut candidates = state.retained_calls.values_mut().filter_map(|retained| {
             if retained.runtime_cell_id.as_ref()?.as_str() != cell_id.as_str() {
@@ -652,7 +641,7 @@ impl ExecutedToolCalls {
         retained.late_truncated_indices.insert(index);
         retained.result_metadata_updated = true;
         retained.calls[index].set_tool_result_metadata(metadata);
-        has_metadata
+        true
     }
 
     pub(crate) fn register_cell(&self, cell_id: &CellId, output_call_id: &str) {

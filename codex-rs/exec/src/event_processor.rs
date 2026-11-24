@@ -5,6 +5,7 @@ use codex_app_server_protocol::ServerNotification;
 use codex_core::config::Config;
 use codex_exec_server::BoundOutput;
 use codex_protocol::protocol::SessionConfiguredEvent;
+use codex_utils_path_uri::PathUri;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexStatus {
@@ -19,6 +20,7 @@ pub(crate) trait EventProcessor {
         config: &Config,
         prompt: &str,
         session_configured: &SessionConfiguredEvent,
+        workspace_roots: &[PathUri],
     );
 
     /// Handle a single typed app-server notification emitted by the agent.

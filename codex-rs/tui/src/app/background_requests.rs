@@ -293,14 +293,18 @@ impl App {
     pub(super) fn refresh_skills(&mut self, app_server: &AppServerSession) {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
-        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+        if app_server.uses_remote_workspace() && self.chat_widget.thread_id().is_none() {
+            self.skill_load_warnings.startup_complete = true;
+            return;
+        }
+        let cwd = self.chat_widget.session_cwd().clone();
         tokio::spawn(async move {
             let request_id = RequestId::String(format!("startup-skills-list-{}", Uuid::new_v4()));
             let result = fetch_skills_list(
                 request_handle,
                 request_id,
                 SkillsListParams {
-                    cwds: vec![cwd.clone()],
+                    cwds: vec![cwd.to_path_buf()],
                     force_reload: true,
                 },
             )

@@ -442,7 +442,7 @@ fn rendered_history_rows(
     };
     thread_items_to_transcript_cells(
         Some(thread_id),
-        &thread.cwd,
+        thread.cwd.as_path(),
         items.into_iter().map(|item| item.item.payload),
         visibility,
         Some(config),

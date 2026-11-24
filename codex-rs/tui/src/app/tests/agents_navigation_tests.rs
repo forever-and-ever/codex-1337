@@ -30,7 +30,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         thread_settings: codex_app_server_protocol::ThreadSettings {
             disabled_plugin_ids: Vec::new(),
             environments: None,
-            cwd: app.config.cwd.clone(),
+            cwd: app.config.cwd.clone().into(),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::AutoReview,
             sandbox_policy: codex_app_server_protocol::SandboxPolicy::ReadOnly {
@@ -671,6 +671,59 @@ async fn externally_archived_thread_keeps_advertised_agents_navigation() -> Resu
         render_bottom_popup(&app.chat_widget, /*width*/ 96)
     );
     app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_error_opens_command_center_with_left() -> Result<()> {
+    for offline in [false, true] {
+        let (mut app, _, _) = make_test_app_with_channels().await;
+        app.chat_widget.insert_str("Retained draft");
+        app.chat_widget.show_provider_error(
+            codex_app_server_protocol::ModelProviderError::ModelProviderNotConfigured {
+                model_provider: "missing".into(),
+            },
+            /*rejected_message_id*/ None,
+        );
+        app.reconnect.offline = offline;
+        // The ordinary command center requires the shared daemon. Embedded mode
+        // intentionally opens the separate unavailable/start-server prompt.
+        app.app_server_target = AppServerTarget::LocalDaemon {
+            endpoint: crate::RemoteAppServerEndpoint::UnixSocket {
+                socket_path: app.config.codex_home.join("provider-error-test.sock"),
+            },
+            allow_embedded_fallback: false,
+        };
+        let mut app_server = start_config_write_test_app_server(&app).await?;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        tui.set_owned_screen(/*owned*/ true)?;
+        assert!(render_bottom_popup(&app.chat_widget, /*width*/ 96).contains("← command center"));
+
+        app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            TuiEvent::Key(KeyEvent::new_with_kind(
+                KeyCode::Left,
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            )),
+        )
+        .await?;
+        assert!(app.chat_widget.no_modal_or_popup_active());
+        app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            TuiEvent::Key(KeyCode::Left.into()),
+        )
+        .await?;
+        assert!(app.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID));
+        assert_eq!(
+            app.chat_widget.composer_text_with_pending(),
+            "Retained draft"
+        );
+        tui.set_owned_screen(/*owned*/ false)?;
+        app_server.shutdown().await?;
+    }
     Ok(())
 }
 

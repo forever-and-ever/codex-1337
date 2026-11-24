@@ -80,6 +80,7 @@ async fn temporary_side_chat_sends_policy_on_its_first_request() -> Result<()> {
             crate::app_server_session::session_preparation::RequestPolicy::Unbounded,
             &app.local_settings,
             app.side_fork_config(),
+            /*workspace_roots*/ None,
             parent,
             None,
         )

@@ -279,7 +279,7 @@ pub(crate) struct CapturedSideDisplay {
     pub(crate) work: Option<CapturedSideWork>,
     pub(crate) last_completed_agent_message: Option<crate::chatwidget::CompletedAgentMessage>,
     pub(crate) preparations: Vec<crate::streaming::completion::PreparedStream>,
-    pub(crate) cwd: AbsolutePathBuf,
+    pub(crate) cwd: PathUri,
     pub(crate) visualizations: Option<crate::inline_visualization::InlineVisualizationContext>,
 }
 
@@ -366,6 +366,7 @@ pub(crate) enum AppEvent {
         result: Result<AgentsOverviewThreadRefresh, String>,
     },
     /// Switch to a root session selected from the shared dashboard.
+    /// Open a linked conversation in its owning session tree.
     SelectAgentsOverviewThread {
         thread_id: ThreadId,
     },
@@ -1050,7 +1051,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Result of computing a `/diff` command.
-    DiffResult(PathBuf, String),
+    DiffResult(PathUri, String),
 
     /// Open the app link view in the bottom pane.
     OpenAppLink {
@@ -1066,6 +1067,13 @@ pub(crate) enum AppEvent {
     /// Open the provided URL in the user's browser.
     OpenUrlInBrowser {
         url: String,
+    },
+
+    /// Resolve a transcript link on the server that owns the rendered source.
+    OpenThreadLink(crate::app::thread_link_handoff::ThreadLinkRequest),
+    ThreadLinkOpenCompleted {
+        request: crate::app::thread_link_handoff::ThreadLinkRequest,
+        result: Result<(), String>,
     },
 
     /// Open the current thread in Codex Desktop.
@@ -1304,20 +1312,22 @@ pub(crate) enum AppEvent {
         thread_id: Option<ThreadId>,
     },
 
-    /// Refresh the displayed conversation's skill catalogue without blocking rendering.
-    RefreshSkills,
+    /// Refresh metadata after attaching a conversation, without using the user-command queue.
+    RefreshSkills {
+        thread_id: ThreadId,
+    },
 
     /// Background catalogue result; explicit user refreshes use the synchronous command path.
     SkillsListLoaded {
-        cwd: PathBuf,
+        cwd: PathUri,
         result: Result<SkillsListResponse, String>,
     },
 
-    /// Result of the skills refresh issued while replaying a docked conversation.
+    /// Result of the skills refresh issued while replaying a saved side chat.
     SideReplaySkillsLoaded {
         request_id: Uuid,
         thread_id: ThreadId,
-        cwd: PathBuf,
+        cwd: PathUri,
         result: Result<SkillsListResponse, String>,
     },
 

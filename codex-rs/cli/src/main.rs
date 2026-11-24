@@ -3400,7 +3400,7 @@ enabled = true
             }))
         ));
 
-        for verb in ["uninstal", "echo"] {
+        for verb in ["uninstal", "echo", "launcher"] {
             let error = MultitoolCli::try_parse_from(["codex", "sandbox", verb])
                 .expect_err("unknown modes must not become executables");
             assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);

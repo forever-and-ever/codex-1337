@@ -197,15 +197,7 @@ async fn observe_window_attention(
         };
         let mut socket = UnixStream::connect(path).await?;
         let payload = b"[\"window\",\"workspace\",\"output\"]";
-        let mut request = b"i3-ipc".to_vec();
-        request.extend_from_slice(
-            &u32::try_from(payload.len())
-                .context("i3 subscription exceeds the protocol message size")?
-                .to_ne_bytes(),
-        );
-        request.extend_from_slice(&2_u32.to_ne_bytes()); // SUBSCRIBE
-        request.extend_from_slice(payload);
-        socket.write_all(&request).await?;
+        send_i3_message(&mut socket, /*kind: SUBSCRIBE*/ 2, payload).await?;
         let (kind, reply) = read_i3_message(&mut socket).await?;
         ensure!(
             kind == 2 && reply["success"] == true,
@@ -243,7 +235,27 @@ async fn observe_window_attention(
     }
 }
 
+pub(crate) async fn send_i3_message(
+    socket: &mut UnixStream,
+    kind: u32,
+    payload: &[u8],
+) -> Result<()> {
+    let length = u32::try_from(payload.len()).context("oversized i3 IPC request")?;
+    let mut header = [0_u8; 14];
+    header[..6].copy_from_slice(b"i3-ipc");
+    header[6..10].copy_from_slice(&length.to_ne_bytes());
+    header[10..14].copy_from_slice(&kind.to_ne_bytes());
+    socket.write_all(&header).await?;
+    socket.write_all(payload).await?;
+    Ok(())
+}
+
 async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
+    let (kind, payload) = read_i3_payload(socket).await?;
+    Ok((kind, serde_json::from_slice(&payload)?))
+}
+
+pub(crate) async fn read_i3_payload(socket: &mut UnixStream) -> Result<(u32, Vec<u8>)> {
     let mut header = [0_u8; 14];
     socket.read_exact(&mut header).await?;
     ensure!(&header[..6] == b"i3-ipc", "invalid i3 IPC header");
@@ -255,7 +267,7 @@ async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
     let kind = u32::from_ne_bytes(header[10..14].try_into()?);
     let mut payload = vec![0; length as usize];
     socket.read_exact(&mut payload).await?;
-    Ok((kind, serde_json::from_slice(&payload)?))
+    Ok((kind, payload))
 }
 
 fn affects_window_attention(event: &Value) -> bool {

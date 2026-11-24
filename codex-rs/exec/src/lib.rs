@@ -65,6 +65,7 @@ use codex_app_server_protocol::TurnStartedNotification;
 use codex_arg0::Arg0DispatchPaths;
 use codex_cloud_config::managed_config_bundle_loader_for_storage;
 use codex_config::CloudConfigBundleLoader;
+use codex_config::ConfigLayerSource;
 use codex_config::ConfigLoadError;
 use codex_config::ConfigLoadOptions;
 use codex_config::LoaderOverrides;
@@ -120,6 +121,7 @@ use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
+use codex_utils_path_uri::LegacyAppPathString;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 pub use event_processor_with_jsonl_output::CodexStatus;
 pub use event_processor_with_jsonl_output::CollectedThreadEvents;
@@ -227,6 +229,8 @@ struct ExecRunArgs {
     state_db: Option<StateDbHandle>,
     command: ExecCommand,
     config: Config,
+    overrides: ConfigOverrides,
+    resume_approval_policy_override: Option<codex_app_server_protocol::AskForApproval>,
     resume_approvals_reviewer_override: Option<codex_app_server_protocol::ApprovalsReviewer>,
     daybreak_override: Option<bool>,
     dangerously_bypass_approvals_and_sandbox: bool,
@@ -469,12 +473,16 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         None // No model specified, will use the default.
     };
 
+    let explicit_approval_policy = cli_kv_overrides
+        .iter()
+        .any(|(key, _)| key == "approval_policy");
     let overrides = ConfigOverrides {
         model,
         review_model: None,
-        // Default to never ask for approvals in headless mode. Rebuild below if
-        // the fully resolved reviewer is AutoReview.
-        approval_policy: Some(AskForApproval::Never),
+        // Preserve an explicit policy except when the dangerous bypass was requested.
+        // Otherwise use headless Never unless the resolved reviewer uses auto review.
+        approval_policy: (dangerously_bypass_approvals_and_sandbox || !explicit_approval_policy)
+            .then_some(AskForApproval::Never),
         approvals_reviewer: None,
         sandbox_mode,
         permission_profile: None,
@@ -510,8 +518,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             .build()
     };
     let mut config = build_exec_config(
-        overrides,
-        dangerously_bypass_approvals_and_sandbox,
+        overrides.clone(),
+        dangerously_bypass_approvals_and_sandbox || explicit_approval_policy,
         build_config,
     )
     .await?;
@@ -533,6 +541,9 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         .iter()
         .any(|(key, _)| key == "daybreak")
         .then_some(config.daybreak_enabled);
+    let resume_approval_policy_override = (dangerously_bypass_approvals_and_sandbox
+        || explicit_approval_policy)
+        .then(|| config.permissions.approval_policy.value().into());
     let resume_approvals_reviewer_override = cli_kv_overrides
         .iter()
         .any(|(key, _)| key == "approvals_reviewer")
@@ -668,6 +679,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         state_db,
         command,
         config,
+        overrides,
+        resume_approval_policy_override,
         resume_approvals_reviewer_override,
         daybreak_override,
         dangerously_bypass_approvals_and_sandbox,
@@ -768,6 +781,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         state_db,
         command,
         config,
+        overrides,
+        resume_approval_policy_override,
         resume_approvals_reviewer_override,
         daybreak_override,
         dangerously_bypass_approvals_and_sandbox,
@@ -820,7 +835,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     let default_cwd = config.cwd.to_path_buf();
-    let default_approval_policy = config.permissions.approval_policy.value();
     let default_effort = config.model_reasoning_effort.clone();
 
     let (initial_operation, prompt_summary) = match (&command, images) {
@@ -941,6 +955,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     );
 
     let mut daybreak_enabled = config.daybreak_enabled;
+    let mut resumed_workspace_roots = None;
+    let mut first_turn_cwd = Some(default_cwd);
+    let mut first_turn_workspace_roots = None;
     // Resolve resume and fork through existing app-server thread lifecycle APIs.
     let (history_mode, fallback_session_configured) = if let ExecCommand::Resume(args) = &command {
         if let Some(thread_id) =
@@ -953,6 +970,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     params: thread_resume_params_from_config(
                         &config,
                         thread_id,
+                        &overrides,
+                        resume_approval_policy_override,
                         resume_approvals_reviewer_override,
                     ),
                 },
@@ -960,9 +979,29 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             )
             .await
             .map_err(anyhow::Error::msg)?;
+            let AppServerClient::InProcess(embedded_client) = &client else {
+                unreachable!("local exec uses an embedded app-server");
+            };
+            let thread_id = ThreadId::from_string(&response.thread.id)
+                .map_err(|err| anyhow::anyhow!("invalid resumed thread id: {err}"))?;
+            let permissions = embedded_client.thread_permissions(thread_id).await?;
             let session_configured =
-                session_configured_from_thread_resume_response(&response, &config)
+                session_configured_from_thread_resume_response(&response, permissions.profile)
                     .map_err(anyhow::Error::msg)?;
+            // Resume already chose the cwd and environments, including any explicit -C.
+            first_turn_cwd = None;
+            resumed_workspace_roots = Some(permissions.workspace_roots);
+            if !overrides.additional_writable_roots.is_empty() {
+                let mut roots = response
+                    .runtime_workspace_roots
+                    .into_iter()
+                    .map(AbsolutePathBuf::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                roots.extend(overrides.additional_writable_roots.into_iter().map(|path| {
+                    AbsolutePathBuf::resolve_path_against_base(path, config.cwd.as_path())
+                }));
+                first_turn_workspace_roots = Some(roots);
+            }
             daybreak_enabled = daybreak_override
                 .or(response.thread.daybreak_enabled)
                 .unwrap_or(false);
@@ -1022,7 +1061,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     model: config.model.clone(),
                     model_provider: Some(config.model_provider_id.clone()),
                     cwd: Some(config.cwd.to_string_lossy().to_string()),
-                    runtime_workspace_roots: Some(config.workspace_roots.clone()),
+                    runtime_workspace_roots: Some(LegacyAppPathString::from_abs_paths(
+                        &config.workspace_roots,
+                    )),
                     approval_policy: Some(config.permissions.approval_policy.value().into()),
                     approvals_reviewer: resume_approvals_reviewer_override,
                     sandbox: sandbox.flatten(),
@@ -1077,17 +1118,28 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     // Use the start/resume response as the authoritative bootstrap payload.
     // Waiting for a later streamed `SessionConfigured` event adds up to 10s of
     // avoidable startup latency on the in-process path.
-    let session_configured = fallback_session_configured;
+    let mut session_configured = fallback_session_configured;
 
     exec_span.record("thread.id", primary_thread_id_for_span.as_str());
 
     // Print the effective configuration and initial request so users can see what Codex
     // is using.
-    event_processor.print_config_summary(&config, &prompt_summary, &session_configured);
+    // With --add-dir, report the host's effective grant after turn/start applies the additions.
+    let summary_after_turn_start = !json_mode && first_turn_workspace_roots.is_some();
+    if !summary_after_turn_start {
+        let workspace_roots =
+            resumed_workspace_roots.unwrap_or_else(|| config.effective_workspace_roots());
+        event_processor.print_config_summary(
+            &config,
+            &prompt_summary,
+            &session_configured,
+            &workspace_roots,
+        );
+    }
     if !json_mode
         && let Some(message) = codex_core::config::system_bwrap_warning(
-            &config.permissions.effective_permission_profile(),
-            &config.cwd,
+            &session_configured.permission_profile,
+            &session_configured.cwd,
         )
     {
         event_processor.process_warning(message);
@@ -1155,9 +1207,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         responsesapi_client_metadata_patch: None,
                         additional_context: None,
                         environments: None,
-                        cwd: Some(default_cwd),
-                        runtime_workspace_roots: None,
-                        approval_policy: Some(default_approval_policy.into()),
+                        cwd: first_turn_cwd,
+                        runtime_workspace_roots: first_turn_workspace_roots,
+                        approval_policy: None,
                         approvals_reviewer: None,
                         sandbox_policy: None,
                         permissions: None,
@@ -1177,6 +1229,21 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             )
             .await
             .map_err(anyhow::Error::msg)?;
+            if summary_after_turn_start {
+                let AppServerClient::InProcess(embedded_client) = &client else {
+                    unreachable!("local exec uses an embedded app-server");
+                };
+                let permissions = embedded_client
+                    .thread_permissions(primary_thread_id)
+                    .await?;
+                session_configured.permission_profile = permissions.profile;
+                event_processor.print_config_summary(
+                    &config,
+                    &prompt_summary,
+                    &session_configured,
+                    &permissions.workspace_roots,
+                );
+            }
             let task_id = response.turn.id;
             info!("Sent prompt with event ID: {task_id}");
             task_id
@@ -1407,7 +1474,7 @@ fn thread_start_params_from_config(
     ThreadStartParams {
         model: config.model.clone(),
         model_provider: Some(config.model_provider_id.clone()),
-        runtime_workspace_roots: Some(config.workspace_roots.clone()),
+        runtime_workspace_roots: Some(LegacyAppPathString::from_abs_paths(&config.workspace_roots)),
         approval_policy: Some(config.permissions.approval_policy.value().into()),
         approvals_reviewer: Some(config.approvals_reviewer.into()),
         sandbox: sandbox.flatten(),
@@ -1424,25 +1491,62 @@ fn thread_start_params_from_config(
 fn thread_resume_params_from_config(
     config: &Config,
     thread_id: String,
+    overrides: &ConfigOverrides,
+    approval_policy_override: Option<codex_app_server_protocol::AskForApproval>,
     approvals_reviewer_override: Option<codex_app_server_protocol::ApprovalsReviewer>,
 ) -> ThreadResumeParams {
     let permissions = permissions_selection_from_config(config);
-    let sandbox = permissions.is_none().then(|| {
+    let sandbox = if permissions.is_none() {
         sandbox_mode_from_permission_profile(
             &config.permissions.effective_permission_profile(),
             config.cwd.as_path(),
         )
-    });
+    } else {
+        None
+    };
+    // A process default is not a new choice for an existing thread.
+    let mut explicit_permissions = overrides.sandbox_mode.is_some();
+    let mut runtime_workspace_roots = None;
+    for layer in config
+        .config_layer_stack
+        .layers_high_to_low()
+        .filter(|layer| {
+            matches!(
+                layer.name,
+                ConfigLayerSource::SessionFlags
+                    | ConfigLayerSource::User {
+                        profile: Some(_),
+                        ..
+                    }
+            )
+        })
+    {
+        let legacy_workspace = layer
+            .config
+            .get("sandbox_workspace_write")
+            .filter(|_| sandbox == Some(codex_app_server_protocol::SandboxMode::WorkspaceWrite));
+        explicit_permissions |= layer.config.get("sandbox_mode").is_some()
+            || layer.config.get("default_permissions").is_some()
+            || legacy_workspace.is_some();
+        if legacy_workspace
+            .and_then(|settings| settings.get("writable_roots"))
+            .is_some()
+        {
+            runtime_workspace_roots =
+                Some(LegacyAppPathString::from_abs_paths(&config.workspace_roots));
+        }
+    }
     ThreadResumeParams {
         thread_id,
         model: config.model.clone(),
         model_provider: Some(config.model_provider_id.clone()),
-        cwd: Some(config.cwd.to_string_lossy().to_string()),
-        runtime_workspace_roots: Some(config.workspace_roots.clone()),
-        approval_policy: Some(config.permissions.approval_policy.value().into()),
+        cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())
+            .then(|| config.cwd.to_string_lossy().into_owned()),
+        runtime_workspace_roots,
+        approval_policy: approval_policy_override,
         approvals_reviewer: approvals_reviewer_override,
-        sandbox: sandbox.flatten(),
-        permissions,
+        sandbox: sandbox.filter(|_| explicit_permissions),
+        permissions: permissions.filter(|_| explicit_permissions),
         config: thread_config_overrides_from_config(config),
         exclude_turns: true,
         ..ThreadResumeParams::default()
@@ -1534,7 +1638,7 @@ fn session_configured_from_thread_start_response(
 
 fn session_configured_from_thread_resume_response(
     response: &ThreadResumeResponse,
-    config: &Config,
+    permission_profile: PermissionProfile,
 ) -> Result<SessionConfiguredEvent, String> {
     session_configured_from_thread_response(
         &response.thread.session_id,
@@ -1549,7 +1653,7 @@ fn session_configured_from_thread_resume_response(
         response.service_tier.clone(),
         response.approval_policy.to_core(),
         response.approvals_reviewer.to_core(),
-        config.permissions.effective_permission_profile(),
+        permission_profile,
         response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort.clone(),
@@ -1584,7 +1688,7 @@ fn session_configured_from_thread_response(
     approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer,
     permission_profile: PermissionProfile,
     active_permission_profile: Option<codex_protocol::models::ActivePermissionProfile>,
-    cwd: AbsolutePathBuf,
+    cwd: LegacyAppPathString,
     reasoning_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
 ) -> Result<SessionConfiguredEvent, String> {
     let session_id = SessionId::from_string(session_id)
@@ -1614,7 +1718,7 @@ fn session_configured_from_thread_response(
         approvals_reviewer,
         permission_profile,
         active_permission_profile,
-        cwd,
+        cwd: AbsolutePathBuf::try_from(cwd).map_err(|err| err.to_string())?,
         reasoning_effort,
         network_proxy: None,
         rollout_path,

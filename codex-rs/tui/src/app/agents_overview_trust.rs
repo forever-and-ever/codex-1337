@@ -54,8 +54,8 @@ pub(in crate::app) enum DashboardTrustStage {
 }
 
 pub(in crate::app) enum DashboardConfigOutcome {
-    Ready(Config, Option<PathBuf>),
-    Pending(DashboardTrustAdmission),
+    Ready(Box<Config>, Option<PathBuf>),
+    Pending(Box<DashboardTrustAdmission>),
     Stopped(AppRunControl),
 }
 
@@ -140,7 +140,7 @@ impl App {
                     draft,
                 ))
                 .await
-                .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
+                .map(|(config, cwd)| DashboardConfigOutcome::Ready(Box::new(config), cwd));
             }
             DashboardTrustStage::Directory { preparation, plan } => (preparation, plan),
             DashboardTrustStage::Initial(preparation) => {
@@ -153,7 +153,7 @@ impl App {
                             draft,
                         ))
                         .await
-                        .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
+                        .map(|(config, cwd)| DashboardConfigOutcome::Ready(Box::new(config), cwd));
                     };
                     cwd
                 } else {
@@ -218,13 +218,13 @@ impl App {
             };
             match decision {
                 DirectoryTrustDecision::Consent(consent) => {
-                    return Some(DashboardConfigOutcome::Pending(
+                    return Some(DashboardConfigOutcome::Pending(Box::new(
                         DashboardTrustAdmission::Directory {
                             consent,
                             preparation,
                             plan,
                         },
-                    ));
+                    )));
                 }
                 DirectoryTrustDecision::Confirmed(consent) => {
                     if let Some(consent) = plan.note_consent(consent) {
@@ -288,12 +288,12 @@ impl App {
                     return None;
                 }
                 Ok(HooksReviewDecision::TrustAll(hooks)) => {
-                    return Some(DashboardConfigOutcome::Pending(
+                    return Some(DashboardConfigOutcome::Pending(Box::new(
                         DashboardTrustAdmission::Hooks {
                             updates: hook_trust_updates(&hooks),
                             preparation,
                         },
-                    ));
+                    )));
                 }
                 Err(error) => {
                     self.add_agents_overview_error(format!(
@@ -305,7 +305,7 @@ impl App {
         }
         Box::pin(self.finish_dashboard_session_config(tui, server, preparation, draft))
             .await
-            .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd))
+            .map(|(config, cwd)| DashboardConfigOutcome::Ready(Box::new(config), cwd))
     }
 
     pub(in crate::app) async fn continue_confirmed_dashboard_trust(
@@ -334,7 +334,7 @@ impl App {
         .await;
         let result = match outcome {
             Some(DashboardConfigOutcome::Ready(config, cwd)) => {
-                Box::pin(self.start_dashboard_with_config(tui, server, config, cwd, &mut draft))
+                Box::pin(self.start_dashboard_with_config(tui, server, *config, cwd, &mut draft))
                     .await
             }
             Some(DashboardConfigOutcome::Pending(consent)) => {

@@ -28,7 +28,10 @@ use codex_config::LoaderOverrides;
 use codex_core::config::Config;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
+use codex_protocol::ThreadId;
+use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::SessionSource;
+use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
 use toml::Value as TomlValue;
 
@@ -139,10 +142,22 @@ impl InProcessClientStartArgs {
     }
 }
 
+/// Effective permissions and roots for a loaded embedded thread.
+pub struct ThreadPermissions {
+    pub profile: PermissionProfile,
+    pub workspace_roots: Vec<PathUri>,
+}
+
+/// Read-only access to loaded thread permissions in the embedded runtime.
+pub type ThreadPermissionsReader =
+    Arc<dyn Fn(ThreadId) -> BoxFuture<'static, IoResult<ThreadPermissions>> + Send + Sync>;
+
 /// The server half of one in-process connection.
 pub trait EmbeddedServer: Send {
     /// Returns a sender that remains usable while the server runs.
     fn connection(&self) -> Arc<dyn EmbeddedConnection>;
+
+    fn thread_permissions_reader(&self) -> ThreadPermissionsReader;
 
     /// Yields the next server event, or `None` once the server has stopped.
     fn next_event(&mut self) -> BoxFuture<'_, Option<InProcessServerEvent>>;

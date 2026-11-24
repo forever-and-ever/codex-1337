@@ -42,13 +42,13 @@ impl App {
                     StartupDraftSessionAction::NewFromCommandCenter,
                 ))
             });
-        let mut display_config = self.chat_widget.config_ref().clone();
-        if let Some(cwd) = cwd.as_ref() {
-            display_config.cwd = cwd.clone();
-        }
+        let display_cwd = cwd
+            .as_ref()
+            .map(AbsolutePathBuf::to_path_buf)
+            .unwrap_or_else(|| self.chat_widget.session_cwd().to_path_buf());
         draft.apply_settings(
-            &crate::local_settings::LocalSettings::from(&display_config),
-            display_config.cwd.as_path(),
+            &crate::local_settings::LocalSettings::from(self.chat_widget.config_ref()),
+            &display_cwd,
         );
         draft.show(tui)?;
         // Keep the large session-start future off the TUI's stack in dev builds.
@@ -111,8 +111,14 @@ impl App {
             }
             trust::DashboardConfigOutcome::Stopped(control) => Ok(control),
             trust::DashboardConfigOutcome::Ready(config, remote_cwd) => {
-                self.start_dashboard_with_config(tui, app_server, config, remote_cwd, startup_draft)
-                    .await
+                self.start_dashboard_with_config(
+                    tui,
+                    app_server,
+                    *config,
+                    remote_cwd,
+                    startup_draft,
+                )
+                .await
             }
         }
     }

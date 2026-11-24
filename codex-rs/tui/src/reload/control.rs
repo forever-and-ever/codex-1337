@@ -1,6 +1,7 @@
 //! Private, bounded local control messages; never part of the app-server protocol.
 
 use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_client::RemoteAuthToken;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,7 +18,7 @@ use tokio::sync::oneshot;
 
 const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(super) enum Endpoint {
     Unix(AbsolutePathBuf),
     WebSocket { url: String, token: Option<String> },
@@ -32,7 +33,9 @@ impl From<RemoteAppServerEndpoint> for Endpoint {
                 auth_token,
             } => Self::WebSocket {
                 url: websocket_url,
-                token: auth_token,
+                // Only the broker's transport copy crosses this wire. The UI keeps
+                // the original endpoint, including any CLI provenance.
+                token: auth_token.map(|token| token.as_str().to_owned()),
             },
         }
     }
@@ -47,7 +50,7 @@ impl From<Endpoint> for RemoteAppServerEndpoint {
                 token: auth_token,
             } => Self::WebSocket {
                 websocket_url,
-                auth_token,
+                auth_token: auth_token.map(RemoteAuthToken::from_secret),
             },
         }
     }

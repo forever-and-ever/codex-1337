@@ -11,13 +11,13 @@ use crate::multi_agents;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::WebSearchAction;
 use codex_protocol::ThreadId;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
+use std::path::Path;
 use std::sync::Arc;
 
 pub(super) fn cells(
     item: ThreadItemPayload,
-    cwd: &AbsolutePathBuf,
+    cwd: &Path,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
     image_origin: crate::history_cell::ImagePathOrigin,
 ) -> TranscriptCells {
@@ -53,7 +53,7 @@ pub(super) fn cells(
             history_cell::patch_apply_cells(
                 id,
                 file_update_changes_to_display(changes),
-                cwd.as_path(),
+                cwd,
                 status,
             )
             .into_iter()

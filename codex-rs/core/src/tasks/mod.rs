@@ -3,6 +3,9 @@ mod compact;
 mod lifecycle;
 mod regular;
 mod review;
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
 mod user_shell;
 
 use crate::McpRefreshReason;
@@ -15,7 +18,6 @@ use codex_diagnostics::Gauge;
 use codex_exec_server::ExecutorCapabilityDiscoveryV2Cache;
 use codex_extension_api::ThreadIdleCause;
 use futures::future::BoxFuture;
-use tokio::select;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 use tokio::sync::Notify;
@@ -48,6 +50,7 @@ use crate::state::TaskKind;
 use crate::state::TurnState;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use admission::TaskAdmission;
+use codex_analytics::IncompleteReason;
 use codex_analytics::TurnProfileFact;
 use codex_analytics::TurnTokenUsageFact;
 use codex_context_fragments::RenderedFragment;
@@ -438,8 +441,10 @@ impl Session {
             (task_kind == TaskKind::Regular).then(|| turn_context.attribution()),
         )
         .await;
-        let host_admission = self.host_turn_admission();
         let input = input.into_input();
+        self.bind_realtime_handoffs_to_turn(&input, &turn_context.sub_id)
+            .await;
+        let host_admission = self.host_turn_admission();
         let (agent_execution_guard, task_input, pending_initial_input) = match &host_admission {
             Some(_) => (None, Vec::new(), Some(input)),
             None => (
@@ -490,6 +495,7 @@ impl Session {
                     ).await?,
                     None => task_input,
                 };
+                ctx.turn_metadata_state.admit_git_enrichment();
                 task_for_run
                     .run(
                         Arc::clone(&session),
@@ -940,6 +946,8 @@ impl Session {
             PersistContext::Standard,
         )
         .await;
+        self.reject_realtime_handoffs_for_turn(&turn_context.sub_id)
+            .await;
         if let Some(task) = unadmitted_task {
             // The task never ran. Unwind setup such as entering review mode.
             task.abort(Arc::clone(self), Arc::clone(&turn_context))
@@ -972,7 +980,7 @@ impl Session {
                 .await;
         }
         if sampling_interrupted || stop_cause.is_some() {
-            self.record_interrupted_turn_history(&turn_context, stop_cause.as_ref())
+            self.record_interrupted_turn_history(&turn_context, stop_cause.as_ref(), Vec::new())
                 .await;
         }
         drop(finish_recording);
@@ -1237,25 +1245,29 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         cause: Option<&CodexErrorInfo>,
+        mut injected: Vec<codex_history::ResponseItemEnvelope>,
     ) {
-        let Some(marker) = interrupted_turn_history_marker(
+        if let Some(marker) = interrupted_turn_history_marker(
             InterruptedTurnHistoryMarker::from_config_and_version(
                 turn_context.config.as_ref(),
                 turn_context.multi_agent_version,
             ),
             cause,
-        ) else {
+        ) {
+            injected.push(marker.into());
+        }
+        if injected.is_empty() {
             return;
-        };
-        self.record_conversation_items(
+        }
+        self.record_annotated_conversation_items(
             turn_context,
-            turn_context.model_info(),
-            std::slice::from_ref(&marker),
+            &turn_context.capture_current_model_info(),
+            injected,
         )
         .await;
         // Clients may re-read the rollout as soon as they receive the terminal event.
         if let Err(err) = self.flush_rollout().await {
-            warn!("failed to flush interrupted-turn marker before terminal event: {err}");
+            warn!("failed to flush interrupted-turn history before terminal event: {err}");
         }
     }
 
@@ -1292,21 +1304,27 @@ impl Session {
             .cancel_git_enrichment_task();
         let session_task = task.task;
 
-        select! {
-            _ = task.done.notified() => {
-            },
-            _ = tokio::time::sleep(Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS)) => {
-                warn!("task {sub_id} didn't complete gracefully after {}ms", GRACEFULL_INTERRUPTION_TIMEOUT_MS);
-                // Forced teardown can abort independently spawned tool dispatches
-                // whose guards are destroyed later. Do not publish complete totals
-                // for a dependency graph that has not settled.
-                task.turn_context.turn_timing_state.invalidate_critical_path();
+        let mut handle = task.handle;
+        let grace = Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS);
+        let joined = match tokio::time::timeout(grace, &mut handle).await {
+            Ok(joined) => joined,
+            Err(_) => {
+                handle.abort();
+                handle.await
             }
+        };
+        // A task may finish normally between the deadline and the abort.
+        if let Err(error) = joined {
+            warn!(%error, "task {sub_id} did not finish gracefully");
+            let reason = if error.is_cancelled() {
+                IncompleteReason::ForcedTeardown
+            } else {
+                IncompleteReason::Unclassified
+            };
+            task.turn_context
+                .turn_timing_state
+                .invalidate_critical_path(&[reason]);
         }
-
-        task.handle.abort();
-        // Aborting schedules destruction; join before freezing the turn's timing.
-        let _ = task.handle.await;
 
         if let Err(error) = self
             .record_pending_initial_input(
@@ -1324,16 +1342,42 @@ impl Session {
             .await;
         }
 
+        self.reject_realtime_handoffs_for_turn(&task.turn_context.sub_id)
+            .await;
+
         session_task
             .abort(Arc::clone(self), Arc::clone(&task.turn_context))
             .await;
 
         if reason == TurnAbortReason::Interrupted {
+            // This turn has been detached. Preserve queued raw host notices before
+            // teardown discards pending input and the host observes TurnAborted.
+            let mut pending_mail = Vec::new();
+            let mut remaining_input = Vec::new();
+            for input in self
+                .input_queue
+                .take_pending_input_for_turn_state(turn_state)
+                .await
+            {
+                match input {
+                    TurnInput::ResponseItem(item)
+                        if matches!(item.item, ResponseItem::AgentMessage { .. }) =>
+                    {
+                        pending_mail.push(item);
+                    }
+                    input => remaining_input.push(input),
+                }
+            }
+            // Existing cleanup requeues native terminal results from this input.
+            self.input_queue
+                .extend_pending_input_for_turn_state(turn_state, remaining_input)
+                .await;
             self.record_interrupted_turn_history(
                 &task.turn_context,
                 error
                     .as_ref()
                     .and_then(|error| error.codex_error_info.as_ref()),
+                pending_mail,
             )
             .await;
             run_turn_interrupt_hooks(self, &task.turn_context, turn_state).await;

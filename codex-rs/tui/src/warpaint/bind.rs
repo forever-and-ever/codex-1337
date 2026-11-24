@@ -308,7 +308,7 @@ const NAMED: [Color; 16] = [
 ];
 
 /// Whether a foreground is the page's ink, which a terminal's `DIM` would only approximate.
-fn is_ink(color: Color) -> bool {
+pub(super) fn is_ink(color: Color) -> bool {
     matches!(color, Color::Reset | Color::White | Color::Gray)
         || color == Figure::Ink.color()
         || color == Figure::InkMuted.color()

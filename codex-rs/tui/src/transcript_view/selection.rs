@@ -666,9 +666,10 @@ impl TranscriptView {
             ViewAction::Copy(text)
             | ViewAction::CopyOnSelect(text)
             | ViewAction::CopyAndFollow(text) => text.as_str(),
-            ViewAction::Changed | ViewAction::ExitSelectMode | ViewAction::OpenLink(_) => {
-                return None;
-            }
+            ViewAction::Changed
+            | ViewAction::ExitSelectMode
+            | ViewAction::OpenLink(_)
+            | ViewAction::OpenThreadLink(_) => return None,
         };
         let clear_selection = self.selection_copy(action).clear_selection();
         let result =

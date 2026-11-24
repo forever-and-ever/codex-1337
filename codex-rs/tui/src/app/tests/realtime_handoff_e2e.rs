@@ -283,6 +283,13 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     timeout(Duration::from_secs(10), async {
         loop {
             tokio::select! {
+                // The real dispatcher keeps submission receipts moving while a turn waits.
+                Some(completion) = app.server_operations.control_rx.recv() => {
+                    Box::pin(app.handle_server_completion(&mut tui, &mut app_server, completion)).await?;
+                }
+                Some(completion) = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(&mut app_server, completion).await?;
+                }
                 event = app_server.next_event() => {
                     let event = event.expect("embedded app-server should stay connected");
                     let completed = matches!(&event.event, AppServerEvent::ServerNotification(notification)

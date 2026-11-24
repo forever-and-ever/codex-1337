@@ -23,6 +23,7 @@ use crate::payload::RawPayloadRef;
 pub(in super::super) fn normalize_messages_request(
     request: &Value,
     raw_payload: &RawPayloadRef,
+    missing: &Value,
 ) -> Result<Vec<NormalizedConversationItem>> {
     let messages = request
         .get("messages")
@@ -36,9 +37,16 @@ pub(in super::super) fn normalize_messages_request(
     let mut items = Vec::new();
     let mut custom_calls = HashSet::new();
     if let Some(system) = request.get("system") {
-        append_content(system, "system", raw_payload, &mut custom_calls, &mut items)?;
+        append_content(
+            system,
+            &missing["system"],
+            "system",
+            raw_payload,
+            &mut custom_calls,
+            &mut items,
+        )?;
     }
-    for message in messages {
+    for (index, message) in messages.iter().enumerate() {
         let role = message
             .get("role")
             .and_then(Value::as_str)
@@ -49,13 +57,21 @@ pub(in super::super) fn normalize_messages_request(
         let content = message
             .get("content")
             .context("Messages request message had no content")?;
-        append_content(content, role, raw_payload, &mut custom_calls, &mut items)?;
+        append_content(
+            content,
+            &missing["messages"][index]["content"],
+            role,
+            raw_payload,
+            &mut custom_calls,
+            &mut items,
+        )?;
     }
     Ok(items)
 }
 
 fn append_content(
     content: &Value,
+    missing: &Value,
     role: &str,
     raw_payload: &RawPayloadRef,
     custom_calls: &mut HashSet<String>,
@@ -63,22 +79,24 @@ fn append_content(
 ) -> Result<()> {
     if let Some(text) = content.as_str() {
         items.push(normalize_model_item(
-            &serde_json::json!({
+            &mut serde_json::json!({
                 "type": "message", "role": role, "content": [{"type": "text", "text": text}],
             }),
             raw_payload,
+            &Value::Null,
         )?);
         return Ok(());
     }
     let blocks = content
         .as_array()
         .context("Messages content was neither a string nor an array")?;
-    for block in blocks {
+    for (index, block) in blocks.iter().enumerate() {
         let kind = block
             .get("type")
             .and_then(Value::as_str)
             .context("Messages content block had no type")?;
-        let item = match kind {
+        let block_missing = &missing[index];
+        let (mut item, item_missing) = match kind {
             "compaction" => {
                 let checkpoint: AnthropicSignedCompaction =
                     serde_json::from_value(block.clone())
@@ -102,7 +120,10 @@ fn append_content(
                     .and_then(Value::as_str)
                 {
                     custom_calls.insert(id.to_string());
-                    serde_json::json!({"type": "custom_tool_call", "call_id": id, "input": input})
+                    (
+                        serde_json::json!({"type": "custom_tool_call", "call_id": id, "input": input}),
+                        Value::Null,
+                    )
                 } else {
                     // Only the adapter's exact one-key object envelope can be unwrapped.
                     // Rejected/unknown native calls retain malformed input in full as raw JSON.
@@ -112,7 +133,10 @@ fn append_content(
                         .and_then(|input| input.get("arguments"))
                         .filter(|arguments| arguments.is_object())
                         .unwrap_or(input);
-                    serde_json::json!({"type": "function_call", "call_id": id, "arguments": arguments})
+                    (
+                        serde_json::json!({"type": "function_call", "call_id": id, "arguments": arguments}),
+                        Value::Null,
+                    )
                 }
             }
             "tool_result" => {
@@ -120,8 +144,11 @@ fn append_content(
                     .get("tool_use_id")
                     .and_then(Value::as_str)
                     .context("Messages tool_result had no tool_use_id")?;
-                serde_json::json!({"type": if custom_calls.contains(id) { "custom_tool_call_output" } else { "function_call_output" },
-                    "call_id": id, "output": block.get("content")})
+                (
+                    serde_json::json!({"type": if custom_calls.contains(id) { "custom_tool_call_output" } else { "function_call_output" },
+                        "call_id": id, "output": block.get("content")}),
+                    serde_json::json!({"output": block_missing["content"]}),
+                )
             }
             "thinking" | "redacted_thinking" => {
                 // Signed thinking is lazy evidence, not JSON that might print its signature.
@@ -146,6 +173,7 @@ fn append_content(
                 parts.push(signed_payload_ref_part(kind, signature, raw_payload));
                 items.push(NormalizedConversationItem {
                     responses_item_id: None,
+                    structured_output_hash: None,
                     role: ConversationRole::Assistant,
                     channel: Some(ConversationChannel::Analysis),
                     kind: ConversationItemKind::Reasoning,
@@ -155,9 +183,12 @@ fn append_content(
                 });
                 continue;
             }
-            _ => serde_json::json!({"type": "message", "role": role, "content": [block]}),
+            _ => (
+                serde_json::json!({"type": "message", "role": role, "content": [block]}),
+                serde_json::json!({"content": [block_missing]}),
+            ),
         };
-        items.push(normalize_model_item(&item, raw_payload)?);
+        items.push(normalize_model_item(&mut item, raw_payload, &item_missing)?);
     }
     Ok(())
 }

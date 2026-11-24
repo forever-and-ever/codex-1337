@@ -1,22 +1,39 @@
 //! Binds an immutable action and root lifetime to fresh per-attempt authorization evidence.
 //! The extension chooses effects; this adapter supplies evidence, validation and publication.
 
+#[path = "attached_review.rs"]
+mod attached;
+use super::super::reviewer_route::ReviewerRoute;
+use super::super::reviewer_route::run_review_attempt;
 use super::super::runtime::validate;
 use super::*;
 use crate::codex_thread::GuardianAuthorizationVersion;
+use crate::guardian_review::ReviewPreparationError;
+use attached::AttachedApproval;
 use codex_config::config_toml::CircuitBreakAction;
 use codex_guardian_reviewer::ReviewDeadline;
 use codex_guardian_reviewer::ReviewHost;
 use codex_protocol::approvals::GuardianReviewReason;
 use codex_protocol::protocol::ErrorEvent;
+use tokio::sync::Mutex;
+use tokio::sync::OnceCell;
 
 pub(in crate::guardian) struct PreparedApproval {
     request: GuardianApprovalRequest,
-    route: tokio::sync::Mutex<super::super::reviewer_route::ReviewerRoute>,
+    reviewer: PreparedReviewer,
+    category: GuardianScope,
     context: GuardianReviewContext,
     // Unlike authorization, the original history lifetime cannot advance on retry.
     root_history: Option<(codex_protocol::ThreadId, u64)>,
     formatted_action: Option<String>,
+}
+
+enum PreparedReviewer {
+    Standalone(OnceCell<Mutex<ReviewerRoute>>),
+    Attached {
+        route: Mutex<ReviewerRoute>,
+        approval: AttachedApproval,
+    },
 }
 
 pub(in crate::guardian) struct ApprovalEvidence {
@@ -124,6 +141,7 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
         let super::super::runtime::ReviewRuntime {
             session,
             history_reset: _,
+            attached_reviewer,
             mut context,
             request,
             reasons: _,
@@ -152,7 +170,7 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
                     deadline.cap(tokio::time::Instant::now() + GUARDIAN_PLUGIN_ATTRIBUTION_TIMEOUT);
                 let attribution = tokio::select! {
                     biased;
-                    _ = cancellation.cancelled() => return Err(ReviewDecision::Abort),
+                    _ = cancellation.cancelled() => Ok(None),
                     attribution = tokio::time::timeout_at(
                         attribution_deadline,
                         plugin_attribution_for_guardian_request(&context, &request),
@@ -175,38 +193,103 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
             .as_ref()
             .map(PluginCommandAttribution::serialized_fields)
             .unzip();
-        let report =
-            codex_guardian_reviewer::ReviewReport::new(codex_guardian_reviewer::ReviewMetadata {
-                thread_id: session.thread_id.to_string(),
-                turn_id: assessment_turn_id,
-                review_id: review_id.to_owned(),
-                target_item_id,
-                plugin_id,
-                script_path,
-                approval_request_source,
-                reviewed_action: guardian_reviewed_action(&request),
-                action: guardian_assessment_action(&request),
-                review_reason,
-                model_context,
-                timeout: turn.config.guardian_review_timeout,
-            });
-        let root_history = session
+        let metadata = codex_guardian_reviewer::ReviewMetadata {
+            thread_id: session.thread_id.to_string(),
+            turn_id: assessment_turn_id,
+            turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
+            review_id: review_id.to_owned(),
+            target_item_id,
+            plugin_id,
+            script_path,
+            approval_request_source,
+            reviewed_action: guardian_reviewed_action(&request),
+            action: guardian_assessment_action(&request),
+            review_reason,
+            model_context,
+            timeout: turn.config.guardian_review_timeout,
+        };
+        let root = session
             .services
             .agent_control
-            .get_guardian_package(session.thread_id)
-            .await
-            .map(|snapshot| (snapshot.root_thread_id, snapshot.history_reset_version));
+            .get_guardian_package(session.thread_id);
+        let (root_history, reviewer) = if let Some(provider) =
+            attached_reviewer.filter(|_| !cancellation.is_cancelled())
+        {
+            let route = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(ReviewDecision::Abort),
+                _ = deadline.wait() => return Err(ReviewDecision::denied("automatic approval review timed out")),
+                route = ReviewerRoute::resolve(&session, &context) => route,
+            };
+            let root = root.await;
+            let root_history = root
+                .as_ref()
+                .map(|root| (root.root_thread_id, root.history_reset_version));
+            let history = session.conversation_history_snapshot().await;
+            let authorization = ReviewAuthorization {
+                user_message_revision: history.user_message_revision(),
+                review_context_revision: history.guardian_review_context_revision(),
+                root_history,
+                root_authorization_version: root.as_ref().map(|root| root.authorization_version),
+                root_review_context_revision: root
+                    .as_ref()
+                    .map(|root| root.review_context_revision),
+                history_reset: self.history_reset.clone(),
+            };
+            drop(history);
+            let started = tokio::time::Instant::now();
+            tracing::info!(%review_id, "Guardian V3 review preparation started");
+            let result = AttachedApproval::prepare(
+                provider,
+                authorization,
+                &session,
+                &context,
+                &route,
+                deadline,
+                cancellation,
+            )
+            .await;
+            let result = if cancellation.is_cancelled() {
+                Err(ReviewPreparationError::Cancelled)
+            } else {
+                result
+            };
+            tracing::info!(
+                %review_id,
+                ready = result.is_ok(),
+                failure_reason = result.as_ref().err().map(tracing::field::display),
+                preparation_ms = started.elapsed().as_millis() as u64,
+                "Guardian V3 review preparation finished"
+            );
+            let approval = result.map_err(|error| match error {
+                ReviewPreparationError::Cancelled => ReviewDecision::Abort,
+                _ => ReviewDecision::denied(format!(
+                    "Guardian V3 could not prepare the evidence for this action: {error}"
+                )),
+            })?;
+            (
+                root_history,
+                PreparedReviewer::Attached {
+                    route: Mutex::new(route),
+                    approval,
+                },
+            )
+        } else {
+            let root_history = root
+                .await
+                .map(|root| (root.root_thread_id, root.history_reset_version));
+            (root_history, PreparedReviewer::Standalone(OnceCell::new()))
+        };
         Ok((
             PreparedApproval {
-                route: tokio::sync::Mutex::new(
-                    super::super::reviewer_route::ReviewerRoute::resolve(&session, &context).await,
-                ),
+                reviewer,
                 formatted_action: format_guardian_action_pretty(&request).ok(),
                 request,
+                category: self.request.category,
                 context,
                 root_history,
             },
-            report,
+            codex_guardian_reviewer::ReviewReport::new(metadata),
         ))
     }
 
@@ -227,9 +310,34 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
                 None,
             );
         }
+        let session = &self.session;
+        let (route, attached) = match &prepared.reviewer {
+            PreparedReviewer::Standalone(route) => {
+                // Resolve once under the review's budget, after reporting its start.
+                // All retries keep this route, including any permanent fallback.
+                let route = tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => Err(GuardianReviewError::Cancelled),
+                    _ = deadline.wait() => Err(GuardianReviewError::Timeout),
+                    route = route.get_or_init(|| async {
+                        Mutex::new(ReviewerRoute::resolve(session, &prepared.context).await)
+                    }) => Ok(route),
+                };
+                match route {
+                    Ok(route) => (route, None),
+                    Err(error) => {
+                        return (
+                            GuardianReviewOutcome::Error(error),
+                            GuardianReviewAnalyticsResult::without_session(),
+                            None,
+                        );
+                    }
+                }
+            }
+            PreparedReviewer::Attached { route, approval } => (route, Some(approval)),
+        };
         // Every attempt rebuilds the prompt from live history. Capture its revision and
         // cache attribution anew too; a retried verdict must not use the first snapshot.
-        let session = &self.session;
         let root_snapshot = session
             .services
             .agent_control
@@ -268,27 +376,41 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
                 root_versions,
             });
         drop(history);
-        let (outcome, analytics) = super::super::reviewer_route::run_review_attempt(
+        let (outcome, analytics) = run_review_attempt(
             session,
             &prepared.context,
             deadline,
-            &prepared.route,
+            route,
             |route| async move {
+                let authorization = ReviewAuthorization {
+                    user_message_revision,
+                    review_context_revision,
+                    root_history: prepared.root_history,
+                    root_authorization_version,
+                    root_review_context_revision,
+                    history_reset: self.history_reset.clone(),
+                };
+                if let Some(attached) = attached {
+                    return attached
+                        .attempt(
+                            session,
+                            prepared,
+                            &self.reasons,
+                            authorization,
+                            &route,
+                            deadline,
+                            cancellation,
+                        )
+                        .await;
+                }
                 run_guardian_review_session_before_deadline(
                     Arc::clone(&self.session),
                     prepared.context.clone(),
                     prepared.request.clone(),
-                    self.request.category,
+                    prepared.category,
                     self.reasons.clone(),
                     ReviewAttemptOptions {
-                        authorization: Some(ReviewAuthorization {
-                            user_message_revision,
-                            review_context_revision,
-                            root_history: prepared.root_history,
-                            root_authorization_version,
-                            root_review_context_revision,
-                            history_reset: self.history_reset.clone(),
-                        }),
+                        authorization: Some(authorization),
                         external_cancel: Some(cancellation.clone()),
                         deadline,
                     },

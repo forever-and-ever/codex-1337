@@ -64,6 +64,8 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::warn;
 use url::Url;
 
+use crate::RemoteAuthToken;
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 128 << 20;
@@ -75,7 +77,7 @@ const UDS_WEBSOCKET_HANDSHAKE_URL: &str = "ws://localhost/rpc";
 pub enum RemoteAppServerEndpoint {
     WebSocket {
         websocket_url: String,
-        auth_token: Option<String>,
+        auth_token: Option<RemoteAuthToken>,
     },
     UnixSocket {
         socket_path: AbsolutePathBuf,
@@ -176,6 +178,7 @@ pub struct RemoteAppServerClient {
 pub struct RemoteAppServerRequestHandle {
     command_tx: mpsc::Sender<RemoteClientCommand>,
     thread_coordination: bool,
+    pub(crate) platform_os: Option<String>,
 }
 
 enum SocketPeerPolicy {
@@ -543,6 +546,7 @@ impl RemoteAppServerClient {
         RemoteAppServerRequestHandle {
             command_tx: self.command_tx.clone(),
             thread_coordination: self.metadata.thread_coordination,
+            platform_os: self.metadata.platform_os.clone(),
         }
     }
 
@@ -735,7 +739,7 @@ impl RemoteAppServerRequestHandle {
 
 async fn connect_websocket_endpoint(
     websocket_url: String,
-    auth_token: Option<String>,
+    auth_token: Option<RemoteAuthToken>,
 ) -> IoResult<(String, WebSocketHandshake<MaybeTlsStream<TcpStream>>)> {
     let url = Url::parse(&websocket_url).map_err(|err| {
         IoError::new(
@@ -758,14 +762,15 @@ async fn connect_websocket_endpoint(
             format!("invalid websocket URL `{websocket_url}`: {err}"),
         )
     })?;
-    if let Some(auth_token) = auth_token.as_deref() {
-        let header_value =
-            HeaderValue::from_str(&format!("Bearer {auth_token}")).map_err(|err| {
+    if let Some(auth_token) = auth_token {
+        let mut header_value = HeaderValue::from_str(&format!("Bearer {}", auth_token.as_str()))
+            .map_err(|err| {
                 IoError::new(
                     ErrorKind::InvalidInput,
                     format!("invalid remote authorization header value: {err}"),
                 )
             })?;
+        header_value.set_sensitive(true);
         request.headers_mut().insert(AUTHORIZATION, header_value);
     }
 

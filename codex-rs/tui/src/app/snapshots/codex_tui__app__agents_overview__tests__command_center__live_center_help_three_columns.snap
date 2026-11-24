@@ -7,15 +7,15 @@ expression: "screen(&view, width, height)"
   ────────────────────────────────────────────────────────────────────────────────────────────────
   Task shortcuts
 
-  Navigate            Tasks           View
-  ↑      Up           ⌃n   New        tab/⇧tab  Filter
-  ↓      Down         ⌃o   Resume     ⌃f        Search
-  enter  Open         f    Fork       ⌃s        Group
-  pgup   Page up      ⌃r   Rename
-  pgdn   Page down    ⌃x   Stop
-  ⌃c     Quit         ⌃a   Archive
-                      ⌃w   Hide
-                      del  Delete
+  Navigate                 Tasks           View
+  ↑      Up                ⌃n   New        tab/⇧tab  Filter
+  ↓      Down              ⌃o   Resume     ⌃f        Search
+  enter  Open              f    Fork       ⌃s        Group
+  pgup   Page up           ⌃r   Rename
+  pgdn   Page down         ⌃x   Stop
+  ⇧↓     Next group        ⌃a   Archive
+  ⇧↑     Previous group    ⌃w   Hide
+  ⌃c     Quit              del  Delete
 
 
 

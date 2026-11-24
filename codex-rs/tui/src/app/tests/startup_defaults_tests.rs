@@ -54,7 +54,12 @@ pub(super) async fn run_startup_for_test(
 #[tokio::test]
 async fn bare_startup_has_no_server_thread() -> Result<()> {
     let app = make_test_app().await;
-    let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
+    let (mut server, requests, proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
     let bootstrap = server.bootstrap(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.pause_events();
@@ -738,15 +743,13 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         )
         .await?;
         assert_eq!(started.session.model, selected_model);
+        let cwd = started.session.cwd.to_path_buf();
         assert!(
             !started
                 .session
                 .permission_profile
                 .file_system_sandbox_policy()
-                .can_write_local_path_with_cwd(
-                    started.session.cwd.as_path(),
-                    started.session.cwd.as_path()
-                )
+                .can_write_local_path_with_cwd(&cwd, &cwd)
         );
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), if remote { 1 } else { 2 });

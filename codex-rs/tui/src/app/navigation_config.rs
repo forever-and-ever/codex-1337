@@ -18,26 +18,31 @@ pub(super) struct ConfigRebuild {
 }
 
 impl ConfigRebuild {
-    pub(super) async fn run(self) -> Result<Box<(Config, LocalSettings)>> {
-        let config = match config_persistence::build_config_on_runtime_worker(
-            self.builder,
-            self.network,
-            format!("Failed to rebuild config for cwd {}", self.cwd.display()),
-        )
-        .await
-        {
-            Ok(config) => config,
-            Err(error) => match self.fallback {
-                Some(config) => {
-                    tracing::warn!(%error, cwd = %self.cwd.display(),
-                        "failed to rebuild config for same-cwd resume; using current in-memory config");
-                    return Ok(Box::new((*config, self.settings)));
-                }
-                None => return Err(error),
-            },
-        };
-        let settings = self.settings.reloaded(&config);
-        Ok(Box::new((config, settings)))
+    pub(super) fn run(
+        self: Box<Self>,
+    ) -> impl Future<Output = Result<Box<(Config, LocalSettings)>>> {
+        // Keep the rebuild frame out of the navigation continuation's frame.
+        Box::pin(async move {
+            let config = match config_persistence::build_config_on_runtime_worker(
+                self.builder,
+                self.network,
+                format!("Failed to rebuild config for cwd {}", self.cwd.display()),
+            )
+            .await
+            {
+                Ok(config) => config,
+                Err(error) => match self.fallback {
+                    Some(config) => {
+                        tracing::warn!(%error, cwd = %self.cwd.display(),
+                            "failed to rebuild config for same-cwd resume; using current in-memory config");
+                        return Ok(Box::new((*config, self.settings)));
+                    }
+                    None => return Err(error),
+                },
+            };
+            let settings = self.settings.reloaded(&config);
+            Ok(Box::new((config, settings)))
+        })
     }
 }
 

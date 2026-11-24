@@ -11,6 +11,15 @@ use serde_json::json;
 use super::*;
 
 impl ExecutedToolCalls {
+    fn record_tool_result_metadata(
+        &self,
+        source: &ToolCallSource,
+        call_id: &str,
+        metadata: &JsonValue,
+    ) -> bool {
+        self.record_result_metadata(source, call_id, ToolResultMetadata::new(metadata))
+    }
+
     fn attach_pending_to_prompt(
         &self,
         items: &mut [ResponseItem],
@@ -491,13 +500,13 @@ async fn recorder_refreshes_without_changing_execution_features_or_claiming_miss
             panic!("recording must not rebuild the tool result")
         }
 
-        fn tool_result_metadata(&self) -> Option<&JsonValue> {
+        fn tool_result_metadata(&self) -> ToolResultMetadata {
             assert!(
                 self.2.state.try_lock().is_ok(),
                 "result callbacks must run unlocked"
             );
             self.0.set(self.0.get() + 1);
-            Some(&self.1)
+            ToolResultMetadata::new(&self.1)
         }
     }
 
@@ -1241,8 +1250,9 @@ fn large_wrapped_arguments_preserve_later_wait_completeness() {
     assert_eq!(tool_calls_complete(&wait[1]), Some(true));
 }
 
-#[test]
-fn result_metadata_updates_the_exact_retained_call_and_preserves_large_retries() {
+#[test_case::test_case(false; "yielded")]
+#[test_case::test_case(true; "finished")]
+fn result_metadata_updates_the_exact_retained_call_and_preserves_large_retries(finished: bool) {
     let recorder = new_recorder(InitialHistory::Forked(Vec::new()));
     let cell_id = CellId::new("metadata-cell".to_string());
     recorder.start_cell(&cell_id, "exec");
@@ -1255,10 +1265,12 @@ fn result_metadata_updates_the_exact_retained_call_and_preserves_large_retries()
             /*original_bytes*/ 2,
         );
     }
-    recorder.finish_cell_recording(&cell_id);
+    if finished {
+        recorder.finish_cell_recording(&cell_id);
+    }
     let mut retry_cache = HashMap::new();
-    let mut initial = [exec_input("exec"), exec_output("exec")];
-    assert!(recorder.attach_pending_to_prompt(&mut initial, &mut retry_cache));
+    let history = [exec_input("exec"), exec_output("exec")];
+    assert!(recorder.attach_pending_to_prompt(&mut history.clone(), &mut retry_cache));
 
     let metadata = json!({ "all-keys": { "ids": ["R1"] }, "other": true });
     let source = |cell_id: &str| ToolCallSource::CodeMode {
@@ -1269,12 +1281,15 @@ fn result_metadata_updates_the_exact_retained_call_and_preserves_large_retries()
     assert!(!recorder.record_tool_result_metadata(&source(cell_id.as_str()), "unknown", &metadata));
     assert!(recorder.record_tool_result_metadata(&source(cell_id.as_str()), "first", &metadata));
 
+    // A fresh output with the same model call ID recovers only provider metadata.
     let mut expected_call = call.clone();
     expected_call.set_tool_result_metadata(ToolResultMetadata::new(&metadata));
     let mut expected = exec_output("exec");
     expected.append_executed_tool_calls(vec![expected_call, call]);
     expected.set_tool_call_cell_id("exec");
-    expected.mark_tool_calls_complete();
+    if finished {
+        expected.mark_tool_calls_complete();
+    }
     let mut retry = [exec_output("exec")];
     assert!(recorder.attach_pending_to_prompt(&mut retry, &mut retry_cache));
     assert_eq!(retry, [expected]);
@@ -1285,7 +1300,7 @@ fn result_metadata_updates_the_exact_retained_call_and_preserves_large_retries()
         "first",
         &large_metadata,
     ));
-    let mut expected = serde_json::to_value(&initial[1..]).unwrap();
+    let mut expected = serde_json::to_value(&retry).unwrap();
     expected[0]["internal_chat_message_metadata_passthrough"]["executed_tool_calls"][0]["tool_result_metadata"] =
         large_metadata;
     let mut retry = [exec_output("exec")];

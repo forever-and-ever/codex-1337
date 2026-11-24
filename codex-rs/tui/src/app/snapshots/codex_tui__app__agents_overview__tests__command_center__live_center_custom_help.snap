@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/agent_center_tests.rs
-assertion_line: 703
 expression: "screen(&view, 100, 24)"
 ---
   Agent command center  Group: Project  ⌃s
@@ -8,15 +7,15 @@ expression: "screen(&view, 100, 24)"
   ────────────────────────────────────────────────────────────────────────────────────────────────
   Task shortcuts
 
-  Navigate            Tasks             View
-  k      Up           ⌃n   New          tab/⇧tab  Filter
-  j      Down         ⌃o   Resume       ⌃f        Search
-  enter  Open         f    Fork         ⌃s        Group
-  pgdn   Page down    z r  Rename
-  ⌃c     Quit         ⌃x   Stop
-                      ⌃w   Hide
-                      del  Delete
-                      z p  Pin/unpin
+  Navigate                 Tasks             View
+  k      Up                ⌃n   New          tab/⇧tab  Filter
+  j      Down              ⌃o   Resume       ⌃f        Search
+  enter  Open              f    Fork         ⌃s        Group
+  pgdn   Page down         z r  Rename
+  ⇧j     Next group        ⌃x   Stop
+  ⇧k     Previous group    ⌃w   Hide
+  ⌃c     Quit              del  Delete
+                           z p  Pin/unpin
 
 
 

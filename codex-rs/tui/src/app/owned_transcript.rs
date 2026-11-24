@@ -334,6 +334,8 @@ impl App {
         let highlight_divider =
             self.pane_resize.is_some() || tui.link_hover.shape == tui::PointerShape::Resize;
         let hovered_target = self.hovered_sidebar_target(tui.link_hover.position());
+        let hovered_chat = self.hovered_sidebar_chat(tui.link_hover.position());
+        let hover_mouse = self.hover_pointer(tui, tui.link_hover.mouse);
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
         // completed cells through it when only the conversation is being redrawn.
         let backdrop = caller_inset.map(|_| {
@@ -432,6 +434,7 @@ impl App {
                             pane.choice,
                             &crate::sidebar_chooser::SidebarStyle {
                                 new_chat: self.chat_widget.side_chat_creation_state(),
+                                hovered_chat,
                                 use_theme_colors: self.local_settings.tui.status_line_use_colors,
                                 motion: MotionMode::from_animations_enabled(
                                     self.local_settings.tui.animations,
@@ -492,6 +495,9 @@ impl App {
                 frame.cursor_position = None;
                 self.conversation_frame.close_buttons = buttons;
             }
+            if let Some(area) = self.hover_target_area(hover_mouse, frame.buffer) {
+                crate::terminal_hyperlinks::paint_hover_foreground(area, frame.buffer);
+            }
             self.paint_centered_dialog(frame);
             painted.glint = crate::tui::glint::settle(
                 frame.buffer,
@@ -500,6 +506,10 @@ impl App {
             )
             .filter(|_| !prepared.floating_shortcuts);
         })?;
+        // A shortcut HUD is painted after the conversation and can move over a stationary pointer.
+        if hover_mouse != self.hover_pointer(tui, tui.link_hover.mouse) {
+            frames.schedule_frame();
+        }
         self.finish_conversation(tui, painted)
     }
 
@@ -961,7 +971,7 @@ impl App {
                 && panes.passive.contains((mouse.column, mouse.row).into())
             {
                 let id = panes.passive_thread;
-                let handled = self.handle_passive_transcript_event(tui, id, event);
+                let handled = self.handle_passive_transcript_event(tui, app_server, id, event);
                 if mouse.kind == MouseEventKind::ScrollUp
                     && app_server.has_older_history(id)
                     && self
@@ -1244,8 +1254,18 @@ impl App {
                         | Err(_) => {}
                     }
                 }
-            } else if let ViewAction::OpenLink(url) = action {
-                self.open_url_in_browser(url);
+            } else {
+                match action {
+                    ViewAction::OpenThreadLink(thread_id) => {
+                        self.request_thread_link(
+                            app_server,
+                            self.current_displayed_thread_id(),
+                            thread_id,
+                        );
+                    }
+                    ViewAction::OpenLink(url) => self.open_url_in_browser(url),
+                    _ => {}
+                }
             }
         }
         if was_select_mode && !self.transcript_view.is_select_mode() {

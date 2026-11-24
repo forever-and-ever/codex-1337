@@ -4,6 +4,7 @@ use codex_features::Feature;
 use codex_guardian_reviewer::reviewer_instructions;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::BaseInstructionsProvenance;
+use std::borrow::Cow;
 
 use crate::config::Config;
 use crate::config::NetworkProxySpec;
@@ -46,7 +47,7 @@ pub fn build_guardian_review_session_config(
         ),
         template => template,
     };
-    let retrieval_guidance = match retrieval {
+    let retrieval_guidance = match &retrieval {
         ReviewRetrieval::ConversationHistory
             if guardian_config
                 .features
@@ -60,9 +61,10 @@ pub fn build_guardian_review_session_config(
             }
             .render()
             .into_text()
+            .map(Cow::Owned)
         }
         ReviewRetrieval::ConversationHistory => None,
-        ReviewRetrieval::Extension(prompt) => Some(prompt.to_owned()),
+        ReviewRetrieval::Extension(prompt) => Some(Cow::Borrowed(prompt.as_ref())),
     };
     let instructions = reviewer_instructions(
         guardian_config.guardian_transcript_mode,

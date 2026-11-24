@@ -923,6 +923,7 @@ impl App {
         }
         chat_widget.remote_connection = remote_connection;
         chat_widget.snapshot_local_images = app_server_target.uses_remote_workspace();
+        chat_widget.app_server_path_convention = app_server.path_convention();
         let thread_and_widget_ms = thread_and_widget_started_at.elapsed().as_millis();
         chat_widget.windows_sandbox_local_server = !app_server_target.uses_remote_workspace()
             && app_server.app_server_platform_os() == Some("windows");
@@ -1065,6 +1066,7 @@ See the Codex keymap documentation for supported actions and examples."
             divider_drag: None,
             pane_resize: None,
             passive_link_drag: None,
+            pending_thread_links: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,

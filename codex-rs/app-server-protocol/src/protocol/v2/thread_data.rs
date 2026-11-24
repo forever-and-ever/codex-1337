@@ -15,7 +15,7 @@ use codex_protocol::protocol::SessionSource as CoreSessionSource;
 use codex_protocol::protocol::SubAgentSource as CoreSubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode as CoreThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource as CoreThreadSource;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::LegacyAppPathString;
 #[cfg(test)]
 use schemars::r#gen::SchemaGenerator;
 #[cfg(test)]
@@ -266,7 +266,10 @@ pub struct Thread {
     /// [UNSTABLE] Path to the thread on disk.
     pub path: Option<PathBuf>,
     /// Working directory captured for the thread.
-    pub cwd: AbsolutePathBuf,
+    // Preserve the published SDK type for this server-native absolute path.
+    #[schemars(with = "codex_utils_absolute_path::AbsolutePathBuf")]
+    #[ts(as = "codex_utils_absolute_path::AbsolutePathBuf")]
+    pub cwd: LegacyAppPathString,
     /// Version of the CLI that created the thread.
     pub cli_version: String,
     /// Originator recorded when the thread was created, independent of its current client or executor.
@@ -295,6 +298,10 @@ pub struct Thread {
     /// Saved Daybreak choice, independent of turn execution. Null if unset.
     #[experimental("thread.daybreakEnabled")]
     pub daybreak_enabled: Option<bool>,
+    /// Whether the live thread joined the Daybreak propagation experiment at startup.
+    /// Null when only stored metadata is available. Older servers can omit this field.
+    #[experimental("thread.daybreakProgramPropagationEnrolled")]
+    pub daybreak_program_propagation_enrolled: Option<bool>,
     /// TELOS(warpaint): saved pack; null follows configuration. Only the family root's choice applies.
     pub theme: Option<String>,
     /// Cross-context message admission, independent of user input.
@@ -339,7 +346,7 @@ struct ThreadCompatibility {
     recency_at: Option<i64>,
     status: ThreadStatus,
     path: Option<PathBuf>,
-    cwd: AbsolutePathBuf,
+    cwd: LegacyAppPathString,
     cli_version: String,
     originator: Option<String>,
     source: SessionSource,
@@ -351,6 +358,7 @@ struct ThreadCompatibility {
     git_info: Option<GitInfo>,
     name: Option<String>,
     daybreak_enabled: Option<bool>,
+    daybreak_program_propagation_enrolled: Option<bool>,
     #[serde(default)]
     theme: Option<String>,
     #[serde(default)]
@@ -399,6 +407,7 @@ impl<'de> Deserialize<'de> for Thread {
             git_info: thread.git_info,
             name: thread.name,
             daybreak_enabled: thread.daybreak_enabled,
+            daybreak_program_propagation_enrolled: thread.daybreak_program_propagation_enrolled,
             theme: thread.theme,
             comms: thread.comms,
             context_role: thread.context_role,

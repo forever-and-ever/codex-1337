@@ -70,7 +70,7 @@ impl PublicationQueue {
                 self.pending.push_back(PendingCell::Stream(prepared));
                 let source = text.clone();
                 let questions = questions.clone().unwrap_or_default();
-                let cwd = display.cwd.clone();
+                let cwd = display.cwd.to_path_buf();
                 let visualizations = display.visualizations.clone();
                 let events = events.clone();
                 tokio::task::spawn_blocking(move || {

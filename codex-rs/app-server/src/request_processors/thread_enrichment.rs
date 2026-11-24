@@ -57,7 +57,7 @@ async fn enrich_loaded_thread(
         return;
     };
     let config_snapshot = loaded_thread.config_snapshot().await;
-    apply_live_thread_settings(thread, &config_snapshot);
+    apply_live_thread_settings(thread, &loaded_thread, &config_snapshot);
     thread.can_accept_text_input = Some(true);
     if !matches!(
         &thread.source,

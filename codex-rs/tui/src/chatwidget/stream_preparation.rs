@@ -105,11 +105,8 @@ impl ChatWidget {
         let authoritative = completed.is_some();
         let completed = completed.map(str::to_owned);
         let questions = questions.to_vec();
-        let cwd = self.config.cwd.to_path_buf();
-        let context = crate::inline_visualization::InlineVisualizationContext::from_config(
-            &self.config,
-            thread_id,
-        );
+        let cwd = self.session_cwd().to_path_buf();
+        let context = self.local_inline_visualization_context();
         let tx = self.app_event_tx.clone();
         self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
@@ -157,7 +154,7 @@ impl ChatWidget {
             .item_id
             .clone()
             .expect("background stream has an item");
-        let cwd = self.config.cwd.to_path_buf();
+        let cwd = self.session_cwd().to_path_buf();
         let tx = self.app_event_tx.clone();
         self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
@@ -206,7 +203,7 @@ impl ChatWidget {
     pub(super) fn start_prepared_plan_stream(&mut self) {
         let mut controller = PlanStreamController::new(
             self.current_stream_width(/*reserved_cols*/ 4),
-            &self.config.cwd,
+            &self.session_cwd().to_path_buf(),
             self.history_render_mode(),
         )
         .with_list_spacing(if self.local_settings.transcript_mode.is_owned() {

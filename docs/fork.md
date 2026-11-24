@@ -174,6 +174,15 @@ retaining its C bzip2 backend without compiling the unused Rust backend.
 Provenance, the exact metadata delta and removal condition live in
 `codex-rs/vendor/zip/DOWNSTREAM.md`; the library has no functional changes.
 
+## Saved-thread links
+
+Clicking a `codex://threads/<uuid>` link asks the transcript's app server for
+that saved thread. On an i3/Alacritty desktop, Codex focuses a window already
+displaying it or starts another Alacritty on the same backend. The originating
+chat, overlay and draft stay put. A missing thread or an endpoint that cannot
+be safely reopened produces an error, not a local fallback. The URL remains
+copyable and is never sent to a web browser.
+
 ## Current X11 clipboard keeper
 
 The optional desktop-wide keeper retains only the current CLIPBOARD offer in
@@ -365,6 +374,16 @@ chose, as a conversation's model or a subagent's. Work Codex starts on its own
 (approval review, web search, memories, titles, scoring) never runs on
 OpenRouter: it runs on the ChatGPT login, natively on the Claude subscription
 where Codex has that path, or not at all.
+
+The experimental `thread/sample` RPC asks for one response against a snapshot
+of a saved root thread. It does not switch the parent model or launch a
+persistent worker. Omitting `model` inherits the source; an explicit alternate
+must be admitted on its pinned provider and account and be compatible with
+the captured history. An incompatible selector is an error, not permission
+to change payer or translate private provider state. The extra question has
+no sampler-specific byte cap; context limits and ordinary inference charges
+still apply. For a review on another provider today, give a fresh subagent
+the material to review rather than forking the full history.
 
 A memory startup job is an independently admitted operation. It captures its
 conversation's committed credential authority before any worker is queued and

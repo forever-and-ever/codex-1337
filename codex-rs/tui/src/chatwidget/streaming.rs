@@ -117,9 +117,9 @@ impl ChatWidget {
                 .take()
                 .filter(|_| completed_message.is_none());
             let (cell, streamed_source) = controller.finalize();
-            let completed_display = completed_message.map(|source| {
-                parse_assistant_markdown(source, self.config.cwd.as_path()).visible_markdown
-            });
+            let cwd = self.session_cwd().to_path_buf();
+            let completed_display = completed_message
+                .map(|source| parse_assistant_markdown(source, &cwd).visible_markdown);
             let completed_message_differs = completed_display.as_deref().is_some_and(|completed| {
                 let Some(streamed) = streamed_source.as_deref() else {
                     return true;
@@ -163,16 +163,11 @@ impl ChatWidget {
                     );
             }
             let copy_source = completed_message.map(str::to_owned).or(streamed_source);
-            let source = copy_source.as_deref().map(|source| {
-                parse_assistant_markdown(source, self.config.cwd.as_path()).visible_markdown
-            });
+            let source = copy_source
+                .as_deref()
+                .map(|source| parse_assistant_markdown(source, &cwd).visible_markdown);
             if let Some(source) = source {
-                let inline_visualization_context = self.thread_id.and_then(|thread_id| {
-                    crate::inline_visualization::InlineVisualizationContext::from_config(
-                        &self.config,
-                        thread_id,
-                    )
-                });
+                let inline_visualization_context = self.local_inline_visualization_context();
                 self.note_stream_consolidation_queued();
                 self.app_event_tx.send(AppEvent::ConsolidateAgentMessage {
                     interrupted_item,
@@ -182,7 +177,7 @@ impl ChatWidget {
                         .map(|message| message.item_id.clone())
                         .or_else(|| controller.item_id.clone()),
                     copy_source,
-                    cwd: self.config.cwd.to_path_buf(),
+                    cwd,
                     inline_visualization_context,
                     scrollback_reflow,
                     deferred_history_cell,
@@ -256,12 +251,23 @@ impl ChatWidget {
             })
     }
 
+    pub(super) fn local_inline_visualization_context(
+        &self,
+    ) -> Option<crate::inline_visualization::InlineVisualizationContext> {
+        self.thread_id
+            .filter(|_| self.session_paths_are_local())
+            .and_then(|id| {
+                crate::inline_visualization::InlineVisualizationContext::from_config(
+                    &self.config,
+                    id,
+                )
+            })
+    }
+
     /// Capture at handoff, while links and visualization directives still have the outgoing cwd.
     pub(crate) fn take_side_display(&mut self, width: u16) -> CapturedSideDisplay {
         self.flush_completed_tool_activity();
-        let visualizations = self.thread_id.and_then(|id| {
-            crate::inline_visualization::InlineVisualizationContext::from_config(&self.config, id)
-        });
+        let visualizations = self.local_inline_visualization_context();
         let source = self.active_cell_transcript_key();
         let visible = |cell: &dyn HistoryCell| {
             !cell.as_any().is::<history_cell::StreamingAgentTailCell>()
@@ -297,7 +303,7 @@ impl ChatWidget {
                         self.bottom_pane.status_elapsed().unwrap_or_default(),
                     )
                 }),
-            cwd: self.config.cwd.clone(),
+            cwd: self.session_cwd().clone(),
             visualizations,
         }
     }
@@ -312,8 +318,8 @@ impl ChatWidget {
             && !message.is_empty()
             && !self.completed_agent_message_was_flushed(message)
         {
-            let displayed =
-                parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown;
+            let displayed = parse_assistant_markdown(message, &self.session_cwd().to_path_buf())
+                .visible_markdown;
             self.handle_streaming_delta(displayed);
         }
         // Item completion is authoritative. Use it for consolidation so any
@@ -418,7 +424,10 @@ impl ChatWidget {
                     .send(AppEvent::ConsolidateProposedPlan(source));
             }
         } else if !plan_text.is_empty() {
-            self.add_to_history(history_cell::new_proposed_plan(plan_text, &self.config.cwd));
+            self.add_to_history(history_cell::new_proposed_plan(
+                plan_text,
+                &self.session_cwd().to_path_buf(),
+            ));
         } else if let Some(source) = consolidated_plan_source {
             self.note_stream_consolidation_queued();
             self.app_event_tx
@@ -482,8 +491,10 @@ impl ChatWidget {
             .or(self.reasoning_header.take());
         if !self.reasoning_summary_parts.is_empty() {
             let reasoning_parts = std::mem::take(&mut self.reasoning_summary_parts);
-            let mut cell =
-                history_cell::new_reasoning_summary_block(reasoning_parts, &self.config.cwd);
+            let mut cell = history_cell::new_reasoning_summary_block(
+                reasoning_parts,
+                &self.session_cwd().to_path_buf(),
+            );
             if let Some(id) = &self.status_state.reasoning_item_id {
                 cell.set_source_item_id(id.clone());
             }
@@ -555,7 +566,8 @@ impl ChatWidget {
         if self.finish_prepared_answer(&item, &message, from_replay) {
             return;
         }
-        let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
+        let cwd = self.session_cwd().to_path_buf();
+        let parsed = parse_assistant_markdown(&message, &cwd);
         let questions = item.questions.as_deref().unwrap_or_default();
         let interrupted = self
             .transcript
@@ -575,15 +587,10 @@ impl ChatWidget {
             self.prepare_assistant_message();
             self.mark_safety_buffering_agent_message_started();
             self.hide_stream_status();
-            let context = self.thread_id.and_then(|thread_id| {
-                crate::inline_visualization::InlineVisualizationContext::from_config(
-                    &self.config,
-                    thread_id,
-                )
-            });
+            let context = self.local_inline_visualization_context();
             let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
                 parsed.visible_markdown.clone(),
-                self.config.cwd.as_path(),
+                &cwd,
                 context,
             );
             cell = cell
@@ -743,16 +750,11 @@ impl ChatWidget {
         }
         if self.stream_controller.is_none() {
             self.prepare_assistant_message();
-            let inline_visualization_context = self.thread_id.and_then(|thread_id| {
-                crate::inline_visualization::InlineVisualizationContext::from_config(
-                    &self.config,
-                    thread_id,
-                )
-            });
+            let inline_visualization_context = self.local_inline_visualization_context();
             let timestamp = self.transcript.agent_timestamp;
             let mut controller = StreamController::new_with_inline_visualizations(
                 self.current_stream_width(history_cell::agent_prefix(/*first*/ true).width()),
-                &self.config.cwd,
+                &self.session_cwd().to_path_buf(),
                 self.history_render_mode(),
                 inline_visualization_context,
             )

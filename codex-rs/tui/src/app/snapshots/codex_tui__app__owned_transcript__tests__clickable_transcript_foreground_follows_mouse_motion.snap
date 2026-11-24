@@ -1,0 +1,14 @@
+---
+source: tui/src/app/owned_transcript_tests.rs
+assertion_line: 2464
+expression: "styles.join(\"\\n\")"
+---
+https://prompt.example/: Rgb(220, 220, 220) → Rgb(255, 168, 70)
+guide: Rgb(255, 162, 75) → Rgb(220, 220, 220)
+日本語: Rgb(255, 162, 75) → Rgb(220, 220, 220)
+Table guide: Rgb(255, 162, 75) → Rgb(220, 220, 220)
+MCP docs: Rgb(152, 152, 152) → Rgb(255, 168, 70)
+[in: Rgb(220, 220, 220) → Rgb(255, 168, 70)
+1 warning: Rgb(209, 193, 132) → Rgb(255, 168, 70)
+1 warning (Ctrl): Rgb(209, 193, 132) → Rgb(255, 168, 70)
+PR #42: Rgb(220, 220, 220) → Rgb(255, 168, 70)

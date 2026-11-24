@@ -7,6 +7,7 @@
 //! Wheel input preserves fractional rows and caps admitted distance in real time.
 
 use crate::key_hint::KeyBindingListExt;
+use crate::terminal_hyperlinks::TerminalHyperlink;
 use codex_protocol::ThreadId;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -27,6 +28,17 @@ pub(crate) enum ViewAction {
     PrimarySelection(String),
     CopyAndFollow(String),
     OpenLink(String),
+    OpenThreadLink(ThreadId),
+}
+
+impl ViewAction {
+    fn open_link(link: &TerminalHyperlink) -> Option<Self> {
+        if let Some(id) = link.thread_id() {
+            Some(Self::OpenThreadLink(id))
+        } else {
+            link.terminal_destination().map(Self::OpenLink)
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,20 +116,45 @@ impl TranscriptView {
             | ViewAction::ExitSelectMode
             | ViewAction::Copy(_)
             | ViewAction::CopyAndFollow(_)
-            | ViewAction::OpenLink(_) => SelectionCopy::Explicit,
+            | ViewAction::OpenLink(_)
+            | ViewAction::OpenThreadLink(_) => SelectionCopy::Explicit,
         }
     }
 
-    /// Resolve the terminal destination at the same geometry used for mouse clicks.
+    /// Resolve the copy destination at the same geometry used for mouse clicks.
     pub(crate) fn link_at(&self, column: u16, row: u16) -> Option<String> {
-        if !self.area.contains(ScreenPosition::new(column, row)) {
+        let (_, link) = self.link_hit(ScreenPosition::new(column, row))?;
+        link.interaction_destination()
+    }
+
+    /// A saved-thread link has no OSC 8 cell metadata, so use its painted layout range.
+    pub(crate) fn thread_link_hover_area(&self, point: ScreenPosition) -> Option<Rect> {
+        if self.is_select_mode() {
             return None;
         }
-        let visible = self.visible.get(usize::from(row - self.area.y))?;
-        visible
+        let (visible, link) = self.link_hit(point)?;
+        link.thread_id()?;
+        let (inset, _) = visible.layout.row_links(visible.row)?;
+        let start = self.area.x + u16::try_from(inset + link.columns.start).ok()?;
+        let end = (usize::from(self.area.x) + inset + link.columns.end)
+            .min(usize::from(self.area.right()));
+        Some(Rect::new(
+            start,
+            point.y,
+            u16::try_from(end).ok()? - start,
+            1,
+        ))
+    }
+
+    fn link_hit(&self, point: ScreenPosition) -> Option<(&VisibleRow, &TerminalHyperlink)> {
+        if !self.area.contains(point) {
+            return None;
+        }
+        let visible = self.visible.get(usize::from(point.y - self.area.y))?;
+        let link = visible
             .layout
-            .raw_link_at(visible.row, column - self.area.x)?
-            .terminal_destination()
+            .raw_link_at(visible.row, point.x - self.area.x)?;
+        Some((visible, link))
     }
 
     pub(super) fn navigate_presented_pager(
@@ -334,12 +371,11 @@ impl TranscriptView {
             && area.contains(point)
         {
             let column = usize::from(event.column - area.x);
-            return tip
+            let link = tip
                 .hyperlinks
                 .iter()
-                .find(|link| link.columns.contains(&column))?
-                .terminal_destination()
-                .map(ViewAction::OpenLink);
+                .find(|link| link.columns.contains(&column))?;
+            return ViewAction::open_link(link);
         }
         let inside = self.area.contains(point);
         let dragging = self
@@ -399,8 +435,11 @@ impl TranscriptView {
                 } else {
                     None
                 };
-                let link = link.filter(|destination| {
-                    self.link_at(event.column, event.row).as_ref() == Some(destination)
+                let action = link.and_then(|destination| {
+                    let (_, link) = self.link_hit(point)?;
+                    (link.interaction_destination().as_ref() == Some(&destination))
+                        .then(|| ViewAction::open_link(link))
+                        .flatten()
                 });
                 if self
                     .selection
@@ -414,9 +453,9 @@ impl TranscriptView {
                 if selected.is_none() {
                     self.end_selection(cells);
                 }
-                if let Some(link) = link {
+                if let Some(action) = action {
                     self.end_selection(cells);
-                    return Some(ViewAction::OpenLink(link));
+                    return Some(action);
                 }
                 if let Some(text) = selected.filter(|text| !text.is_empty()) {
                     if self.copy_on_select {
@@ -515,10 +554,7 @@ impl TranscriptView {
             return Some(ViewAction::Changed);
         }
         let was_following = self.is_following();
-        if !self.is_select_mode()
-            && event.modifiers.is_empty()
-            && self.toggle_disclosure_at(cells, event.column, event.row)
-        {
+        if event.modifiers.is_empty() && self.toggle_disclosure_at(cells, event.column, event.row) {
             // Keep the patch anchored for inspection, then follow again when the prompt closes.
             if was_following && let MouseMode::Selection(Some((thread_id, id))) = mode {
                 self.disclosure.resume_after_approval = Some((thread_id, id.to_owned()));
@@ -534,9 +570,8 @@ impl TranscriptView {
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
         {
-            return self
-                .link_at(event.column, event.row)
-                .map(ViewAction::OpenLink);
+            let (_, link) = self.link_hit(ScreenPosition::new(event.column, event.row))?;
+            return ViewAction::open_link(link);
         }
         if event.modifiers == KeyModifiers::SHIFT && self.has_selection_range() {
             self.last_click = None;

@@ -26,6 +26,7 @@ fn review_completion_uses_one_monotonic_duration(
     let mut report = ReviewReport::new(ReviewMetadata {
         thread_id: "thread".to_string(),
         turn_id: "turn".to_string(),
+        turn_trigger: None,
         review_id: "review".to_string(),
         target_item_id: None,
         plugin_id: None,
@@ -86,4 +87,36 @@ fn review_completion_uses_one_monotonic_duration(
             .map(|event| (event.started_at_ms, event.completed_at_ms)),
         has_client_event.then_some((1_654_073_807_000, Some(1_792_141_011_000)))
     );
+}
+
+#[test_case::test_case(Some("automation"), "automation"; "automation")]
+#[test_case::test_case(Some("mcp_event"), "automation"; "webhook")]
+#[test_case::test_case(Some("automation_cron_scheduled"), "automation"; "scheduled")]
+#[test_case::test_case(Some("automation_cron_run_now"), "automation"; "run_now")]
+#[test_case::test_case(Some("automation_heartbeat_scheduled"), "automation"; "heartbeat_scheduled")]
+#[test_case::test_case(Some("automation_heartbeat_run_now"), "automation"; "heartbeat_run_now")]
+#[test_case::test_case(Some("composer"), "other"; "user")]
+#[test_case::test_case(Some("arbitrary client supplied value"), "other"; "bounded_labels")]
+#[test_case::test_case(Some(""), "unknown"; "empty")]
+#[test_case::test_case(None, "unknown"; "missing")]
+fn review_report_bounds_turn_origin(turn_trigger: Option<&str>, expected_origin: &str) {
+    let report = ReviewReport::new(ReviewMetadata {
+        thread_id: "thread".into(),
+        turn_id: "turn".into(),
+        turn_trigger: turn_trigger.map(str::to_owned),
+        review_id: "review".into(),
+        target_item_id: None,
+        plugin_id: None,
+        script_path: None,
+        approval_request_source: GuardianApprovalRequestSource::MainTurn,
+        reviewed_action: GuardianReviewedAction::NativeToolCall {},
+        action: None,
+        review_reason: GuardianReviewReason::Policy,
+        model_context: ModelInvocationContext {
+            model_slug: "test-model".into(),
+            reasoning_effort: None,
+        },
+        timeout: None,
+    });
+    assert_eq!(report.turn_origin, expected_origin);
 }

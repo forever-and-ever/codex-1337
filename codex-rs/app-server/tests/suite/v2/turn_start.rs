@@ -90,7 +90,6 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_LIST_TOOL;
@@ -3337,7 +3336,7 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
                     approvals_reviewer: None,
                     sandbox_policy: Some(
                         codex_app_server_protocol::SandboxPolicy::WorkspaceWrite {
-                            writable_roots: vec![first_writable_root],
+                            writable_roots: vec![first_writable_root.into()],
                             network_access: false,
                             exclude_tmpdir_env_var: true,
                             exclude_slash_tmp: true,
@@ -3413,7 +3412,10 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
             mcp.read_notification("thread/settings/updated"),
         )
         .await??;
-        assert_eq!(settings_updated.thread_settings.cwd, second_cwd.abs());
+        assert_eq!(
+            settings_updated.thread_settings.cwd.as_path(),
+            second_cwd.as_path()
+        );
 
         let command_exec_item = timeout(DEFAULT_READ_TIMEOUT, async {
             loop {
@@ -4614,14 +4616,7 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
         .environments
         .as_ref()
         .and_then(|environments| environments.first())
-        .map(|environment| {
-            environment
-                .runtime_workspace_roots
-                .iter()
-                .map(|root| AbsolutePathBuf::from_absolute_path(root.as_str()))
-                .collect::<std::io::Result<Vec<_>>>()
-        })
-        .transpose()?;
+        .map(|environment| environment.runtime_workspace_roots.clone());
     let forked: codex_app_server_protocol::ThreadForkResponse = mcp
         .request(|request_id| ClientRequest::ThreadFork {
             request_id,
@@ -4630,7 +4625,7 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
                 name: Some("independent investigation".to_string()),
                 model: current.thread.model.clone(),
                 model_provider: Some(current.thread.model_provider.clone()),
-                cwd: Some(current.thread.cwd.to_string_lossy().into_owned()),
+                cwd: Some(current.thread.cwd.as_str().to_owned()),
                 runtime_workspace_roots: source_roots,
                 service_tier: Some(None),
                 ..Default::default()

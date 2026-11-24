@@ -4,7 +4,7 @@ expression: rendered
 ---
 /status
 
-  >_ OpenAI Codex (v0.171.0-1337)
+  >_ OpenAI Codex (v0.172.0-1337)
 
   Model:           claude-sonnet-5-5 (reasoning none, summaries auto)
   Model provider:  claude_subscription

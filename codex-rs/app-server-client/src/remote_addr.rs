@@ -1,6 +1,7 @@
 //! Parse CLI remote app-server endpoints and determine whether they can carry bearer tokens.
 
 use crate::RemoteAppServerEndpoint;
+use crate::RemoteAuthToken;
 use crate::remote::websocket_url_supports_auth_token;
 use codex_core::config::find_codex_home;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -105,32 +106,9 @@ pub fn resolve_remote_endpoint(
                 ));
             }
         };
-        *slot = Some(read_remote_auth_token_from_env_var(&remote_auth_token_env)?);
+        *slot = Some(RemoteAuthToken::from_env(remote_auth_token_env)?);
     }
     Ok(remote_endpoint)
-}
-
-fn read_remote_auth_token_from_env_var_with<F>(
-    env_var_name: &str,
-    get_var: F,
-) -> std::io::Result<String>
-where
-    F: FnOnce(&str) -> Result<String, std::env::VarError>,
-{
-    let auth_token = get_var(env_var_name).map_err(|_| {
-        std::io::Error::other(format!("environment variable `{env_var_name}` is not set"))
-    })?;
-    let auth_token = auth_token.trim().to_string();
-    if auth_token.is_empty() {
-        return Err(std::io::Error::other(format!(
-            "environment variable `{env_var_name}` is empty"
-        )));
-    }
-    Ok(auth_token)
-}
-
-fn read_remote_auth_token_from_env_var(env_var_name: &str) -> std::io::Result<String> {
-    read_remote_auth_token_from_env_var_with(env_var_name, |name| std::env::var(name))
 }
 
 #[cfg(test)]

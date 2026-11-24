@@ -4,6 +4,7 @@
 //! catalog state into one-time TUI prompts or warning cells without owning the main event loop.
 
 use super::*;
+use codex_app_server_protocol::SkillErrorInfo;
 use codex_config::ConfigLayerSource;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use std::collections::HashSet;

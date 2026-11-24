@@ -8,7 +8,6 @@ use super::ForkPermissionMode;
 use super::ForkPresentation;
 use super::HistoryHydrationScope;
 use super::LocalSettings;
-use super::PermissionProfile;
 use super::PermissionProfileSelection;
 use super::RequestId;
 use super::SideChatStorage;
@@ -21,6 +20,7 @@ use super::ThreadParamsMode;
 use super::TypedRequestError;
 use super::Uuid;
 use super::bootstrap_request_error;
+use super::decode_thread_cwd;
 use super::history;
 use super::history::preparation::HistoryPaginationUpdate;
 use super::is_history_pagination_unsupported;
@@ -37,6 +37,9 @@ use super::thread_fork_params_from_config;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
+use codex_utils_path_uri::LegacyAppPathString;
+use codex_utils_path_uri::PathUri;
+use codex_utils_path_uri::Platform;
 
 enum ForkPermissions {
     InheritSaved,
@@ -55,7 +58,7 @@ pub(crate) struct ForkPreparation {
     mode: ThreadParamsMode,
     history_support: ThreadHistorySupport,
     presentation: ForkPresentation,
-    source: ForkConfigSource,
+    from_session: bool,
     permissions: ForkPermissions,
     task_tools_available: bool,
     uses_remote_workspace: bool,
@@ -67,6 +70,7 @@ impl AppServerSession {
         policy: RequestPolicy,
         local_settings: &LocalSettings,
         config: Config,
+        workspace_roots: Option<&[PathUri]>,
         parent: ThreadId,
         selected_profile: Option<&PermissionProfileSelection>,
     ) -> ForkPreparation {
@@ -81,7 +85,7 @@ impl AppServerSession {
             ForkPresentation::SideConversation(SideChatStorage::Temporary),
             selected_profile,
             ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session,
+            ForkConfigSource::Session { workspace_roots },
             None,
         )
     }
@@ -95,6 +99,7 @@ impl AppServerSession {
         policy: RequestPolicy,
         local_settings: &LocalSettings,
         config: Config,
+        workspace_roots: Option<&[PathUri]>,
         thread_id: ThreadId,
         last_turn_id: Option<String>,
         before_turn_id: Option<String>,
@@ -113,7 +118,7 @@ impl AppServerSession {
             ForkPresentation::Regular,
             selected_profile,
             ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session,
+            ForkConfigSource::Session { workspace_roots },
             name,
         )
     }
@@ -134,7 +139,7 @@ impl AppServerSession {
         presentation: ForkPresentation,
         selected_profile: Option<&PermissionProfileSelection>,
         permission_mode: ForkPermissionMode,
-        source: ForkConfigSource,
+        source: ForkConfigSource<'_>,
         name: Option<ForkName>,
     ) -> ForkPreparation {
         let session_config = if config.model.is_none() {
@@ -165,11 +170,20 @@ impl AppServerSession {
         };
         params.model_provider = match source {
             ForkConfigSource::Local => self.explicit_model_provider(&config),
-            ForkConfigSource::Session => Some(config.model_provider_id.clone()),
+            ForkConfigSource::Session { .. } => Some(config.model_provider_id.clone()),
         };
-        if source == ForkConfigSource::Session {
-            // Fork does not restore omitted roots; the active config adopted the server's roots.
-            params.runtime_workspace_roots = Some(config.workspace_roots.clone());
+        if let ForkConfigSource::Session {
+            workspace_roots: Some(roots),
+        } = source
+        {
+            // Captured roots belong to the source session, not the UI host.
+            params.runtime_workspace_roots = Some(
+                roots
+                    .iter()
+                    .cloned()
+                    .map(LegacyAppPathString::from)
+                    .collect(),
+            );
         }
         let permissions = if let Some(selected) = selected_profile {
             params.runtime_workspace_roots = None;
@@ -196,7 +210,7 @@ impl AppServerSession {
             mode: self.thread_params_mode(),
             history_support: self.history_support,
             presentation,
-            source,
+            from_session: matches!(source, ForkConfigSource::Session { .. }),
             permissions,
             task_tools_available: self.task_tools_available(thread_id),
             uses_remote_workspace: self.uses_remote_workspace(),
@@ -224,7 +238,7 @@ impl ForkPreparation {
             mode,
             history_support,
             mut presentation,
-            source,
+            from_session,
             permissions,
             task_tools_available,
             uses_remote_workspace,
@@ -272,10 +286,10 @@ impl ForkPreparation {
                     .as_ref()
                     .is_some_and(|thread| thread.history_mode == ThreadHistoryMode::Paginated)
                     || matches!(presentation, ForkPresentation::SideConversation(_)));
-            let child_fork = source == ForkConfigSource::Session
-                && fork_parent.as_ref().is_some_and(thread_blocks_direct_input);
-            if child_fork {
-                params.cwd = Some(config.cwd.to_string_lossy().into_owned());
+            let child_parent = fork_parent.as_ref().filter(|thread| from_session && thread_blocks_direct_input(thread));
+            let child_fork = child_parent.is_some();
+            if let Some(parent) = child_parent {
+                params.cwd = Some(parent.cwd.as_str().to_owned());
                 // A child's saved tier must not be inferred from the client's default model.
                 params.service_tier = Some(config.service_tier.clone());
                 params.base_instructions = None;
@@ -425,15 +439,13 @@ impl ForkPreparation {
                     );
                 }
             }
-            let selected_permissions =
-                matches!(permissions, ForkPermissions::Selected).then(|| {
-                    PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-                        &response.sandbox.to_core(),
-                        response.cwd.as_path(),
-                    )
-                });
+            let convention = Platform::from_platform_os(handle.platform_os()).path_convention();
+            let cwd = decode_thread_cwd(&response.cwd, convention)?;
+            let selected_permissions = matches!(permissions, ForkPermissions::Selected)
+                .then(|| response.sandbox.permission_profile_for_cwd(&cwd))
+                .transpose()?;
             let mut started =
-                started_thread_from_fork_response(response, &local_settings, &config, mode).await?;
+                started_thread_from_fork_response(response, &local_settings, &config, mode, cwd).await?;
             if let Some(permissions) = selected_permissions {
                 started.session.permission_profile = permissions;
             }
@@ -461,6 +473,7 @@ impl AppServerSession {
         &mut self,
         local_settings: &LocalSettings,
         config: Config,
+        workspace_roots: Option<&[PathUri]>,
         thread_id: ThreadId,
         selected_profile: Option<&PermissionProfileSelection>,
         storage: SideChatStorage,
@@ -470,6 +483,7 @@ impl AppServerSession {
                 RequestPolicy::Unbounded,
                 local_settings,
                 config,
+                workspace_roots,
                 thread_id,
                 selected_profile,
             )

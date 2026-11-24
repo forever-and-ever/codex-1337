@@ -13,7 +13,6 @@ use super::HashSet;
 use super::OperationLane;
 use super::OperationOrigin;
 use super::OperationScope;
-use super::PathBuf;
 use super::PendingSubmission;
 use super::RealtimeOperation;
 use super::Result;
@@ -72,7 +71,7 @@ pub(in crate::app) enum ThreadMutation {
 pub(in crate::app) enum CatalogRequest {
     Skills {
         params: SkillsListParams,
-        cwd: PathBuf,
+        cwd: codex_utils_path_uri::PathUri,
     },
     UiRequest(ui_requests::UiRequest),
 }
@@ -503,7 +502,7 @@ impl App {
             }
             OperationReceipt::Skills(response) => {
                 if let ServerOperation::Catalog(CatalogRequest::Skills { cwd, .. }) = operation
-                    && self.chat_widget.config_ref().cwd.as_path() == cwd
+                    && self.chat_widget.session_cwd() == cwd
                 {
                     self.handle_skills_list_result(Ok(response), "failed to refresh skills");
                 }

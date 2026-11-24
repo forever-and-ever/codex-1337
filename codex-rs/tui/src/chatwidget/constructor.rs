@@ -66,7 +66,12 @@ impl ChatWidget {
         history_cell::set_fresh_session(header.as_mut(), &empty_state_animation.fresh_session);
         let active_cell = Some(header);
 
-        let current_cwd = Some(config.cwd.to_path_buf());
+        let current_cwd = PathUri::from_abs_path(&config.cwd);
+        let current_workspace_roots = config
+            .workspace_roots
+            .iter()
+            .map(PathUri::from_abs_path)
+            .collect();
         let effective_service_tier = crate::service_tier_resolution::effective_service_tier(
             &config,
             &local_settings.notices,
@@ -128,6 +133,7 @@ impl ChatWidget {
             active_account_label: None,
             openrouter_ui: openrouter::OpenRouterUi::default(),
             remote_connection: None,
+            app_server_path_convention: None,
             snapshot_local_images: false,
             pending_image_submission: None,
             windows_sandbox_local_server: false,
@@ -241,6 +247,7 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             current_rollout_path: None,
             current_cwd,
+            current_workspace_roots,
             primary_environment_cwd: None,
             workspace_command_runner,
             instruction_source_paths: Vec::new(),

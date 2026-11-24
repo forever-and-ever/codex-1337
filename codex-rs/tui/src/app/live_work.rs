@@ -439,7 +439,10 @@ impl App {
                 view.jump_to_latest();
             }
             self.transcript_view.show_copy_feedback(&result, characters);
-        } else if matches!(action, ViewAction::OpenLink(_)) {
+        } else if matches!(
+            action,
+            ViewAction::OpenLink(_) | ViewAction::OpenThreadLink(_)
+        ) {
             unreachable!("Work selection never activates links");
         }
         tui.frame_requester().schedule_frame();

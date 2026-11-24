@@ -114,6 +114,7 @@ struct SafetyContinuation {
 pub(super) struct ForkContext {
     input: ForkInput,
     config: Config,
+    workspace_roots: Option<Vec<codex_utils_path_uri::PathUri>>,
 }
 pub(super) struct ForkReady {
     context: ForkContext,
@@ -656,6 +657,7 @@ impl App {
                     RequestPolicy::Interactive,
                     &self.local_settings,
                     context.config.clone(),
+                    context.workspace_roots.as_deref(),
                     context.input.thread_id(),
                     context.input.permissions.selection(),
                 )
@@ -702,6 +704,7 @@ impl App {
             RequestPolicy::Interactive,
             &self.local_settings,
             context.config.clone(),
+            context.workspace_roots.as_deref(),
             context.input.thread_id(),
             None,
             before_turn_id,
@@ -1074,11 +1077,6 @@ impl App {
                         } else {
                             self.config.clone()
                         };
-                        if server.uses_remote_workspace() {
-                            config
-                                .workspace_roots
-                                .clone_from(&self.chat_widget.config_ref().workspace_roots);
-                        }
                         config
                             .model_provider_id
                             .clone_from(&self.chat_widget.config_ref().model_provider_id);
@@ -1097,9 +1095,24 @@ impl App {
                     }
                     ForkPurpose::Safety(_) => self.chat_widget.config_ref().clone(),
                 };
+                let workspace_roots = if server.uses_remote_workspace() {
+                    let (_, store) = input.origin.thread();
+                    store
+                        .lock()
+                        .await
+                        .session
+                        .as_ref()
+                        .filter(|session| {
+                            session.thread_settings_confirmed && !session.read_only_history
+                        })
+                        .map(|session| session.runtime_workspace_roots.clone())
+                } else {
+                    None
+                };
                 let context = Box::new(ForkContext {
                     input: *input,
                     config,
+                    workspace_roots,
                 });
                 if let ForkPurpose::Recourse { turn_id, .. } = &context.input.purpose {
                     let effect = ForkEffect::RecourseHistory {

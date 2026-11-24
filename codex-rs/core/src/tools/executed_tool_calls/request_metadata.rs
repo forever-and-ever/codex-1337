@@ -36,6 +36,7 @@ impl ExecutedToolCalls {
             };
             for item in items.iter_mut() {
                 if let Some(call) = item.id().and_then(|id| state.direct_calls.get(id)) {
+                    // Release the old arguments and metadata before cloning the cached row.
                     item.clear_executed_tool_calls();
                     item.append_executed_tool_calls(vec![call.clone()]);
                     if call.has_complete_inventory() {
@@ -320,9 +321,11 @@ impl ExecutedToolCalls {
         // Compaction may retry with a shortened history without installing that history.
         // Keep absent observations until a normal sampling request confirms the live window.
         if request_kind == RequestKind::Sampling && !pending_outputs.is_empty() {
-            state
-                .retained_calls
-                .retain(|key, _| !pending_outputs.contains(key));
+            for key in pending_outputs {
+                if let Some(mut retained) = state.retained_calls.remove(&key) {
+                    retained.clear_late_truncated_metadata();
+                }
+            }
         }
         let mut invalid_cells = HashSet::new();
         for index in 0..items.len() {
@@ -362,6 +365,9 @@ impl ExecutedToolCalls {
             let intact =
                 output_counts.get(call_id) == Some(&1) && matches_inventory && matches_input;
             retained.complete &= intact;
+            if !intact {
+                retained.clear_late_truncated_metadata();
+            }
             if !intact && let Some(cell) = retained.runtime_cell_id.clone() {
                 invalid_cells.insert(cell);
             }
@@ -380,8 +386,8 @@ impl ExecutedToolCalls {
                     .is_some_and(|cell_id| invalid_cells.contains(cell_id))
                 {
                     retained.complete = false;
-                    retained.call_index_by_id.clear();
                     retained.clear_late_truncated_metadata();
+                    retained.call_index_by_id.clear();
                 }
             }
         }
@@ -393,9 +399,8 @@ impl ExecutedToolCalls {
                 continue;
             };
             let key = (std::mem::discriminant(&*item), call_id.to_string());
-            let Some(retained) = state.retained_calls.get(&key) else {
-                continue;
-            };
+            let retained = state.retained_calls.get(&key);
+            let Some(retained) = retained else { continue };
             if retained.complete {
                 item.mark_tool_calls_complete();
             } else {

@@ -22,6 +22,9 @@ use tokio::sync::oneshot;
 pub const WS_REQUEST_HEADER_TRACEPARENT_CLIENT_METADATA_KEY: &str = "ws_request_header_traceparent";
 pub const WS_REQUEST_HEADER_TRACESTATE_CLIENT_METADATA_KEY: &str = "ws_request_header_tracestate";
 
+/// Maximum outgoing Responses message size for attaching optional tool observations.
+pub const MAX_RESPONSE_MESSAGE_BYTES: usize = 15 * 1024 * 1024;
+
 /// Explicit per-request access selection using the Responses API wire values.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct AccessPrograms {

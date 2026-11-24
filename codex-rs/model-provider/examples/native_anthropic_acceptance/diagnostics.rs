@@ -127,6 +127,7 @@ impl Diagnostics {
             | ApiError::ContextWindowExceeded
             | ApiError::ContentFilter
             | ApiError::QuotaExceeded
+            | ApiError::SpendLimitExceeded(_)
             | ApiError::ModelNotFound { .. }
             | ApiError::UsageNotIncluded
             | ApiError::Retryable { .. }

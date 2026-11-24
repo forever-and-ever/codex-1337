@@ -160,8 +160,15 @@ impl Session {
             return Ok(());
         }
 
+        let mut input_error = None;
         for item in recordable_inputs(self, &model_info, &input) {
-            let item = item?;
+            let item = match item {
+                Ok(item) => item,
+                Err(error) => {
+                    input_error.get_or_insert(error);
+                    continue;
+                }
+            };
             // The user must resubmit a prompt that still needs a submit hook.
             if matches!(item.as_ref(), TurnInput::UserInput { .. })
                 && with_environment_hooks(
@@ -172,9 +179,14 @@ impl Session {
                 .execution_mode_for_event(HookEventName::UserPromptSubmit)
                 .is_some()
             {
+                if let TurnInput::UserInput { metadata, .. } = item.as_ref()
+                    && let Some(uuid) = metadata.realtime_handoff_id
+                {
+                    self.reject_realtime_handoff(uuid).await;
+                }
                 continue;
             }
-            record_pending_input(
+            if let Err(error) = record_pending_input(
                 self,
                 context,
                 &model_info,
@@ -182,7 +194,14 @@ impl Session {
                 Vec::new(),
                 PersistContext::Standard,
             )
-            .await?;
+            .await
+            {
+                input_error.get_or_insert(error);
+            }
+        }
+        if let Some(error) = input_error {
+            self.conversation.stop_for_history_recovery().await;
+            return Err(error);
         }
         Ok(())
     }

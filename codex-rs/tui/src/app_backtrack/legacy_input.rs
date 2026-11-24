@@ -105,6 +105,12 @@ impl App {
                 event => self.overlay_forward_event(tui, event)?,
             }
         }
+        if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut()
+            && let Some(thread_id) = overlay.pending_thread_link.take()
+        {
+            let source = overlay.thread_link_source;
+            self.request_thread_link_from_source(app_server, source, thread_id);
+        }
         let browsing_needs_history = self.browsing_needs_history();
         let request = request.or_else(|| {
             let Some(Overlay::Transcript(overlay)) = &mut self.overlay else {

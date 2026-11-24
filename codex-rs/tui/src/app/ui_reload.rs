@@ -143,7 +143,7 @@ impl App {
         let cwd = self
             .primary_session_configured
             .as_ref()
-            .map(|session| session.cwd.clone())
+            .and_then(|session| session.cwd.to_abs_path().ok())
             .or_else(|| {
                 (!self.app_server_target.uses_remote_workspace()).then(|| self.config.cwd.clone())
             });

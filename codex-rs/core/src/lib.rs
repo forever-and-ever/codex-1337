@@ -221,6 +221,7 @@ pub use thread_manager::AgentTreeShutdownFailure;
 pub use thread_manager::AgentTreeShutdownFailureReason;
 pub use thread_manager::AgentTreeShutdownReport;
 pub use thread_manager::ForkSnapshot;
+pub use thread_manager::GuardianPolicyLoader;
 pub use thread_manager::InternalSessionParent;
 pub use thread_manager::McpRefreshReason;
 pub use thread_manager::NewThread;

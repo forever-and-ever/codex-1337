@@ -266,6 +266,7 @@ impl MessageBoardHost for LocalBoardHost {
                     start_options: Default::default(),
                 })
                 .await?;
+            // Accepted here means enqueued on an active recipient, not a durable mail receipt.
             Ok(NotificationDelivery::Accepted)
         })
     }

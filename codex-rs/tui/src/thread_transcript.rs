@@ -21,8 +21,8 @@ use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::items::UserMessageItem;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
+use std::path::Path;
 
 mod activity_pages;
 mod computer_groups;
@@ -137,7 +137,7 @@ pub(crate) fn thread_to_transcript_cells(
             &mut cells,
             &mut owned,
             thread_id,
-            &cwd,
+            cwd.as_path(),
             turn.items,
             raw_reasoning_visibility,
             config,
@@ -160,7 +160,7 @@ pub(crate) fn thread_to_transcript_cells(
 
 pub(crate) fn thread_items_to_transcript_cells(
     thread_id: Option<ThreadId>,
-    cwd: &AbsolutePathBuf,
+    cwd: &Path,
     items: impl IntoIterator<Item = ThreadItemPayload>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
@@ -191,7 +191,7 @@ fn append_thread_items(
     cells: &mut TranscriptCells,
     owned: &mut crate::code_mode_transcript::Reducers,
     thread_id: Option<ThreadId>,
-    cwd: &AbsolutePathBuf,
+    cwd: &Path,
     items: impl IntoIterator<Item = ThreadItem>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
@@ -369,7 +369,7 @@ fn append_thread_items(
 /// Project one item without changing the active widget or its turn lifecycle.
 fn item_to_cells(
     item: ThreadItem,
-    cwd: &AbsolutePathBuf,
+    cwd: &Path,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
@@ -386,7 +386,7 @@ fn item_to_cells(
                     started_at_ms: item_started_at_ms,
                     completed_at_ms: item_completed_at_ms,
                 },
-                cwd.as_path(),
+                cwd,
             )))
         }
         item @ ThreadItemPayload::Preamble { .. } => {
@@ -450,7 +450,7 @@ fn item_to_cells(
                     local_image_paths: item.local_image_paths(),
                     remote_image_urls: item.image_urls(),
                 }
-                .with_async_replies(replies, cwd.as_path()),
+                .with_async_replies(replies, cwd),
             ));
         }
         ThreadItemPayload::AgentMessage {
@@ -459,11 +459,11 @@ fn item_to_cells(
             questions,
             ..
         } => {
-            let parsed = parse_assistant_markdown(&text, cwd.as_path());
+            let parsed = parse_assistant_markdown(&text, cwd);
             if !parsed.visible_markdown.trim().is_empty() {
                 let mut cell = AgentMarkdownCell::new_with_inline_visualizations(
                     parsed.visible_markdown,
-                    cwd.as_path(),
+                    cwd,
                     inline_visualization_context,
                 );
                 cell = cell.with_questions(questions.as_deref().unwrap_or_default());
@@ -497,10 +497,7 @@ fn item_to_cells(
         }
         ThreadItemPayload::Plan { text, .. } => {
             if !text.trim().is_empty() {
-                cells.push(Arc::new(crate::history_cell::new_proposed_plan(
-                    text,
-                    cwd.as_path(),
-                )));
+                cells.push(Arc::new(crate::history_cell::new_proposed_plan(text, cwd)));
             }
         }
         ThreadItemPayload::Reasoning {
@@ -518,12 +515,8 @@ fn item_to_cells(
                 text.push_str(&content.join("\n\n"));
             }
             if !text.trim().is_empty() {
-                let mut cell = ReasoningSummaryCell::new(
-                    header,
-                    text,
-                    cwd.as_path(),
-                    /*transcript_only*/ true,
-                );
+                let mut cell =
+                    ReasoningSummaryCell::new(header, text, cwd, /*transcript_only*/ true);
                 cell.set_source_item_id(id);
                 cells.push(Arc::new(cell));
             }
@@ -541,7 +534,7 @@ fn item_to_cells(
 /// Project a scoped child without entering the widget's ordinary active-cell lifecycle.
 pub(crate) fn scoped_item_cells(
     item: ThreadItemPayload,
-    cwd: &AbsolutePathBuf,
+    cwd: &Path,
     source: crate::code_mode_transcript::Source,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
     image_origin: crate::history_cell::ImagePathOrigin,
@@ -567,7 +560,7 @@ pub(crate) fn scoped_item_cells(
     {
         return crate::history_cell::new_patch_events(
             crate::app_server_approval_conversions::file_update_changes_to_display(changes.clone()),
-            cwd.as_path(),
+            cwd,
         )
         .into_iter()
         .map(|cell| Arc::new(cell.with_activity_id(id.clone())) as Arc<dyn HistoryCell>)

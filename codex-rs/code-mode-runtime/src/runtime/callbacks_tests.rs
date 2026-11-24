@@ -134,7 +134,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
             exit_requested: None,
             sh_calls: Vec::new(),
         });
-        globals::install_globals(scope).expect("install globals");
+        globals::install_globals(scope, &[]).expect("install globals");
 
         let marker = v8::Function::new(scope, mark_exit_requested).expect("exit marker");
         let key = v8::String::new(scope, "markExit").expect("marker name");

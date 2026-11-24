@@ -133,8 +133,7 @@ fn seatbelt_allows_semaphore_limit_sysconf() {
             sandbox_policy_cwd: workspace.path(),
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("create seatbelt args");
@@ -199,8 +198,7 @@ fn filesystem_helper_platform_defaults_do_not_grant_applications_directory() {
                 sandbox_policy_cwd: workspace.path(),
                 enforce_managed_network: false,
                 managed_network: None,
-                environment_id: None,
-                network: None,
+
                 extra_allow_unix_sockets: &[],
             },
             profile,
@@ -279,8 +277,7 @@ fn process_platform_defaults_allow_scratch_without_granting_it_to_filesystem_hel
                 sandbox_policy_cwd: workspace.path(),
                 enforce_managed_network: false,
                 managed_network: None,
-                environment_id: None,
-                network: None,
+
                 extra_allow_unix_sockets: &[],
             },
             profile,
@@ -453,8 +450,7 @@ fn explicit_unreadable_paths_are_excluded_from_full_disk_read_and_write_access()
         sandbox_policy_cwd: Path::new("/"),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -593,8 +589,7 @@ denied /bin/mv "$workspace" "$destination/workspace"
             sandbox_policy_cwd: &workspace,
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("generate full Seatbelt policy");
@@ -647,8 +642,7 @@ fn scoped_or_nonliteral_basename_denies_still_block_directory_moves() {
             sandbox_policy_cwd: &workspace,
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("generate full Seatbelt policy");
@@ -784,8 +778,7 @@ fn nested_protected_paths_cannot_be_bypassed_by_renaming_ancestors() {
                     sandbox_policy_cwd: &workspace,
                     enforce_managed_network: false,
                     managed_network: None,
-                    environment_id: None,
-                    network: None,
+
                     extra_allow_unix_sockets: &[],
                 })
                 .expect("create seatbelt policy")
@@ -884,8 +877,7 @@ fn prepared_managed_network_context_allows_only_its_proxy_ports() {
         sandbox_policy_cwd: Path::new("/"),
         enforce_managed_network: true,
         managed_network: Some(&managed_network),
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -898,6 +890,12 @@ fn prepared_managed_network_context_allows_only_its_proxy_ports() {
     assert!(!policy.contains("(allow network-outbound)\n"));
     assert!(!policy.contains("(allow system-socket (socket-domain AF_UNIX))"));
     assert!(!policy.contains("(allow network-outbound (remote unix-socket))"));
+    assert!(!policy.contains("(allow network-bind (local unix-socket))"));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
+    );
 }
 
 #[test]
@@ -924,8 +922,7 @@ fn explicit_unreadable_paths_are_excluded_from_readable_roots() {
         sandbox_policy_cwd: Path::new("/"),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -1074,8 +1071,7 @@ fn unreadable_glob_policy_includes_canonicalized_static_prefix() {
             sandbox_policy_cwd: temp_dir.path(),
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("generate Seatbelt command");
@@ -1145,8 +1141,7 @@ fn preferences_access_requires_unrestricted_reads() {
                     sandbox_policy_cwd: cwd,
                     enforce_managed_network: false,
                     managed_network: None,
-                    environment_id: None,
-                    network: None,
+
                     extra_allow_unix_sockets: &[],
                 },
                 profile,
@@ -1260,8 +1255,7 @@ fn restricted_reads_cannot_read_preferences_outside_allowed_roots() {
             sandbox_policy_cwd: workspace.path(),
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("build seatbelt command");
@@ -1479,8 +1473,7 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
         sandbox_policy_cwd: cwd.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &extra_allow_unix_sockets,
     })
     .unwrap();
@@ -1508,6 +1501,53 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
 }
 
 #[test]
+fn create_seatbelt_args_merges_prepared_and_explicit_unix_socket_paths() -> anyhow::Result<()> {
+    let cwd = TempDir::new().expect("temp cwd");
+    let file_system_policy = FileSystemSandboxPolicy::read_only();
+    let network_socket = "/tmp/codex-proxy-use";
+    let explicit_socket = "/tmp/codex-browser-use";
+    let route = ManagedNetworkSandboxContext {
+        allow_unix_sockets: vec![network_socket.to_string()],
+        ..Default::default()
+    };
+    let extra_allow_unix_sockets = vec![absolute_path(explicit_socket)];
+
+    let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
+        command: vec!["/usr/bin/true".to_string()],
+        file_system_sandbox_policy: &file_system_policy,
+        network_sandbox_policy: NetworkSandboxPolicy::Restricted,
+        sandbox_policy_cwd: cwd.path(),
+        enforce_managed_network: false,
+        managed_network: Some(&route),
+
+        extra_allow_unix_sockets: &extra_allow_unix_sockets,
+    })
+    .unwrap();
+
+    let expected_explicit_socket = normalize_path_for_sandbox(Path::new(explicit_socket))
+        .expect("explicit socket root should normalize");
+    let expected_network_socket = normalize_path_for_sandbox(Path::new(network_socket))
+        .expect("network socket root should normalize");
+    let unix_socket_definitions = args
+        .iter()
+        .filter(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unix_socket_definitions,
+        vec![
+            format!(
+                "-DUNIX_SOCKET_PATH_0={}",
+                expected_explicit_socket.display()
+            ),
+            format!("-DUNIX_SOCKET_PATH_1={}", expected_network_socket.display()),
+        ],
+        "seatbelt args should include both explicit and network proxy socket roots: {args:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn create_seatbelt_args_preserves_full_network_with_explicit_unix_socket_paths() {
     let cwd = TempDir::new().expect("temp cwd");
     let file_system_policy = FileSystemSandboxPolicy::read_only();
@@ -1519,8 +1559,7 @@ fn create_seatbelt_args_preserves_full_network_with_explicit_unix_socket_paths()
         sandbox_policy_cwd: cwd.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &extra_allow_unix_sockets,
     })
     .unwrap();
@@ -1709,8 +1748,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         sandbox_policy_cwd: &cwd,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -1862,8 +1900,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         sandbox_policy_cwd: &cwd,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -1905,8 +1942,7 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         sandbox_policy_cwd: &cwd,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -1960,8 +1996,7 @@ fn create_seatbelt_args_rejects_symlinked_writable_root() {
         sandbox_policy_cwd: &workspace,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect_err("symlinked workspace should be rejected");
@@ -2006,8 +2041,7 @@ fn seatbelt_prevents_writable_root_replacement() {
         sandbox_policy_cwd: &workspace,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2053,8 +2087,7 @@ fn create_seatbelt_args_uses_literal_non_directory_writable_roots() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("file writable root should be supported");
@@ -2107,8 +2140,7 @@ fn seatbelt_allows_file_root_replacement_and_deletion() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2134,8 +2166,7 @@ fn seatbelt_allows_file_root_replacement_and_deletion() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("deleted file roots should remain usable by later commands");
@@ -2165,8 +2196,7 @@ fn seatbelt_file_root_does_not_follow_replacement_symlink() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2206,8 +2236,7 @@ fn seatbelt_protects_file_root_replaced_with_directory() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2259,8 +2288,7 @@ fn seatbelt_does_not_follow_rebound_writable_root_ancestor() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2302,8 +2330,7 @@ fn seatbelt_prevents_writable_directory_root_rename() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2347,8 +2374,7 @@ fn seatbelt_protects_writable_root_created_as_directory() {
         sandbox_policy_cwd: tmp.path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("build seatbelt command");
@@ -2428,8 +2454,7 @@ fn seatbelt_protects_aws_in_extra_writable_home() {
                 sandbox_policy_cwd: &workspace,
                 enforce_managed_network: false,
                 managed_network: None,
-                environment_id: None,
-                network: None,
+
                 extra_allow_unix_sockets: &[],
             })
             .expect("build seatbelt command");
@@ -2508,8 +2533,7 @@ fn seatbelt_protects_case_variants_of_metadata() {
                     sandbox_policy_cwd: &workspace,
                     enforce_managed_network: false,
                     managed_network: None,
-                    environment_id: None,
-                    network: None,
+
                     extra_allow_unix_sockets: &[],
                 })
                 .expect("build seatbelt command");
@@ -2579,8 +2603,7 @@ fn seatbelt_protects_resolved_target_of_symlinked_metadata_directory() {
             sandbox_policy_cwd: &writable_root,
             enforce_managed_network: false,
             managed_network: None,
-            environment_id: None,
-            network: None,
+
             extra_allow_unix_sockets: &[],
         })
         .expect("build seatbelt command");
@@ -2650,8 +2673,7 @@ fn create_seatbelt_args_block_first_time_dot_codex_creation_with_metadata_name_r
         sandbox_policy_cwd: repo_root.as_path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -2709,8 +2731,7 @@ fn create_seatbelt_args_with_read_only_git_pointer_file() {
         sandbox_policy_cwd: &cwd,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -2752,8 +2773,7 @@ fn create_seatbelt_args_with_read_only_git_pointer_file() {
         sandbox_policy_cwd: &cwd,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();
@@ -2810,8 +2830,7 @@ fn workspace_write_protects_linked_worktree_gitdir_under_tmp() {
         sandbox_policy_cwd: &worktree,
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .expect("create seatbelt args");
@@ -2886,8 +2905,7 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
         sandbox_policy_cwd: vulnerable_root.as_path(),
         enforce_managed_network: false,
         managed_network: None,
-        environment_id: None,
-        network: None,
+
         extra_allow_unix_sockets: &[],
     })
     .unwrap();

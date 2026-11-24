@@ -41,6 +41,30 @@ impl App {
         available.then_some(target)
     }
 
+    pub(super) fn hovered_sidebar_chat(
+        &self,
+        point: Option<ratatui::layout::Position>,
+    ) -> Option<ThreadId> {
+        let point = point?;
+        let area = self.conversation_frame.chooser_area()?;
+        let pane = self.sidebar()?;
+        if self.overlay.is_some()
+            || self.pane_resize.is_some()
+            || pane.creation.is_some()
+            || pane.close.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+            || self.chat_widget.side_chat_creation_state()
+                != sidebar_chooser::NewChatState::Available
+            || !area.contains(point)
+            || !sidebar_chooser::body_row(area, point.y).contains(point)
+        {
+            return None;
+        }
+        let tabs = pane.chat_tabs();
+        let index = sidebar_chooser::choice_at(area, tabs, pane.choice, point.y)?;
+        (index != pane.choice).then(|| tabs.choice(index)).flatten()
+    }
+
     pub(super) fn sidebar_chooser_available(&self) -> bool {
         !self.reconnect.offline
             && !self.conversation_frame.has_caller_inset()

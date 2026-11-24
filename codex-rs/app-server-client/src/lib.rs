@@ -24,6 +24,7 @@
 mod path;
 mod remote;
 mod remote_addr;
+mod remote_auth;
 mod remote_websocket;
 mod server_request;
 pub use server_request::AppServerReplyHandle;
@@ -41,6 +42,8 @@ pub use codex_app_server_embedding::InProcessClientStartArgs;
 pub use codex_app_server_embedding::InProcessServerEvent;
 pub use codex_app_server_embedding::RequestResult;
 pub use codex_app_server_embedding::StateDbHandle;
+pub use codex_app_server_embedding::ThreadPermissions;
+use codex_app_server_embedding::ThreadPermissionsReader;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -53,6 +56,7 @@ pub use codex_app_server_transport::verified_local_daemon_socket;
 pub use codex_core::otel_init::build_provider as build_otel_provider;
 pub use codex_exec_server::EnvironmentManager;
 pub use codex_exec_server::ExecServerRuntimeOptions;
+use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
@@ -66,6 +70,7 @@ pub use crate::remote::RemoteAppServerConnectArgs;
 pub use crate::remote::RemoteAppServerEndpoint;
 pub use crate::remote_addr::resolve_remote_addr;
 pub use crate::remote_addr::resolve_remote_endpoint;
+pub use crate::remote_auth::RemoteAuthToken;
 
 /// Transitional access to core-only embedded app-server types.
 ///
@@ -225,6 +230,7 @@ enum ClientCommand {
 /// boundary.
 pub struct InProcessAppServerClient {
     command_tx: mpsc::Sender<ClientCommand>,
+    thread_permissions_reader: ThreadPermissionsReader,
     event_rx: mpsc::UnboundedReceiver<InProcessServerEvent>,
     worker_handle: tokio::task::JoinHandle<()>,
 }
@@ -249,6 +255,16 @@ impl std::fmt::Debug for AppServerRequestHandle {
     }
 }
 
+impl AppServerRequestHandle {
+    /// Operating system reported by the app-server that serves these requests.
+    pub fn platform_os(&self) -> Option<&str> {
+        match self {
+            Self::InProcess(_) => Some(std::env::consts::OS),
+            Self::Remote(client) => client.platform_os.as_deref(),
+        }
+    }
+}
+
 pub enum AppServerClient {
     InProcess(InProcessAppServerClient),
     Remote(RemoteAppServerClient),
@@ -263,6 +279,7 @@ impl InProcessAppServerClient {
         let channel_capacity = args.channel_capacity.max(1);
         let mut handle = codex_app_server_embedding::start(args).await?;
         let request_sender = handle.connection();
+        let thread_permissions_reader = handle.thread_permissions_reader();
         let (command_tx, mut command_rx) = mpsc::channel::<ClientCommand>(channel_capacity);
         // e9996ec62a preserved transcript events by awaiting a bounded queue, but that can
         // deadlock a foreground request whose response is behind unread notifications.
@@ -369,6 +386,7 @@ impl InProcessAppServerClient {
 
         Ok(Self {
             command_tx,
+            thread_permissions_reader,
             event_rx,
             worker_handle,
         })
@@ -378,6 +396,11 @@ impl InProcessAppServerClient {
         InProcessAppServerRequestHandle {
             command_tx: self.command_tx.clone(),
         }
+    }
+
+    /// Reads effective permissions for a thread loaded in this embedded server.
+    pub async fn thread_permissions(&self, thread_id: ThreadId) -> IoResult<ThreadPermissions> {
+        (self.thread_permissions_reader)(thread_id).await
     }
 
     /// Sends a typed client request and returns raw JSON-RPC result.
@@ -482,6 +505,7 @@ impl InProcessAppServerClient {
     pub async fn shutdown(self) -> IoResult<()> {
         let Self {
             command_tx,
+            thread_permissions_reader: _,
             event_rx,
             worker_handle,
         } = self;
@@ -794,6 +818,17 @@ mod tests {
     use tokio_tungstenite::tungstenite::handshake::server::Request as WebSocketRequest;
     use tokio_tungstenite::tungstenite::handshake::server::Response as WebSocketResponse;
     use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
+
+    fn closed_permissions_reader() -> ThreadPermissionsReader {
+        Arc::new(|_| {
+            Box::pin(async {
+                Err(IoError::new(
+                    ErrorKind::BrokenPipe,
+                    "in-process app-server runtime is closed",
+                ))
+            })
+        })
+    }
 
     async fn build_test_config_for_codex_home(codex_home: &Path) -> Config {
         match ConfigBuilder::default()
@@ -1552,7 +1587,7 @@ mod tests {
             required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url,
-                auth_token: Some(auth_token),
+                auth_token: Some(RemoteAuthToken::from_secret(auth_token)),
             },
             client_name: "codex-app-server-client-test".to_string(),
             client_version: "0.0.0-test".to_string(),
@@ -1573,7 +1608,9 @@ mod tests {
             required_human_approval: false,
             endpoint: RemoteAppServerEndpoint::WebSocket {
                 websocket_url: "ws://example.com:4500".to_string(),
-                auth_token: Some("remote-bearer-token".to_string()),
+                auth_token: Some(RemoteAuthToken::from_secret(
+                    "remote-bearer-token".to_string(),
+                )),
             },
             client_name: "codex-app-server-client-test".to_string(),
             client_version: "0.0.0-test".to_string(),
@@ -2084,6 +2121,7 @@ mod tests {
 
         let mut client = InProcessAppServerClient {
             command_tx,
+            thread_permissions_reader: closed_permissions_reader(),
             event_rx,
             worker_handle,
         };
@@ -2129,6 +2167,7 @@ mod tests {
         });
         let client = InProcessAppServerClient {
             command_tx,
+            thread_permissions_reader: closed_permissions_reader(),
             event_rx,
             worker_handle,
         };
