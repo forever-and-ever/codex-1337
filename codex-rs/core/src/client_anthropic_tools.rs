@@ -95,10 +95,8 @@ fn custom(tool: &FreeformTool, namespace: Option<&str>) -> Result<AnthropicTool,
     };
     Ok(AnthropicTool {
         name: identity.wire_alias()?,
-        description: format!(
-            "{}\n\nPass the exact tool input as the JSON string property `input`. Input format: {}; syntax: {}.\n{}",
-            tool.description, tool.format.r#type, tool.format.syntax, tool.format.definition,
-        ),
+        // A grammar constrains an OpenAI decoder; here the description alone states the format.
+        description: format!("{}\n\nPass the raw input as the string `input`.", tool.description),
         input_schema: json!({
             "type": "object",
             "properties": {"input": {"type": "string"}},

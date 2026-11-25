@@ -519,6 +519,10 @@ impl Session {
                 world_state.add_extension_section(section);
             }
         }
+        // TELOS(mcp-roster): the roster is context, so a catalogue change amends it.
+        world_state.add_nested_tools(
+            (!preserve_parent_tool_declarations).then(|| step_context.tool_router.nested_tools()),
+        );
         let v2_namespace = turn_context
             .config
             .multi_agent_v2

@@ -15,22 +15,40 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (9; hash=bcfc8b8066635a80):
-    - custom/exec: Exec guidance.  Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fen...; hash=6f0914fafb86967e
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
-    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
-    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+  tools (9; hash=025e89e6eaeff7eb):
+    - custom/exec: Exec guidance.  Run JavaScript as one cell: a fresh V8 async module, without Node, a console or d...; hash=8c857e407520adbd
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. The output is only what the ...; args=[cell_id, max_tokens, terminate]; hash=a8edb1e34c9ff75d
+    - custom/python: Run python source in a fresh python3 -u process: no REPL, no state between calls, no packages or ...; hash=cbb0cf037d5d0447
+    - custom/bash: Run bash source in a fresh bash process: no REPL, no state between calls, no packages or venv bey...; hash=ada9be9216ce5ecc
     - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
       - function/wait_agent
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - function/fence: A barrier between the tool calls of one response. Calls after a fence start only when every call ...; args=[]; hash=da834037d6e8472c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+01:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__reports_one.echo (tools.mcp__reports_one__echo): Echo back the provided message and include environment data.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: Image guidance.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 02:message/developer:
     Coordinate sub-agents.
 03:message/developer:
@@ -54,13 +72,31 @@ Settings:
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (9; hash=46e6289e77d6c2d4):
-    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=c68f911e2e3588da
+  tools (9; hash=c344f5fe66d3d0bd):
+    ~ custom/exec: Run JavaScript as one cell: a fresh V8 async module, without Node, a console or direct network ac...; hash=427068e3cc08d897
 -- request 3 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+01:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__reports_one.echo (tools.mcp__reports_one__echo): Echo back the provided message and include environment data.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: Image guidance.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 02:message/developer:
     Coordinate sub-agents.
 03:message/developer:
@@ -83,16 +119,21 @@ Settings: relative to window 1
     Done.
 09:message/developer:
     <MODEL_SWITCH>
-10:message/user:
+10:message/developer:
+    <nested_tools>
+    Added or changed:
+    - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+    </nested_tools>
+11:message/user:
     Find echo again, call it, and list the agents.
 -- request 4 (turn) --
-11:custom_tool_call/exec:
+12:custom_tool_call/exec:
     const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
       .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
-12:custom_tool_call_output:Script completed
+13:custom_tool_call_output:Script completed
     Output:
      | {"descriptions":["Call: await tools.view_image(args).\\nParameters: object\\n  path (required): string. Lo...n\\nReports."],"echo":"ECHOING: ping","agent":"/root"} [hash=fc006e8ed1f4f933]

@@ -149,11 +149,13 @@ text(JSON.stringify(results));"#;
     for pair in requests.windows(2) {
         assert!(pair[1].input().starts_with(&pair[0].input()));
     }
+    // The roster is an instruction: a catalogue change amends it and declares nothing.
     for index in [2, 4, 6] {
+        assert_eq!(requests[index].inputs_of_type("additional_tools"), prefix);
         assert_eq!(
-            requests[index].inputs_of_type("additional_tools").len(),
-            requests[index - 1].inputs_of_type("additional_tools").len() + 1,
-            "adding, replacing and removing the roster each append one declaration",
+            core_test_support::nested_tools::fragments(&requests[index].input()).len(),
+            core_test_support::nested_tools::fragments(&requests[index - 1].input()).len() + 1,
+            "adding, replacing and removing the server each amend the roster once",
         );
     }
     for (request, (phase, expected)) in requests.iter().skip(1).step_by(2).zip([

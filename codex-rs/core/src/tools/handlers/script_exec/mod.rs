@@ -57,19 +57,19 @@ impl ToolExecutor<ToolInvocation> for ScriptExecHandler {
             ScriptLanguage::Bash => "bash",
         };
         let environment = if self.options.include_environment_id {
-            " environment_id: nonempty string selecting an available executor; omit for the default."
+            " `environment_id` selects an executor other than the default."
         } else {
             ""
         };
         let background = if self.resumable {
-            "Foreground waits for completion; background:true returns a live session_id for write_stdin."
+            "`background: true` returns a session ID for `write_stdin` at once; otherwise the call waits for the process to exit."
         } else {
-            "Resumable execution is disabled; background:true is rejected and foreground inherits the existing one-shot execution limit."
+            "`background: true` is rejected here, and a call is subject to the one-shot execution limit."
         };
         ToolSpec::Freeform(FreeformTool {
             name: language.to_string(),
             description: format!(
-                "Execute ordinary {language} source in a fresh {interpreter} process, not a REPL or JavaScript. Supply source directly: no JSON envelope, Markdown fences, or delimiters. Source is preserved exactly (maximum 64 KiB UTF-8). Optional first-line metadata (or immediately after an initial shebang): # @exec: {{\"workdir\":\"/path/to/project\",\"max_output_tokens\":2000}}. Optional fields: workdir: nonempty string resolved against the selected environment cwd (default: that cwd); max_output_tokens: nonnegative integer with the existing output-budget semantics (default: 10000, still subject to model policy); background: boolean (default: false); sandbox_permissions: \"use_default\" (default) or \"require_escalated\" (requests unsandboxed execution under the existing approval policy); justification: nonempty string explaining an approval request, allowed only with explicit sandbox_permissions. The advanced \"with_additional_permissions\" mode requires exec_command and its permission profile.{environment} Unknown/duplicate fields, nulls, and invalid values are rejected before execution. {background} Uses the selected execution environment's cwd and PATH, sandbox, network restrictions and approvals. Source is passed separately from stdin; existing non-TTY stdin semantics apply. No implicit packages, venv activation, or persistent state. Use exec_command for advanced execution."
+                "Run {language} source in a fresh {interpreter} process: no REPL, no state between calls, no packages or venv beyond the environment's own. The input is the source alone, at most 64 KiB, with no JSON wrapper or Markdown fence. An optional first line, after a shebang if there is one, sets options: `# @exec: {{\"workdir\": \"/path\", \"max_output_tokens\": 2000}}`. `workdir` is resolved against the environment's cwd, the default. `max_output_tokens` defaults to 10000, within this model's limit. `sandbox_permissions: \"require_escalated\"` requests unsandboxed execution under the approval policy, and only then may `justification` explain the request.{environment} An unknown, duplicate, null or invalid option rejects the call before anything runs. {background} The process uses the environment's PATH, sandbox, network restrictions and approvals; the source does not arrive on stdin, which is not a TTY. For anything else, including `with_additional_permissions`, use `exec_command`."
             ),
             defer_loading: None,
             format: FreeformToolFormat {

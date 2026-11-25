@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 2812
 expression: snapshot
 ---
 Scenario: Astra continues after new user input yields a running code cell, then waits for its result.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=240a182e6271534e):
-        - namespace/functions; hash=40b27175211d5c2a
+00:additional_tools/developer (2; hash=65877ab30b42d088):
+        - namespace/functions; hash=843f2cccadedadfa
           - custom/exec
           - function/wait
           - custom/python
@@ -37,8 +36,24 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-02:message/developer[2]:
-    [01] <permissions instructions>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 
@@ -46,7 +61,7 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
         Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 

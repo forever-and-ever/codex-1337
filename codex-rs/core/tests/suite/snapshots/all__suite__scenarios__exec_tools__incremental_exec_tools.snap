@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios_exec_tools.rs
-assertion_line: 494
 expression: snapshot
 ---
-Scenario: Code Mode appends complete changed tool entries and namespace instructions in combined developer messages. Namespace clearing, eager/deferred movement, remove-all and re-enabling preserve context. Common instructions and shared types stay frozen while nested methods update; compaction installs the latest full catalog.
+Scenario: A catalogue change amends the nested-tool roster in one developer message and declares nothing: additions, removals, remove-all and re-enabling preserve context, while namespace guidance and eager/deferred movement leave the roster alone. Common instructions and shared types stay frozen; compaction keeps the retained prefix, and the new window installs the latest declaration and the current roster.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
-        - namespace/functions; hash=c0252986b104f5e0
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -18,9 +17,25 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
           - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <tools>
         Deferred tool namespaces:
         - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>
@@ -30,10 +45,10 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
     Initial eager catalog: echo.
 -- request 2 (turn) --
 05:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
+    </nested_tools>
 06:message/user:
     Nested tool addition: cwd.
 -- request 3 (turn) --
@@ -41,8 +56,10 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
     Namespace instructions redefinition: durations.
 -- request 4 (turn) --
 08:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.mcp__echo_service__cwd
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.cwd (tools.mcp__echo_service__cwd)
+    </nested_tools>
 09:message/user:
     Nested tool removal: cwd.
 -- request 5 (turn) --
@@ -69,34 +86,32 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
     Deferred to eager: echo.
 -- request 9 (turn) --
 16:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.list_mcp_resource_templates
-    - Tool: tools.list_mcp_resources
-    - Tool: tools.mcp__echo_service__echo
-    - Tool: tools.read_mcp_resource
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.echo (tools.mcp__echo_service__echo)
+    - tools.list_mcp_resource_templates
+    - tools.list_mcp_resources
+    - tools.read_mcp_resource
+    </nested_tools>
 17:message/user:
     Remove all echo service entries.
 -- request 10 (turn) --
 18:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
-
     - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
-
     - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
-
     - tools.list_mcp_resources: Lists resources provided by MCP servers.
-
     - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+    </nested_tools>
 19:message/user:
     Re-enable echo service entries: echo and cwd.
 
 ## Window 2 (after request 10: settings changed (model))
 -- request 11 (turn) --
-00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
-        - namespace/functions; hash=c0252986b104f5e0
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -106,9 +121,25 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
           - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <tools>
         Deferred tool namespaces:
         - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>
@@ -117,17 +148,19 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
 04:message/user:
     Initial eager catalog: echo.
 05:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
+    </nested_tools>
 06:message/user:
     Nested tool addition: cwd.
 07:message/user:
     Namespace instructions redefinition: durations.
 08:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.mcp__echo_service__cwd
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.cwd (tools.mcp__echo_service__cwd)
+    </nested_tools>
 09:message/user:
     Nested tool removal: cwd.
 10:message/user:
@@ -149,44 +182,42 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
 15:message/user:
     Deferred to eager: echo.
 16:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.list_mcp_resource_templates
-    - Tool: tools.list_mcp_resources
-    - Tool: tools.mcp__echo_service__echo
-    - Tool: tools.read_mcp_resource
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.echo (tools.mcp__echo_service__echo)
+    - tools.list_mcp_resource_templates
+    - tools.list_mcp_resources
+    - tools.read_mcp_resource
+    </nested_tools>
 17:message/user:
     Remove all echo service entries.
 18:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
-
     - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
-
     - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
-
     - tools.list_mcp_resources: Lists resources provided by MCP servers.
-
     - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+    </nested_tools>
 19:message/user:
     Re-enable echo service entries: echo and cwd.
 20:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
-    - tools.read_mcp_resource: Read a selected resource revision.
-21:message/developer:
     <model_instructions>
     The current model is catalog-updated.
     </model_instructions>
+21:message/developer:
+    <nested_tools>
+    Added or changed:
+    - tools.read_mcp_resource: Read a selected resource revision.
+    </nested_tools>
 22:message/user:
     Combined redefinition: resource revision, common instructions, and shared types.
 
 ## Window 3 (after request 11: settings changed (model))
 -- request 12 (turn) --
-00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
-        - namespace/functions; hash=c0252986b104f5e0
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -196,9 +227,25 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
           - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <tools>
         Deferred tool namespaces:
         - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>
@@ -207,17 +254,19 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
 04:message/user:
     Initial eager catalog: echo.
 05:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
+    </nested_tools>
 06:message/user:
     Nested tool addition: cwd.
 07:message/user:
     Namespace instructions redefinition: durations.
 08:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.mcp__echo_service__cwd
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.cwd (tools.mcp__echo_service__cwd)
+    </nested_tools>
 09:message/user:
     Nested tool removal: cwd.
 10:message/user:
@@ -239,37 +288,35 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
 15:message/user:
     Deferred to eager: echo.
 16:message/developer:
-    Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.
-    - Tool: tools.list_mcp_resource_templates
-    - Tool: tools.list_mcp_resources
-    - Tool: tools.mcp__echo_service__echo
-    - Tool: tools.read_mcp_resource
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.echo (tools.mcp__echo_service__echo)
+    - tools.list_mcp_resource_templates
+    - tools.list_mcp_resources
+    - tools.read_mcp_resource
+    </nested_tools>
 17:message/user:
     Remove all echo service entries.
 18:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
+    <nested_tools>
+    Added or changed:
     - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
-
     - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
-
     - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
-
     - tools.list_mcp_resources: Lists resources provided by MCP servers.
-
     - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+    </nested_tools>
 19:message/user:
     Re-enable echo service entries: echo and cwd.
 20:message/developer:
-    Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier versio...ls keep their latest definitions and `tools` methods. [hash=4d13008df632810d]
-
-    ## Namespace: functions
-    - tools.read_mcp_resource: Read a selected resource revision.
-21:message/developer:
     <model_instructions>
     The current model is catalog-updated.
     </model_instructions>
+21:message/developer:
+    <nested_tools>
+    Added or changed:
+    - tools.read_mcp_resource: Read a selected resource revision.
+    </nested_tools>
 22:message/user:
     Combined redefinition: resource revision, common instructions, and shared types.
 23:message/developer:
@@ -283,8 +330,8 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
 
 ## Window 4 (after request 13: input diverged at item 00)
 -- request 14 (turn) --
-00:additional_tools/developer (1; hash=7ed9540dc1f2ec3b):
-        - namespace/functions; hash=3a2f953caa95101d
+00:additional_tools/developer (1; hash=7b9dbc30407e44e6):
+        - namespace/functions; hash=fcd49e8b9343ba00
           - custom/exec
           - function/wait
           - custom/python
@@ -316,9 +363,26 @@ Scenario: Code Mode appends complete changed tool entries and namespace instruct
     Re-enable echo service entries: echo and cwd.
 12:message/user:
     Combined redefinition: resource revision, common instructions, and shared types.
-13:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
+13:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.cwd (tools.mcp__echo_service__cwd): Return the current working directory of this test server process.
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a selected resource revision.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <tools>
         Deferred tool namespaces:
         - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>

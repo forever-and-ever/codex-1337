@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_mcp_resource_messages.rs
-assertion_line: 239
 expression: "context_snapshot::format_request_history_snapshot(\"A known resource-capable connection enables resource helpers. Broad discovery retains that connection's resources and names a second dormant server; calling the dormant server by name returns its resources and templates through Code Mode.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: A known resource-capable connection enables resource helpers. Broad discovery retains that connection's resources and names a second dormant server; calling the dormant server by name returns its resources and templates through Code Mode.
@@ -16,17 +15,17 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=0b39e5a382dcc1d1):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=2a5d7c0ec69ea780
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
-    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
-    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+  tools (10; hash=c6ac96947bab7692):
+    - custom/exec: Run JavaScript as one cell: a fresh V8 async module, without Node, a console or direct network ac...; hash=427068e3cc08d897
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. The output is only what the ...; args=[cell_id, max_tokens, terminate]; hash=a8edb1e34c9ff75d
+    - custom/python: Run python source in a fresh python3 -u process: no REPL, no state between calls, no packages or ...; hash=cbb0cf037d5d0447
+    - custom/bash: Run bash source in a fresh bash process: no REPL, no state between calls, no packages or venv bey...; hash=ada9be9216ce5ecc
     - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
     - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
       - function/wait_agent
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - function/fence: A barrier between the tool calls of one response. Calls after a fence start only when every call ...; args=[]; hash=da834037d6e8472c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
@@ -47,12 +46,29 @@ Settings:
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-01:message/developer[2]:
-    [01] <permissions instructions>
+01:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - mcp__known_resources.client_capabilities (tools.mcp__known_resources__client_capabilities): Return capabilities advertised by the MCP client.
+        - mcp__known_resources.cwd (tools.mcp__known_resources__cwd): Return the current working directory of this test server process.
+        - mcp__known_resources.echo (tools.mcp__known_resources__echo): Echo back the provided message and include environment data.
+        - mcp__known_resources.echo_tool (tools.mcp__known_resources__echo_tool): Echo back the provided message via a tool name that is not a legal JS identifier.
+        <OMITTED 23 LINES; ~712 TOKENS; hash=e97ca9d627d7c2c7>
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 

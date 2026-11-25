@@ -780,20 +780,19 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
 
     for request in [&child_first, &grandchild] {
         let body = request.body_json();
-        let has_standalone_web = |tools: &serde_json::Value| {
+        let input = body["input"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let declares_web = |tools: &serde_json::Value| {
             responses::namespace_child_tool(tools, "web", "run").is_some()
-                || responses::namespace_child_tool(tools, "functions", "exec")
-                    .and_then(|exec| exec["description"].as_str())
-                    .is_some_and(|description| description.contains("tools.web__run"))
         };
         assert!(
-            has_standalone_web(&body)
-                || body["input"].as_array().is_some_and(|items| {
-                    items
-                        .iter()
-                        .filter(|item| item["type"] == "additional_tools")
-                        .any(has_standalone_web)
-                }),
+            declares_web(&body)
+                || input
+                    .iter()
+                    .filter(|item| item["type"] == "additional_tools")
+                    .any(declares_web)
+                || core_test_support::nested_tools::fragments(input)
+                    .iter()
+                    .any(|roster| roster.contains("tools.web__run")),
             "spawned agent should inherit its parent's standalone web.run"
         );
     }

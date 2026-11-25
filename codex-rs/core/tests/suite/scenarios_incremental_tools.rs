@@ -114,32 +114,31 @@ async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> R
         assert!(requests[2].input().starts_with(&child_input));
 
         let inherited = requests[0].inputs_of_type("additional_tools");
-        let exec = inherited.iter()
-            .find_map(|item| responses::namespace_child_tool(item, "functions", "exec"))
-            .expect("parent declares functions.exec");
-        assert!(exec["description"].as_str().expect("exec description")
-            .contains("mcp__echo_service__echo"));
+        let roster = |index: usize| {
+            core_test_support::nested_tools::fragments(&requests[index].input())
+        };
+        assert!(roster(0).concat().contains("mcp__echo_service__echo"));
 
-        let child_declarations = requests[1].inputs_of_type("additional_tools");
+        // The roster is an instruction, so no fork redeclares `exec` to change it.
+        for request in &requests[1..] {
+            assert_eq!(request.inputs_of_type("additional_tools"), inherited);
+        }
         if preserve_parent_tools {
-            assert_eq!(child_declarations, inherited);
+            assert_eq!(roster(1), roster(0), "the inherited roster stands under the notice");
             assert!(!child_input.iter().any(|item|
                 item.to_string().contains("no longer available")
             ));
         } else {
-            assert_eq!(child_declarations.len(), inherited.len() + 1);
-            assert_eq!(&child_declarations[..inherited.len()], &inherited);
-            let updated_exec = responses::namespace_child_tool(
-                child_declarations.last().expect("updated declarations"),
-                "functions",
-                "exec",
-            ).expect("prediction updates functions.exec");
-            assert_ne!(updated_exec, exec);
-            assert!(!updated_exec["description"].as_str().expect("updated exec description")
-                .contains("mcp__echo_service__echo"));
+            let child = roster(1);
+            let [inherited_roster, amendment] = child.as_slice() else {
+                panic!("the fork amends the roster once: {child:?}")
+            };
+            assert_eq!(std::slice::from_ref(inherited_roster), roster(0).as_slice());
+            assert!(amendment.starts_with("<nested_tools>\nRemoved:\n"), "{amendment}");
+            assert!(amendment.contains("mcp__echo_service__echo"), "{amendment}");
         }
-        assert_eq!(requests[2].inputs_of_type("additional_tools"), child_declarations);
-        assert_eq!(requests[3].inputs_of_type("additional_tools"), inherited);
+        assert_eq!(roster(2), roster(1), "the second turn repeats nothing");
+        assert_eq!(roster(3), roster(0), "the parent keeps its roster");
 
         let unavailable_notices: Vec<_> = requests.iter().map(|request| {
             request.message_input_texts("developer").iter().filter(|text|
@@ -157,7 +156,7 @@ async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> R
         } else {
             (
                 "prediction_fork_mcp_removal",
-                "The prediction fork preserves the parent's complete prefix, then updates functions.exec to omit unavailable MCP helpers. Its second turn retains that update without repeating it; continuing the parent keeps its original tools.",
+                "The prediction fork preserves the parent's complete prefix, then amends the nested-tool roster to drop the unavailable MCP helpers. Its second turn retains that amendment without repeating it; continuing the parent keeps its original tools.",
             )
         };
         insta::assert_snapshot!(

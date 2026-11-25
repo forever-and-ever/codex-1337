@@ -35,6 +35,10 @@ qualified forms.
   not alarms or prompt-cache warming. `clock.sleep` blocks its current tool call;
   an alarm leaves the agent free to work. XSync desktop attention
   (`desktop_attention.rs`) watches desktop activity, not thread alarm conditions.
+- nested tool, roster: a nested tool is one that a Code Mode cell calls as
+  `tools.<member>`. The roster lists, by name and one purpose sentence, the nested
+  tools whose contracts wait for `describe_tool`; the model reads it as the
+  `<nested_tools>` section. Qualify every other roster: agent roster, skill roster.
 - native: never used alone. Native history
   (`codex-rs/tui/src/app/native_history.rs`) is output written to the terminal's own
   scrollback. Provider-native items are a model provider's own wire format and

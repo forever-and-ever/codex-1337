@@ -677,7 +677,8 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
     test.submit_text_turn("collect diagnostics").await?;
     let live_output = responses.requests()[1].custom_tool_call_output("call-custom");
     let text = "diagnostic line\n".repeat(500);
-    let live_text = live_output["output"][1]["text"]
+    // The header and the truncation notice precede the bounded section.
+    let live_text = live_output["output"][2]["text"]
         .as_str()
         .expect("bounded custom output");
     assert!(live_text.len() < text.len());

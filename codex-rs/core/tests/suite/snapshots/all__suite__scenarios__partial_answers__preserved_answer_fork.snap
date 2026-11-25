@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios_partial_answers.rs
-assertion_line: 338
 expression: "context_snapshot::format_request_history_snapshot(\"A worker inherits the parent prefix, then receives its own window hint and instructions. Requests are grouped by parent, then child.\",\n&requests, &ContextSnapshotOptions::default().rewrite_known_segments())"
 ---
 Scenario: A worker inherits the parent prefix, then receives its own window hint and instructions. Requests are grouped by parent, then child.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=2b87b568f0a33f52):
-        - namespace/functions; hash=8af05b32be0cb3a7
+00:additional_tools/developer (2; hash=d9fcf1e8efbd26fc):
+        - namespace/functions; hash=d66c99d9443db7ef
           - custom/exec
           - function/wait
           - custom/python
@@ -28,7 +27,7 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[3]:
+02:message/developer[4]:
     [01] Coordinate the investigation.
     [02] <context_window_guidance>
         For tasks that may span context windows, use `notes` to maintain a concise checkpoint of the goal, decis... notes, but writes are limited to the current thread. [hash=3eea124e6983e23d]
@@ -40,7 +39,16 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
         Treat notes and history as internal bookkeeping. Do not mention them in user-facing messages.
 
         </context_window_guidance>
-    [03] <PERMISSIONS_INSTRUCTIONS>
+    [03] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.get_context_remaining: Get the remaining tokens in the current context window.
+        - tools.update_plan: Updates the task plan.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [04] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]
@@ -72,8 +80,8 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
 
 ## Window 2 (after request 3: input diverged at item 13)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=2b87b568f0a33f52):
-        - namespace/functions; hash=8af05b32be0cb3a7
+00:additional_tools/developer (2; hash=d9fcf1e8efbd26fc):
+        - namespace/functions; hash=d66c99d9443db7ef
           - custom/exec
           - function/wait
           - custom/python
@@ -93,7 +101,7 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[3]:
+02:message/developer[4]:
     [01] Coordinate the investigation.
     [02] <context_window_guidance>
         For tasks that may span context windows, use `notes` to maintain a concise checkpoint of the goal, decis... notes, but writes are limited to the current thread. [hash=3eea124e6983e23d]
@@ -105,7 +113,16 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
         Treat notes and history as internal bookkeeping. Do not mention them in user-facing messages.
 
         </context_window_guidance>
-    [03] <PERMISSIONS_INSTRUCTIONS>
+    [03] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.get_context_remaining: Get the remaining tokens in the current context window.
+        - tools.update_plan: Updates the task plan.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [04] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]

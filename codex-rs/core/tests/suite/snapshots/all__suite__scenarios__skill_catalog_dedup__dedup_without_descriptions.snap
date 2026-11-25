@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=1dc7c9b7acfa41a6):
-        - namespace/functions; hash=c2630b13a044c684
+00:additional_tools/developer (2; hash=3c29515f2112b7f5):
+        - namespace/functions; hash=535e145e61c36931
           - custom/exec
           - function/wait
           - custom/python
@@ -46,12 +46,29 @@ Settings:
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-02:message/developer[4]:
-    [01] <permissions instructions>
+02:message/developer[5]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - skills.list (tools.skills__list): List skills owned by the requested authority.
+        - skills.read (tools.skills__read): Read one page from a skill.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
@@ -67,7 +84,7 @@ Settings:
 
         Never use the `request_user_input` tool for permission requests or permission-related escalations.
         </collaboration_mode>
-    [03] <skills_instructions>
+    [04] <skills_instructions>
         ## Skills
         A skill is a `SKILL.md` source of instructions. Entries give each skill's name and source locator; expand short locators from the skill roots table.
         ### Skill roots
@@ -78,7 +95,7 @@ Settings:
         - other:s1: (executor package: e1/s1)
         - other:s2: (executor package: e1/s2)
         </skills_instructions>
-    [04] <skills_instructions>
+    [05] <skills_instructions>
         ## Skills
         A skill is a `SKILL.md` source of instructions. Entries give each skill's name and source locator: a pla...ustom resource` uses its provider's access mechanism. [hash=a8901a930adcff52]
         Read a skill package directly with `skills.read({"package":"<package>"})` to read its `SKILL.md`; root a...ackage is not provided, use `skills.list` to find it. [hash=25bf84ea2123d647]

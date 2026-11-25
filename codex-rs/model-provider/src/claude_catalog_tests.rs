@@ -12,6 +12,7 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     let speak_claude = |model: &mut ModelInfo| {
+        model.truncation_policy = TruncationPolicyConfig::tokens(/*limit*/ 10_000);
         if !model
             .experimental_supported_tools
             .iter()

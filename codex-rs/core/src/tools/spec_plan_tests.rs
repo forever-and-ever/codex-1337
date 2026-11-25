@@ -76,6 +76,7 @@ struct ToolPlanProbe {
     exposures: BTreeMap<String, ToolExposure>,
     tool_namespaces_info: Option<TurnToolNamespacesInfo>,
     code_mode_tool_names: BTreeMap<String, ToolName>,
+    nested_tools: Vec<codex_code_mode::RosterEntry>,
     tool_mode: ToolMode,
     requires_code_mode_worker: bool,
     has_terminal_controls: bool,
@@ -131,6 +132,7 @@ impl ToolPlanProbe {
             exposures,
             tool_namespaces_info: router.tool_namespaces_info().cloned(),
             code_mode_tool_names: router.code_mode_tool_names().clone(),
+            nested_tools: router.nested_tools().to_vec(),
             tool_mode: router.tool_mode(),
             requires_code_mode_worker: router.requires_code_mode_worker(),
             has_terminal_controls: router.has_terminal_controls(),
@@ -187,6 +189,14 @@ impl ToolPlanProbe {
         self.namespace_functions
             .get(namespace)
             .map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether the roster lists the nested tool behind this `tools` member.
+    fn rosters(&self, member: &str) -> bool {
+        self.nested_tools.iter().any(|entry| {
+            entry.name == format!("tools.{member}")
+                || entry.name.ends_with(&format!(" (tools.{member})"))
+        })
     }
 
     fn visible_spec(&self, name: &str) -> &ToolSpec {
@@ -948,6 +958,7 @@ async fn request_user_input_stays_direct_in_code_mode_only() {
         panic!("expected code mode exec tool");
     };
     assert!(!exec.description.contains("request_user_input"));
+    assert!(!plan.rosters("request_user_input"));
 }
 
 #[tokio::test]
@@ -1218,18 +1229,13 @@ async fn sleep_tool_is_batchable_and_direct_unless_code_mode_only() {
         assert_eq!(plan.exposure(&sleep_tool_name), ToolExposure::Direct);
         plan.assert_registered_lacks(&[wait_agent_tool_name.as_str()]);
 
-        let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
-            panic!("expected code mode exec tool");
-        };
-        if code_mode_only {
-            assert!(exec.description.contains("clock__curr_time"));
-        }
         assert_eq!(
             plan.code_mode_tool_names.get("clock__sleep"),
             Some(&ToolName::namespaced("clock", "sleep"))
         );
         if code_mode_only {
-            assert!(exec.description.contains("clock__sleep"));
+            assert!(plan.rosters("clock__curr_time"));
+            assert!(plan.rosters("clock__sleep"));
         }
     }
 }
@@ -2269,14 +2275,20 @@ async fn code_mode_uses_the_first_normalized_tool_identity() {
             panic!("expected code mode exec tool");
         };
         assert!(!exec.description.contains("lookup dynamic tool"));
+        assert!(
+            plan.nested_tools
+                .iter()
+                .all(|entry| entry.purpose != "lookup dynamic tool")
+        );
         // The canonical winner stays rostered even when its contract is deferred.
         assert_eq!(
-            exec.description.contains(
-                "\n- normalized-alias.lookup (tools.normalized_alias__lookup): lookup test tool"
-            ),
+            plan.nested_tools.contains(&codex_code_mode::RosterEntry {
+                name: "normalized-alias.lookup (tools.normalized_alias__lookup)".to_string(),
+                purpose: "lookup test tool".to_string(),
+            }),
             code_mode_only || winner_exposure == ToolExposure::Deferred,
-            "unexpected roster: {}",
-            exec.description,
+            "unexpected roster: {:?}",
+            plan.nested_tools,
         );
         assert!(!exec.description.contains("### `normalized_alias__lookup`"));
     }
@@ -2668,7 +2680,7 @@ async fn code_mode_config_updates_exec_description() {
             panic!("expected code mode wait tool");
         };
         for description in [&exec.description, &wait.description] {
-            assert!(description.contains(&format!("{expected_yield_time_ms} ms;")));
+            assert!(description.contains(&format!("after {expected_yield_time_ms} ms.")));
         }
     }
 }
@@ -2766,7 +2778,7 @@ async fn excluded_deferred_namespaces_do_not_enable_nested_tool_guidance() {
     let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
         panic!("expected code mode exec tool");
     };
-    assert!(exec.description.contains("inventory names every"));
+    assert!(exec.description.contains("`<nested_tools>` lists nested tools"));
     assert!(!exec.description.contains("excluded__lookup("));
     plan.assert_registered_contains(&[
         &ToolName::namespaced("excluded", "lookup").to_string(),

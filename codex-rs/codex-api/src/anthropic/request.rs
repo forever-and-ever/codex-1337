@@ -5,6 +5,7 @@ use super::AnthropicRequestOptions;
 use super::cache::mark_prefixes;
 use super::history::encode_history;
 use super::history::invalid;
+use super::history::separate;
 use crate::ApiError;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::AnthropicThinkingMode;
@@ -16,8 +17,14 @@ use std::sync::Arc;
 // otherwise identical OAuth requests without it. Keep it at the wire boundary:
 // the caller's authority blocks and canonical history remain intact after it.
 const SUBSCRIPTION_PREAMBLE: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
-// Corrects the identity the required block asserts, before any instruction relies on it.
-const SUBSCRIPTION_HARNESS: &str = "That line is a subscription formality. You are running in Codex-1337, a fork of OpenAI's Codex CLI, not Claude Code: project instructions come from AGENTS.md, and Claude Code's tools and commands do not exist here.";
+
+/// Corrects the identity the required block asserts, before any instruction relies on it.
+// TELOS(claude-native-voice): the second block names the model and the harness it runs in.
+fn subscription_harness(model: &str) -> String {
+    format!(
+        "That line is a subscription formality. You are `{model}`, running in Codex-1337, a fork of OpenAI's Codex CLI, not Claude Code: project instructions come from AGENTS.md, and Claude Code's tools and commands do not exist here."
+    )
+}
 
 /// Encode canonical agent history as an Anthropic subscription Messages request.
 pub fn encode_anthropic_request(
@@ -57,9 +64,13 @@ pub fn encode_anthropic_request(
     )?;
     history.system.splice(
         0..0,
-        [SUBSCRIPTION_PREAMBLE, SUBSCRIPTION_HARNESS]
-            .map(|text| json!({"type":"text", "text":text})),
+        [
+            SUBSCRIPTION_PREAMBLE.to_owned(),
+            subscription_harness(&options.model.slug),
+        ]
+        .map(|text| json!({"type":"text", "text":text})),
     );
+    separate(&mut history.system);
     let mut tools = prompt
         .tools
         .iter()

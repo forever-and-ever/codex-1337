@@ -17,6 +17,7 @@ mod model_catalog;
 mod model_identity;
 mod multi_agent_mode;
 mod multi_agent_usage_hint;
+mod nested_tools;
 mod permissions;
 mod persistent_mode;
 mod plugins_instructions;

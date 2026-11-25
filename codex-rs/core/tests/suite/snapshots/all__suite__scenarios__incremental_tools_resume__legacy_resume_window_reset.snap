@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools_resume.rs
-assertion_line: 143
 expression: "context_snapshot::format_request_history_snapshot(\"A resumed legacy window retains its generated prefix; rebuilding the next window emits no incremental notice. A later update appends one developer notice, changed definitions, then the removal notice. Unchanged turns and another restart preserve that pair without duplication.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: A resumed legacy window retains its generated prefix; rebuilding the next window emits no incremental notice. A later update appends one developer notice, changed definitions, then the removal notice. Unchanged turns and another restart preserve that pair without duplication.
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=93c970837e19f7fc):
-        - namespace/functions; hash=2484141402cf6d00
+00:additional_tools/developer (2; hash=26e91d6496643c3f):
+        - namespace/functions; hash=da3ef514470eed21
           - custom/exec
           - function/wait
           - custom/python
@@ -35,8 +34,16 @@ Settings:
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]
@@ -58,8 +65,8 @@ Settings:
 ## Window 2 (after request 2: input diverged at item 03)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=93c970837e19f7fc):
-        - namespace/functions; hash=2484141402cf6d00
+00:additional_tools/developer (2; hash=26e91d6496643c3f):
+        - namespace/functions; hash=da3ef514470eed21
           - custom/exec
           - function/wait
           - custom/python
@@ -76,8 +83,16 @@ Settings: same as window 1
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]
@@ -101,8 +116,8 @@ Settings: same as window 1
 -- request 5 (turn) --
 09:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-10:additional_tools/developer (1; hash=7d8843c07a831551):
-        - namespace/functions; hash=f1d39072d520ccab
+10:additional_tools/developer (1; hash=935d43d9ed8313b8):
+        - namespace/functions; hash=d74cbcfdb051c4f6
           - custom/exec
           - function/update_plan
 11:message/developer:
