@@ -1,4 +1,4 @@
-//! OpenRouter batch admission and one-row jobs. No submit retry: a lost response can hide a charge.
+//! `OpenRouter` batch admission and one-row jobs. A lost POST response can hide a charge.
 
 use super::Bearer;
 use super::Client;
@@ -122,9 +122,59 @@ impl BatchRoute {
         request: &ResponsesApiRequest,
         compaction: bool,
     ) -> Result<BatchDispatch, Error> {
+        use codex_protocol::models::AudioReference;
         use codex_protocol::models::ContentItem;
+        use codex_protocol::models::FunctionCallOutputBody;
+        use codex_protocol::models::FunctionCallOutputContentItem;
+        use codex_protocol::models::ImageReference;
         use codex_protocol::models::ResponseItem;
-        let inline_audio=request.input.iter().any(|item|matches!(item,ResponseItem::Message{content,..} if content.iter().any(|part|matches!(part,ContentItem::InputAudio{..}))));
+        // Inline images need a separate account allowlist that model discovery
+        // does not attest. A native file ID is not a public batch input either.
+        let image = |reference: &ImageReference| match reference {
+            ImageReference::Inline { image_url } if image_url.starts_with("https://") => Ok(()),
+            _ => Err(Error::BatchUnavailable),
+        };
+        let mut inline_audio = false;
+        let mut audio = |reference: &AudioReference| match reference {
+            AudioReference::Inline { audio_url } if audio_url.starts_with("data:audio/") => {
+                inline_audio = true;
+                Ok(())
+            }
+            _ => Err(Error::BatchUnavailable),
+        };
+        for item in &request.input {
+            match item {
+                ResponseItem::Message { content, .. } => {
+                    for part in content {
+                        match part {
+                            ContentItem::InputImage {
+                                image: reference, ..
+                            } => image(reference)?,
+                            ContentItem::InputAudio { audio: reference } => audio(reference)?,
+                            _ => {}
+                        }
+                    }
+                }
+                ResponseItem::FunctionCallOutput { output, .. }
+                | ResponseItem::CustomToolCallOutput { output, .. } => {
+                    if let FunctionCallOutputBody::ContentItems(parts) = &output.body {
+                        for part in parts {
+                            match part {
+                                FunctionCallOutputContentItem::InputImage {
+                                    image: reference,
+                                    ..
+                                } => image(reference)?,
+                                FunctionCallOutputContentItem::InputAudio { audio: reference } => {
+                                    audio(reference)?
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         if !inline_audio {
             return Ok(BatchDispatch::Batch);
         }
@@ -139,7 +189,7 @@ impl BatchRoute {
         }
     }
 
-    /// The serialized order is a wire contract: OpenRouter reads routing fields before requests.
+    /// The serialized order is a wire contract: `OpenRouter` reads routing fields before requests.
     pub fn encode(
         &self,
         custom_id: &str,
@@ -250,7 +300,9 @@ enum JobState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUsage {
+    #[serde(alias="input_tokens")]
     pub prompt_tokens: i64,
+    #[serde(alias="output_tokens")]
     pub completion_tokens: i64,
     pub total_tokens: i64,
     pub cost: Option<Usd>,
@@ -295,38 +347,25 @@ impl Client {
                 RESULTS_LIMIT,
             )
             .await?;
-        #[derive(Deserialize)]
-        struct Usage {
-            input_tokens: i64,
-            output_tokens: i64,
-            total_tokens: i64,
-            cost: Option<Usd>,
-        }
         let usage = body
             .get("usage")
             .cloned()
             .filter(|v| !v.is_null())
-            .map(serde_json::from_value::<Usage>)
+            .map(serde_json::from_value::<BatchUsage>)
             .transpose()
-            .map_err(|_| Error::InvalidResponse)?
-            .map(|u| BatchUsage {
-                prompt_tokens: u.input_tokens,
-                completion_tokens: u.output_tokens,
-                total_tokens: u.total_tokens,
-                cost: u.cost,
-            });
+            .map_err(|_| Error::InvalidResponse)?;
         Ok(Settlement {
             usage,
             response: Ok(body),
         })
     }
     pub(super) async fn admitted_models(&self, bearer: &Bearer) -> Result<BTreeSet<String>, Error> {
-        if !self.admits_global_batch() {
-            return Err(Error::BatchUnavailable);
-        }
         #[derive(Deserialize)]
         struct UserModel {
             id: String,
+        }
+        if !self.admits_global_batch() {
+            return Err(Error::BatchUnavailable);
         }
         self.exchange::<Envelope<Vec<UserModel>>>(
             self.request(Method::GET, "models/user")?,

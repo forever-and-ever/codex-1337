@@ -32,6 +32,7 @@ pub(crate) struct StepSettings {
     /// Normalized requested tier; resolution filters it against the pinned model.
     /// Spawned agents use None for live parent inheritance, resolved at step capture.
     pub(crate) service_tier: Option<String>,
+    pub(crate) openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub(crate) personality: Option<Personality>,
     pub(crate) approval_policy: Constrained<AskForApproval>,
     pub(crate) approvals_reviewer: ApprovalsReviewer,
@@ -54,6 +55,28 @@ pub(crate) struct ResolvedStepSettings {
 }
 
 impl ResolvedStepSettings {
+    pub(super) fn capture_transport(
+        selected: Arc<Self>,
+        thread: &StepSettings,
+        features: &Features,
+    ) -> Arc<Self> {
+        if selected.model_info.slug != thread.collaboration_mode.model()
+            || selected.selected.openrouter_transport == thread.openrouter_transport
+        {
+            return selected;
+        }
+        let mut next = selected.selected.as_ref().clone();
+        next.openrouter_transport = thread.openrouter_transport;
+        Arc::new(Self::new(
+            Arc::new(next),
+            Arc::clone(&selected.model_info),
+            features,
+        ))
+    }
+    pub(crate) fn openrouter_transport(&self) -> codex_protocol::openrouter::OpenRouterTransport {
+        self.selected.openrouter_transport
+    }
+
     pub(crate) fn request_country(&self) -> &RequestCountry {
         &self.selected.request_country
     }
@@ -218,6 +241,7 @@ pub(crate) struct StepSettingsUpdate {
     /// Omission preserves the runtime country.
     pub(crate) request_country: Option<RequestCountry>,
     pub(crate) model: Option<String>,
+    pub(crate) openrouter_transport: Option<codex_protocol::openrouter::OpenRouterTransport>,
     pub(crate) effort: Option<Option<ReasoningEffort>>,
     /// A complete collaboration mode takes precedence over model and effort edits.
     pub(crate) collaboration_mode: Option<CollaborationMode>,
@@ -268,6 +292,11 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
+        if let Some(transport) = update.openrouter_transport {
+            next.openrouter_transport = transport;
+        } else if self.collaboration_mode.model() != next.collaboration_mode.model() {
+            next.openrouter_transport = codex_protocol::openrouter::OpenRouterTransport::Live;
+        }
         if let Some(summary) = update.reasoning_summary {
             next.reasoning_summary = Some(summary);
         }

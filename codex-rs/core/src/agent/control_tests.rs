@@ -3054,6 +3054,7 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix(
                 ThreadSettingsAppliedEvent {
                     thread_id: Some(parent_thread_id),
                     thread_settings: ThreadSettingsSnapshot {
+                        openrouter_transport: Default::default(),
                         account_id: None,
                         disabled_plugin_ids: Vec::new(),
                         model: "parent-only-model".to_string(),

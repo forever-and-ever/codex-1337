@@ -9,8 +9,11 @@ use codex_core::path_utils::write_atomically;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RecoverySnapshot {
+    /// Child jobs must resume through their loaded owner, after root restoration.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub paid_children: BTreeSet<String>,
     #[serde(skip)]
     pub loaded: BTreeSet<String>,
     pub interrupted: BTreeMap<String, InterruptedTurn>,
@@ -19,6 +22,8 @@ pub struct RecoverySnapshot {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InterruptedTurn {
     pub turn_id: String,
+    #[serde(default)]
+    pub prompt_cache_ttl: Option<codex_core::PromptCacheTtl>,
     pub output_schema: Option<serde_json::Value>,
     pub service_tier: Option<String>,
     pub cyber_access_program: Option<codex_protocol::turn_input::CyberAccessProgram>,

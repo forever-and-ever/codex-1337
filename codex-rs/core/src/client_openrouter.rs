@@ -2,7 +2,7 @@ use codex_api::ResponseStream as ApiResponseStream;
 use tokio::sync::mpsc;
 
 #[path = "client_openrouter_tools.rs"]
-mod tools;
+pub(super) mod tools;
 
 use super::CurrentClientSetup;
 use super::ModelClient;
@@ -80,7 +80,7 @@ impl ModelClient {
         }
     }
 
-    fn openrouter_home(&self) -> Result<PathBuf> {
+    pub(super) fn openrouter_home(&self) -> Result<PathBuf> {
         self.state
             .provider
             .auth_manager()
@@ -128,6 +128,11 @@ impl ModelClient {
             .model
             .parse::<ModelSlug>()
             .map_err(CodexErr::InvalidRequest)?;
+        if slug.as_str().ends_with(":batch") {
+            return Err(CodexErr::InvalidRequest(
+                "Select the ordinary model and enable /slow for batch inference.".into(),
+            ));
+        }
         request.openrouter = match slug {
             ModelSlug::Preset(_) => None,
             ModelSlug::Model(_) => {
@@ -289,6 +294,7 @@ fn terminal_status(status: StatusCode) -> bool {
 pub(super) fn project_stream(
     mut stream: ApiResponseStream,
     projection: Option<tools::Projection>,
+    settled: bool,
 ) -> ApiResponseStream {
     let Some(mut projection) = projection else {
         return stream;
@@ -307,6 +313,7 @@ pub(super) fn project_stream(
                 return;
             };
             let events = match event {
+                Ok(event) if settled => vec![Ok(projection.settled(event))],
                 Ok(event) => projection.event(event).into_iter().map(Ok).collect(),
                 Err(error) => {
                     let message = match &error {

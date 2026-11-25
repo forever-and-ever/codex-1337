@@ -663,6 +663,8 @@ pub struct Config {
     /// Effective service tier request id preference for new turns.
     /// `default` means the user explicitly selected standard routing.
     pub service_tier: Option<String>,
+    /// Thread-owned dispatch selection. Never inherited by implicit provider work.
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
@@ -4748,6 +4750,7 @@ impl Config {
             prefer_mxc,
             model,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
+            openrouter_transport: Default::default(),
             service_tier,
             review_model,
             model_context_window: cfg.model_context_window,

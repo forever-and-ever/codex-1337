@@ -358,6 +358,7 @@ async fn run_remote_compaction_request_v2(
                 &settings.model_info,
                 &step_context.session_telemetry,
                 SamplingOptions {
+                    batch_step: None,
                     reasoning_effort: effort,
                     reasoning_summary: settings.reasoning_summary,
                     service_tier: settings.service_tier.clone(),
@@ -400,6 +401,7 @@ async fn run_remote_compaction_request_v2(
             &settings.model_info,
             &turn_context.session_telemetry,
             SamplingOptions {
+                batch_step: None,
                 reasoning_effort: sess
                     .reasoning_effort_for_request(settings, RequestEffortUsage::Compaction)
                     .await,

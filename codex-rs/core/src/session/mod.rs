@@ -288,6 +288,7 @@ mod model_catalog;
 mod model_catalog_settings;
 mod model_ids;
 pub(crate) mod multi_agents;
+mod openrouter_batch_settings;
 mod plugin_selection;
 pub(crate) mod preamble;
 mod prompt_cache;
@@ -881,6 +882,8 @@ impl Session {
             )
         };
 
+        let mut config = config;
+        crate::openrouter::normalize_batch_selector(&mut config);
         let mut config = Arc::new(config);
         let configured_runtime = crate::runtime_auth::runtime_for_config(
             &runtime_auth,
@@ -1093,6 +1096,7 @@ impl Session {
             },
             step_settings: Arc::new(StepSettings {
                 request_country,
+                openrouter_transport: config.openrouter_transport,
                 collaboration_mode,
                 reasoning_summary: config.model_reasoning_summary,
                 service_tier: config.service_tier.clone(),
@@ -4403,9 +4407,13 @@ impl Session {
                 .lock()
                 .or_cancel(cancellation_token)
                 .await?;
-            let _state = self.state.lock().or_cancel(cancellation_token).await?;
+            let state = self.state.lock().or_cancel(cancellation_token).await?;
             (
-                turn_context.next_step_settings.load_full(),
+                ResolvedStepSettings::capture_transport(
+                    turn_context.next_step_settings.load_full(),
+                    &state.session_configuration.step_settings,
+                    &self.features,
+                ),
                 self.services.turn_environments.snapshot(),
                 self.features
                     .enabled(Feature::SubagentThreadEnvironments)

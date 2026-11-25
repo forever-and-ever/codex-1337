@@ -519,6 +519,9 @@ async fn run_compact_task_inner_impl(
         },
     )
     .await?;
+    if let Some(step) = compaction_response.batch_step {
+        step.consumed(&sess).await?;
+    }
     sess.recompute_token_usage(&replacement_step_context.turn)
         .await;
 
@@ -922,6 +925,7 @@ fn build_compacted_history_with_limit(
 }
 
 struct CompactionResponse {
+    batch_step: Option<crate::client::openrouter_batch::Step>,
     response_id: String,
     output: Vec<ResponseItem>,
 }
@@ -938,6 +942,12 @@ async fn drain_to_completed(
     let turn_context = step_context.turn.as_ref();
     let mut includes_reasoning = turn_context.model_info().use_responses_lite;
     let cancellation = &step_context.turn_cancellation;
+    let batch_step = crate::client::openrouter_batch::Step::capture(
+        sess,
+        step_context,
+        crate::client::openrouter_batch::Operation::Compaction,
+    )
+    .await?;
     let mut stream = request
         .open(
             sess,
@@ -949,6 +959,7 @@ async fn drain_to_completed(
                 turn_context.model_info(),
                 &turn_context.session_telemetry,
                 SamplingOptions {
+                    batch_step: batch_step.clone(),
                     reasoning_effort: sess
                         .reasoning_effort_for_request(
                             &turn_context.initial_settings,
@@ -1023,6 +1034,7 @@ async fn drain_to_completed(
                 )
                 .await?;
                 return Ok(CompactionResponse {
+                    batch_step,
                     response_id,
                     output,
                 });

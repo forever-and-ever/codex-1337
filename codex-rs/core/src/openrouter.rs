@@ -7,6 +7,18 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use std::sync::Arc;
 
+pub(crate) fn normalize_batch_selector(config: &mut Config) {
+    if config.model_provider.adapter == ModelProviderAdapter::OpenRouter
+        && let Some(base) = config
+            .model
+            .as_deref()
+            .and_then(|model| model.strip_suffix(":batch"))
+    {
+        config.model = Some(base.to_owned());
+        config.openrouter_transport = codex_protocol::openrouter::OpenRouterTransport::Batch;
+    }
+}
+
 pub(crate) fn initial_account(
     adapter: ModelProviderAdapter,
     selected: Option<Arc<ProviderAccountSelection>>,

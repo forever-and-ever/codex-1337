@@ -735,6 +735,7 @@ mod tests {
             ThreadSettingsAppliedEvent {
                 thread_id: None,
                 thread_settings: ThreadSettingsSnapshot {
+                    openrouter_transport: Default::default(),
                     account_id: None,
                     disabled_plugin_ids: Vec::new(),
                     model: "gpt-5.2-codex".to_string(),

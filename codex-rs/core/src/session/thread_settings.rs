@@ -116,6 +116,7 @@ pub(super) fn prepare_update(
         active_permission_profile,
         windows_sandbox_level,
         model,
+        openrouter_transport,
         effort,
         summary,
         service_tier,
@@ -128,6 +129,7 @@ pub(super) fn prepare_update(
         step_settings: StepSettingsUpdate {
             request_country,
             model,
+            openrouter_transport,
             effort,
             collaboration_mode,
             reasoning_summary: summary,

@@ -123,6 +123,7 @@ pub(super) async fn request(
                 model_info,
                 &step_context.session_telemetry,
                 SamplingOptions {
+                    batch_step: None,
                     reasoning_effort: effort,
                     reasoning_summary: settings.reasoning_summary,
                     service_tier: settings.service_tier.clone(),

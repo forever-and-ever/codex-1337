@@ -293,6 +293,7 @@ async fn environment_only_update_revalidates_existing_step_settings() {
 
 fn configured_settings() -> StepSettings {
     StepSettings {
+        openrouter_transport: Default::default(),
         request_country: RequestCountry::from_iso_code("DE").unwrap(),
         collaboration_mode: CollaborationMode {
             mode: ModeKind::Default,

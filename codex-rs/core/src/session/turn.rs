@@ -3172,6 +3172,12 @@ async fn try_run_sampling_request(
     sess.announce_step_arrivals(&step_context, &prompt).await;
     let mut preamble = sess.prepare_preamble(&prompt).await;
     let mut prepared_admission = Some(sess.prepare_step_admission(&step_context, &prompt).await);
+    let batch_step = crate::client::openrouter_batch::Step::capture(
+        &sess,
+        &step_context,
+        crate::client::openrouter_batch::Operation::Generation,
+    )
+    .await?;
     let mut includes_reasoning = step_context.settings.model_info.use_responses_lite;
     // Catalog policies can enable adaptive review independently of the legacy scorer flag.
     // Capture evidence whenever Guardian is available; the reviewer resolves the policy.
@@ -3194,6 +3200,7 @@ async fn try_run_sampling_request(
                 &step_context.settings.model_info,
                 &step_context.session_telemetry,
                 SamplingOptions {
+                    batch_step: batch_step.clone(),
                     reasoning_effort: effort.clone(),
                     reasoning_summary: step_context.settings.reasoning_summary,
                     service_tier: step_context.settings.service_tier.clone(),
@@ -4088,6 +4095,9 @@ async fn try_run_sampling_request(
     match outcome {
         Ok(result) => {
             // A drained or preempted response can leave provisional items uncommitted.
+            if let Some(step) = batch_step {
+                step.consumed(&sess).await?;
+            }
             stream_attempt::discard(
                 &sess,
                 &turn_context,

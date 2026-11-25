@@ -664,6 +664,7 @@ pub struct ThreadSettingsOverrides {
     /// Use `Some(Some(_))` to set a specific tier, `Some(None)` to clear the
     /// preference, or `None` to leave the existing value unchanged.
     pub service_tier: Option<Option<String>>,
+    pub openrouter_transport: Option<crate::openrouter::OpenRouterTransport>,
 
     /// EXPERIMENTAL - set a pre-set collaboration mode.
     /// Takes precedence over model, effort, and developer instructions if set.
@@ -2586,6 +2587,8 @@ pub struct ThreadSettingsSnapshot {
     pub account_id: Option<String>,
     pub model: String,
     pub model_provider_id: String,
+    #[serde(default)]
+    pub openrouter_transport: crate::openrouter::OpenRouterTransport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
     pub approval_policy: AskForApproval,

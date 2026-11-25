@@ -56,6 +56,8 @@ pub use provider_capture::StartCredentials;
 
 #[path = "client_openrouter.rs"]
 mod openrouter;
+#[path = "client_openrouter_batch.rs"]
+pub(crate) mod openrouter_batch;
 use response_delivery::ResponseDelivery;
 
 use crate::CodexResponsesHeaders;
@@ -601,6 +603,7 @@ impl WebsocketSession {
 /// Generation settings shared by HTTP and WebSocket, including transport fallback.
 #[derive(Clone)]
 pub(crate) struct SamplingOptions {
+    pub(crate) batch_step: Option<openrouter_batch::Step>,
     pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
     pub(crate) reasoning_summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
@@ -2296,20 +2299,38 @@ impl ResponsesHttpExecutor<'_> {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
-            let stream_result = client
-                .stream_request_with_observer(request, options, |wire| {
-                    inference_trace_attempt.record_started(
-                        wire.clone(),
-                        Arc::clone(prompt),
-                        history_ids,
-                        || Ok(None),
-                    );
-                })
-                .await;
+            let stream_result = if let Some(step) = &sampling.batch_step {
+                let (wire, stream) = self
+                    .client
+                    .open_batch_step(step, request, openrouter_projection.as_ref())
+                    .await?;
+                inference_trace_attempt.record_started(
+                    wire,
+                    Arc::clone(prompt),
+                    history_ids,
+                    || Ok(None),
+                );
+                Ok(stream)
+            } else {
+                client
+                    .stream_request_with_observer(request, options, |wire| {
+                        inference_trace_attempt.record_started(
+                            wire.clone(),
+                            Arc::clone(prompt),
+                            history_ids,
+                            || Ok(None),
+                        );
+                    })
+                    .await
+            };
 
             match stream_result {
                 Ok(stream) => {
-                    let stream = openrouter::project_stream(stream, openrouter_projection);
+                    let stream = openrouter::project_stream(
+                        stream,
+                        openrouter_projection,
+                        sampling.batch_step.is_some(),
+                    );
                     return Ok(OpenedModelResponse {
                         stream,
                         telemetry: request_session_telemetry,
@@ -2796,6 +2817,7 @@ impl ModelClientSession {
                 model_info,
                 session_telemetry,
                 SamplingOptions {
+                    batch_step: None,
                     reasoning_effort: effort,
                     reasoning_summary: summary,
                     service_tier,
@@ -2863,6 +2885,7 @@ impl ModelClientSession {
             model_info,
             session_telemetry,
             SamplingOptions {
+                batch_step: None,
                 reasoning_effort: effort,
                 reasoning_summary: summary,
                 service_tier,

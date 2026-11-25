@@ -751,6 +751,15 @@ impl Session {
         info!("interrupt received: abort current task, if any");
         // Release the admission lock before creating the asynchronous cleanup.
         let turn = self.take_active_turn(active, &TurnAbortReason::Interrupted);
+        if let Some(task) = turn.as_ref().and_then(|turn| turn.task.as_ref())
+            && let Err(error) = crate::client::openrouter_batch::abandon(
+                &task.turn_context.config.codex_home,
+                self.thread_id(),
+                &task.turn_context.sub_id,
+            )
+        {
+            tracing::error!(%error, "could not persist OpenRouter batch interruption");
+        }
         let session = Arc::clone(self);
         async move {
             let had_active_turn = turn.is_some();

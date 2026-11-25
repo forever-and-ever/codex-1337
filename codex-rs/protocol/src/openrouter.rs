@@ -76,6 +76,22 @@ impl FromStr for KeyName {
 }
 string_value!(KeyName);
 
+/// Dispatch selected for a thread's next `OpenRouter` model step.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "v2/")]
+pub enum OpenRouterTransport {
+    #[default]
+    Live,
+    Batch,
+}
+
+impl OpenRouterTransport {
+    pub fn is_live(&self) -> bool {
+        *self == Self::Live
+    }
+}
+
 /// The `OpenRouter` model id sent as `model`: `[~]author/name[:variant]` or `@preset/name`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[serde(try_from = "String", into = "String")]

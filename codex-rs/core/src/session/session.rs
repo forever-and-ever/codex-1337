@@ -310,6 +310,7 @@ impl SessionConfiguration {
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             model_provider_adapter: self.provider.info().adapter,
             requires_openai_auth: self.provider.info().requires_openai_auth,
+            openrouter_transport: self.step_settings.openrouter_transport,
             service_tier: self.step_settings.service_tier.clone(),
             approval_policy: self.step_settings.approval_policy.value(),
             approvals_reviewer: self.step_settings.approvals_reviewer,
@@ -367,6 +368,7 @@ impl SessionConfiguration {
                 }),
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
+            openrouter_transport: self.step_settings.openrouter_transport,
             service_tier: self.step_settings.service_tier.clone(),
             approval_policy: self.step_settings.approval_policy.value(),
             approvals_reviewer: self.step_settings.approvals_reviewer,
@@ -413,6 +415,7 @@ impl SessionConfiguration {
             active_permission_profile: self.active_permission_profile(),
             windows_sandbox_level: Some(self.windows_sandbox_level),
             summary: self.step_settings.reasoning_summary,
+            openrouter_transport: Some(self.step_settings.openrouter_transport),
             service_tier: Some(self.step_settings.service_tier.clone()),
             collaboration_mode: Some(self.step_settings.collaboration_mode.clone()),
             personality: self.step_settings.personality,
@@ -1013,6 +1016,18 @@ impl Session {
                 .root_thread_instructions_provider(thread_id, instructions.thread_provider);
         }
         // Ephemeral forks reuse cache routing, without sharing storage or lifecycle identity.
+        if let Some(snapshot) =
+            super::openrouter_batch_settings::inherited(&initial_history, thread_id)
+            && snapshot.model_provider_id == config.model_provider_id
+            && snapshot.model
+                == session_configuration
+                    .step_settings
+                    .collaboration_mode
+                    .model()
+        {
+            Arc::make_mut(&mut session_configuration.step_settings).openrouter_transport =
+                snapshot.openrouter_transport;
+        }
         let fork_cache_key = match &initial_history {
             InitialHistory::Forked(items)
                 if config.ephemeral

@@ -179,6 +179,14 @@ pub(crate) async fn prepare_agent_spawn_config_from_selection(
             .await;
         clamp_openrouter_reasoning(&mut config, &info);
     }
+    config.openrouter_transport = if config.model_provider.adapter
+        == codex_model_provider_info::ModelProviderAdapter::OpenRouter
+        && config.model.as_deref() == Some(&settings.model_info.slug)
+    {
+        settings.openrouter_transport()
+    } else {
+        codex_protocol::openrouter::OpenRouterTransport::Live
+    };
     apply_spawn_agent_service_tier(session, &mut config, options.service_tier).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 

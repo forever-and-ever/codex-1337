@@ -122,6 +122,7 @@ pub struct ThreadConfigSnapshot {
     pub model_provider_adapter: codex_model_provider_info::ModelProviderAdapter,
     pub requires_openai_auth: bool,
     pub service_tier: Option<String>,
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub approval_policy: AskForApproval,
     pub approvals_reviewer: ApprovalsReviewer,
     pub permission_profile: PermissionProfile,
@@ -196,6 +197,7 @@ pub struct CodexThreadSettingsOverrides {
     pub effort: Option<Option<ReasoningEffort>>,
     pub summary: Option<ReasoningSummary>,
     pub service_tier: Option<Option<String>>,
+    pub openrouter_transport: Option<codex_protocol::openrouter::OpenRouterTransport>,
     pub collaboration_mode: Option<CollaborationMode>,
     pub personality: Option<Personality>,
     pub disabled_plugin_ids: Option<Vec<String>>,
@@ -1047,6 +1049,7 @@ impl CodexThread {
             active_permission_profile,
             windows_sandbox_level,
             model,
+            openrouter_transport,
             effort,
             summary,
             service_tier,
@@ -1058,6 +1061,7 @@ impl CodexThread {
             requested_approvals_reviewer,
             turn_extension_init,
             step_settings: StepSettingsUpdate {
+                openrouter_transport,
                 request_country,
                 model,
                 effort,
@@ -1372,6 +1376,49 @@ impl CodexThread {
     /// Returns thread-owned settings suitable for rollout persistence and resume.
     pub async fn thread_settings_snapshot(&self) -> ThreadSettingsSnapshot {
         self.session.thread_settings_snapshot().await
+    }
+
+    pub async fn validate_openrouter_batch_model(&self, model: &str) -> CodexResult<()> {
+        self.session
+            .services
+            .model_client
+            .validate_batch_selection(model)
+            .await
+    }
+
+    pub async fn has_paid_openrouter_step(&self, turn_id: &str) -> CodexResult<bool> {
+        crate::client::openrouter_batch::has_paid_step(
+            &self.config().await.codex_home,
+            self.session.thread_id(),
+            turn_id,
+        )
+    }
+
+    pub async fn read_openrouter_batch_sample(
+        &self,
+        fork: ThreadId,
+    ) -> CodexResult<crate::OpenRouterSampleStatus> {
+        self.session
+            .services
+            .model_client
+            .read_batch_sample(fork)
+            .await
+    }
+
+    pub async fn park_openrouter_step(&self, turn_id: &str) -> CodexResult<bool> {
+        crate::client::openrouter_batch::park(&self.session, turn_id).await
+    }
+
+    pub async fn recover_openrouter_step(
+        &self,
+        request: RecoverTurnRequest,
+    ) -> CodexResult<StartIfIdleSubmission> {
+        crate::client::openrouter_batch::unpark(
+            &self.config().await.codex_home,
+            self.session.thread_id(),
+            &request.turn_id,
+        )?;
+        self.recover_turn_if_idle(request).await
     }
 
     /// Accepts a saved account for this family. Running work keeps its payer until

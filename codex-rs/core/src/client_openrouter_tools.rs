@@ -20,17 +20,20 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(serde::Serialize, Deserialize)]
 enum Input {
     Function,
     Freeform,
 }
 
+#[derive(serde::Serialize, Deserialize)]
 struct Tool {
     identity: ToolName,
     alias: String,
     input: Input,
 }
 
+#[derive(serde::Serialize, Deserialize)]
 pub(in crate::client) struct Projection {
     tools: Vec<Tool>,
     freeform_items: HashSet<ResponseItemId>,
@@ -320,6 +323,18 @@ impl Projection {
                 events
             }
             event => vec![event],
+        }
+    }
+
+    pub(super) fn settled(&self, event: ResponseEvent) -> ResponseEvent {
+        match event {
+            ResponseEvent::OutputItemAdded(item) => {
+                ResponseEvent::OutputItemAdded(self.item(item, true))
+            }
+            ResponseEvent::OutputItemDone(item) => {
+                ResponseEvent::OutputItemDone(self.item(item, false))
+            }
+            event => event,
         }
     }
 }

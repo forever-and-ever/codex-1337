@@ -269,7 +269,7 @@ pub enum CyberAccessProgram {
 }
 
 /// Minimum lifetime requested for new prompt cache entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PromptCacheTtl {
     #[serde(rename = "30m")]
     ThirtyMinutes,
