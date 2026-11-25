@@ -690,6 +690,7 @@ async fn managed_shutdown_records_interrupted_turn(outcome: &str) -> Result<()> 
         [(
             id.clone(),
             daemon_recovery::InterruptedTurn {
+                prompt_cache_ttl: None,
                 turn_id: turn["turn"]["id"].as_str().context("turn ID")?.to_string(),
                 output_schema: Some(schema.clone()),
                 service_tier: Some("default".into()),
@@ -704,6 +705,7 @@ async fn managed_shutdown_records_interrupted_turn(outcome: &str) -> Result<()> 
     assert_eq!(
         daemon_recovery::read_snapshot(&path)?,
         daemon_recovery::RecoverySnapshot {
+            paid_children: Default::default(),
             loaded: [id.clone()].into(),
             interrupted: expected,
         }
@@ -926,6 +928,14 @@ pub(super) async fn connect_daemon_client(
 }
 
 pub(super) fn spawn_server(home: &Path, socket_path: &Path) -> Result<Child> {
+    spawn_server_with_stderr(home, socket_path, Stdio::null())
+}
+
+pub(super) fn spawn_server_with_stderr(
+    home: &Path,
+    socket_path: &Path,
+    stderr: Stdio,
+) -> Result<Child> {
     let binary = codex_utils_cargo_bin::cargo_bin("codex-app-server")?;
     Ok(Command::new(binary)
         .args(["--listen", &format!("unix://{}", socket_path.display())])
@@ -944,7 +954,7 @@ pub(super) fn spawn_server(home: &Path, socket_path: &Path) -> Result<Child> {
         )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .kill_on_drop(true)
         .spawn()?)
 }

@@ -34,6 +34,47 @@ use wiremock::matchers::path;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[path = "openrouter_batch_recovery.rs"]
+mod batch_recovery;
+
+async fn mount_routed_catalog(server: &MockServer, model: &str, host: &str) {
+    Mock::given(method("GET"))
+            .and(path(format!("/model/{model}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {
+                "id": model, "name": "Routing Test", "canonical_slug":model, "endpoints":["/api/v1/responses"],
+                "context_length": 262_144, "architecture": {"input_modalities": ["text","image"]},
+                "supported_parameters": ["tools"], "pricing": {"prompt": "0.0000003", "completion": "0.000002"}
+            }})))
+            .mount(server)
+            .await;
+    Mock::given(method("GET"))
+            .and(path(format!("/models/{model}/endpoints")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [{
+                "tag": format!("{host}/test"), "provider_name": host, "supported_parameters":["tools"],
+                "quantization": "fp8", "service_tier": "priority", "context_length": 131_072,
+                "pricing": {"prompt": "0.0000003", "completion": "0.000002"},
+                "uptime_last_30m": 99.5, "status": 0
+            }]}})))
+            .mount(server)
+            .await;
+    let batch_alias = format!("{model}:batch");
+    Mock::given(method("GET"))
+        .and(path("/models/user"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data":[{"id":model},{"id":batch_alias}]})),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET")).and(path(format!("/model/{batch_alias}"))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":{
+            "id":batch_alias,"name":"Routing Test (batch)","canonical_slug":model,"endpoints":["/api/v1/batches"],"context_length":131_072,
+            "architecture":{"input_modalities":["text","image"]},"supported_parameters":["tools"],"pricing":{}
+        }}))).mount(server).await;
+    Mock::given(method("GET")).and(path(format!("/models/{batch_alias}/endpoints"))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":{"endpoints":[{
+            "tag":host,"provider_name":host,"context_length":131_072,"pricing":{},"status":0,"supported_parameters":["tools"]
+        }]}}))).mount(server).await;
+}
+
 #[tokio::test]
 async fn openrouter_saved_model_routes_spend_and_key_quota() -> Result<()> {
     for (model, host) in [
@@ -93,26 +134,9 @@ stream_max_retries = 2
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("GET"))
-            .and(path(format!("/model/{model}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {
-                "id": model, "name": "Routing Test",
-                "context_length": 262_144, "architecture": {"input_modalities": ["text"]},
-                "supported_parameters": ["tools"], "pricing": {"prompt": "0.0000003", "completion": "0.000002"}
-            }})))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path(format!("/models/{model}/endpoints")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [{
-                "tag": format!("{host}/test"), "provider_name": host,
-                "quantization": "fp8", "service_tier": "priority", "context_length": 131_072,
-                "pricing": {"prompt": "0.0000003", "completion": "0.000002"},
-                "uptime_last_30m": 99.5, "status": 0
-            }]}})))
-            .mount(&server)
-            .await;
+        mount_routed_catalog(&server,model,host).await;
         let mut completed = responses::ev_completed_with_tokens("paid-turn", 123);
+        let batch_alias=format!("{model}:batch");
         completed["response"]["usage"]["cost"] = json!(0.0123);
         // Item completion is not response completion. Exercise both a provider
         // timeout and a closed stream, before and after a non-idempotent tool.
@@ -238,7 +262,7 @@ stream_max_retries = 2
         let _: OpenRouterModelRouteResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         let request = app.send_request("model/list", Some(json!({"modelProvider": "openrouter"}))).await?;
         let listed: ModelListResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        assert_eq!(listed.data.len(), 1);
+        assert_eq!(listed.data.iter().map(|row|row.model.as_str()).collect::<Vec<_>>(),vec![model,batch_alias.as_str()]);
         assert_eq!(listed.data[0].model, saved.model.model);
         assert!(listed.providers.iter().any(|provider| provider.id == "openrouter"));
         let stored: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
@@ -299,6 +323,52 @@ stream_max_retries = 2
         assert_eq!(body["model"], model);
         assert_eq!(body["store"], false);
         assert!(body["tools"].as_array().expect("request tools").iter().all(|tool| tool["type"] == "function"));
+
+        // The same agent must execute the returned call and carry its real receipt into
+        // the next paid row; streaming the alias to /responses would miss this contract.
+        let jobs=std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let submitted=jobs.clone();
+        Mock::given(method("POST")).and(path("/batches")).and(header("authorization","Bearer sk-or-test"))
+            .respond_with(move |r:&wiremock::Request|{
+                let mut rows=submitted.lock().expect("mock jobs"); rows.push(r.body_json().expect("valid JSON request"));
+                ResponseTemplate::new(202).set_body_json(json!({"id":format!("batch_{}",rows.len())}))
+            }).expect(2).mount(&server).await;
+        let polled=jobs.clone();
+        let effect_dir=home.path().to_owned();
+        Mock::given(method("GET")).and(wiremock::matchers::path_regex("^/batches/batch_[12]$"))
+            .respond_with(move|r:&wiremock::Request|{
+                let step=usize::from(r.url.path().ends_with('2'));
+                let call=if step==0 {json!({"type":"function_call","id":"batch-tool","call_id":"batch-effect","name":"exec_command","arguments":json!({"cmd":"printf x >> batch-effect","workdir":effect_dir}).to_string(),"status":"completed"})}
+                    else {json!({"type":"message","id":"batch-message","role":"assistant","content":[{"type":"output_text","text":"Done."}],"status":"completed"})};
+                let rows=polled.lock().expect("mock jobs");
+                ResponseTemplate::new(200).set_body_json(json!({"id":format!("batch_{}",step+1),"status":"completed",
+                    "usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"cost":0.01},
+                    "results":[{"custom_id":rows[step]["requests"][0]["custom_id"],"response":{"status_code":200,"body":{"status":"completed","id":format!("slow-{step}"),"output":[call]}}}]}))
+            }).mount(&server).await;
+        Mock::given(method("DELETE")).and(wiremock::matchers::path_regex("^/batches/batch_[12]$")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted":true}))).expect(2).mount(&server).await;
+        let request=app.send_request("thread/settings/update",Some(json!({"threadId":started.thread.id,"openrouterTransport":"batch"}))).await?;
+        let ack:codex_app_server_protocol::ThreadSettingsUpdateResponse=timeout(READ_TIMEOUT,app.read_response(request)).await??;
+        assert_eq!(ack.openrouter_transport,Some(codex_protocol::openrouter::OpenRouterTransport::Batch));
+        let request=app.send_turn_start_request(TurnStartParams{thread_id:started.thread.id.clone(),input:vec![UserInput::Text{text:"Run a batch tool.".into(),text_elements:Vec::new()}],..Default::default()}).await?;
+        let _:TurnStartResponse=timeout(READ_TIMEOUT,app.read_response(request)).await??;
+        let slow_done:TurnCompletedNotification=timeout(READ_TIMEOUT,app.read_notification("turn/completed")).await??;
+        assert_eq!(slow_done.turn.status,TurnStatus::Completed);
+        assert_eq!(std::fs::read_to_string(home.path().join("batch-effect"))?,"x");
+        {
+            let rows=jobs.lock().expect("mock jobs"); assert_eq!(rows.len(),2);
+            for job in rows.iter(){
+                assert_eq!(job["endpoint"],"/v1/responses"); assert_eq!(job["model"],model);
+                assert_eq!(job["provider"],json!({"only":[host],"allow_fallbacks":false}));
+                let row=&job["requests"][0]["body"];assert_eq!(row["model"],model); assert_eq!(row["stream"],false);
+                assert_eq!(row.get("prompt_cache_key"),body.get("prompt_cache_key"),"transport must not change cache identity");
+                assert_eq!(row.get("prompt_cache_options"),body.get("prompt_cache_options"));
+                assert_eq!(row.get("reasoning"),body.get("reasoning"),"transport must not change reasoning effort");
+                assert!(row.get("provider").is_none() && row.get("stream_options").is_none());
+            }
+            assert!(rows[1]["requests"][0]["body"]["input"].as_array().expect("input items").iter().any(|item|item["type"]=="function_call_output" && item["call_id"]=="batch-effect"));
+        }
+        let request=app.send_request("thread/settings/update",Some(json!({"threadId":started.thread.id,"openrouterTransport":"live"}))).await?;
+        let _:codex_app_server_protocol::ThreadSettingsUpdateResponse=timeout(READ_TIMEOUT,app.read_response(request)).await??;
 
         let request = app.send_turn_start_request(TurnStartParams {
             thread_id: started.thread.id.clone(),
