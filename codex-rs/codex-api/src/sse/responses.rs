@@ -1,3 +1,7 @@
+#[path = "responses_batch.rs"]
+mod batch;
+pub use batch::batch_response_events;
+
 use super::responses_error::parse_error_event;
 use super::responses_error::parse_failed_response;
 use crate::common::ReasoningRemovalReason;

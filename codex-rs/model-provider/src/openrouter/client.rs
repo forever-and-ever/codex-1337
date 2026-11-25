@@ -25,6 +25,7 @@ pub enum Error {
     TooLarge,
     InvalidResponse,
     PresetNeedsKey,
+    BatchUnavailable,
 }
 
 impl fmt::Display for Error {
@@ -37,6 +38,9 @@ impl fmt::Display for Error {
             Self::TooLarge => f.write_str("OpenRouter response exceeds its size limit"),
             Self::InvalidResponse => f.write_str("invalid OpenRouter response"),
             Self::PresetNeedsKey => f.write_str("Choose an OpenRouter key with /account"),
+            Self::BatchUnavailable => f.write_str(
+                "No compatible OpenRouter batch route under this model, key and endpoint selection",
+            ),
         }
     }
 }
@@ -51,6 +55,9 @@ pub struct Envelope<T> {
 pub struct Model {
     pub id: ModelSlug,
     pub name: String,
+    pub canonical_slug: Option<String>,
+    #[serde(default)]
+    pub endpoints: Vec<String>,
     pub context_length: i64,
     pub architecture: Architecture,
     pub supported_parameters: Vec<String>,
@@ -114,6 +121,8 @@ pub struct Pricing {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Endpoint {
     pub tag: EndpointSlug,
+    #[serde(default)]
+    pub supported_parameters: Vec<String>,
     #[serde(rename = "provider_name")]
     pub host_name: String,
     pub quantization: Option<String>,
@@ -184,6 +193,18 @@ impl fmt::Debug for Client {
 }
 
 impl Client {
+    pub(super) fn admits_global_batch(&self) -> bool {
+        match self.base_url.host() {
+            Some(url::Host::Domain("openrouter.ai")) => {
+                self.base_url.scheme() == "https"
+                    && self.base_url.port_or_known_default() == Some(443)
+            }
+            Some(url::Host::Domain("localhost")) => true,
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            _ => false,
+        }
+    }
     pub fn new(base_url: &str, factory: HttpClientFactory) -> Result<Self, Error> {
         let mut base_url = Url::parse(base_url).map_err(|_| Error::InvalidBaseUrl)?;
         if !matches!(base_url.scheme(), "http" | "https")
@@ -214,12 +235,30 @@ impl Client {
         path: &str,
         bearer: Option<&super::Bearer>,
     ) -> Result<T, Error> {
+        self.exchange::<Envelope<T>>(self.request(http::Method::GET, path)?, bearer, MAX_BODY)
+            .await
+            .map(|envelope| envelope.data)
+    }
+
+    pub(super) fn request(
+        &self,
+        method: http::Method,
+        path: &str,
+    ) -> Result<codex_http_client::RequestBuilder, Error> {
         let url = self
             .base_url
             .join(path)
             .map_err(|_| Error::InvalidBaseUrl)?;
+        Ok(self.pool.request(method, url))
+    }
+
+    pub(super) async fn exchange<T: DeserializeOwned>(
+        &self,
+        request: codex_http_client::RequestBuilder,
+        bearer: Option<&super::Bearer>,
+        limit: usize,
+    ) -> Result<T, Error> {
         tokio::time::timeout(DEADLINE, async {
-            let request = self.pool.get(url);
             let request = match bearer {
                 Some(bearer) => request.header(http::header::AUTHORIZATION, bearer.expose()),
                 None => request,
@@ -231,20 +270,18 @@ impl Client {
             }
             if response
                 .content_length()
-                .is_some_and(|size| size > MAX_BODY as u64)
+                .is_some_and(|size| size > limit as u64)
             {
                 return Err(Error::TooLarge);
             }
             let mut body = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
-                if chunk.len() > MAX_BODY.saturating_sub(body.len()) {
+                if chunk.len() > limit.saturating_sub(body.len()) {
                     return Err(Error::TooLarge);
                 }
                 body.extend_from_slice(&chunk);
             }
-            serde_json::from_slice::<Envelope<T>>(&body)
-                .map(|envelope| envelope.data)
-                .map_err(|_| Error::InvalidResponse)
+            serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)
         })
         .await
         .map_err(|_| Error::Timeout)?

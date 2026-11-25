@@ -127,11 +127,18 @@ impl Catalog {
             Some(key) => credentials(&self.home, key).await.map(Some),
             None => Ok(None),
         };
-        let mut models = stream::iter(preferences.models.clone().into_iter().enumerate())
+        let admitted = match (&self.client, &bearer) {
+            (Ok(client), Ok(Some(bearer))) if !preferences.models.is_empty() => {
+                client.admitted_models(bearer).await.ok()
+            }
+            _ => None,
+        };
+        let models = stream::iter(preferences.models.clone().into_iter().enumerate())
             .map(|(priority, (slug, filter))| {
                 let bearer = &bearer;
+                let admitted = admitted.as_ref();
                 async move {
-                    let priority = i32::try_from(priority).unwrap_or(i32::MAX);
+                    let priority = i32::try_from(priority.saturating_mul(2)).unwrap_or(i32::MAX);
                     let resolved = match &self.client {
                         Ok(client) => {
                             let token = match bearer {
@@ -144,12 +151,32 @@ impl Catalog {
                         Err(error) => Err(error.clone()),
                     };
                     match resolved {
-                        Ok(resolved) => normalize(&resolved, &filter, priority),
+                        Ok(resolved) => {
+                            let info = normalize(&resolved, &filter, priority);
+                            let mut rows = vec![info];
+                            if let Some(admitted) = admitted
+                                && !slug.as_str().contains(':')
+                                && matches!(slug, ModelSlug::Model(_))
+                                && let Ok(alias) = format!("{slug}:batch").parse::<ModelSlug>()
+                                && admitted.contains(slug.as_str())
+                                && admitted.contains(alias.as_str())
+                                && let Ok(client) = &self.client
+                                && let Ok(twin) = client
+                                    .resolve(&alias, bearer.as_ref().ok().and_then(Option::as_ref))
+                                    .await
+                                && super::BatchRoute::pair(&resolved, &twin, &filter).is_ok()
+                            {
+                                let mut row = normalize(&twin, &filter, priority.saturating_add(1));
+                                row.display_name = format!("{} (batch)", rows[0].display_name);
+                                rows.push(row);
+                            }
+                            rows
+                        }
                         Err(error) => {
                             let mut info = local(slug.as_str());
                             info.priority = priority;
                             info.description = Some(format!("Unavailable: {error}"));
-                            info
+                            vec![info]
                         }
                     }
                 }
@@ -157,6 +184,7 @@ impl Catalog {
             .buffer_unordered(4)
             .collect::<Vec<_>>()
             .await;
+        let mut models = models.into_iter().flatten().collect::<Vec<_>>();
         models.sort_by_key(|info| info.priority);
         models
     }

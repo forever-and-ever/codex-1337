@@ -1,8 +1,10 @@
+mod batch;
 mod catalog;
 mod client;
 mod credentials;
 mod normalize;
 
+pub use batch::*;
 pub(crate) use catalog::catalog_for_provider;
 pub use catalog::shared_catalog;
 pub use client::*;
