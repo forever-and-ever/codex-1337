@@ -521,14 +521,19 @@ async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::
     }
 
     impl codex_extension_api::TurnLifecycleContributor for HoldFirstTask {
+        fn turn_start_phase(
+            &self,
+            _thread_store: &ExtensionData,
+        ) -> codex_extension_api::TurnStartPhase {
+            codex_extension_api::TurnStartPhase::RegularTaskStart
+        }
+
         fn on_turn_start<'a>(
             &'a self,
-            input: codex_extension_api::TurnStartInput<'a>,
+            _input: codex_extension_api::TurnStartInput<'a>,
         ) -> ExtensionFuture<'a, ()> {
             Box::pin(async move {
-                if input.token_usage_at_turn_start.is_none()
-                    && !self.first.swap(true, Ordering::SeqCst)
-                {
+                if !self.first.swap(true, Ordering::SeqCst) {
                     self.entered.notify_one();
                     std::future::pending::<()>().await;
                 }
@@ -1480,12 +1485,12 @@ async fn resumed_idle_dispatches_input_without_a_loaded_manager() -> anyhow::Res
         Arc::new(NoopExtensionEventSink),
     );
     emit_idle(&service, thread_id).await;
-    assert!(service.list(thread_id).await?.is_empty());
     wait_for_event_match(test.codex.as_ref(), |event| match event {
         EventMsg::TurnComplete(_) => Some(()),
         _ => None,
     })
     .await;
+    assert!(service.list(thread_id).await?.is_empty());
     let body = response.single_request().body_json();
     let metadata: serde_json::Value = serde_json::from_str(
         body["client_metadata"]["x-codex-turn-metadata"]
