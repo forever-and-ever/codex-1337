@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=2c9af3dc99abf842):
-        - namespace/functions; hash=d17415e4b1d663e8
+00:additional_tools/developer (2; hash=9fa474e692f32a7c):
+        - namespace/functions; hash=4ac470b205b120e8
           - custom/exec
           - function/wait
           - custom/python
@@ -46,12 +46,28 @@ Settings:
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-02:message/developer[2]:
-    [01] <permissions instructions>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
@@ -106,23 +122,34 @@ Settings:
 -- request 3 (turn) --
 10:message/assistant:
     The Notes tool is not installed yet.
-11:message/developer:
-    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-12:additional_tools/developer (1; hash=097a8ba9c04b5f74):
-        - namespace/functions; hash=1a788873fa289f50
-          - custom/exec
-13:message/developer:
-    <skills_instructions>
-    ## Skills
-    A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, descriptio...; expand the path's alias from the skill roots table. [hash=9b09cf46082eaea7]
-    ### Skill roots
-    - `r0` = `<PLUGINS_CACHE>/test`
-    ### Available skills
-    - notes:summarize: Summarize team notes (r0/notes/local/skills/summarize/SKILL.md)
-    </skills_instructions>
-14:message/user:
+11:message/developer[2]:
+    [01] <skills_instructions>
+        ## Skills
+        A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, descriptio...; expand the path's alias from the skill roots table. [hash=9b09cf46082eaea7]
+        ### Skill roots
+        - `r0` = `<PLUGINS_CACHE>/test`
+        ### Available skills
+        - notes:summarize: Summarize team notes (r0/notes/local/skills/summarize/SKILL.md)
+        </skills_instructions>
+    [02] <nested_tools>
+        Added or changed:
+        - mcp__notes.client_capabilities (tools.mcp__notes__client_capabilities): Return capabilities advertised by the MCP client.
+        - mcp__notes.cwd (tools.mcp__notes__cwd): Return the current working directory of this test server process.
+        - mcp__notes.echo (tools.mcp__notes__echo): Echo back the provided message and include environment data.
+        - mcp__notes.echo_tool (tools.mcp__notes__echo_tool): Echo back the provided message via a tool name that is not a legal JS identifier.
+        - mcp__notes.encrypted_output (tools.mcp__notes__encrypted_output): Return mixed plaintext and encrypted content for integration tests.
+        - mcp__notes.image (tools.mcp__notes__image): Return a single image content block.
+        - mcp__notes.image_scenario (tools.mcp__notes__image_scenario): Return content blocks for manual testing of MCP image rendering scenarios.
+        - mcp__notes.sandbox_meta (tools.mcp__notes__sandbox_meta): Return the MCP request metadata received by this test server.
+        - mcp__notes.sync (tools.mcp__notes__sync): Synchronize concurrent test calls and optionally delay before or after the barrier.
+        - mcp__notes.sync_readonly (tools.mcp__notes__sync_readonly): Synchronize concurrent test calls and optionally delay before or after the barrier.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        </nested_tools>
+12:message/user:
     I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.
-15:message/user:
+13:message/user:
     <skill>
     <name>notes:summarize</name>
     <path><PLUGINS_CACHE>/test/notes/local/skills/summarize/SKILL.md</path>
@@ -134,25 +161,25 @@ Settings:
     State the owner and date from the notes.
 
     </skill>
-16:message/developer:
+14:message/developer:
     The user selected the `notes` plugin. Use its available skills and tools to complete this request.
 -- request 4 (turn) --
-17:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-18:custom_tool_call_output:Script completed
+15:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
+16:custom_tool_call_output:Script completed
     Output:
      | ["mcp__notes__echo"]
 -- request 5 (turn) --
-19:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
-20:custom_tool_call_output:Script completed
+17:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
+18:custom_tool_call_output:Script completed
     Output:
      | ECHOING: Mira owns the kickoff
 -- request 6 (turn) --
-21:message/assistant:
+19:message/assistant:
     The Notes plugin confirms Mira owns the kickoff.
-22:message/user:
+20:message/user:
     Use the Notes tool again to check that the kickoff is Friday.
 -- request 7 (turn) --
-23:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
-24:custom_tool_call_output:Script completed
+21:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
+22:custom_tool_call_output:Script completed
     Output:
      | ECHOING: The kickoff is Friday

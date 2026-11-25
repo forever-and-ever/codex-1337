@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 2949
 expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Ranked search prints a deferred tool declaration before a later code cell invokes it, yields, and completes through wait.
@@ -16,17 +15,17 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=7dbacfbd7053c5e6):
-    - custom/exec: Catalog exec instructions. Yield ceiling: 1234 ms. `image(value)`: append an image. Value is a ba...; hash=ceceac5483410a89
+  tools (10; hash=90624b42d8f36c78):
+    - custom/exec: Catalog exec instructions. Yield ceiling: 1234 ms. `image(value)`: append an image. Value is a ba...; hash=1c6c9872409fff8d
     - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=67bc0f04da3505b3
-    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
-    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+    - custom/python: Run python source in a fresh python3 -u process: no REPL, no state between calls, no packages or ...; hash=cbb0cf037d5d0447
+    - custom/bash: Run bash source in a fresh bash process: no REPL, no state between calls, no packages or venv bey...; hash=ada9be9216ce5ecc
     - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
     - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
       - function/wait_agent
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - function/fence: A barrier between the tool calls of one response. Calls after a fence start only when every call ...; args=[]; hash=da834037d6e8472c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
@@ -47,12 +46,29 @@ Settings:
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-01:message/developer[2]:
-    [01] <permissions instructions>
+01:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - mcp__codex_apps__calendar._create_event (tools.mcp__codex_apps__calendar_create_event): Create a calendar event.
+        - mcp__codex_apps__calendar._extract_text (tools.mcp__codex_apps__calendar_extract_text): Extract text from an uploaded document.
+        - mcp__codex_apps__calendar._list_events (tools.mcp__codex_apps__calendar_list_events): List calendar events.
+        - mcp__codex_apps__calendar._timezone_option_10 (tools.mcp__codex_apps__calendar_timezone_option_10): Read timezone option 10.
+        <OMITTED 100 LINES; ~3151 TOKENS; hash=9b185bddd140eb75>
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 

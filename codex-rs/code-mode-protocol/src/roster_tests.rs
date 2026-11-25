@@ -20,15 +20,37 @@ fn roster_retains_every_callable_and_purpose_in_each_dialect() {
         ToolDialect::Anthropic,
         ToolDialect::Other,
     ] {
-        let roster = render_roster_for(&tools, dialect).unwrap();
+        let entries = roster(&tools, dialect);
+        let rendered = render_roster(&entries).unwrap();
         for tool in &tools {
-            assert!(roster.contains(&format!(
+            assert!(rendered.contains(&format!(
                 "tools.{}",
                 crate::normalize_code_mode_identifier(&tool.0.name)
             )));
-            assert!(roster.contains(&tool.0.description));
+            assert!(rendered.contains(&tool.0.description));
         }
-        assert_eq!(roster.lines().count(), tools.len() + 1);
-        assert_eq!(render_roster_for(&[], dialect), None);
+        assert_eq!(rendered.trim().lines().count(), tools.len() + 1);
+        // Only the Responses dialect has a namespace reference that differs from the member.
+        assert_eq!(
+            rendered.contains("mcp__depot.lsp.rename"),
+            dialect == ToolDialect::Responses
+        );
+        assert_eq!(render_roster(&roster(&[], dialect)), None);
+        // An amendment names what the model must add or forget, and nothing else.
+        let mut told = roster_record(&entries);
+        assert_eq!(render_roster_amendment(&entries, &told), None);
+        told.remove(&entries[0].name);
+        told.insert("tools.retired".to_owned(), "Retired.".to_owned());
+        assert_eq!(
+            render_roster_amendment(&entries, &told),
+            Some(format!(
+                "\nAdded or changed:\n- {}: {}\nRemoved:\n- tools.retired\n",
+                entries[0].name, entries[0].purpose
+            ))
+        );
+        assert_eq!(
+            render_roster_amendment(&[], &told).as_deref(),
+            Some("\nNo nested tools remain.\n")
+        );
     }
 }

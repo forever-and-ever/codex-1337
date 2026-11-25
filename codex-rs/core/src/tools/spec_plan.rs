@@ -513,7 +513,7 @@ pub(crate) fn finalize_tool_router(
         registry.mcp_namespaces(),
     )
     .map_err(|error| CodexErrorDetails::InvalidRequest(error.to_string()))?;
-    let (code_mode_tool_names, exec_definitions) =
+    let (code_mode_tool_names, exec_definitions, nested_tools) =
         register_code_mode_executors(turn_context, model_info, &mut registry, &indirect_prefixes);
     if registry.entries().any(|tool| {
         let name = tool.runtime.tool_name();
@@ -607,7 +607,8 @@ pub(crate) fn finalize_tool_router(
         exec_definitions,
         tool_namespaces_info,
         &child_management_tools,
-    ))
+    )
+    .with_nested_tools(nested_tools))
 }
 
 fn apply_direct_model_only_namespace_overrides(
@@ -1081,10 +1082,11 @@ fn register_code_mode_executors(
 ) -> (
     BTreeMap<String, ToolName>,
     Option<Arc<Vec<codex_code_mode::ExecDefinition>>>,
+    Vec<codex_code_mode::RosterEntry>,
 ) {
     let tool_mode = effective_tool_mode(turn_context, model_info);
     if !matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly) {
-        return (BTreeMap::new(), None);
+        return (BTreeMap::new(), None, Vec::new());
     }
 
     let mut code_mode_tool_names = BTreeMap::new();
@@ -1180,7 +1182,11 @@ fn register_code_mode_executors(
     )));
     registry.prepend_trusted(Arc::new(execute_handler));
 
-    (code_mode_tool_names, exec_definitions)
+    (
+        code_mode_tool_names,
+        exec_definitions,
+        codex_code_mode::roster(&undeclared_tools, dialect),
+    )
 }
 
 #[instrument(level = "trace", skip_all, fields(tool_spec_count = specs.len()))]

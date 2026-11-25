@@ -332,8 +332,23 @@ async fn resource_helpers_across_server_changes() -> Result<()> {
         .map(|request| request.body_json()["tools"].clone())
         .collect::<Vec<_>>();
     assert_eq!(requests.len(), 6);
+    // The declarations never move: roster amendments carry the resource helpers in and out.
+    assert_eq!(tools[0], tools[2]);
     assert_eq!(tools[0], tools[4]);
-    assert_ne!(tools[0], tools[2]);
+    let roster = core_test_support::nested_tools::fragments(&requests[4].input());
+    let [_, registered, removed] = roster.as_slice() else {
+        panic!("each server change amends the roster once: {roster:?}")
+    };
+    assert!(
+        registered.starts_with("<nested_tools>\nAdded or changed:\n")
+            && registered.contains("\n- tools.list_mcp_resources: "),
+        "{registered}"
+    );
+    assert!(
+        removed.starts_with("<nested_tools>\nRemoved:\n")
+            && removed.contains("\n- tools.list_mcp_resources\n"),
+        "{removed}"
+    );
     for (request, phase) in
         requests
             .iter()

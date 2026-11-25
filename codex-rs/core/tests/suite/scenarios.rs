@@ -4461,31 +4461,38 @@ async fn astra_async_compaction_preserves_exec_catalog(change: ExecCatalogRefres
         .enumerate()
         .find_map(|(index, pair)| match pair {
             [RolloutItem::Compacted(_), RolloutItem::WorldState(baseline)] if baseline.full => {
-                Some((index, &baseline.state["top_level_tools"]))
+                Some((index, &baseline.state))
             }
             _ => None,
         })
         .expect("adopted full checkpoint");
-    let changed_hashes: &[&str] = match change {
-        ExecCatalogRefresh::Hybrid => &["/functions.exec"],
-        ExecCatalogRefresh::Metadata => &["/tools/functions.exec", "/exec/Tool: tools.view_image"],
+    // The declaration lives in the tool state, the roster entry in its own instruction.
+    let changed: &[(&str, &str)] = match change {
+        ExecCatalogRefresh::Hybrid => &[("top_level_tools", "/functions.exec")],
+        ExecCatalogRefresh::Metadata => &[
+            ("top_level_tools", "/tools/functions.exec"),
+            ("nested_tools", "/tools.view_image"),
+        ],
     };
-    for path in changed_hashes {
+    for (section, path) in changed {
         let live = history[..adoption_index]
             .iter()
             .rev()
             .find_map(|item| match item {
                 RolloutItem::WorldState(patch) if !patch.full => {
-                    patch.state.get("top_level_tools")?.pointer(path)
+                    patch.state.get(*section)?.pointer(path)
                 }
                 _ => None,
             })
             .and_then(serde_json::Value::as_str)
-            .expect("live exec update before adoption");
+            .expect("live catalog update before adoption");
         assert_eq!(
-            adopted.pointer(path).and_then(serde_json::Value::as_str),
+            adopted
+                .get(*section)
+                .and_then(|state| state.pointer(path))
+                .and_then(serde_json::Value::as_str),
             Some(live),
-            "{path}"
+            "{section}{path}"
         );
     }
     if matches!(change, ExecCatalogRefresh::Metadata) {

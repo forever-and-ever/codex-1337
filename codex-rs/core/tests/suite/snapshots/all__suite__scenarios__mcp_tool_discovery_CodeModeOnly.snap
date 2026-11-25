@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 971
 expression: "context_snapshot::format_context_snapshot(\"An MCP discovery call announces a new tool, which is called in the same turn.\",\n&entries,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: An MCP discovery call announces a new tool, which is called in the same turn.
@@ -16,44 +15,52 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=d26d0a76c50c99ce):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=1dadd5cb6f25c6d4
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
-    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
-    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+  tools (8; hash=8ef124dd3a171a2f):
+    - custom/exec: Run JavaScript as one cell: a fresh V8 async module, without Node, a console or direct network ac...; hash=427068e3cc08d897
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. The output is only what the ...; args=[cell_id, max_tokens, terminate]; hash=a8edb1e34c9ff75d
+    - custom/python: Run python source in a fresh python3 -u process: no REPL, no state between calls, no packages or ...; hash=cbb0cf037d5d0447
+    - custom/bash: Run bash source in a fresh bash process: no REPL, no state between calls, no packages or venv bey...; hash=ada9be9216ce5ecc
     - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - function/fence: A barrier between the tool calls of one response. Calls after a fence start only when every call ...; args=[]; hash=da834037d6e8472c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (request) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+01:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__discovery.search_tools (tools.mcp__discovery__search_tools): Discover the echo tool.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 02:message/user:
     <ENVIRONMENT_CONTEXT>
 03:message/user:
     Discover the echo tool, then call it with hello.
-
-## Window 2 (after request 1)
-Settings: relative to window 1
-  tools (8; hash=c0828caf8daf073a):
-    ~ custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=8fab92aabf1d6740
 -- request 2 (request) --
-00:message/developer:
-    <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
-02:message/user:
-    <ENVIRONMENT_CONTEXT>
-03:message/user:
-    Discover the echo tool, then call it with hello.
 04:custom_tool_call/exec:text(await tools.mcp__discovery__search_tools({"message":"find echo"}));
 05:custom_tool_call_output:Script completed
     Output:
      | {"content":[],"isError":false,"structuredContent":{"tools":[{"annotations":{"readOnlyHint":true},"descri...l"}]}},"required":["echo","env"],"type":"object"}}]}} [hash=df19b4e245e07b80]
+06:message/developer:
+    <nested_tools>
+    Added or changed:
+    - mcp__discovery.echo (tools.mcp__discovery__echo): Echo back the provided message and include environment data.
+    </nested_tools>
 -- request 3 (request) --
-06:custom_tool_call/exec:text(await tools.mcp__discovery__echo({"message":"hello"}));
-07:custom_tool_call_output:Script completed
+07:custom_tool_call/exec:text(await tools.mcp__discovery__echo({"message":"hello"}));
+08:custom_tool_call_output:Script completed
     Output:
      | {"content":[],"isError":false,"structuredContent":{"echo":"ECHOING: hello","env":"discovered"}}

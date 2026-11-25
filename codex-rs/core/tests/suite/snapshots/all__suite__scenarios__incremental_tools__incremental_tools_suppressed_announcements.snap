@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
-assertion_line: 465
 expression: "context_snapshot::format_request_history_snapshot(if\nsuppress_model_change_announcements == Some(true)\n{\n    \"Model-ID notices are suppressed while changed tools and a base-instructions amendment append without rewriting history.\"\n} else if incremental_tools\n{\n    \"Tool definitions precede the initial base instructions. A model switch appends a tools notice, changed tools, a base-instructions amendment, and an identity-only model notice without rewriting the prefix; the next unchanged turn appends only user input.\"\n} else\n{\n    \"Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests.\"\n}, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Model-ID notices are suppressed while changed tools and a base-instructions amendment append without rewriting history.
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=4e03ba67c685d600):
-        - namespace/functions; hash=bc637873bba76010
+00:additional_tools/developer (2; hash=2dcb757d5a237013):
+        - namespace/functions; hash=b4cb1e7d2ee466f1
           - custom/exec
           - function/wait
           - custom/python
@@ -33,8 +32,16 @@ Settings:
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
@@ -47,8 +54,8 @@ Settings:
 Settings: relative to window 1
   model: "updated-tools-model"
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=4e03ba67c685d600):
-        - namespace/functions; hash=bc637873bba76010
+00:additional_tools/developer (2; hash=2dcb757d5a237013):
+        - namespace/functions; hash=b4cb1e7d2ee466f1
           - custom/exec
           - function/wait
           - custom/python
@@ -63,8 +70,16 @@ Settings: relative to window 1
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
@@ -73,8 +88,8 @@ Settings: relative to window 1
     Continue with the same tools.
 06:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-07:additional_tools/developer (1; hash=3bc381297be3b8fa):
-        - namespace/functions; hash=bfe9b634bdb03dfa
+07:additional_tools/developer (1; hash=12e6ed7a6833f55e):
+        - namespace/functions; hash=42ead6dac899868e
           - custom/exec
 08:message/developer:
     <instruction_diff>
@@ -96,8 +111,8 @@ Settings: relative to window 1
 ## Window 3 (after request 4: input diverged at item 01)
 Settings: same as window 2
 -- request 5 (compaction) --
-00:additional_tools/developer (2; hash=4e03ba67c685d600):
-        - namespace/functions; hash=bc637873bba76010
+00:additional_tools/developer (2; hash=2dcb757d5a237013):
+        - namespace/functions; hash=b4cb1e7d2ee466f1
           - custom/exec
           - function/wait
           - custom/python
@@ -112,8 +127,16 @@ Settings: same as window 2
         - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=400cd6ac61d524a9
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
@@ -122,8 +145,8 @@ Settings: same as window 2
     Continue with the same tools.
 06:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-07:additional_tools/developer (1; hash=3bc381297be3b8fa):
-        - namespace/functions; hash=bfe9b634bdb03dfa
+07:additional_tools/developer (1; hash=12e6ed7a6833f55e):
+        - namespace/functions; hash=42ead6dac899868e
           - custom/exec
 08:message/user:
     Continue with the updated execution instructions.
@@ -134,8 +157,8 @@ Settings: same as window 2
 ## Window 4 (after request 5: input diverged at item 00)
 Settings: same as window 2
 -- request 6 (turn) --
-00:additional_tools/developer (2; hash=fd148ac1850eca57):
-        - namespace/functions; hash=406fe51d194a17bd
+00:additional_tools/developer (2; hash=589555b7ac7c85fd):
+        - namespace/functions; hash=df6e25c29282b429
           - custom/exec
           - function/wait
           - custom/python
@@ -156,8 +179,16 @@ Settings: same as window 2
     Continue with the same tools.
 04:message/user:
     Continue with the updated execution instructions.
-05:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+05:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 06:message/user:
     <ENVIRONMENT_CONTEXT>
 07:message/user:

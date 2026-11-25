@@ -1,8 +1,8 @@
-//! Exec tools append changed entries and refresh frozen exec sections only at compaction.
+//! Catalogue changes amend the nested-tool roster; frozen exec sections refresh only at
+//! compaction.
 
 use anyhow::Result;
 use codex_features::Feature;
-use codex_protocol::openai_models::IncrementalToolMessages;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -21,12 +21,8 @@ use std::collections::HashMap;
 use super::super::rmcp_client::remote_aware_environment_id;
 use super::super::rmcp_client::remote_aware_stdio_server_bin;
 
-#[test_case::test_case(false; "bundled")]
-#[test_case::test_case(true; "catalog_messages")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn changed_sections_and_entries_append_without_repeating_the_catalog(
-    catalog_messages: bool,
-) -> Result<()> {
+async fn changed_sections_and_entries_append_without_repeating_the_catalog() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(Ok(()), "requires a Windows test_stdio_server fixture");
     let server = responses::start_mock_server().await;
@@ -44,8 +40,6 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
     };
     let original_instructions = "Echo service instructions.";
     let updated_instructions = "Echo service instructions. Durations are milliseconds.";
-    let update_hint = "Catalog exec updates: retain {{ literal }} text.";
-    let removal_header = "Catalog exec removals: retain {{ literal }} text.";
     let initial_server = server_config(&["echo"], original_instructions, &["deferred"])?;
     let mut builder = test_codex().with_config(move |config| {
         super::configure_scenario_catalog(config);
@@ -72,29 +66,11 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
             )]))
             .expect("set MCP fixture");
     });
-    for (slug, hint, header) in [
-        ("catalog-initial", update_hint, removal_header),
-        ("catalog-empty-hints", "", ""),
-    ] {
-        builder = builder.with_model_info_override(slug, move |model| {
-            model.use_responses_lite = true;
-            model.tool_mode = Some(ToolMode::CodeModeOnly);
-            model.supports_search_tool = true;
-            if catalog_messages {
-                model
-                    .model_messages
-                    .as_mut()
-                    .expect("model messages")
-                    .tools
-                    .get_or_insert_default()
-                    .incremental_tools = Some(IncrementalToolMessages {
-                    exec_tools_update_hint: Some(hint.to_string()),
-                    exec_tools_removed_definitions_header: Some(header.to_string()),
-                    ..Default::default()
-                });
-            }
-        });
-    }
+    builder = builder.with_model_info_override("catalog-initial", |model| {
+        model.use_responses_lite = true;
+        model.tool_mode = Some(ToolMode::CodeModeOnly);
+        model.supports_search_tool = true;
+    });
     for (slug, description, deferred_guidance, shared_types) in [
         (
             "catalog-updated",
@@ -120,10 +96,6 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
                         "deferred_nested_tools_guidance": deferred_guidance,
                         "mcp_typescript_preamble": shared_types,
                     },
-                    "incremental_tools": catalog_messages.then_some(json!({
-                        "exec_tools_update_hint": "",
-                        "exec_tools_removed_definitions_header": "",
-                    })),
                     "mcp_resources": {"read_mcp_resource": {
                         "description": "Read a selected resource revision.",
                         "parameters": json!({
@@ -192,18 +164,11 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
             .await?;
         test.submit_text_turn(prompt).await?;
     }
-    // The catalog variant changes only wording; bundled mode reapplies its current model.
+    // Reapplying the current model changes nothing.
     core_test_support::submit_thread_settings(
         &test.codex,
         ThreadSettingsOverrides {
-            model: Some(
-                if catalog_messages {
-                    "catalog-empty-hints"
-                } else {
-                    "catalog-initial"
-                }
-                .to_string(),
-            ),
+            model: Some("catalog-initial".to_string()),
             ..Default::default()
         },
     )
@@ -292,16 +257,15 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
     assert_eq!(requests.len(), 14);
     let mut previous = Vec::new();
     let mut declarations = Vec::new();
-    let mut previous_developer_count = 0;
+    let mut amendments = Vec::new();
     // Snapshots normalize IDs and metadata, so check the retained raw prefix separately.
     for (index, request) in requests.iter().enumerate() {
         let input = request.input();
-        let suffix = if index == 13 {
-            input.as_slice()
-        } else {
-            if index == 12 {
-                // Compaction sees a disposable canonical-instruction view, whose rewritten
-                // harness instructions have fresh request IDs. Its semantic prefix is intact.
+        let (appended, roster) = match index {
+            // Compaction sees a disposable canonical-instruction view, whose rewritten harness
+            // instructions have fresh request IDs. Its semantic prefix, roster included, is
+            // intact.
+            12 => {
                 let without_ids = |items: &[serde_json::Value]| {
                     responses::strip_response_item_ids_from_json(serde_json::Value::Array(
                         items.to_vec(),
@@ -312,98 +276,80 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
                     without_ids(&previous),
                     "compaction changed the semantic retained prefix",
                 );
-            } else {
+                let appended = &input[previous.len()..];
+                (appended, core_test_support::nested_tools::fragments(appended))
+            }
+            13 => (
+                input.as_slice(),
+                core_test_support::nested_tools::fragments(&input),
+            ),
+            _ => {
                 assert_eq!(
                     &input[..previous.len()],
                     previous.as_slice(),
                     "retained context changed at request {index}"
                 );
+                let appended = &input[previous.len()..];
+                (appended, core_test_support::nested_tools::fragments(appended))
             }
-            &input[previous.len()..]
         };
         declarations.push(
-            suffix
+            appended
                 .iter()
                 .filter(|item| item["type"] == "additional_tools")
                 .filter_map(|item| responses::namespace_child_tool(item, "functions", "exec"))
                 .cloned()
                 .collect::<Vec<_>>(),
         );
-        if catalog_messages {
-            let texts = request.message_input_texts("developer");
-            let start = if index == 13 {
-                0
-            } else {
-                previous_developer_count
-            };
-            let updates = texts[start..]
-                .iter()
-                .map(String::as_str)
-                .filter(|text| text.contains("## Namespace: functions\n"))
-                .collect::<Vec<_>>();
-            let notices = texts[start..]
-                .iter()
-                .map(String::as_str)
-                .filter(|text| {
-                    text.lines().any(|line| {
-                        line.starts_with("- Tool: tools.")
-                            || line.starts_with("- Namespace instructions: ")
-                    })
-                })
-                .collect::<Vec<_>>();
-            if index == 4 {
-                assert!(updates.is_empty() && notices.is_empty() && declarations[index].is_empty());
-            }
-            if matches!(index, 1 | 10) {
-                assert_eq!(
-                    updates.len(),
-                    1,
-                    "request {index} expected catalog update; suffix={:?}",
-                    &texts[start..]
-                );
-            }
-            if matches!(index, 2 | 5 | 6 | 7) {
-                assert!(
-                    updates.is_empty(),
-                    "Glossed inventory is unchanged by namespace guidance or execution exposure"
-                );
-            }
-            if index == 10 {
-                assert!(updates[0].contains("Read a selected resource revision."));
-            }
-            if matches!(index, 5 | 6) {
-                assert!(
-                    notices.is_empty(),
-                    "Glossed tools never publish namespace instructions: {notices:?}"
-                );
-            } else if index == 8 {
-                assert_eq!(
-                    notices,
-                    vec![
-                        "- Tool: tools.list_mcp_resource_templates\n- Tool: tools.list_mcp_resources\n- Tool: tools.mcp__echo_service__echo\n- Tool: tools.read_mcp_resource"
-                    ]
-                );
-            }
-            let prefix = if index < 4 {
-                format!("{update_hint}\n\n## Namespace: functions\n")
-            } else {
-                "## Namespace: functions\n".to_string()
-            };
-            for update in updates {
-                assert!(update.starts_with(&prefix));
-            }
-            if index == 3 {
-                let expected = format!("{removal_header}\n- Tool: tools.mcp__echo_service__cwd");
-                assert_eq!(notices, vec![expected.as_str()]);
-            } else if index >= 4 {
-                for notice in notices {
-                    assert!(notice.lines().all(|line| line.starts_with("- Tool: tools.")
-                        || line.starts_with("- Namespace instructions: ")));
-                }
-            }
-            previous_developer_count = texts.len();
-        }
+        amendments.push(roster);
         previous = input;
+    }
+    // A window declares `exec` once: no catalogue change moves the declaration.
+    assert_eq!(
+        declarations.iter().map(Vec::len).collect::<Vec<_>>(),
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+    );
+    let cwd = "- mcp__echo_service.cwd (tools.mcp__echo_service__cwd)";
+    let echo = "- mcp__echo_service.echo (tools.mcp__echo_service__echo)";
+    let revised = "- tools.read_mcp_resource: Read a selected resource revision.";
+    assert_eq!(
+        amendments[1],
+        [format!(
+            "<nested_tools>\nAdded or changed:\n{cwd}: Return the current working directory of this test server process.\n</nested_tools>"
+        )]
+    );
+    assert_eq!(
+        amendments[3],
+        [format!("<nested_tools>\nRemoved:\n{cwd}\n</nested_tools>")]
+    );
+    assert_eq!(
+        amendments[8],
+        [format!(
+            "<nested_tools>\nRemoved:\n{echo}\n- tools.list_mcp_resource_templates\n- tools.list_mcp_resources\n- tools.read_mcp_resource\n</nested_tools>"
+        )]
+    );
+    let [reenabled] = amendments[9].as_slice() else {
+        panic!("re-enabling amends the roster once: {:?}", amendments[9])
+    };
+    assert!(reenabled.starts_with(&format!("<nested_tools>\nAdded or changed:\n{cwd}: ")));
+    for entry in [echo, "- tools.list_mcp_resources: ", "- tools.read_mcp_resource: "] {
+        assert!(reenabled.contains(entry), "re-enabling omitted {entry}");
+    }
+    assert_eq!(
+        amendments[10],
+        [format!("<nested_tools>\nAdded or changed:\n{revised}\n</nested_tools>")]
+    );
+    // Namespace guidance, eager/deferred movement, an unchanged catalogue, frozen exec
+    // sections and compaction leave the roster alone.
+    for index in [2, 4, 5, 6, 7, 11, 12] {
+        assert!(amendments[index].is_empty(), "request {index}");
+    }
+    // The new window states the current roster once.
+    let [roster] = amendments[13].as_slice() else {
+        panic!("a window opens with one roster: {:?}", amendments[13])
+    };
+    for entry in [cwd, echo, revised] {
+        assert!(roster.contains(entry), "the new window omitted {entry}");
     }
     // Native declarations are fingerprinted in snapshots; keep their invariants readable here.
     let mut native_fields = declarations[0][0].clone();
@@ -434,9 +380,6 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
         "Await every tool call and inspect its result",
         "Find deferred tools by name in ALL_TOOLS.",
         "isError?: boolean; _meta?: unknown",
-        "Read a selected resource revision.",
-        "- mcp__echo_service.echo (tools.mcp__echo_service__echo):",
-        "- mcp__echo_service.cwd (tools.mcp__echo_service__cwd):",
     ] {
         assert!(restored.contains(expected), "compaction omitted {expected}");
     }
@@ -475,22 +418,12 @@ async fn changed_sections_and_entries_append_without_repeating_the_catalog(
             .expect("cwd contract")
             .contains("Parameters: object")
     );
-    let (snapshot_name, scenario) = if catalog_messages {
-        (
-            "incremental_exec_tools_catalog_messages",
-            "Configured exec updates and removals use the catalog wording. Empty overrides omit that wording while retaining the changed definitions and removal keys. Compaction restores the current catalog.",
-        )
-    } else {
-        (
-            "incremental_exec_tools",
-            "Code Mode appends complete changed tool entries and namespace instructions in combined developer messages. Namespace clearing, eager/deferred movement, remove-all and re-enabling preserve context. Common instructions and shared types stay frozen while nested methods update; compaction installs the latest full catalog.",
-        )
-    };
+    let scenario = "A catalogue change amends the nested-tool roster in one developer message and declares nothing: additions, removals, remove-all and re-enabling preserve context, while namespace guidance and eager/deferred movement leave the roster alone. Common instructions and shared types stay frozen; compaction keeps the retained prefix, and the new window installs the latest declaration and the current roster.";
     let snapshot = context_snapshot::format_request_history_snapshot(
         scenario,
         &requests,
         &ContextSnapshotOptions::default().rewrite_known_segments(),
     );
-    insta::assert_snapshot!(snapshot_name, snapshot);
+    insta::assert_snapshot!("incremental_exec_tools", snapshot);
     Ok(())
 }

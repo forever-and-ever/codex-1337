@@ -687,16 +687,12 @@ mod tests {
         let Item::InputText { text: notice, .. } = &output[0] else {
             panic!("missing notice")
         };
-        assert!(notice.starts_with("Warning: truncated 4 text sections"));
-        assert!(notice.contains("Section 1: 120 bytes → 15 bytes"));
+        let (summary, limits) = notice.split_once('\n').expect("section limits");
+        assert!(limits.starts_with("Section 1: 120 → 15 bytes, emission cap 16\n"));
         let path = std::path::PathBuf::from(
-            notice
-                .lines()
-                .find_map(|line| line.strip_prefix("Truncated emitted text: "))
-                .expect("recovery path")
-                .split_once(" (Codex host filesystem")
-                .expect("host location")
-                .0,
+            summary
+                .strip_prefix("Truncated 4 of 5 sections to fit 64 bytes. Full text: ")
+                .expect("recovery path"),
         );
         let retained = std::fs::read_to_string(&path).expect("read recovery");
         assert!(retained.contains(&first));
@@ -768,10 +764,9 @@ mod tests {
         let Item::InputText { text: notice, .. } = &clipped[0] else {
             panic!("missing reduction notice")
         };
-        assert!(notice.contains(
-            "requested output cap 1000 tokens reduced by model policy to 1 approximate text bytes"
+        assert!(notice.starts_with(
+            "Output cap is 1 bytes, about 0 tokens, not the 1000 tokens requested.\nTruncated 2 of 2 sections to fit 1 bytes. Full text: "
         ));
-        assert!(notice.contains("truncated 2 text sections"));
         assert_eq!(clipped.len(), 3);
         for item in &clipped[1..] {
             assert!(matches!(item, Item::InputText { text, .. } if text == "…"));
@@ -786,7 +781,7 @@ mod tests {
             &retention,
         );
         assert!(
-            matches!(&capped[0], Item::InputText { text, .. } if text.starts_with("Warning: requested output cap"))
+            matches!(&capped[0], Item::InputText { text, .. } if text.starts_with("Output cap is 4 bytes, about 1 tokens, not the 1000 tokens requested."))
         );
         assert!(matches!(&capped[1], Item::InputText { text, .. } if text == "tiny"));
         let implicit = truncate_sections(

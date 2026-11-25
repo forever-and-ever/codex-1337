@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_strict_3p_cache.rs
-assertion_line: 207
 expression: snapshot
 ---
 Scenario: Strict Code Mode Only: MCP config changes between turns, with omit-all and namespace skips. Exec calls the live catalog. One window means the captured prefix stayed stable. The execution environment remains running.
@@ -31,9 +30,25 @@ Settings:
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <COLLABORATION_MODE>
 03:message/developer:
     <MULTI_AGENT_ROLE>
 04:message/developer:
@@ -56,58 +71,62 @@ Settings:
      | []
 -- request 3 (turn; turn 2: register MCP with lookup; omit-all, direct-only and excluded) --
 10:message/developer:
-    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-11:additional_tools/developer (1; hash=dec70030b30400e3):
-        - namespace/functions; hash=<INITIAL_BUILD_HASH>
-          - custom/exec
-12:message/user:
+    <nested_tools>
+    Added or changed:
+    - mcp__environment.lookup (tools.mcp__environment__lookup): First environment tool.
+    </nested_tools>
+11:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 4 (turn; turn 2: exec discovery and call results) --
-13:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+12:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-14:custom_tool_call_output:Script completed
+13:custom_tool_call_output:Script completed
     Output:
      | [{"name":"mcp__environment__lookup","result":"called lookup for  at  with "}]
 -- request 5 (turn; turn 3: same MCP name, new endpoint; replace lookup with resolve and search) --
-15:message/developer:
-    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-16:additional_tools/developer (1; hash=333e38cd9d801ceb):
-        - namespace/functions; hash=<INITIAL_BUILD_HASH>
-          - custom/exec
-17:message/user:
+14:message/developer:
+    <nested_tools>
+    Added or changed:
+    - mcp__environment.resolve (tools.mcp__environment__resolve): Additional tool from the refreshed environment.
+    - mcp__environment.search (tools.mcp__environment__search): Replacement environment tool.
+    Removed:
+    - mcp__environment.lookup (tools.mcp__environment__lookup)
+    </nested_tools>
+15:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 6 (turn; turn 3: exec discovery and call results) --
-18:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+16:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-19:custom_tool_call_output:Script completed
+17:custom_tool_call_output:Script completed
     Output:
      | [{"name":"mcp__environment__resolve","result":"called resolve for  at  with "},{"name":"mcp__environment__search","result":"called search for  at  with "}]
 -- request 7 (turn; turn 4: remove MCP server from config) --
-20:message/developer:
-    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-21:additional_tools/developer (1; hash=9429b626eaa6a1bd):
-        - namespace/functions; hash=<INITIAL_BUILD_HASH>
-          - custom/exec
-22:message/user:
+18:message/developer:
+    <nested_tools>
+    Removed:
+    - mcp__environment.resolve (tools.mcp__environment__resolve)
+    - mcp__environment.search (tools.mcp__environment__search)
+    </nested_tools>
+19:message/user:
     List and call the tools provided by the environment MCP server.
 -- request 8 (turn; turn 4: exec discovery and call results) --
-23:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
+20:custom_tool_call/exec:const available = ALL_TOOLS.filter(t => t.name.startsWith("mcp__environment__")).sort((a, b) => a.name.localeCompare(b.name));
     const results = [];
     for (const t of available) {
       const result = await tools[t.name]({});
       results.push({name: t.name, result: result.content[0].text});
     }
     text(JSON.stringify(results));
-24:custom_tool_call_output:Script completed
+21:custom_tool_call_output:Script completed
     Output:
      | []

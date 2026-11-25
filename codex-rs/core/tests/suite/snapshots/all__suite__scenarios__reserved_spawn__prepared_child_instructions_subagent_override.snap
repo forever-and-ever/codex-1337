@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_reserved_spawn.rs
-assertion_line: 284
 expression: "context_snapshot::format_request_history_snapshot(\"Host preparation preserves custom base instructions and applies the native subagent developer override when starting a child with a different model.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Host preparation preserves custom base instructions and applies the native subagent developer override when starting a child with a different model.
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=e6c5a5cd75267fa8):
-        - namespace/functions; hash=44152e84962ecbf8
+00:additional_tools/developer (1; hash=21ca5ed0740a8d9c):
+        - namespace/functions; hash=74e9f30cff7e785c
           - custom/exec
           - function/wait
           - custom/python
@@ -29,9 +28,18 @@ Settings:
           - function/fence
 01:message/developer:
     Keep the custom base instructions.
-02:message/developer[3]:
+02:message/developer[4]:
     [01] Explain the reasoning behind your findings.
-    [02] <permissions instructions>
+    [02] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [03] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 
@@ -39,7 +47,7 @@ Settings:
 
         Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
         </permissions instructions>
-    [03] <collaboration_mode># Collaboration Mode: Default
+    [04] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
@@ -82,8 +90,8 @@ Settings: relative to window 1
   prompt_cache_key: "<PROMPT_CACHE_KEY 2>"
   reasoning: {"context":"all_turns","effort":"medium"}
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=66e6cc82b9740a4d):
-        - namespace/functions; hash=efb5664864c5ad15
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -93,9 +101,16 @@ Settings: relative to window 1
           - function/fence
 01:message/developer:
     Keep the custom base instructions.
-02:message/developer[2]:
+02:message/developer[3]:
     [01] Report worker findings concisely.
-    [02] <permissions instructions>
+    [02] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [03] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 

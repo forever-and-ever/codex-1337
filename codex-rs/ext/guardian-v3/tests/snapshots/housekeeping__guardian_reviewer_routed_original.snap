@@ -6,14 +6,25 @@ Scenario: The retained reviewer receives the subscribed original before assessin
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=6ba42464880b5854):
-        - namespace/functions; hash=a59ccdce6dfee5ca
+00:additional_tools/developer (1; hash=301e718751d83c62):
+        - namespace/functions; hash=d51e7c953669e090
           - custom/exec
           - function/wait
 01:message/developer:
     <GUARDIAN_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - guardian_board.get_channels (tools.guardian_board__get_channels): List channels, most recently active first, or search by a case-insensitive part of the name.
+        - guardian_board.list_threads (tools.guardian_board__list_threads): List a channel's threads with previews of the first post and latest reply.
+        - guardian_board.read_post (tools.guardian_board__read_post): Read a post or reply by message ID, without needing its channel.
+        - guardian_board.read_thread (tools.guardian_board__read_thread): Read a thread using its first post's message ID.
+        - guardian_board.search_posts (tools.guardian_board__search_posts): Search top-level posts and replies, newest first.
+        - guardian_board.subscribe (tools.guardian_board__subscribe): Subscribe yourself to new evidence in this channel.
+        - guardian_board.subscribed_channels (tools.guardian_board__subscribed_channels): List the names of channels you are currently subscribed to.
+        - guardian_board.unsubscribe (tools.guardian_board__unsubscribe): Stop receiving new evidence from this channel.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:function_call_output/guardian.guardian_original_evidence:{"sources":[{"id":{"ordinal":1},"original":{"type":"response_item","payload":{"type":"message","role":"u...a":{"client_authored":false,"user_input_order":1}}}]} [hash=083a9d45501016e2]

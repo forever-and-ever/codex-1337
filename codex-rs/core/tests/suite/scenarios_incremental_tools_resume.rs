@@ -424,9 +424,9 @@ async fn exec_tools_follow_current_settings_across_history() -> Result<()> {
             2, // Disabling keeps those messages without a forced declaration.
             3, // Hybrid mode uses ordinary declarations even with the flag enabled.
             4, // Returning with the flag disabled uses a whole declaration.
-            5, // Fork adds planning through a whole declaration.
-            5, // Resume adds planning through the same whole declaration.
-            5, // Compaction samples the retained history.
+            4, // Fork adds planning by amending the roster, declaring nothing.
+            4, // Resume adds planning by the same amendment.
+            4, // Compaction samples the retained history.
             1, // Full replacement uses the current disabled flag.
             2, // Enabling initializes a full catalog before further deltas.
             2, // Resume adds planning in a developer message.
@@ -450,14 +450,31 @@ async fn exec_tools_follow_current_settings_across_history() -> Result<()> {
         declarations[8].last(),
         "fork and resume publish the same complete catalog while granular updates are disabled"
     );
-    let has_update_plan = [6, 8].map(|index| {
-        declarations[index].last().expect("full exec declaration")["description"]
-            .as_str()
-            .expect("exec description")
-            .lines()
-            .any(|line| line.starts_with("- tools.update_plan: "))
-    });
-    assert_eq!(has_update_plan, [false, true]);
+    // Planning is a rostered tool: it comes and goes as a roster amendment, whatever the
+    // declaration mode. Compaction keeps the retained roster; the new window restates it.
+    let roster = |index: usize| {
+        core_test_support::nested_tools::fragments(&requests[index].input())
+    };
+    let planned =
+        "<nested_tools>\nAdded or changed:\n- tools.update_plan: Updates the task plan.\n</nested_tools>";
+    assert_eq!(
+        roster(3).last().map(String::as_str),
+        Some(
+            "<nested_tools>\nAdded or changed:\n- tools.update_plan: Updates the task plan.\nRemoved:\n- tools.write_stdin\n</nested_tools>"
+        )
+    );
+    assert_eq!(roster(4), roster(3), "disabling granular updates repeats nothing");
+    for index in [7, 8, 12] {
+        assert_eq!(roster(index).last().map(String::as_str), Some(planned));
+    }
+    assert_eq!(roster(9), roster(8), "compaction keeps the retained roster");
+    let restated = roster(10);
+    assert_eq!(restated.len(), 1, "a window opens with one roster");
+    assert!(restated[0].contains("\n- tools.update_plan: Updates the task plan.\n"));
+    assert_eq!(
+        roster(11).last().map(String::as_str),
+        Some("<nested_tools>\nRemoved:\n- tools.update_plan\n</nested_tools>")
+    );
     assert_eq!(
         declarations[10].last(),
         declarations[8].last(),
@@ -465,53 +482,7 @@ async fn exec_tools_follow_current_settings_across_history() -> Result<()> {
     );
     assert_eq!(declarations[11].last(), declarations[0].last());
     assert_eq!(declarations[12], declarations[11]);
-    let exec_definition_updates = requests
-        .iter()
-        .map(|request| {
-            request
-                .message_input_texts("developer")
-                .into_iter()
-                .filter(|text| {
-                    text.starts_with(
-                        "Use these definitions and namespace instructions with `functions.exec`.",
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        exec_definition_updates
-            .iter()
-            .map(Vec::len)
-            .collect::<Vec<_>>(),
-        vec![0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1]
-    );
-    let plan_inventory_entry = declarations[8]
-        .last()
-        .expect("full current exec declaration")["description"]
-        .as_str()
-        .expect("exec description")
-        .lines()
-        .find(|line| line.starts_with("- tools.update_plan: "))
-        .expect("planning remains in the eager name-and-purpose inventory");
-    for index in [3, 12] {
-        let update = &exec_definition_updates[index][0];
-        assert_eq!(
-            update
-                .lines()
-                .filter(|line| line.starts_with("- "))
-                .collect::<Vec<_>>(),
-            vec![plan_inventory_entry]
-        );
-    }
-    assert_eq!(
-        exec_definition_updates[3], exec_definition_updates[4],
-        "disabling granular updates retains the previously published definitions"
-    );
-    assert_eq!(
-        exec_definition_updates[8], exec_definition_updates[9],
-        "compaction receives retained definitions without repeating them"
-    );
+    // The only eager contract this history changes is the shell's, which leaves once.
     let removal_notices = requests
         .iter()
         .map(|request| {

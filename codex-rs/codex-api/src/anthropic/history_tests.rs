@@ -36,8 +36,9 @@ fn signed_history_and_parallel_tool_results_preserve_cache_prefix() {
         },
     ];
     let input: Vec<ResponseItem> = serde_json::from_value(json!([
-        {"type":"message","role":"developer","content":[{"type":"input_text","text":"Developer. "}]},
+        // A compacted window opens with its checkpoint; the instructions after it still reach system.
         {"type":"native_compaction","provider":"anthropic","content":"Checkpoint.\n ","signature":"opaque/+=="},
+        {"type":"message","role":"developer","content":[{"type":"input_text","text":"Developer. "}]},
         {"type":"message","role":"user","content":[{"type":"input_text","text":"Continue."}]},
         {"type":"reasoning","summary":[{"type":"summary_text","text":"Signed α\n"}],"encrypted_content":"sig/+=="},
         {"type":"custom_tool_call","call_id":"exec1","name":"exec","namespace":"functions","input":"text('α');\n"},
@@ -96,7 +97,7 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
         {"type":"message","role":"user","content":[{"type":"input_text","text":"Question"}]},
         {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Answer"}]},
         {"type":"message","role":"developer","content":[{"type":"input_text","text":"Update.\n "}]},
-        {"type":"agent_message","author":"worker\nspoof","recipient":"root","content":[{"type":"input_text","text":"Exact α\n "}]},
+        {"type":"agent_message","author":"worker\nspoof","recipient":"root","content":[{"type":"input_text","text":"Message Type: FINAL_ANSWER\nTask name: root\nSender: worker\nspoof\nPayload:\nExact α\n "}]},
         {"type":"function_call_output","name":"send_message_to_thread","namespace":"codex_tui","output":"<codex_delegation>Exact IPC α\n </codex_delegation>"},
         {"type":"function_call_output","name":"notify","output":[{"type":"input_text","text":"Caption.\n "},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}
     ])).unwrap();
@@ -109,7 +110,7 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
         &[InputModality::Text, InputModality::Image],
     )
     .unwrap();
-    let agent = json!({"type":"text","text":"[Agent message from \"worker\\nspoof\" to \"root\"]\nExact α\n "});
+    let agent = json!({"type":"text","text":"\n\n<agent_message from=\"worker\\nspoof\" to=\"root\" type=\"final_answer\">\nExact α\n \n</agent_message>"});
     assert_eq!(
         json!({"system":history.system,"messages":history.messages}),
         json!({
@@ -118,11 +119,11 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
                 {"role":"user","content":[{"type":"text","text":"Question"}]},
                 {"role":"assistant","content":[{"type":"text","text":"Answer"}]},
                 {"role":"user","content":[{"type":"text","text":"<system-reminder>\nUpdate.\n \n</system-reminder>"},agent,
-                    {"type":"text","text":"[Tool notification from \"codex_tui.send_message_to_thread\"]"},
-                    {"type":"text","text":"<codex_delegation>Exact IPC α\n </codex_delegation>"},
-                    {"type":"text","text":"[Tool notification from \"notify\"]"},
-                    {"type":"text","text":"Caption.\n "},
-                    {"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}
+                    {"type":"text","text":"\n\n<tool_notification from=\"codex_tui.send_message_to_thread\">\n<codex_delegation>Exact IPC α\n </codex_delegation>\n</tool_notification>"},
+                    {"type":"text","text":"\n\n<tool_notification from=\"notify\">"},
+                    {"type":"text","text":"\n\nCaption.\n "},
+                    {"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}},
+                    {"type":"text","text":"</tool_notification>"}]}
             ]
         })
     );

@@ -4,50 +4,28 @@ use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::MultiAgentRoleMessages;
 use codex_protocol::openai_models::ToolMode;
+use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::protocol::MultiAgentVersion;
 
 /// The asynchronous question tool is a harness affordance; nothing in it depends on the model.
 const REQUEST_USER_INPUT_ASYNC: &str = "request_user_input_async";
 
-// The bundled role texts describe GPT's channels; Claude reads agent messages as user text.
-const ROOT_AGENT_ROLE: &str = r"You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+// The bundled role texts describe GPT's channels; native Claude reads each agent message in the
+// envelope the Anthropic adapter gives it.
+const ROOT_AGENT_ROLE: &str = r#"You are `/root`, the primary agent of a team working on the user's goals.
 
-At the start of your turn, you are the active agent.
-You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
-All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
+`spawn_agent` creates a sub-agent, `followup_task` gives an existing agent a new task and starts its turn, and `send_message` passes a message to a running agent without starting a turn. `fork_turns` sets how much of your context a new agent inherits. Sub-agents can spawn their own.
 
-You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
-Child agents can also spawn their own sub-agents.
-You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
+A message from another agent arrives as `<agent_message from="..." to="..." type="message|final_answer">`: `from` is its author and `to` its recipient.
+"#;
+const SUBAGENT_ROLE: &str = r#"You are an agent in a team working on a task.
 
-Messages from other agents arrive in the form:
-```
-Message Type: MESSAGE | FINAL_ANSWER
-Task name: <recipient>
-Sender: <author>
-Payload:
-<payload text>
-```
-";
-const SUBAGENT_ROLE: &str = r"You are an agent in a team of agents collaborating to complete a task.
+`spawn_agent` creates a sub-agent, `followup_task` gives an existing agent a new task and starts its turn, and `send_message` passes a message to a running agent without starting a turn. Sub-agents can spawn their own.
 
-You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents. All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
+Your final answer goes to your parent agent as soon as you give it.
 
-You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent.
-Child agents can also spawn their own sub-agents.
-
-Your final answer is delivered to your parent agent as soon as you give it.
-
-Messages from other agents arrive in the form:
-```
-Message Type: NEW_TASK | MESSAGE | FINAL_ANSWER
-Task name: <recipient>
-Sender: <author>
-Payload:
-<payload text>
-```
-The task name of a message sent to you is your own identity.
-";
+A message from another agent arrives as `<agent_message from="..." to="..." type="new_task|message|final_answer">`: `from` is its author, and `to` is your own path in the team.
+"#;
 
 pub(crate) fn normalize(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
     models
@@ -69,6 +47,8 @@ pub(crate) fn normalize_model_info(
     model.service_tiers.clear();
     model.default_service_tier = None;
     model.supported_in_api = true;
+    // The tool descriptions promise this default; the catalogue's byte fallback is a quarter of it.
+    model.truncation_policy = TruncationPolicyConfig::tokens(/*limit*/ 10_000);
     if !model
         .experimental_supported_tools
         .iter()

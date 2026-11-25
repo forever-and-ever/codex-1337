@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 919
 expression: "context_snapshot::format_request_history_snapshot(\"Code Mode applies explicit MCP schema limits to its runtime tool catalog.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Code Mode applies explicit MCP schema limits to its runtime tool catalog.
@@ -16,20 +15,36 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=9719dbce88a564b9):
-    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=7d29fa7692e3a8ab
-    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=ee10d79459552565
-    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
-    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+  tools (8; hash=8ef124dd3a171a2f):
+    - custom/exec: Run JavaScript as one cell: a fresh V8 async module, without Node, a console or direct network ac...; hash=427068e3cc08d897
+    - function/wait: Waits on a yielded `exec` cell and returns new output or completion. The output is only what the ...; args=[cell_id, max_tokens, terminate]; hash=a8edb1e34c9ff75d
+    - custom/python: Run python source in a fresh python3 -u process: no REPL, no state between calls, no packages or ...; hash=cbb0cf037d5d0447
+    - custom/bash: Run bash source in a fresh bash process: no REPL, no state between calls, no packages or venv bey...; hash=ada9be9216ce5ecc
     - function/write_stdin: Call: await tools.write_stdin(args). Parameters: object   chars (optional): string. Bytes to writ...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=3703a13a08a4360c
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
-    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=c6250a03e735b46e
+    - function/fence: A barrier between the tool calls of one response. Calls after a fence start only when every call ...; args=[]; hash=da834037d6e8472c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+01:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__default_schema.search (tools.mcp__default_schema__search): Search for matching content.
+        - mcp__default_schema.shared (tools.mcp__default_schema__shared): Search with shared input types.
+        - mcp__expanded_schema.search (tools.mcp__expanded_schema__search): Search for matching content.
+        - mcp__expanded_schema.shared (tools.mcp__expanded_schema__shared): Search with shared input types.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 02:message/user:
     <ENVIRONMENT_CONTEXT>
 03:message/user:

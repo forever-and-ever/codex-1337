@@ -221,11 +221,12 @@ pub(super) async fn connector_exposure_requests(
             .find(|tool| tool["name"] == "exec")
             .and_then(|tool| tool["description"].as_str())
             .unwrap_or_default();
-        // Code Mode Only names an MCP tool in `exec`'s roster and never declares it there.
+        let roster = core_test_support::nested_tools::fragments(&requests[0].input()).concat();
+        // Code Mode Only names an MCP tool in the roster and never declares it in `exec`.
         assert_eq!(
             (
                 exec_description.contains(&format!("{namespace}__lookup(")),
-                exec_description.contains(&format!("(tools.{namespace}__lookup):")),
+                roster.contains(&format!("(tools.{namespace}__lookup):")),
             ),
             (
                 false,
@@ -235,11 +236,11 @@ pub(super) async fn connector_exposure_requests(
         );
         // Deferred tools remain discoverable; omission hides declarations, not capability.
         assert_eq!(
-            exec_description.contains(
+            roster.contains(
                 "\n- mcp__codex_apps__notes.read (tools.mcp__codex_apps__notes__read): Read notes"
             ),
             case.mode != ToolMode::Direct && !case.server_omissions.contains(&"code_mode"),
-            "unexpected deferred roster: {exec_description}",
+            "unexpected deferred roster: {roster}",
         );
         if calls_tool {
             assert!(requests[1].body_contains_text("calendar-lookup-ok"));
