@@ -279,6 +279,9 @@ Continue a thread only in a build at least as new as the last one that wrote it:
 older build also drops model input it cannot parse. `scripts/uninstall-local
 --staging` removes staging alone.
 
+After a user-requested staging trial reaches production, disable the staging service:
+`systemctl --user disable --now codex-app-server-staging.service`.
+
 ## UI latency recorder
 
 Each TUI worker keeps content-free, fixed-capacity wall-time counters. Inspect it
