@@ -492,6 +492,26 @@ async fn starting_a_selected_item_preserves_the_remaining_queue() -> anyhow::Res
     clippy::disallowed_methods,
     reason = "an independent connection injects a real SQLite queue DELETE failure"
 )]
+async fn fault_queue_cleanup(test: &TestCodex) -> anyhow::Result<sqlx::SqlitePool> {
+    let database = test
+        .codex
+        .state_db()
+        .context("state runtime unavailable")?
+        .sqlite()
+        .queue_db_path();
+    let sql = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(database),
+    )
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER fault_queue_cleanup BEFORE DELETE ON queued_items \
+                 BEGIN SELECT RAISE(ABORT, 'injected queue cleanup failure'); END",
+    )
+    .execute(&sql)
+    .await?;
+    Ok(sql)
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::Result<()> {
     #[derive(Default)]
@@ -598,28 +618,35 @@ async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::
 
     // The other fault order: roll the queue DELETE back after Core fsyncs the
     // receipt. The model request must still happen once, even across reload.
-    let database = test
-        .codex
-        .state_db()
-        .context("state runtime unavailable")?
-        .sqlite()
-        .queue_db_path();
-    let sql = sqlx::SqlitePool::connect_with(
-        sqlx::sqlite::SqliteConnectOptions::new().filename(database),
-    )
-    .await?;
-    sqlx::query(
-        "CREATE TRIGGER fault_queue_cleanup BEFORE DELETE ON queued_items \
-                 BEGIN SELECT RAISE(ABORT, 'injected queue cleanup failure'); END",
-    )
-    .execute(&sql)
-    .await?;
+    let sql = fault_queue_cleanup(&test).await?;
+    let cleanup_blocked = sql.begin_with("BEGIN IMMEDIATE").await?;
     let StartIfIdleSubmission::Started { turn_id, .. } = queue
         .start(resumed.thread.as_ref(), Some(item.id.clone()), None)
         .await?
     else {
         anyhow::bail!("retained input did not start after reload");
     };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while resumed
+            .thread
+            .queued_input_turn_id(&item.id)
+            .await?
+            .is_none()
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Ok::<_, codex_protocol::error::CodexErr>(())
+    })
+    .await??;
+    assert_eq!(
+        Some(turn_id.clone()),
+        resumed.thread.interrupted_turn().await.map(|(id, _, _)| id)
+    );
+    assert!(
+        model.requests().is_empty(),
+        "cleanup is blocked before sampling"
+    );
+    cleanup_blocked.rollback().await?;
     wait_for_event_with_timeout(
         resumed.thread.as_ref(),
         |event| matches!(event, EventMsg::TurnComplete(_)),
@@ -634,7 +661,7 @@ async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::
     assert!(matches!(
         queue.update(thread_id, item.id.clone(), user_input("lost edit")).await,
         Err(QueueServiceError::Storage(ThreadStoreError::InvalidRequest { message }))
-            if message.contains("already accepted")
+            if message.contains("already handled")
     ));
     assert!(matches!(
         queue
@@ -1082,18 +1109,97 @@ async fn explicitly_started_rejected_queue_messages_are_consumed() -> anyhow::Re
         Arc::new(NoopExtensionEventSink),
     );
 
+    let sql = fault_queue_cleanup(&test).await?;
     let rejected = queue.enqueue(thread_id, user_input("blocked")).await?;
     let submission = tokio::time::timeout(
         Duration::from_secs(10),
-        queue.start(test.codex.as_ref(), Some(rejected.id), /*trace*/ None),
+        queue.start(
+            test.codex.as_ref(),
+            Some(rejected.id.clone()),
+            /*trace*/ None,
+        ),
     )
     .await?
     .expect("explicitly started input should be submitted");
     assert!(matches!(submission, StartIfIdleSubmission::Started { .. }));
     wait_for_hooked_turn(&test).await;
+    assert_eq!(vec![rejected.clone()], queue.list(thread_id).await?);
+    let path = test.codex.rollout_path().context("rollout path missing")?;
+    test.codex.shutdown_and_wait().await?;
+    test.thread_manager.remove_thread(&thread_id).await;
+    let reopened = test
+        .thread_manager
+        .resume_legacy_thread_from_rollout(
+            test.config.clone(),
+            path,
+            test.thread_manager.auth_manager(),
+            /*parent_trace*/ None,
+            Default::default(),
+        )
+        .await?;
+    sqlx::query("DROP TRIGGER fault_queue_cleanup")
+        .execute(&sql)
+        .await?;
+    assert!(matches!(
+        queue.start(reopened.thread.as_ref(), Some(rejected.id), None).await,
+        Err(QueueServiceError::Storage(ThreadStoreError::InvalidRequest { message }))
+            if message.contains("already handled")
+    ));
     assert!(queue.list(thread_id).await?.is_empty());
     let hook_log = std::fs::read_to_string(test.codex_home_path().join("queue_prompt_hook.log"))?;
     assert_eq!(vec!["blocked"], hook_log.lines().collect::<Vec<_>>());
+    assert!(responses.requests().is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_audio_does_not_acknowledge_a_partial_queued_prompt() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let responses =
+        responses::mount_sse_once(&server, responses::sse_completed("unexpected-turn")).await;
+    let test = test_codex()
+        .with_model_info_override("gpt-5.5", |model| {
+            model.input_modalities.retain(|modality| {
+                *modality != codex_protocol::openai_models::InputModality::Audio
+            });
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let thread_id = test.session_configured.thread_id;
+    let queue = QueuedItemService::new(
+        loaded_thread_queue(&test)?,
+        Weak::new(),
+        Arc::new(NoopExtensionEventSink),
+    );
+    let TurnInput::UserInput {
+        mut content,
+        client_id,
+    } = user_input("text with unsupported audio")
+    else {
+        unreachable!();
+    };
+    content.push(UserInput::Audio {
+        audio: AudioReference::File {
+            file_id: "file_unsupported".into(),
+        },
+    });
+    let item = queue
+        .enqueue(thread_id, TurnInput::UserInput { content, client_id })
+        .await?;
+    assert!(matches!(
+        queue
+            .start(test.codex.as_ref(), Some(item.id.clone()), None)
+            .await?,
+        StartIfIdleSubmission::Started { .. }
+    ));
+    wait_for_event_with_timeout(
+        test.codex.as_ref(),
+        |event| matches!(event, EventMsg::TurnComplete(completed) if completed.error.is_some()),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert_eq!(None, test.codex.queued_input_turn_id(&item.id).await?);
+    assert_eq!(vec![item], queue.list(thread_id).await?);
     assert!(responses.requests().is_empty());
     Ok(())
 }

@@ -1793,6 +1793,7 @@ impl RolloutWriterState {
         self.input_sync_pending |= items
             .iter()
             .any(|item| item.realtime_observed_at_ms().is_some()
+                || matches!(item, RolloutItem::QueuedInputRejected(_))
                 || matches!(item, RolloutItem::ResponseItem(envelope)
                     if envelope.metadata.as_ref().is_some_and(|metadata| metadata.queued_input.is_some())));
         self.pending_items.extend(items);
@@ -2292,6 +2293,7 @@ async fn resume_candidate_matches_cwd(
             | RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::Compacted(_)
             | RolloutItem::WorldState(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::RetainedContext(_)

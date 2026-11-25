@@ -20,6 +20,7 @@ impl LiveThread {
             .into_iter()
             .filter_map(|item| match item {
                 RolloutItem::ResponseItem(envelope) => envelope.metadata?.queued_input,
+                RolloutItem::QueuedInputRejected(receipt) => Some(receipt),
                 _ => None,
             })
             .collect())

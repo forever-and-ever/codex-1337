@@ -315,6 +315,7 @@ impl LegacyRolloutCanonicalizer {
             | RolloutItem::TurnContext(_)
             | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::TokenUsageRecord(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::SecurityRiskScore(_)

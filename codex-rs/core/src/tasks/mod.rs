@@ -937,7 +937,6 @@ impl Session {
                 std::mem::take(&mut ts.token_usage_by_model),
             )
         };
-        crate::session::queued_input::leave_unrecorded_in_queue(&mut pending_input);
         let model_info = turn_context.capture_current_model_info();
         let record_result = run_hooks_and_record_inputs(
             self,
@@ -947,6 +946,7 @@ impl Session {
             PersistContext::Standard,
         )
         .await;
+        self.settle_accepted_queue_input(&turn_context).await;
         self.reject_realtime_handoffs_for_turn(&turn_context.sub_id)
             .await;
         if let Some(task) = unadmitted_task {
@@ -1346,6 +1346,7 @@ impl Session {
             .await;
         }
 
+        self.settle_accepted_queue_input(&task.turn_context).await;
         crate::session::queued_input::cancel_unrecorded_queued_input(&task.turn_context);
         self.reject_realtime_handoffs_for_turn(&task.turn_context.sub_id)
             .await;

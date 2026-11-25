@@ -4,6 +4,7 @@
 use super::Session;
 use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use std::sync::Arc;
 
 /// Turn input and turn-start injections have entered the rollout writer.
 pub(super) struct RecordedTurnInput;
@@ -23,13 +24,24 @@ impl Session {
     pub(crate) async fn interrupted_turn(
         &self,
     ) -> Option<(String, crate::TurnStartOptions, TurnEnvironmentSelection)> {
-        let active = self.active_turn.lock().await;
+        let mut active = self.active_turn.lock().await;
         let task = active.as_ref()?.task.as_ref()?;
         if task.kind != crate::state::TaskKind::Regular || task.cancellation_token.is_cancelled() {
             return None;
         }
-        let context = &task.turn_context;
-        context.extension_data.get::<RecordedTurnInput>()?;
+        let context = Arc::clone(&task.turn_context);
+        if context.extension_data.get::<RecordedTurnInput>().is_none() {
+            drop(active);
+            if !self.recoverable_queued_turn(&context).await {
+                return None;
+            }
+            active = self.active_turn.lock().await;
+            let task = active.as_ref()?.task.as_ref()?;
+            if !Arc::ptr_eq(&task.turn_context, &context) || task.cancellation_token.is_cancelled()
+            {
+                return None;
+            }
+        }
         let settings = context.next_step_settings.load();
         let environments = self.services.turn_environments.snapshot_now();
         // Remote identities/configuration are not persisted across daemon restarts.

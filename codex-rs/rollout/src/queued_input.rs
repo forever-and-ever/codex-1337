@@ -29,18 +29,23 @@ pub async fn read_queued_input_receipts(path: &Path) -> io::Result<Vec<QueuedInp
             if !value.is_object() {
                 return Err(invalid_history("rollout record is not an object"));
             }
-            if value.pointer("/metadata/queued_input").is_none() {
+            if value.pointer("/metadata/queued_input").is_none()
+                && value.get("type").and_then(Value::as_str) != Some("queued_input_rejected")
+            {
                 continue;
             }
-            let RolloutItem::ResponseItem(envelope) =
-                decode_rollout_line(value).map_err(invalid_history)?.item
-            else {
-                return Err(invalid_history("queue receipt has no canonical input"));
+            let receipt = match decode_rollout_line(value).map_err(invalid_history)?.item {
+                RolloutItem::ResponseItem(envelope) => envelope
+                    .metadata
+                    .and_then(|metadata| metadata.queued_input)
+                    .ok_or_else(|| invalid_history("invalid canonical queue receipt"))?,
+                RolloutItem::QueuedInputRejected(receipt) => receipt,
+                _ => {
+                    return Err(invalid_history(
+                        "queue receipt has no canonical disposition",
+                    ));
+                }
             };
-            let receipt = envelope
-                .metadata
-                .and_then(|metadata| metadata.queued_input)
-                .ok_or_else(|| invalid_history("invalid canonical queue receipt"))?;
             receipts.push(receipt);
         }
         Ok(receipts)

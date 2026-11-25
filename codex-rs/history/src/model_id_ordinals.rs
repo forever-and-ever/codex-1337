@@ -60,6 +60,7 @@ pub fn next_model_id_ordinals(records: &[RolloutItem]) -> (u64, u64) {
             | RolloutItem::SecurityRiskScore(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::EventMsg(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_) => {}
         }
     }

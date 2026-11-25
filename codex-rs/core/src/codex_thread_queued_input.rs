@@ -12,7 +12,7 @@ use super::CodexThread;
 use super::resolve_client_turn_input;
 
 impl CodexThread {
-    /// Look up the canonical receipt for an already accepted queue row.
+    /// Look up a queue row's durable disposition.
     pub async fn queued_input_turn_id(&self, id: &str) -> CodexResult<Option<String>> {
         self.session.queued_input_turn_id(id).await
     }

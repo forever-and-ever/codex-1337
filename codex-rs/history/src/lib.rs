@@ -446,6 +446,8 @@ pub enum RolloutItem {
     SecurityRiskScore(SecurityRiskScore),
     RetainedContext(RetainedContextEvent),
     EventMsg(EventMsg),
+    /// A prompt hook rejected this dispatch before it became model input.
+    QueuedInputRejected(QueuedInputReceipt),
     /// Sparse, model-invisible facts used to reconstruct realtime presentation.
     RealtimeItem(RealtimeItem),
 }

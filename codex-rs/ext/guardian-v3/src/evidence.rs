@@ -360,6 +360,7 @@ fn review_original(
         | RolloutItem::WorldState(_)
         | RolloutItem::SecurityRiskScore(_)
         | RolloutItem::EventMsg(_)
+        | RolloutItem::QueuedInputRejected(_)
         | RolloutItem::RealtimeItem(_) => false,
     };
     if !include {

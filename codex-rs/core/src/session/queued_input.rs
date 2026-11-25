@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use codex_history::CodexHarnessMetadata;
 use codex_history::QueuedInputReceipt;
 use codex_history::ResponseItemEnvelope;
+use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelInfo;
 use tokio::sync::OnceCell;
@@ -21,9 +22,15 @@ use super::UserInputMetadata;
 
 type QueueCleanup = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
 
+enum PendingQueueInput {
+    Awaiting(QueueCleanup),
+    Recording(QueueCleanup),
+    Accepted(QueueCleanup),
+}
+
 pub(crate) struct QueuedInputAdmission {
     pub(crate) id: String,
-    cleanup: Mutex<Option<QueueCleanup>>,
+    pending: Mutex<Option<PendingQueueInput>>,
 }
 
 impl QueuedInputAdmission {
@@ -33,30 +40,71 @@ impl QueuedInputAdmission {
     {
         Self {
             id,
-            cleanup: Mutex::new(Some(Box::new(move || Box::pin(cleanup())))),
+            pending: Mutex::new(Some(PendingQueueInput::Awaiting(Box::new(move || {
+                Box::pin(cleanup())
+            })))),
         }
     }
 
-    fn take_cleanup(&self) -> Option<QueueCleanup> {
-        self.cleanup
+    fn pending(&self) -> std::sync::MutexGuard<'_, Option<PendingQueueInput>> {
+        self.pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
+    }
+
+    fn begin_recording(&self) {
+        let mut pending = self.pending();
+        if matches!(*pending, Some(PendingQueueInput::Awaiting(_)))
+            && let Some(PendingQueueInput::Awaiting(cleanup)) = pending.take()
+        {
+            *pending = Some(PendingQueueInput::Recording(cleanup));
+        }
+    }
+
+    fn accept(&self) -> bool {
+        let mut pending = self.pending();
+        if matches!(*pending, Some(PendingQueueInput::Recording(_)))
+            && let Some(PendingQueueInput::Recording(cleanup)) = pending.take()
+        {
+            *pending = Some(PendingQueueInput::Accepted(cleanup));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_accepted(&self) -> Option<QueueCleanup> {
+        let mut pending = self.pending();
+        if matches!(*pending, Some(PendingQueueInput::Accepted(_)))
+            && let Some(PendingQueueInput::Accepted(cleanup)) = pending.take()
+        {
+            Some(cleanup)
+        } else {
+            None
+        }
     }
 }
 
-pub(crate) async fn complete_queued_input(turn: &TurnContext, id: &str) {
-    if let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>()
-        && admission.id == id
-        && let Some(cleanup) = admission.take_cleanup()
-    {
-        cleanup().await;
+pub(super) fn begin_queued_input_recording(turn: &TurnContext) {
+    if let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>() {
+        admission.begin_recording();
     }
+}
+
+pub(super) fn queued_input_awaits_acceptance(turn: &TurnContext) -> bool {
+    turn.extension_data
+        .get::<QueuedInputAdmission>()
+        .is_some_and(|admission| {
+            matches!(
+                *admission.pending(),
+                Some(PendingQueueInput::Awaiting(_) | PendingQueueInput::Recording(_))
+            )
+        })
 }
 
 pub(crate) fn cancel_unrecorded_queued_input(turn: &TurnContext) {
     if let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>() {
-        drop(admission.take_cleanup());
+        drop(admission.pending().take());
     }
 }
 
@@ -71,10 +119,6 @@ pub(crate) fn queued_input_id(input: &TurnInput) -> Option<&str> {
             .map(|receipt| receipt.id.as_str()),
         _ => None,
     }
-}
-
-pub(crate) fn leave_unrecorded_in_queue(input: &mut Vec<TurnInput>) {
-    input.retain(|item| queued_input_id(item).is_none());
 }
 
 pub(super) fn receipts_in(items: &[ResponseItemEnvelope]) -> Vec<QueuedInputReceipt> {
@@ -161,24 +205,110 @@ impl Session {
             .await
     }
 
-    pub(super) async fn confirm_queued_input(
+    pub(super) async fn recoverable_queued_turn(&self, turn: &TurnContext) -> bool {
+        let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>() else {
+            return false;
+        };
+        match *admission.pending() {
+            Some(PendingQueueInput::Accepted(_)) => return true,
+            Some(PendingQueueInput::Recording(_)) => {}
+            _ => return false,
+        }
+        // Projection can still be acknowledging an already synced append. Inspect
+        // the writer-locked canonical generation, not the publication of its index.
+        let Some(live) = self.live_thread() else {
+            return false;
+        };
+        match live.queued_input_receipts().await {
+            Ok(receipts) => receipts
+                .iter()
+                .any(|receipt| receipt.id == admission.id && receipt.turn_id == turn.sub_id),
+            Err(error) => {
+                tracing::warn!(turn_id = %turn.sub_id, %error, "could not verify queued input for recovery");
+                false
+            }
+        }
+    }
+
+    pub(super) fn accept_queued_input(
         &self,
-        turn_context: &TurnContext,
+        turn: &TurnContext,
         receipt: QueuedInputReceipt,
-    ) {
+    ) -> io::Result<()> {
+        if let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>()
+            && admission.id == receipt.id
+            && admission.accept()
+        {
+            Ok(())
+        } else {
+            self.publish_queue_receipt(receipt)
+        }
+    }
+
+    /// Only release the queue row after the regular recovery checkpoint is published.
+    pub(crate) async fn settle_accepted_queue_input(&self, turn: &TurnContext) {
+        if let Some(admission) = turn.extension_data.get::<QueuedInputAdmission>()
+            && let Some(cleanup) = admission.take_accepted()
+        {
+            if let Err(error) = self.publish_queue_receipt(QueuedInputReceipt {
+                id: admission.id.clone(),
+                turn_id: turn.sub_id.clone(),
+            }) {
+                self.conversation.mark_history_recovery_required();
+                tracing::error!(%error, "could not publish durable queue receipt");
+                return;
+            }
+            cleanup().await;
+        }
+    }
+
+    pub(super) async fn reject_queued_input(&self, turn: &TurnContext, id: &str) -> io::Result<()> {
+        let Some(admission) = turn
+            .extension_data
+            .get::<QueuedInputAdmission>()
+            .filter(|admission| admission.id == id)
+        else {
+            return Err(io::Error::other(
+                "missing queue admission for rejected input",
+            ));
+        };
+        let receipt = QueuedInputReceipt {
+            id: id.to_owned(),
+            turn_id: turn.sub_id.clone(),
+        };
+        let mut write = UncertainQueueWrite::default();
+        write.arm(self);
+        let live = self
+            .live_thread_for_persistence("record queued input veto")
+            .map_err(io::Error::other)?;
+        live.append_items(&[RolloutItem::QueuedInputRejected(receipt.clone())])
+            .await
+            .map_err(io::Error::other)?;
+        self.flush_rollout().await?;
+        write.confirm();
+        self.publish_queue_receipt(receipt)?;
+        let pending = admission.pending().take();
+        if let Some(PendingQueueInput::Awaiting(cleanup)) = pending {
+            cleanup().await;
+        }
+        Ok(())
+    }
+
+    fn publish_queue_receipt(&self, receipt: QueuedInputReceipt) -> io::Result<()> {
+        let missing = || io::Error::other("queue receipt index was not initialized");
         let runtime = self
             .services
             .thread_extension_data
             .get::<QueuedInputReceipts>()
-            .expect("queued input reconciliation precedes turn admission");
+            .ok_or_else(missing)?;
         runtime
             .0
             .get()
-            .expect("queue receipt index was initialized")
+            .ok_or_else(missing)?
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(receipt.id.clone(), receipt.turn_id);
-        complete_queued_input(turn_context, &receipt.id).await;
+            .insert(receipt.id, receipt.turn_id);
+        Ok(())
     }
 }
 

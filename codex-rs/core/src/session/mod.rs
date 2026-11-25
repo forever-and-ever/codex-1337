@@ -4213,6 +4213,7 @@ impl Session {
                 response_items = vec![envelope.item];
             } else {
                 if !queued_receipts.is_empty() {
+                    queued_input::begin_queued_input_recording(turn_context);
                     queue_write.arm(self);
                 }
                 state
@@ -4268,7 +4269,7 @@ impl Session {
             self.flush_rollout().await?;
             queue_write.confirm();
             for receipt in queued_receipts {
-                self.confirm_queued_input(turn_context, receipt).await;
+                self.accept_queued_input(turn_context, receipt)?;
             }
         }
         if persisted && let Some(revision) = mcp_revision {

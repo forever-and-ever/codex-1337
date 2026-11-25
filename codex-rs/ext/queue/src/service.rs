@@ -371,7 +371,7 @@ impl QueuedItemService {
                 .is_some()
         {
             return Err(ThreadStoreError::InvalidRequest {
-                message: format!("queued submission was already accepted: {queued_item_id}"),
+                message: format!("queued submission was already handled: {queued_item_id}"),
             }
             .into());
         }
@@ -545,7 +545,7 @@ impl QueuedItemService {
         match self.route(thread, item, trace).await? {
             QueuedItemDispatch::Routed(submission) => Ok(submission),
             QueuedItemDispatch::Reconciled(turn_id) => Err(ThreadStoreError::InvalidRequest {
-                message: format!("queued submission was already accepted by turn {turn_id}"),
+                message: format!("queued submission was already handled by turn {turn_id}"),
             }
             .into()),
         }
