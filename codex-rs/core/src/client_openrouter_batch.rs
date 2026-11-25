@@ -271,6 +271,21 @@ fn turn_directory(home: &Path, thread: ThreadId, turn: &str) -> PathBuf {
         .join(format!("{:x}", Sha256::digest(turn.as_bytes())))
 }
 
+/// Persist newly created owner-directory entries before a paid POST or handle
+/// acknowledgement. Syncing only the leaf can lose the entire tree on power loss.
+pub fn sync_openrouter_owner(home: &Path, owner: &Path) -> io::Result<()> {
+    if !owner.starts_with(home) {
+        return Err(io::Error::other("invalid OpenRouter owner directory"));
+    }
+    for dir in owner.ancestors() {
+        File::open(dir)?.sync_all()?;
+        if dir == home {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn admission_lock(dir: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
@@ -758,6 +773,14 @@ impl ModelClient {
         }
         if new {
             lease.save()?;
+            sync_openrouter_owner(
+                &home,
+                lease
+                    .path
+                    .parent()
+                    .ok_or_else(|| fatal("invalid journal path"))?,
+            )
+            .map_err(fatal)?;
         }
         let trace_wire = wire.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();

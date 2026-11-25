@@ -89,7 +89,7 @@ impl SampleHandle {
         serde_json::to_writer(&mut file, &record).map_err(|e| internal_error(e.to_string()))?;
         file.flush()
             .and_then(|()| file.sync_all())
-            .and_then(|()| File::open(directory)?.sync_all())
+            .and_then(|()| codex_core::sync_openrouter_owner(home, &directory))
             .map_err(err)?;
         Ok(Self { path, source_turn })
     }
@@ -156,12 +156,12 @@ impl SampleHandle {
                 "thread/sample/start requires an OpenRouter batch thread; use thread/sample for live inference",
             ));
         }
-        task.parent
-            .validate_openrouter_batch_model(
-                task.params.model.as_deref().unwrap_or(&settings.model),
-            )
-            .await
-            .map_err(|e| invalid_request(e.to_string()))?;
+        let model = task
+            .params
+            .model
+            .as_ref()
+            .unwrap_or(&settings.model)
+            .clone();
         let id = Uuid::new_v4();
         let owner = task.parent.startup_metadata().thread_id;
         let handle = Self::new(
@@ -175,7 +175,17 @@ impl SampleHandle {
         tasks.spawn(async move {
             // Bound only snapshot acquisition and the lifetime of the ephemeral sampling
             // actor. A collector with a remote job id continues without that actor.
-            let result = Box::pin(task.run(Instant::now() + SAMPLE_TIMEOUT, Some(&handle))).await;
+            let deadline = Instant::now() + SAMPLE_TIMEOUT;
+            let admission = tokio::time::timeout_at(
+                deadline,
+                task.parent.validate_openrouter_batch_model(&model),
+            )
+            .await;
+            let result = match admission {
+                Ok(Ok(())) => Box::pin(task.run(deadline, Some(&handle))).await,
+                Ok(Err(error)) => Err(invalid_request(error.to_string())),
+                Err(_) => Err(internal_error("sample timed out")),
+            };
             let capture = std::fs::read(&handle.path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Record>(&bytes).ok())

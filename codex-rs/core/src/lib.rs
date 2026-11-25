@@ -52,6 +52,7 @@ pub use client::openrouter_batch::OpenRouterSample;
 pub use client::openrouter_batch::SampleStatus as OpenRouterSampleStatus;
 pub use client::openrouter_batch::outstanding_openrouter_batches;
 pub use client::openrouter_batch::recover_openrouter_batches;
+pub use client::openrouter_batch::sync_openrouter_owner;
 pub use turn_extension_data::WithTurnExtensionData;
 mod compact_model_fallback;
 mod compact_native;

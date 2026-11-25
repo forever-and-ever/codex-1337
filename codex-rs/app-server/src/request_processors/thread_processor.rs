@@ -827,7 +827,14 @@ impl ThreadRequestProcessor {
             .get_thread(id)
             .await
             .map_err(|_| invalid_request("resume the sample's source thread first"))?;
-        crate::thread_sample::SampleHandle::read(&parent, params).await
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            crate::thread_sample::SampleHandle::read(&parent, params),
+        )
+        .await
+        .unwrap_or(Ok(
+            codex_app_server_protocol::ThreadSampleReadResponse::Pending,
+        ))
     }
 
     pub(crate) async fn thread_revert(
