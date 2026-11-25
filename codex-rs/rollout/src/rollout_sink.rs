@@ -152,6 +152,11 @@ impl RolloutSink {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn read_only_plain_for_test(file: File) -> Self {
+        Self::new(RolloutOutput::Plain(tokio::fs::File::from_std(file)))
+    }
+
     async fn revision(&self) -> Option<RolloutRevision> {
         let (metadata, compressed) = match &self.output {
             RolloutOutput::Plain(file) => (file.metadata().await.ok()?, false),
