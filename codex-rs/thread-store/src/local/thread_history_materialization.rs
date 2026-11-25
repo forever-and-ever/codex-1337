@@ -252,7 +252,7 @@ fn read_projection_batches(
         expected_ordinal,
         thread_id,
         subagent_history_start_ordinal,
-        is_cancelled,
+        &is_cancelled,
         emit,
     )
 }
