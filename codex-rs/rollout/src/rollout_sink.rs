@@ -171,7 +171,10 @@ impl RolloutSink {
     }
 
     pub(crate) async fn observe_append_witness(&mut self) -> Option<AppendWitness> {
-        let revision = self.revision().await?;
+        let Some(revision) = self.revision().await else {
+            self.witness = None;
+            return None;
+        };
         Some(AppendWitness::observe(&mut self.witness, revision))
     }
 

@@ -32,6 +32,9 @@ impl RolloutRevision {
     }
 
     pub(crate) fn from_metadata(metadata: &Metadata, compressed: bool) -> Option<Self> {
+        if !metadata.is_file() {
+            return None;
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
@@ -76,7 +79,7 @@ impl AppendWitness {
     }
 
     pub fn extends(&self, prior: &Self) -> bool {
-        Arc::ptr_eq(&self.epoch, &prior.epoch)
+        Arc::ptr_eq(&self.epoch, &prior.epoch) && self.revision.continues(&prior.revision)
     }
 
     pub(crate) fn observe(slot: &mut Option<Self>, revision: RolloutRevision) -> Self {
