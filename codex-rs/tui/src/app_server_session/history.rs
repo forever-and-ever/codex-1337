@@ -189,33 +189,12 @@ impl HistoryCursor {
 }
 
 impl ThreadHistoryPagination {
-    fn advance_turn_cursor(&mut self, cursor: &str, next: Option<String>) {
-        self.next_turn_cursor = advancing_cursor(Some(cursor), next, &mut self.seen_turn_cursors);
-    }
-
     fn next_page(&self) -> Option<HistoryCursor> {
         self.next_item_cursor
             .clone()
             .map(HistoryPage::Items)
             .or_else(|| self.next_turn_cursor.clone().map(HistoryPage::Turns))
     }
-}
-
-fn merge_turn_page(
-    cursor: &str,
-    page: ThreadTurnsListResponse,
-    state: &mut ThreadHistoryPagination,
-    turns: &mut Vec<Turn>,
-) -> Vec<Turn> {
-    state.advance_turn_cursor(cursor, page.next_cursor);
-    let admitted = page
-        .data
-        .into_iter()
-        .rev()
-        .filter(|turn| !turns.iter().any(|known| known.id == turn.id))
-        .collect::<Vec<_>>();
-    turns.splice(0..0, admitted.iter().cloned());
-    admitted
 }
 
 // Turn metadata can extend before the loaded item window. Inside the window an empty
@@ -343,9 +322,9 @@ impl AppServerSession {
                 self.merge_thread_item_page(thread_id, page, &mut state, turns)
                     .await?,
             ),
-            (HistoryPage::Turns(cursor), HistoryPage::Turns(page)) => {
-                HistoryPage::Turns(merge_turn_page(cursor, page, &mut state, turns))
-            }
+            (HistoryPage::Turns(cursor), HistoryPage::Turns(page)) => HistoryPage::Turns(
+                preparation::merge_thread_turn_page(cursor, page, &mut state, turns),
+            ),
             _ => return Err(eyre!("history response does not match its cursor domain")),
         };
         mark_loaded_interruptions(turns, state.next_item_cursor.as_deref());
