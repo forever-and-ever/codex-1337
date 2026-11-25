@@ -1099,7 +1099,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
             crate::rollout_sink::RolloutSink::read_only_plain_for_test(read_only_file),
         )),
         deferred_creation: false,
-        realtime_sync_pending: false,
+        input_sync_pending: false,
         #[cfg(unix)]
         directories_to_sync: Vec::new(),
         pending_items: Vec::new(),

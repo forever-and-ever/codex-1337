@@ -946,6 +946,7 @@ impl Session {
             PersistContext::Standard,
         )
         .await;
+        self.settle_accepted_queue_input(&turn_context).await;
         self.reject_realtime_handoffs_for_turn(&turn_context.sub_id)
             .await;
         if let Some(task) = unadmitted_task {
@@ -1180,6 +1181,9 @@ impl Session {
         if cleared_active_turn && !sampling_interrupted {
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
+        // A failed, unrecorded queue item remains the head of its queue. Keep its
+        // dispatch pin through this turn's idle hook so it cannot retry itself.
+        crate::session::queued_input::cancel_unrecorded_queued_input(&turn_context);
         // Private reviewers already flushed the terminal event before delivering it.
         // Other buffering writers still need a barrier for the terminal event.
         if !saved_guardian_completion && let Err(err) = self.flush_rollout().await {
@@ -1342,6 +1346,8 @@ impl Session {
             .await;
         }
 
+        self.settle_accepted_queue_input(&task.turn_context).await;
+        crate::session::queued_input::cancel_unrecorded_queued_input(&task.turn_context);
         self.reject_realtime_handoffs_for_turn(&task.turn_context.sub_id)
             .await;
 

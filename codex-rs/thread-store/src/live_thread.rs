@@ -34,6 +34,7 @@ use crate::UpdateThreadMetadataParams;
 use crate::thread_metadata_sync::ThreadMetadataSync;
 
 pub(crate) mod agent_mail;
+mod queued_input;
 pub use agent_mail::ACCEPTED_AGENT_MAIL_ID_KIND;
 pub use agent_mail::AgentMailCommit;
 pub use agent_mail::AgentMailPersistence;

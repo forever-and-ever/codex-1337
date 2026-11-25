@@ -118,6 +118,9 @@ pub(super) async fn revert(
     store
         .acknowledge_agent_mail_before_revert(&state_db, thread_id, &lineage)
         .await?;
+    store
+        .clean_queued_input_before_revert(&state_db, thread_id, &source_path)
+        .await?;
 
     let forked_from_ordinal_exclusive =
         codex_rollout::forked_from_ordinal_exclusive(&source_meta, Some(source_path.as_path()))

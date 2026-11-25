@@ -27,7 +27,6 @@ impl ThreadRequestProcessor {
                 && config.parent_thread_id.is_none()
                 && !config.session_source.is_non_root_agent()
             {
-                let interrupted = thread.interrupted_turn().await;
                 if let Err(err) = self
                     .thread_store
                     .persist_thread(thread_id, PersistContext::Standard)
@@ -37,7 +36,9 @@ impl ThreadRequestProcessor {
                     continue;
                 }
                 snapshot.loaded.insert(thread_id.to_string());
-                if let Some((turn_id, options, environment)) = interrupted {
+                // Recheck after the storage barrier: an input may have become durable
+                // while the writer or its optional history projection was settling.
+                if let Some((turn_id, options, environment)) = thread.interrupted_turn().await {
                     snapshot.interrupted.insert(
                         thread_id.to_string(),
                         InterruptedTurn {

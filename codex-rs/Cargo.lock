@@ -3964,6 +3964,7 @@ dependencies = [
  "core_test_support",
  "pretty_assertions",
  "serde_json",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

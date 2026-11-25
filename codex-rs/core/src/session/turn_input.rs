@@ -255,6 +255,24 @@ pub(super) async fn handle(
         mode,
         submission_id,
         /*realtime_handoff_id*/ None,
+        /*queued_input*/ None,
+    )
+    .await
+}
+
+pub(super) async fn handle_queued(
+    session: &Arc<Session>,
+    request: WithTurnExtensionData<TurnInputRequest>,
+    submission_id: String,
+    queued_input: super::queued_input::QueuedInputAdmission,
+) -> CodexResult<TurnInputSubmission> {
+    handle_inner(
+        session,
+        request,
+        TurnInputMode::StartIfIdle,
+        submission_id,
+        None,
+        Some(queued_input),
     )
     .await
 }
@@ -272,6 +290,7 @@ pub(super) async fn handle_realtime_handoff(
         mode,
         submission_id,
         Some(handoff_id),
+        /*queued_input*/ None,
     )
     .await
 }
@@ -288,6 +307,7 @@ async fn handle_inner(
     mode: TurnInputMode,
     submission_id: String,
     realtime_handoff_id: Option<uuid::Uuid>,
+    queued_input: Option<super::queued_input::QueuedInputAdmission>,
 ) -> CodexResult<TurnInputSubmission> {
     session.conversation.check_history_recovery()?;
     session.check_agent_mail_task_start().await?;
@@ -358,6 +378,7 @@ async fn handle_inner(
                 kind,
                 /*expected_previous_turn_id*/ None,
                 realtime_handoff_id,
+                queued_input,
             )
             .await
         }
@@ -379,6 +400,7 @@ async fn handle_inner(
                 TurnStartKind::Recovery,
                 Some(expected_previous_turn_id),
                 realtime_handoff_id,
+                /*queued_input*/ None,
             )
             .await
         }
@@ -434,6 +456,7 @@ pub(super) async fn handle_recovery(
         TurnStartKind::Recovery,
         /*expected_previous_turn_id*/ None,
         /*realtime_handoff_id*/ None,
+        /*queued_input*/ None,
     )
     .await;
     if let Ok(TurnInputSubmission::Started { turn_id, .. }) = &result {
@@ -613,12 +636,13 @@ async fn start_if_idle(
     kind: TurnStartKind,
     expected_previous_turn_id: Option<String>,
     realtime_handoff_id: Option<uuid::Uuid>,
+    queued_input: Option<super::queued_input::QueuedInputAdmission>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         mut request,
         turn_extension_init,
     } = request;
-    let input_metadata = user_input_metadata(&mut request, realtime_handoff_id);
+    let mut input_metadata = user_input_metadata(&mut request, realtime_handoff_id);
     let TurnInputRequest {
         mut input,
         thread_settings,
@@ -675,6 +699,14 @@ async fn start_if_idle(
         // completed publication before deciding whether new work can start.
         let _publication = session.terminal_publication.lock().await;
         let mut active_turn = session.active_turn.lock().await;
+        if let Some(admission) = &queued_input
+            && let Some(turn_id) = session.known_queued_input_turn_id(&admission.id)
+        {
+            return Ok(TurnInputSubmission::Started {
+                root_turn_id: turn_id.clone(),
+                turn_id,
+            });
+        }
         if let Some(expected) = expected_previous_turn_id {
             let state = session.state.lock().await;
             // A registered successor already owns this work, even if it is still running.
@@ -747,6 +779,10 @@ async fn start_if_idle(
             return Err(error);
         }
     };
+    if let Some(queued_input) = queued_input {
+        input_metadata.queued_input_id = Some(queued_input.id.clone());
+        turn_context.extension_data.insert(queued_input);
+    }
     session.observe_human_turn(human);
     turn_context
         .turn_metadata_state
@@ -1230,6 +1266,13 @@ async fn pending_turn_input(
                 && matches!(item, ResponseItem::FunctionCallOutput { name: Some(_), .. })
             {
                 metadata.get_or_insert_default().retain_across_windows = Some(true);
+            }
+            if let Some(id) = input_metadata.queued_input_id {
+                metadata.get_or_insert_default().queued_input =
+                    Some(codex_history::QueuedInputReceipt {
+                        id,
+                        turn_id: turn_id.to_owned(),
+                    });
             }
             TurnInput::FunctionCallOutput(ResponseItemEnvelope { item, metadata })
         }

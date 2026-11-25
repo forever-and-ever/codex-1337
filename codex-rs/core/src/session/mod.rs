@@ -269,6 +269,7 @@ pub(crate) mod extension_metrics;
 mod guardian_checkpoint;
 mod handlers;
 pub(crate) mod inject;
+pub(crate) mod queued_input;
 mod reasoning_effort;
 mod recording_ids;
 pub(crate) mod submission;
@@ -384,7 +385,6 @@ use crate::windows_sandbox::WindowsSandboxLevelExt;
 use codex_core_plugins::PluginCommandAttribution;
 use codex_core_plugins::PluginsManager;
 use codex_git_utils::get_git_repo_root;
-use codex_history::CodexHarnessMetadata;
 use codex_history::CompactedItem;
 use codex_history::CompactionResumeMetadata;
 use codex_history::DynamicToolsSnapshot;
@@ -1298,6 +1298,16 @@ impl SessionIo {
         request: impl Into<WithTurnExtensionData<TurnInputRequest<ResolvedUserInput>>>,
         mode: TurnInputMode,
     ) -> CodexResult<TurnInputSubmission> {
+        self.submit_turn_input_with_queue(request, mode, /*queued_input*/ None)
+            .await
+    }
+
+    pub(crate) async fn submit_turn_input_with_queue(
+        &self,
+        request: impl Into<WithTurnExtensionData<TurnInputRequest<ResolvedUserInput>>>,
+        mode: TurnInputMode,
+        queued_input: Option<queued_input::QueuedInputAdmission>,
+    ) -> CodexResult<TurnInputSubmission> {
         let id = new_submission_id();
         let (reply_tx, reply_rx) = oneshot::channel();
         let WithTurnExtensionData {
@@ -1310,6 +1320,7 @@ impl SessionIo {
             op: SubmissionOp::TurnInput {
                 request: Box::new(request),
                 mode,
+                queued_input,
                 reply: reply_tx,
             },
             trace,
@@ -4046,6 +4057,8 @@ impl Session {
         image_preparations: Vec<ImagePreparationMetadata>,
         realtime: Option<RealtimeRecord<'_>>,
     ) -> std::io::Result<()> {
+        let queued_receipts = queued_input::receipts_in(&items);
+        let mut queue_write = queued_input::UncertainQueueWrite::default();
         // Save the originating history budget for replay.
         // Preserve any existing tool-specific override.
         let policy: codex_utils_output_truncation::TruncationPolicy =
@@ -4199,6 +4212,10 @@ impl Session {
                 }
                 response_items = vec![envelope.item];
             } else {
+                if !queued_receipts.is_empty() {
+                    queued_input::begin_queued_input_recording(turn_context);
+                    queue_write.arm(self);
+                }
                 state
                     .pending_audio_duration_ids
                     .extend(file_audio::file_ids(&items).cloned());
@@ -4245,6 +4262,16 @@ impl Session {
             self.persist_rollout_items(&rollout_items).await
         };
         drop(realtime_settings_guard);
+        if !queued_receipts.is_empty() {
+            if !persisted {
+                return Err(std::io::Error::other("failed to record queued input"));
+            }
+            self.flush_rollout().await?;
+            queue_write.confirm();
+            for receipt in queued_receipts {
+                self.accept_queued_input(turn_context, receipt)?;
+            }
+        }
         if persisted && let Some(revision) = mcp_revision {
             self.services
                 .executed_tool_calls
@@ -6126,10 +6153,10 @@ impl Session {
                 model_info,
                 vec![ResponseItemEnvelope {
                     item: response_item,
-                    metadata: metadata.acceptance_order.map(|order| CodexHarnessMetadata {
-                        user_input_order: Some(order),
-                        ..Default::default()
-                    }),
+                    metadata: queued_input::prompt_envelope_metadata(
+                        &metadata,
+                        &turn_context.sub_id,
+                    ),
                 }],
             )
             .await;

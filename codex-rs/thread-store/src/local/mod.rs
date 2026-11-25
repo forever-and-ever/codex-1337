@@ -15,6 +15,7 @@ mod original_history;
 mod paginated_fork;
 mod pending_thread_metadata;
 mod projects;
+mod queued_input;
 mod read_thread;
 mod revert_thread;
 mod rollout_migration;

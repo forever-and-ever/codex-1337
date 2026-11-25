@@ -1038,7 +1038,7 @@ impl RolloutRecorder {
                     writer: None,
                     deferred_creation: true,
                     pending_items: Vec::new(),
-                    realtime_sync_pending: false,
+                    input_sync_pending: false,
                     #[cfg(unix)]
                     directories_to_sync: Vec::new(),
                     meta: Some(session_meta),
@@ -1055,7 +1055,7 @@ impl RolloutRecorder {
                     writer: Some(JsonlWriter::new(sink)),
                     deferred_creation: false,
                     pending_items: Vec::new(),
-                    realtime_sync_pending: false,
+                    input_sync_pending: false,
                     // Confirm the existing parent on the first realtime seal, not on resume.
                     #[cfg(unix)]
                     directories_to_sync: path.parent().into_iter().map(Path::to_path_buf).collect(),
@@ -1748,9 +1748,9 @@ struct RolloutWriterState {
     /// True until a newly created rollout is first materialized.
     deferred_creation: bool,
     pending_items: Vec<RolloutItem>,
-    /// A sealed V1 event requires a disk barrier, even if background append drained its item.
-    realtime_sync_pending: bool,
-    /// Directory entries that must reach disk before the first realtime seal is acknowledged.
+    /// Queue receipts and realtime seals require a disk barrier after background append.
+    input_sync_pending: bool,
+    /// Directory entries required before acknowledging the first durable input.
     #[cfg(unix)]
     directories_to_sync: Vec<PathBuf>,
     meta: Option<SessionMeta>,
@@ -1772,9 +1772,12 @@ impl RolloutWriterState {
     }
 
     fn add_items(&mut self, items: Vec<RolloutItem>) {
-        self.realtime_sync_pending |= items
+        self.input_sync_pending |= items
             .iter()
-            .any(|item| item.realtime_observed_at_ms().is_some());
+            .any(|item| item.realtime_observed_at_ms().is_some()
+                || matches!(item, RolloutItem::QueuedInputRejected(_))
+                || matches!(item, RolloutItem::ResponseItem(envelope)
+                    if envelope.metadata.as_ref().is_some_and(|metadata| metadata.queued_input.is_some())));
         self.pending_items.extend(items);
     }
 
@@ -1796,7 +1799,7 @@ impl RolloutWriterState {
             return Ok(());
         }
         self.write_pending_with_recovery("flush").await?;
-        if self.realtime_sync_pending
+        if self.input_sync_pending
             && let Some(writer) = self.writer.as_mut()
         {
             writer.sink.sync_data().await?;
@@ -1807,7 +1810,7 @@ impl RolloutWriterState {
                 }
                 self.directories_to_sync.clear();
             }
-            self.realtime_sync_pending = false;
+            self.input_sync_pending = false;
         }
         Ok(())
     }
@@ -2285,6 +2288,7 @@ async fn resume_candidate_matches_cwd(
             | RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::Compacted(_)
             | RolloutItem::WorldState(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::RetainedContext(_)

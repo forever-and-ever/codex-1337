@@ -593,8 +593,14 @@ pub(crate) async fn run_turn(
             break;
         }
 
+        if super::queued_input::queued_input_awaits_acceptance(&turn_context) {
+            return Err(
+                std::io::Error::other("queued input did not reach canonical history").into(),
+            );
+        }
         // Input and turn-start injections are recorded before recovery can continue this turn.
         turn_context.extension_data.insert(RecordedTurnInput);
+        sess.settle_accepted_queue_input(&turn_context).await;
         let window_id = sess.current_window_id().await;
         super::rollout_budget::maybe_record_reminder(
             sess.as_ref(),
@@ -1223,7 +1229,7 @@ pub(crate) async fn run_hooks_and_record_inputs(
     let mut blocked_input = false;
     let mut accepted_user_input = false;
     let mut input_error = None;
-    for input_item in recordable_inputs(sess, model_info, input) {
+    for input_item in recordable_inputs(sess, model_info, input, persist_context) {
         let input_item = match input_item {
             Ok(input_item) => input_item,
             Err(error) => {
@@ -1239,6 +1245,11 @@ pub(crate) async fn run_hooks_and_record_inputs(
         if hook_outcome.should_stop {
             if let Some(id) = realtime_handoff_id {
                 sess.reject_realtime_handoff(id).await;
+            }
+            if let Some(id) = super::queued_input::queued_input_id(input_item.as_ref())
+                && let Err(error) = sess.reject_queued_input(turn_context, id).await
+            {
+                input_error.get_or_insert(error.into());
             }
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
@@ -1286,9 +1297,8 @@ pub(crate) fn recordable_inputs<'a>(
     sess: &Session,
     model_info: &ModelInfo,
     input: &'a [TurnInput],
+    persist_context: PersistContext,
 ) -> impl Iterator<Item = CodexResult<Cow<'a, TurnInput>>> {
-    let rejected_audio = !model_info.input_modalities.contains(&InputModality::Audio)
-        && input.iter().any(turn_input_has_uploaded_audio_file);
     // Only finalized evidence may enter reusable Guardian history.
     let items: &[TurnInput] = if sess
         .services
@@ -1300,9 +1310,23 @@ pub(crate) fn recordable_inputs<'a>(
     } else {
         input
     };
+    // Fallback paths preserve an ordinary prompt for history, not sampling. The durable
+    // queue remains the owner of its input until normal admission reaches recording.
+    let items = items.iter().filter(move |item| {
+        persist_context != PersistContext::Standard
+            || super::queued_input::queued_input_id(item).is_none()
+    });
+    let rejected_audio = !model_info.input_modalities.contains(&InputModality::Audio)
+        && items.clone().any(turn_input_has_uploaded_audio_file);
     items
-        .iter()
         .filter_map(move |item| {
+            if rejected_audio
+                && turn_input_has_uploaded_audio_file(item)
+                && super::queued_input::queued_input_id(item).is_some()
+            {
+                // Never acknowledge a partial version of a durable queue item.
+                return None;
+            }
             let mut item = Cow::Borrowed(item);
             if rejected_audio
                 && turn_input_has_uploaded_audio_file(&item)
