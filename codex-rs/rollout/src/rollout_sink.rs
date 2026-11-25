@@ -83,18 +83,27 @@ impl RolloutSink {
 
     /// Appends one newline-terminated line. A framed append is durable against a process crash
     /// when this returns.
-    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<()> {
+    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<Vec<u8>> {
         match self {
             Self::Plain(file) => {
                 file.write_all(&line).await?;
-                file.flush().await
+                file.flush().await?;
+                Ok(line)
             }
             Self::Framed(writer) => {
                 off_runtime(writer, move |writer| {
-                    writer.append(&line, /*flush*/ true)
+                    writer.append(&line, /*flush*/ true)?;
+                    Ok(line)
                 })
                 .await
             }
+        }
+    }
+
+    pub(crate) async fn logical_len(&self) -> io::Result<u64> {
+        match self {
+            Self::Plain(file) => Ok(file.metadata().await?.len()),
+            Self::Framed(writer) => Ok(lock(writer)?.logical_len()),
         }
     }
 
@@ -130,10 +139,10 @@ impl RolloutSink {
 }
 
 /// Runs one framed-writer operation on the blocking pool.
-async fn off_runtime(
+async fn off_runtime<T: Send + 'static>(
     writer: &Arc<Mutex<FramedWriter>>,
-    operation: impl FnOnce(&mut FramedWriter) -> io::Result<()> + Send + 'static,
-) -> io::Result<()> {
+    operation: impl FnOnce(&mut FramedWriter) -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
     let writer = Arc::clone(writer);
     tokio::task::spawn_blocking(move || operation(&mut *lock(&writer)?))
         .await

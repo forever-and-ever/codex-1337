@@ -38,11 +38,25 @@ pub(crate) async fn file_modified_time(path: &Path) -> io::Result<Option<time::O
 /// If the requested path disappears during a representation transition, this briefly retries
 /// resolution so callers do not need to know which representation is on disk.
 pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineReader> {
+    open_line_reader(path, ReaderScope::Full).await
+}
+
+pub(crate) async fn open_rollout_head_reader(path: &Path) -> io::Result<RolloutLineReader> {
+    open_line_reader(path, ReaderScope::Head).await
+}
+
+#[derive(Clone, Copy)]
+enum ReaderScope {
+    Head,
+    Full,
+}
+
+async fn open_line_reader(path: &Path, scope: ReaderScope) -> io::Result<RolloutLineReader> {
     let started_at = Instant::now();
     let mut metrics = ReadMetrics::default();
     let result = async {
         for _ in 0..MAX_NOT_FOUND_RETRIES {
-            match reader::open_once(path, &mut metrics).await {
+            match reader::open_once(path, &mut metrics, scope).await {
                 Ok(reader) => return Ok(reader),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {
                     tokio::time::sleep(OPEN_ROLLOUT_LINE_READER_RETRY_DELAY).await;
@@ -50,7 +64,7 @@ pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineRead
                 Err(err) => return Err(err),
             }
         }
-        reader::open_once(path, &mut metrics).await
+        reader::open_once(path, &mut metrics, scope).await
     }
     .await;
     metrics.duration = started_at.elapsed();
@@ -382,6 +396,7 @@ mod reader {
 
     use super::ReadFailureSource;
     use super::ReadMetrics;
+    use super::ReaderScope;
     use super::RolloutLineReaderInner;
     use super::path;
     use tokio::io::AsyncBufReadExt;
@@ -389,6 +404,7 @@ mod reader {
     pub(super) async fn open_once(
         path: &Path,
         metrics: &mut ReadMetrics,
+        scope: ReaderScope,
     ) -> io::Result<RolloutLineReaderInner> {
         let path = path::existing_rollout_path(path)
             .await
@@ -400,7 +416,16 @@ mod reader {
                     if crate::framed::is_framed(&input)? {
                         (
                             "framed",
-                            Box::new(crate::framed::FramedReader::open(input)?),
+                            match scope {
+                                ReaderScope::Head => match crate::framed::read_first_frame(&input)?
+                                {
+                                    Some(head) => Box::new(io::Cursor::new(head)),
+                                    None => Box::new(crate::framed::FramedReader::open(input)?),
+                                },
+                                ReaderScope::Full => {
+                                    Box::new(crate::framed::FramedReader::open(input)?)
+                                }
+                            },
                         )
                     } else {
                         (

@@ -117,17 +117,22 @@ pub enum RolloutRecorderParams {
     },
 }
 
+mod projection_checkpoint;
+
+pub use projection_checkpoint::ProjectionOrdinals;
+pub use projection_checkpoint::RolloutCheckpoint;
+
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
     ReadUnpersistedSessionMeta {
         ack: oneshot::Sender<Option<SessionMeta>>,
     },
     Persist {
-        ack: oneshot::Sender<std::io::Result<()>>,
+        ack: oneshot::Sender<std::io::Result<Option<RolloutCheckpoint>>>,
     },
     /// Ensure all prior writes are processed; respond when flushed.
     Flush {
-        ack: oneshot::Sender<std::io::Result<()>>,
+        ack: oneshot::Sender<std::io::Result<Option<RolloutCheckpoint>>>,
     },
     Shutdown {
         ack: oneshot::Sender<std::io::Result<()>>,
@@ -976,8 +981,6 @@ impl RolloutRecorder {
                 subagent_history_start_ordinal,
                 initial_window_id,
             } => {
-                let ordinal_state =
-                    RolloutOrdinalState::for_new_rollout(history_mode, history_base);
                 let (path, started_at) =
                     precompute_new_rollout_path(config, conversation_id, rollout_id_override)?;
 
@@ -1026,6 +1029,7 @@ impl RolloutRecorder {
                     context_window: initial_window_id.map(SessionContextWindow::new),
                 };
 
+                let ordinal_state = RolloutOrdinalState::for_new_rollout(&session_meta);
                 RolloutWriterState {
                     writer: None,
                     deferred_creation: true,
@@ -1044,7 +1048,7 @@ impl RolloutRecorder {
                 let (path, sink, ordinal_state) =
                     open_rollout_for_append(path.as_path(), writer_lock.clone()).await?;
                 RolloutWriterState {
-                    writer: Some(JsonlWriter { sink }),
+                    writer: Some(JsonlWriter::new(sink)),
                     deferred_creation: false,
                     pending_items: Vec::new(),
                     realtime_sync_pending: false,
@@ -1130,20 +1134,7 @@ impl RolloutRecorder {
     /// This is idempotent. If materialization fails, the recorder keeps all pending items in memory
     /// and a later `persist()` or `flush()` can retry opening and writing the rollout file.
     pub async fn persist(&self) -> std::io::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(RolloutCmd::Persist { ack: tx })
-            .await
-            .map_err(|e| {
-                self.writer_task.terminal_failure().unwrap_or_else(|| {
-                    IoError::other(format!("failed to queue rollout persist: {e}"))
-                })
-            })?;
-        rx.await.map_err(|e| {
-            self.writer_task.terminal_failure().unwrap_or_else(|| {
-                IoError::other(format!("failed waiting for rollout persist: {e}"))
-            })
-        })?
+        self.persist_with_checkpoint().await.map(drop)
     }
 
     /// Flush all queued writes and wait until they are committed by the writer task.
@@ -1151,20 +1142,7 @@ impl RolloutRecorder {
     /// If the first writer attempt fails, the writer drops and reopens the file handle before
     /// retrying. This returns an error only when that retry also fails or the writer task is gone.
     pub async fn flush(&self) -> std::io::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(RolloutCmd::Flush { ack: tx })
-            .await
-            .map_err(|e| {
-                self.writer_task.terminal_failure().unwrap_or_else(|| {
-                    IoError::other(format!("failed to queue rollout flush: {e}"))
-                })
-            })?;
-        rx.await.map_err(|e| {
-            self.writer_task
-                .terminal_failure()
-                .unwrap_or_else(|| IoError::other(format!("failed waiting for rollout flush: {e}")))
-        })?
+        self.flush_with_checkpoint().await.map(drop)
     }
 
     pub async fn load_rollout_items(
@@ -1911,7 +1889,7 @@ impl RolloutWriterState {
         let sink = tokio::task::spawn_blocking(move || open_log_file(&path))
             .await
             .map_err(IoError::other)??;
-        self.writer = Some(JsonlWriter { sink });
+        self.writer = Some(JsonlWriter::new(sink));
         self.deferred_creation = false;
         Ok(())
     }
@@ -2014,10 +1992,18 @@ async fn rollout_writer(
                 state.flush_if_materialized().await;
             }
             RolloutCmd::Persist { ack } => {
-                let _ = ack.send(state.persist().await);
+                let result = match state.persist().await {
+                    Ok(()) => Ok(state.checkpoint().await),
+                    Err(err) => Err(err),
+                };
+                let _ = ack.send(result);
             }
             RolloutCmd::Flush { ack } => {
-                let _ = ack.send(state.flush().await);
+                let result = match state.flush().await {
+                    Ok(()) => Ok(state.checkpoint().await),
+                    Err(err) => Err(err),
+                };
+                let _ = ack.send(result);
             }
             RolloutCmd::Discard { ack } => {
                 let _ = ack.send(());
@@ -2082,7 +2068,7 @@ pub async fn append_rollout_item_to_path(
     let (_rollout_path, sink, ordinal_state) =
         open_rollout_for_append(rollout_path, writer_lock).await?;
     let ordinal = ordinal_state.current()?;
-    let mut writer = JsonlWriter { sink };
+    let mut writer = JsonlWriter::new(sink);
     writer.write_rollout_item(item, ordinal).await?;
     // Nothing follows this line, so end its frame now rather than leave it for the next writer.
     writer.sink.close_frame().await
@@ -2143,6 +2129,9 @@ async fn open_rollout_for_append(
 
 struct JsonlWriter {
     sink: RolloutSink,
+    // Only framed rollout projection benefits from retaining serialized lines. The cap bounds
+    // retention regardless of a caller's flush cadence; a missed suffix can be replayed.
+    suffix: Vec<u8>,
 }
 
 #[derive(serde::Serialize)]
@@ -2172,12 +2161,11 @@ impl JsonlWriter {
             ordinal,
             item: rollout_item,
         };
-        self.write_line(&line).await
-    }
-    async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
-        let mut json = serde_json::to_string(item)?;
-        json.push('\n');
-        self.sink.append_line(json.into_bytes()).await
+        let mut bytes = serde_json::to_vec(&line)?;
+        bytes.push(b'\n');
+        let durable = self.sink.append_line(bytes).await?;
+        self.capture_projection_suffix(ordinal, &durable);
+        Ok(())
     }
 }
 

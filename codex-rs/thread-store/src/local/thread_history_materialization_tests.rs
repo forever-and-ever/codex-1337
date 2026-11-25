@@ -508,10 +508,61 @@ WHERE thread_id = ?
     items.extend(events.iter().cloned());
     items.extend(events);
     items.push(turn_completed("turn-2"));
-    store
+    // The writer already owns its file descriptor. Denying new read opens tests that neither
+    // append projection nor an unchanged flush needs a separate compressed reader.
+    #[cfg(unix)]
+    let denied_path = {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = codex_rollout::test_support::rollout_file(&rollout_path);
+        assert_eq!(
+            path.extension().and_then(std::ffi::OsStr::to_str),
+            Some("zst")
+        );
+        let original = fs::metadata(&path).unwrap().permissions();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o200)).unwrap();
+        (path, original)
+    };
+    let appended = store
         .append_items(AppendThreadItemsParams { thread_id, items })
+        .await;
+    let unchanged = store.flush_thread(thread_id).await;
+    let before_shutdown = self::projection_state(&pool, thread_id).await;
+    #[cfg(unix)]
+    fs::set_permissions(denied_path.0, denied_path.1).unwrap();
+    appended.expect("append thought snapshots and duplicate completions");
+    unchanged.expect("flush without a new batch");
+    assert_eq!(before_shutdown.1, 11);
+
+    // A failed SQLite transaction does not move the checkpoint past rows it did not commit.
+    sqlx::query(
+        "CREATE TRIGGER reject_projection BEFORE UPDATE ON thread_history_projection_state
+                 BEGIN SELECT RAISE(ABORT, 'projection unavailable'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("replayed-turn")],
+        })
         .await
-        .expect("append thought snapshots and duplicate completions");
+        .expect("write canonical bytes despite projection failure");
+    assert_eq!(
+        self::projection_state(&pool, thread_id).await,
+        before_shutdown
+    );
+    sqlx::query("DROP TRIGGER reject_projection")
+        .execute(&pool)
+        .await
+        .unwrap();
+    store
+        .flush_thread(thread_id)
+        .await
+        .expect("replay from the committed checkpoint");
+    assert_eq!(self::projection_state(&pool, thread_id).await.1, 12);
+
     store
         .shutdown_thread(thread_id)
         .await

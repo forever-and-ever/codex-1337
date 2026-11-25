@@ -6,6 +6,7 @@ use super::super::LocalThreadStore;
 use super::super::thread_history::RolloutProjectionStep;
 use super::super::thread_history::apply_projection;
 use super::ProjectionRollout;
+use super::project_records;
 use super::read_projection_batches;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
@@ -25,6 +26,7 @@ pub(super) async fn read_and_apply(
     store: &LocalThreadStore,
     thread_id: ThreadId,
     rollout: ProjectionRollout,
+    committed_suffix: Option<Vec<u8>>,
     start_offset: u64,
     expected_ordinal: u64,
     initial_ordinal: u64,
@@ -38,24 +40,39 @@ pub(super) async fn read_and_apply(
     let span = tracing::Span::current();
     let worker = tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
-        let read = read_projection_batches(
-            &rollout,
-            start_offset,
-            expected_ordinal,
-            thread_id,
-            subagent_history_start_ordinal,
-            || stop.is_closed(),
-            |projections, next_offset| {
-                sender
-                    .blocking_send(ProjectionMessage::Batch {
-                        projections,
-                        next_offset,
-                    })
-                    .map_err(|_| ThreadStoreError::Internal {
-                        message: "projection consumer stopped".to_string(),
-                    })
-            },
-        );
+        let emit = |projections, next_offset| {
+            sender
+                .blocking_send(ProjectionMessage::Batch {
+                    projections,
+                    next_offset,
+                })
+                .map_err(|_| ThreadStoreError::Internal {
+                    message: "projection consumer stopped".to_string(),
+                })
+        };
+        let is_cancelled = || stop.is_closed();
+        let read = match committed_suffix {
+            Some(bytes) => project_records(
+                &rollout,
+                bytes.as_slice(),
+                bytes.len() as u64,
+                start_offset,
+                expected_ordinal,
+                thread_id,
+                subagent_history_start_ordinal,
+                is_cancelled,
+                emit,
+            ),
+            None => read_projection_batches(
+                &rollout,
+                start_offset,
+                expected_ordinal,
+                thread_id,
+                subagent_history_start_ordinal,
+                is_cancelled,
+                emit,
+            ),
+        };
         let completion = match read {
             Ok(()) => ProjectionMessage::Complete,
             Err(error) => ProjectionMessage::Failed(error),

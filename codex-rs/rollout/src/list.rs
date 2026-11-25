@@ -1183,7 +1183,26 @@ impl std::error::Error for MetadataReadError {
 /// Read the SessionMetaLine from the head of a rollout file for reuse by
 /// callers that need the session metadata (e.g. to derive a cwd for config).
 pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
-    let mut lines = compression::open_rollout_line_reader(path).await?;
+    let lines = compression::open_rollout_head_reader(path).await?;
+    match read_session_meta_lines(path, lines).await {
+        Err(err)
+            if err
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<MetadataReadError>())
+                .is_some_and(|metadata| metadata.reason == "missing_metadata") =>
+        {
+            // A re-encoded rollout can have lines before metadata, even in earlier frames.
+            let lines = compression::open_rollout_line_reader(path).await?;
+            read_session_meta_lines(path, lines).await
+        }
+        result => result,
+    }
+}
+
+async fn read_session_meta_lines(
+    path: &Path,
+    mut lines: compression::RolloutLineReader,
+) -> io::Result<SessionMetaLine> {
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
         if trimmed.is_empty() {

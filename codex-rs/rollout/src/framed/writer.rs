@@ -234,8 +234,7 @@ impl FramedWriter {
     }
 
     /// Decoded bytes written so far.
-    #[cfg(test)]
-    pub(super) fn logical_len(&self) -> u64 {
+    pub(crate) fn logical_len(&self) -> u64 {
         self.logical_end
     }
 
