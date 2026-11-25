@@ -38,21 +38,28 @@ pub(crate) async fn file_modified_time(path: &Path) -> io::Result<Option<time::O
 /// If the requested path disappears during a representation transition, this briefly retries
 /// resolution so callers do not need to know which representation is on disk.
 pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineReader> {
+    open_line_reader(path, LineReaderPath::ResolveSiblings).await
+}
+
+pub(crate) async fn open_exact_rollout_line_reader(path: &Path) -> io::Result<RolloutLineReader> {
+    open_line_reader(path, LineReaderPath::Exact).await
+}
+
+enum LineReaderPath {
+    ResolveSiblings,
+    Exact,
+}
+
+async fn open_line_reader(
+    path: &Path,
+    resolution: LineReaderPath,
+) -> io::Result<RolloutLineReader> {
     let started_at = Instant::now();
     let mut metrics = ReadMetrics::default();
-    let result = async {
-        for _ in 0..MAX_NOT_FOUND_RETRIES {
-            match reader::open_once(path, &mut metrics).await {
-                Ok(reader) => return Ok(reader),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                    tokio::time::sleep(OPEN_ROLLOUT_LINE_READER_RETRY_DELAY).await;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        reader::open_once(path, &mut metrics).await
-    }
-    .await;
+    let result = match resolution {
+        LineReaderPath::ResolveSiblings => open_with_retries(path, &mut metrics).await,
+        LineReaderPath::Exact => reader::open_exact(path.to_path_buf(), &mut metrics).await,
+    };
     metrics.duration = started_at.elapsed();
     match result {
         Ok(inner) => Ok(RolloutLineReader { inner, metrics }),
@@ -61,6 +68,22 @@ pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineRead
             Err(err)
         }
     }
+}
+
+async fn open_with_retries(
+    path: &Path,
+    metrics: &mut ReadMetrics,
+) -> io::Result<RolloutLineReaderInner> {
+    for _ in 0..MAX_NOT_FOUND_RETRIES {
+        match reader::open_once(path, metrics).await {
+            Ok(reader) => return Ok(reader),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                tokio::time::sleep(OPEN_ROLLOUT_LINE_READER_RETRY_DELAY).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    reader::open_once(path, metrics).await
 }
 
 #[cfg(test)]
@@ -393,6 +416,13 @@ mod reader {
         let path = path::existing_rollout_path(path)
             .await
             .unwrap_or_else(|| path.to_path_buf());
+        open_exact(path, metrics).await
+    }
+
+    pub(super) async fn open_exact(
+        path: std::path::PathBuf,
+        metrics: &mut ReadMetrics,
+    ) -> io::Result<RolloutLineReaderInner> {
         if path::is_compressed_rollout_path(path.as_path()) {
             let (format, reader) = tokio::task::spawn_blocking(move || {
                 let input = File::open(path.as_path())?;

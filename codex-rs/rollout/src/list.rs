@@ -1183,25 +1183,51 @@ impl std::error::Error for MetadataReadError {
 /// Read the SessionMetaLine from the head of a rollout file for reuse by
 /// callers that need the session metadata (e.g. to derive a cwd for config).
 pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
-    let mut lines = compression::open_rollout_line_reader(path).await?;
+    read_session_meta(path, MetadataReadPolicy::Advisory).await
+}
+
+pub(crate) async fn read_exact_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
+    read_session_meta(path, MetadataReadPolicy::ReferenceCensus).await
+}
+
+enum MetadataReadPolicy {
+    Advisory,
+    ReferenceCensus,
+}
+
+async fn read_session_meta(path: &Path, policy: MetadataReadPolicy) -> io::Result<SessionMetaLine> {
+    let mut lines = match policy {
+        MetadataReadPolicy::Advisory => compression::open_rollout_line_reader(path).await?,
+        MetadataReadPolicy::ReferenceCensus => {
+            compression::open_exact_rollout_line_reader(path).await?
+        }
+    };
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let Ok(rollout_line) = crate::parse_rollout_line(trimmed) else {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                crate::recorder::reject_unknown_thread_history_mode(&value).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        MetadataReadError {
-                            reason: "invalid_history_mode",
-                            error,
+        let rollout_line = match crate::parse_rollout_line(trimmed) {
+            Ok(rollout_line) => rollout_line,
+            Err(error) => {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    crate::recorder::reject_unknown_thread_history_mode(&value).map_err(
+                        |error| {
+                            io::Error::new(
+                                error.kind(),
+                                MetadataReadError {
+                                    reason: "invalid_history_mode",
+                                    error,
+                                },
+                            )
                         },
-                    )
-                })?;
+                    )?;
+                }
+                if matches!(policy, MetadataReadPolicy::ReferenceCensus) {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                }
+                continue;
             }
-            continue;
         };
         match rollout_line.item {
             RolloutItem::SessionMeta(session_meta_line) => return Ok(*session_meta_line),
