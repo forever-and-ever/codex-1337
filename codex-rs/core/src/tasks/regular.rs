@@ -91,8 +91,10 @@ impl SessionTask for RegularTask {
         }
         .instrument(trace_span!("regular_task.prepare_run_turn"))
         .await;
+        let mut input = input;
         let prewarmed_client_session = match prewarmed_client_session {
             SessionStartupPrewarmResolution::Cancelled => {
+                crate::session::queued_input::leave_unrecorded_in_queue(&mut input);
                 let _ = run_hooks_and_record_inputs(
                     &sess,
                     &ctx,
@@ -111,6 +113,7 @@ impl SessionTask for RegularTask {
         if let Some(resolution) = ctx.extension_data.get::<SavedProgramResolution>()
             && let Err(error) = resolution.validate()
         {
+            crate::session::queued_input::leave_unrecorded_in_queue(&mut input);
             let _ = run_hooks_and_record_inputs(
                 &sess,
                 &ctx,

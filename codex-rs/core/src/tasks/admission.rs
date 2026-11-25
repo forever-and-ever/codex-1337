@@ -147,6 +147,7 @@ impl Session {
                 .take_pending_input_for_turn_state(turn_state)
                 .await,
         );
+        crate::session::queued_input::leave_unrecorded_in_queue(&mut input);
         let model_info = context.capture_current_model_info();
         if abort_reason != Some(&TurnAbortReason::Interrupted) {
             run_hooks_and_record_inputs(

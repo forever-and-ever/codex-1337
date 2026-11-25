@@ -30,6 +30,8 @@ pub(crate) use interjection::Interjection;
 /// Host capture metadata belonging to one input, including steers within another turn.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserInputMetadata {
+    #[serde(skip)]
+    pub(crate) queued_input_id: Option<String>,
     /// Private extension data carried with this queued input through completion.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extension_data: BTreeMap<String, serde_json::Value>,

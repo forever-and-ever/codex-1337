@@ -84,6 +84,8 @@ pub enum ModelSearchState {
 ///
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct CodexHarnessMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_input: Option<QueuedInputReceipt>,
     /// Realtime provenance for an accepted ordinary turn input. Never model-visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realtime_handoff: Option<Box<RealtimeHandoffMetadata>>,
@@ -217,6 +219,13 @@ pub struct CodexHarnessMetadata {
     /// Loading moves it into the payload; it is never set in memory.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tool_failed: bool,
+}
+
+/// Identifies the queue row whose canonical input this envelope records.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+pub struct QueuedInputReceipt {
+    pub id: String,
+    pub turn_id: String,
 }
 
 /// Facts that connect an ordinary accepted input to its originating realtime frames.

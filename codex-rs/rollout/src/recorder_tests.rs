@@ -1101,7 +1101,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
             )),
         }),
         deferred_creation: false,
-        realtime_sync_pending: false,
+        input_sync_pending: false,
         #[cfg(unix)]
         directories_to_sync: Vec::new(),
         pending_items: Vec::new(),

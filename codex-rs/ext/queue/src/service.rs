@@ -6,6 +6,7 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use codex_core::CodexThread;
+use codex_core::NotSubmittedReason;
 use codex_core::StartIfIdleSubmission;
 use codex_core::ThreadManager;
 use codex_core::TurnInput;
@@ -66,9 +67,31 @@ pub enum QueueServiceError {
     InputTooLarge { actual_chars: usize },
 }
 
+type PendingDispatches = Arc<StdMutex<HashSet<(ThreadId, String)>>>;
+
+struct DispatchPin {
+    key: (ThreadId, String),
+    dispatches: PendingDispatches,
+}
+
+impl Drop for DispatchPin {
+    fn drop(&mut self) {
+        self.dispatches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.key);
+    }
+}
+
+enum QueuedItemDispatch {
+    Routed(StartIfIdleSubmission),
+    Reconciled(String),
+}
+
 #[derive(Clone)]
 pub struct QueuedItemService {
     queue: Arc<dyn QueueStore>,
+    pending_dispatches: PendingDispatches,
     thread_manager: Weak<ThreadManager>,
     event_sink: Arc<dyn ExtensionEventSink>,
     dispatch_locks: Arc<StdMutex<HashMap<ThreadId, Weak<Mutex<()>>>>>,
@@ -83,6 +106,7 @@ impl QueuedItemService {
     ) -> Self {
         Self {
             queue,
+            pending_dispatches: Arc::default(),
             thread_manager,
             event_sink,
             dispatch_locks: Arc::new(StdMutex::new(HashMap::new())),
@@ -338,6 +362,19 @@ impl QueuedItemService {
         responsesapi_client_metadata =
             responsesapi_client_metadata.filter(|metadata| !metadata.is_empty());
         let _dispatch_guard = self.dispatch_guard(thread_id).await;
+        self.check_not_dispatched(thread_id, &queued_item_id)?;
+        if let Some(manager) = self.thread_manager.upgrade()
+            && let Ok(thread) = manager.get_thread(thread_id).await
+            && thread
+                .queued_input_turn_id(&queued_item_id)
+                .await?
+                .is_some()
+        {
+            return Err(ThreadStoreError::InvalidRequest {
+                message: format!("queued submission was already accepted: {queued_item_id}"),
+            }
+            .into());
+        }
         let previous = self
             .list(thread_id)
             .await?
@@ -376,6 +413,7 @@ impl QueuedItemService {
         queued_item_id: String,
     ) -> Result<bool, QueueServiceError> {
         let _dispatch_guard = self.dispatch_guard(thread_id).await;
+        self.check_not_dispatched(thread_id, &queued_item_id)?;
         self.delete_locked(thread_id, queued_item_id).await
     }
 
@@ -402,6 +440,85 @@ impl QueuedItemService {
         Ok(())
     }
 
+    fn is_dispatched(&self, thread_id: ThreadId, id: &str) -> bool {
+        self.pending_dispatches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&(thread_id, id.to_owned()))
+    }
+
+    fn check_not_dispatched(&self, thread_id: ThreadId, id: &str) -> Result<(), QueueServiceError> {
+        if self.is_dispatched(thread_id, id) {
+            return Err(ThreadStoreError::InvalidRequest {
+                message: format!("queued submission is being dispatched: {id}"),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    async fn route(
+        &self,
+        thread: &CodexThread,
+        item: QueuedItem,
+        trace: Option<W3cTraceContext>,
+    ) -> Result<QueuedItemDispatch, QueueServiceError> {
+        let thread_id = thread.startup_metadata().thread_id;
+        let QueuedItem {
+            id,
+            input,
+            responsesapi_client_metadata,
+        } = item;
+        if let Some(turn_id) = thread.queued_input_turn_id(&id).await? {
+            self.delete_locked(thread_id, id).await?;
+            return Ok(QueuedItemDispatch::Reconciled(turn_id));
+        }
+        let key = (thread_id, id.clone());
+        if !self
+            .pending_dispatches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key.clone())
+        {
+            return Ok(QueuedItemDispatch::Routed(
+                StartIfIdleSubmission::NotSubmitted {
+                    reason: NotSubmittedReason::NotIdle,
+                },
+            ));
+        }
+        let pin = DispatchPin {
+            key,
+            dispatches: self.pending_dispatches.clone(),
+        };
+        let service = self.clone();
+        let cleanup_id = id.clone();
+        let submission = thread.start_queued_input_if_idle(
+                TurnInputRequest::new(input)
+                    .with_responses_metadata(responsesapi_client_metadata)
+                    .with_trace(trace)
+                    .on_start(TurnStartOptions {
+                        turn_trigger: Some("queue".to_owned()),
+                        ..Default::default()
+                    }),
+                id.clone(),
+                move || async move {
+                    let _guard = service.dispatch_guard(thread_id).await;
+                    if let Err(error) = service.delete_locked(thread_id, cleanup_id.clone()).await {
+                        tracing::warn!(%thread_id, id = %cleanup_id, %error, "failed to clean up accepted queued input");
+                    }
+                    drop(pin);
+                },
+            ).await?;
+        if matches!(&submission, StartIfIdleSubmission::Started { .. })
+            && !self.is_dispatched(thread_id, &id)
+            && let Some(turn_id) = thread.queued_input_turn_id(&id).await?
+        {
+            self.delete_locked(thread_id, id).await?;
+            return Ok(QueuedItemDispatch::Reconciled(turn_id));
+        }
+        Ok(QueuedItemDispatch::Routed(submission))
+    }
+
     /// Starts the selected queued message only when its thread is idle.
     pub async fn start(
         &self,
@@ -422,26 +539,16 @@ impl QueuedItemService {
                     |id| format!("queued submission not found: {id}"),
                 ),
             })?;
-        let queued_item_id = item.id.clone();
-        let input = item.input;
-        if !supported_queue_input(&input) {
+        if !supported_queue_input(&item.input) {
             return Err(QueueServiceError::InvalidInput);
         }
-        let submission = thread
-            .start_turn_if_idle(
-                TurnInputRequest::new(input)
-                    .with_responses_metadata(item.responsesapi_client_metadata)
-                    .with_trace(trace)
-                    .on_start(TurnStartOptions {
-                        turn_trigger: Some("queue".to_string()),
-                        ..Default::default()
-                    }),
-            )
-            .await?;
-        if matches!(submission, StartIfIdleSubmission::Started { .. }) {
-            self.delete_locked(thread_id, queued_item_id).await?;
-        }
-        Ok(submission)
+        Ok(match self.route(thread, item, trace).await? {
+            QueuedItemDispatch::Routed(submission) => submission,
+            QueuedItemDispatch::Reconciled(turn_id) => StartIfIdleSubmission::Started {
+                root_turn_id: turn_id.clone(),
+                turn_id,
+            },
+        })
     }
 
     async fn dispatch_if_idle(&self, thread_id: ThreadId) -> Result<(), QueueServiceError> {
@@ -478,37 +585,17 @@ impl QueuedItemService {
                 continue;
             }
 
-            match thread
-                .start_turn_if_idle(
-                    TurnInputRequest::new(item.input)
-                        .with_responses_metadata(item.responsesapi_client_metadata)
-                        .on_start(TurnStartOptions {
-                            turn_trigger: Some("queue".to_string()),
-                            ..Default::default()
-                        }),
-                )
-                .await
-            {
-                Ok(StartIfIdleSubmission::Started { .. }) => {
-                    self.delete_locked(thread_id, queued_item_id).await?;
+            match self.route(&thread, item, /*trace*/ None).await {
+                Ok(QueuedItemDispatch::Reconciled(_)) => continue,
+                Ok(QueuedItemDispatch::Routed(StartIfIdleSubmission::Started { .. })) => {
                     return Ok(());
                 }
-                Ok(StartIfIdleSubmission::NotSubmitted { reason }) => {
-                    tracing::warn!(
-                        %thread_id,
-                        %queued_item_id,
-                        ?reason,
-                        "core could not start queued input"
-                    );
+                Ok(QueuedItemDispatch::Routed(StartIfIdleSubmission::NotSubmitted { reason })) => {
+                    tracing::debug!(%thread_id, %queued_item_id, ?reason, "core deferred queued input");
                     return Ok(());
                 }
                 Err(error) => {
-                    tracing::warn!(
-                        %thread_id,
-                        %queued_item_id,
-                        %error,
-                        "core could not start queued input"
-                    );
+                    tracing::warn!(%thread_id, %queued_item_id, %error, "core could not start queued input");
                     return Ok(());
                 }
             }
@@ -590,7 +677,7 @@ async fn prepare_queued_input(mut input: TurnInput) -> Result<TurnInput, QueueSe
 fn supported_queue_input(input: &TurnInput) -> bool {
     // TELOS(server-hosted-agents): attributed deliveries stay tool output in the durable queue.
     let item = match input {
-        TurnInput::UserInput { .. } => return true,
+        TurnInput::UserInput { content, .. } => return !content.is_empty(),
         TurnInput::ResponseItem(item) => item,
         TurnInput::AnnotatedResponseItem(annotated) => &annotated.item,
         TurnInput::InterAgentCommunication(_) => return false,

@@ -1240,6 +1240,9 @@ pub(crate) async fn run_hooks_and_record_inputs(
             if let Some(id) = realtime_handoff_id {
                 sess.reject_realtime_handoff(id).await;
             }
+            if let Some(id) = super::queued_input::queued_input_id(input_item.as_ref()) {
+                super::queued_input::complete_queued_input(turn_context, id).await;
+            }
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {

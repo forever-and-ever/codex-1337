@@ -2501,6 +2501,7 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
                         client_id: Some("rejected-draft".into()),
                     })),
                     mode,
+                    queued_input: None,
                     reply,
                 },
                 turn_extension_init: None,

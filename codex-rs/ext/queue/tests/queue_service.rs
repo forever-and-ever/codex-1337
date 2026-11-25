@@ -464,12 +464,12 @@ async fn starting_a_selected_item_preserves_the_remaining_queue() -> anyhow::Res
         submission,
         StartIfIdleSubmission::Started { turn_id, .. } if !turn_id.is_empty()
     ));
-    assert_eq!(vec![first], service.list(thread_id).await?);
     wait_for_event_match(test.codex.as_ref(), |event| match event {
         EventMsg::TurnComplete(_) => Some(()),
         _ => None,
     })
     .await;
+    assert_eq!(vec![first], service.list(thread_id).await?);
     assert_eq!(
         Some("second"),
         response
@@ -485,6 +485,199 @@ async fn starting_a_selected_item_preserves_the_remaining_queue() -> anyhow::Res
             .context("missing turn metadata")?,
     )?;
     assert_eq!(metadata["client_type"], "ios_app");
+    Ok(())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "an independent connection injects a real SQLite queue DELETE failure"
+)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::Result<()> {
+    #[derive(Default)]
+    struct HoldFirstTask {
+        entered: tokio::sync::Notify,
+        first: AtomicBool,
+    }
+
+    impl codex_extension_api::TurnLifecycleContributor for HoldFirstTask {
+        fn on_turn_start<'a>(
+            &'a self,
+            input: codex_extension_api::TurnStartInput<'a>,
+        ) -> ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                if input.token_usage_at_turn_start.is_none()
+                    && !self.first.swap(true, Ordering::SeqCst)
+                {
+                    self.entered.notify_one();
+                    std::future::pending::<()>().await;
+                }
+            })
+        }
+    }
+
+    let server = start_mock_server().await;
+    let model = responses::mount_sse_sequence(
+        &server,
+        ["committed", "follow-up"]
+            .into_iter()
+            .map(responses::sse_completed)
+            .collect(),
+    )
+    .await;
+    let gate = Arc::new(HoldFirstTask::default());
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.turn_lifecycle_contributor(gate.clone());
+    let test = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(|config| config.include_environment_context = false)
+        .build_with_auto_env(&server)
+        .await?;
+    let thread_id = test.session_configured.thread_id;
+    let queue = QueuedItemService::new(
+        loaded_thread_queue(&test)?,
+        Arc::downgrade(&test.thread_manager),
+        Arc::new(NoopExtensionEventSink),
+    );
+    // Populate the queue without an automatic wake: we want the manually selected
+    // row to reach task registration while its prompt is still entirely in RAM.
+    let external = QueuedItemService::new(
+        loaded_thread_queue(&test)?,
+        Weak::new(),
+        Arc::new(NoopExtensionEventSink),
+    );
+    let item = external
+        .enqueue(thread_id, user_input("keep this queued prompt"))
+        .await?;
+    let editable = external.enqueue(thread_id, user_input("later")).await?;
+    assert!(matches!(
+        queue
+            .start(test.codex.as_ref(), Some(item.id.clone()), None)
+            .await?,
+        StartIfIdleSubmission::Started { .. }
+    ));
+    tokio::time::timeout(Duration::from_secs(10), gate.entered.notified()).await?;
+    assert_eq!(
+        vec![item.clone(), editable.clone()],
+        queue.list(thread_id).await?
+    );
+    assert!(model.requests().is_empty());
+    assert!(
+        queue
+            .update(thread_id, item.id.clone(), user_input("overwrite"))
+            .await
+            .is_err()
+    );
+    assert!(queue.delete(thread_id, item.id.clone()).await.is_err());
+    assert!(queue.delete(thread_id, editable.id).await?);
+    test.codex
+        .submit(codex_protocol::protocol::Op::Interrupt)
+        .await?;
+    wait_for_event_with_timeout(
+        test.codex.as_ref(),
+        |event| matches!(event, EventMsg::TurnAborted(_)),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert_eq!(vec![item.clone()], queue.list(thread_id).await?);
+    assert_eq!(None, test.codex.queued_input_turn_id(&item.id).await?);
+    let rollout_path = test.codex.rollout_path().context("rollout path missing")?;
+    test.codex.flush_rollout().await?;
+    test.codex.shutdown_and_wait().await?;
+    test.thread_manager.remove_thread(&thread_id).await;
+    let resumed = test
+        .thread_manager
+        .resume_legacy_thread_from_rollout(
+            test.config.clone(),
+            rollout_path.clone(),
+            test.thread_manager.auth_manager(),
+            /*parent_trace*/ None,
+            Default::default(),
+        )
+        .await?;
+
+    // The other fault order: roll the queue DELETE back after Core fsyncs the
+    // receipt. The model request must still happen once, even across reload.
+    let database = test
+        .codex
+        .state_db()
+        .context("state runtime unavailable")?
+        .sqlite()
+        .queue_db_path();
+    let sql = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new().filename(database),
+    )
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER fault_queue_cleanup BEFORE DELETE ON queued_items \
+                 BEGIN SELECT RAISE(ABORT, 'injected queue cleanup failure'); END",
+    )
+    .execute(&sql)
+    .await?;
+    let StartIfIdleSubmission::Started { turn_id, .. } = queue
+        .start(resumed.thread.as_ref(), Some(item.id.clone()), None)
+        .await?
+    else {
+        anyhow::bail!("retained input did not start after reload");
+    };
+    wait_for_event_with_timeout(
+        resumed.thread.as_ref(),
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert_eq!(vec![item.clone()], queue.list(thread_id).await?);
+    assert_eq!(
+        Some(turn_id.clone()),
+        resumed.thread.queued_input_turn_id(&item.id).await?
+    );
+    assert!(matches!(
+        queue
+            .start(resumed.thread.as_ref(), Some(item.id.clone()), None)
+            .await,
+        Err(QueueServiceError::Storage(_))
+    ));
+    assert_eq!(1, model.requests().len());
+    resumed.thread.shutdown_and_wait().await?;
+    test.thread_manager.remove_thread(&thread_id).await;
+    let reopened = test
+        .thread_manager
+        .resume_legacy_thread_from_rollout(
+            test.config.clone(),
+            rollout_path,
+            test.thread_manager.auth_manager(),
+            /*parent_trace*/ None,
+            Default::default(),
+        )
+        .await?;
+    assert_eq!(
+        Some(turn_id),
+        reopened.thread.queued_input_turn_id(&item.id).await?
+    );
+    sqlx::query("DROP TRIGGER fault_queue_cleanup")
+        .execute(&sql)
+        .await?;
+    emit_idle(&queue, thread_id).await;
+    assert!(queue.list(thread_id).await?.is_empty());
+    external
+        .enqueue(thread_id, user_input("a different prompt"))
+        .await?;
+    emit_idle(&queue, thread_id).await;
+    wait_for_event_with_timeout(
+        reopened.thread.as_ref(),
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(10),
+    )
+    .await;
+    let prompts = model
+        .requests()
+        .into_iter()
+        .filter_map(|request| request.message_input_texts("user").pop())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        vec!["keep this queued prompt", "a different prompt"],
+        prompts
+    );
     Ok(())
 }
 
