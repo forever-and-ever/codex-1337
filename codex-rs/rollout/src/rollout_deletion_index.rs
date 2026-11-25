@@ -6,17 +6,14 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
-use anyhow::bail;
 use anyhow::ensure;
 use codex_protocol::RolloutId;
 use codex_protocol::ThreadId;
 use tokio::fs;
 
 use crate::ARCHIVED_SESSIONS_SUBDIR;
-use crate::RolloutItem;
 use crate::SESSIONS_SUBDIR;
-use crate::compression::open_exact_rollout_line_reader;
-use crate::parse_rollout_line;
+use crate::list::read_exact_session_meta_line;
 use crate::rollout_file_name::RolloutFileName;
 
 /// Physical rollout copies and their references, verified for deletion.
@@ -67,17 +64,19 @@ impl RolloutDeletionIndex {
                         stack.push(path);
                         continue;
                     }
-                    // Never traverse links or treat an unvisited subtree as empty.
-                    ensure!(
-                        !file_type.is_symlink(),
-                        "unexpected symlink in rollout directory: {}",
-                        path.display()
-                    );
-                    let Some(file_name) = path
+                    let file_name = path
                         .file_name()
                         .and_then(|name| name.to_str())
-                        .and_then(RolloutFileName::parse)
-                    else {
+                        .and_then(RolloutFileName::parse);
+                    if file_type.is_symlink() {
+                        ensure!(
+                            file_name.is_none() && !symlink_target_is_directory(&path).await?,
+                            "cannot verify symlinked rollout or subtree: {}",
+                            path.display()
+                        );
+                        continue;
+                    }
+                    let Some(file_name) = file_name else {
                         continue;
                     };
                     ensure!(
@@ -155,31 +154,24 @@ impl RolloutDeletionIndex {
 }
 
 async fn read_copy(path: PathBuf) -> Result<(ThreadId, RolloutCopy)> {
-    let context = || format!("read rollout header {}", path.display());
-    let mut reader = open_exact_rollout_line_reader(&path)
+    let meta = read_exact_session_meta_line(&path)
         .await
-        .with_context(context)?;
-    while let Some(line) = reader.next_line().await.with_context(context)? {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let RolloutItem::SessionMeta(header) =
-            parse_rollout_line(line.trim()).with_context(context)?.item
-        else {
-            bail!(
-                "rollout does not start with session metadata: {}",
-                path.display()
-            );
-        };
-        let meta = header.meta;
-        return Ok((
-            meta.id,
-            RolloutCopy {
-                path,
-                history_base: meta.history_base.map(|base| base.thread_id),
-                attached_parent: meta.forked_from_id.filter(|_| meta.attached_thread),
-            },
-        ));
+        .with_context(|| format!("read rollout header {}", path.display()))?
+        .meta;
+    Ok((
+        meta.id,
+        RolloutCopy {
+            path,
+            history_base: meta.history_base.map(|base| base.thread_id),
+            attached_parent: meta.forked_from_id.filter(|_| meta.attached_thread),
+        },
+    ))
+}
+
+async fn symlink_target_is_directory(path: &Path) -> Result<bool> {
+    match fs::metadata(path).await {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("inspect symlink target {}", path.display())),
     }
-    bail!("rollout has no session metadata: {}", path.display())
 }

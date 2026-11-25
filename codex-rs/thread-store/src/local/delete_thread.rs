@@ -402,7 +402,14 @@ mod tests {
         let compressed = zstd::stream::encode_all(referenced_header.as_slice(), 0)
             .expect("compress dependent child");
         std::fs::write(&compressed_path, compressed).expect("write compressed child");
-        std::fs::write(&child_path, independent_header).expect("replace plain child");
+        let preamble = serde_json::json!({
+            "timestamp": "2025-01-03T12:00:01Z",
+            "type": "event_msg",
+            "payload": {"type": "user_message", "message": "legacy preamble", "kind": "plain"}
+        });
+        let mut independent_rollout = format!("{preamble}\n").into_bytes();
+        independent_rollout.extend(independent_header);
+        std::fs::write(&child_path, independent_rollout).expect("replace plain child");
 
         let err = store
             .delete_thread(DeleteThreadParams {

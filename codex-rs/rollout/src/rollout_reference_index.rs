@@ -35,7 +35,9 @@ struct IndexedRollout {
 }
 
 impl RolloutReferenceIndex {
-    /// Scans active and archived local rollout metadata.
+    /// Scans active and archived local rollout metadata, skipping unreadable headers.
+    ///
+    /// This index cannot establish that deleting a rollout is safe.
     pub async fn scan(codex_home: &Path) -> io::Result<Self> {
         Self::scan_paths(
             vec![
