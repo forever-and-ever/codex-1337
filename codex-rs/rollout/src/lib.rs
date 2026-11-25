@@ -106,6 +106,7 @@ pub use compression::existing_rollout_path;
 pub use compression::existing_rollout_with_metadata_sync;
 pub use compression::open_rollout_line_reader;
 pub use compression::plain_rollout_path;
+pub use seekable_reader::open_rollout_range;
 pub use seekable_reader::open_rollout_seekable_reader;
 pub use seekable_reader::read_rollout_prefix;
 pub use seekable_reader::read_rollout_text;

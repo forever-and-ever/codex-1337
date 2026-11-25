@@ -1151,6 +1151,77 @@ async fn referenced_paginated_rollout_projects_inherited_ordinal_range() {
     .await
     .expect("read child projection ordinal");
     assert_eq!((turn_ordinal, next_ordinal), (5, 8));
+
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: source_id,
+            items: vec![
+                turn_started("later-turn"),
+                user_message("later message"),
+                turn_completed("later-turn"),
+            ],
+        })
+        .await
+        .expect("append later source history");
+    let (_, end_byte_offset) = rollout_line_byte_offsets(source_path.as_path(), /*ordinal*/ 6);
+    let sibling_id = ThreadId::default();
+    create_paginated_subagent_thread(
+        &store,
+        sibling_id,
+        Some(HistoryPosition {
+            thread_id: source_id,
+            end_ordinal_exclusive: 7,
+            end_byte_offset: u64::try_from(end_byte_offset).unwrap(),
+        }),
+        /*subagent_history_start_ordinal*/ None,
+    )
+    .await;
+    store
+        .persist_thread(sibling_id, PersistContext::Standard)
+        .await
+        .expect("persist later-cut sibling");
+    store
+        .shutdown_thread(source_id)
+        .await
+        .expect("unload source");
+    let read_turns = async |thread_id| {
+        store
+            .list_turns(ListTurnsParams {
+                thread_id,
+                include_archived: false,
+                cursor: None,
+                page_size: 10,
+                sort_direction: SortDirection::Asc,
+                items_view: StoredTurnItemsView::NotLoaded,
+            })
+            .await
+            .expect("read saved turns")
+            .turns
+            .into_iter()
+            .map(|turn| turn.turn_id)
+            .collect::<Vec<_>>()
+    };
+
+    // Whether the parent or the later-cut sibling follows the first bounded rebuild, the
+    // shared projection must extend to that request's own end without an intervening write.
+    for (first, second) in [(source_id, sibling_id), (sibling_id, source_id)] {
+        sqlx::query(
+            "UPDATE thread_history_projection_state SET accessed_at_ms = 0 WHERE thread_id = ?",
+        )
+        .bind(source_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("age source projection");
+        assert_eq!(
+            super::super::history_pruning::evict_unused(&store, 1)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(read_turns(child_id).await, ["source-turn", "child-turn"]);
+        assert_eq!(read_turns(first).await, ["source-turn", "later-turn"]);
+        assert_eq!(read_turns(second).await, ["source-turn", "later-turn"]);
+    }
 }
 
 #[tokio::test]

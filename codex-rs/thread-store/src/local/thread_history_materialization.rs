@@ -146,7 +146,7 @@ async fn materialize_to_sqlite_with_state_db(
         .cutoff(&rollout.path)
         .is_some_and(|end| start_offset >= end.end_byte_offset)
     {
-        return pipeline::finish_projection(store, thread_id).await;
+        return Ok(());
     }
     if projection_state.is_none()
         && !rollout.reads.tracks(&rollout.path)
@@ -198,34 +198,42 @@ fn read_projection_batches(
     mut emit: impl FnMut(Vec<RolloutProjectionStep>, u64) -> ThreadStoreResult<()>,
 ) -> ThreadStoreResult<()> {
     let rollout_path = &rollout.path;
-    let mut file = match rollout.reads.open(rollout_path, &is_cancelled) {
-        Ok(file) => file,
-        Err(err)
-            if err.kind() == std::io::ErrorKind::NotFound
-                && start_offset == 0
-                && !rollout.reads.tracks(rollout_path) =>
-        {
-            return Ok(());
-        }
-        Err(err) => return Err(thread_store_io_error(err)),
-    };
-    let file_end_offset = match rollout.reads.cutoff(rollout_path) {
-        Some(end) => end.end_byte_offset,
-        None => file.seek(SeekFrom::End(0)).map_err(thread_store_io_error)?,
-    };
-    let byte_count = file_end_offset.checked_sub(start_offset).ok_or_else(|| {
-        rollout.reads.record_failure(rollout_path);
-        ThreadStoreError::Internal {
-            message: format!(
-                "durable rollout shrank before projection: {}",
-                rollout_path.display()
-            ),
-        }
-    })?;
-    file.seek(SeekFrom::Start(start_offset))
-        .map_err(thread_store_io_error)?;
+    let (source, byte_count): (Box<dyn Read>, u64) =
+        if let Some(end) = rollout.reads.cutoff(rollout_path) {
+            let byte_count = end.end_byte_offset - start_offset;
+            let source = codex_rollout::open_rollout_range(
+                rollout_path,
+                start_offset,
+                end.end_byte_offset,
+                &is_cancelled,
+            )
+            .map_err(|err| rollout.reads.source_error(rollout_path, err))
+            .map_err(thread_store_io_error)?;
+            (Box::new(source), byte_count)
+        } else {
+            let mut file = match rollout.reads.open(rollout_path, &is_cancelled) {
+                Ok(file) => file,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound && start_offset == 0 => {
+                    return Ok(());
+                }
+                Err(err) => return Err(thread_store_io_error(err)),
+            };
+            let byte_count = file
+                .seek(SeekFrom::End(0))
+                .map_err(thread_store_io_error)?
+                .checked_sub(start_offset)
+                .ok_or_else(|| ThreadStoreError::Internal {
+                    message: format!(
+                        "durable rollout shrank before projection: {}",
+                        rollout_path.display()
+                    ),
+                })?;
+            file.seek(SeekFrom::Start(start_offset))
+                .map_err(thread_store_io_error)?;
+            (Box::new(file), byte_count)
+        };
     // Freeze this pass at the captured end, without retaining the entire durable suffix.
-    let mut reader = BufReader::new(file.take(byte_count));
+    let mut reader = BufReader::new(source.take(byte_count));
     let mut line_bytes = Vec::new();
     // Only project the newline-terminated prefix; leave a trailing partial record for the next
     // pass.
@@ -249,6 +257,7 @@ fn read_projection_batches(
         line_bytes.clear();
         if reader
             .read_until(b'\n', &mut line_bytes)
+            .map_err(|err| rollout.reads.source_error(rollout_path, err))
             .map_err(thread_store_io_error)?
             == 0
         {
@@ -434,9 +443,12 @@ fn read_projection_batches(
         line_start_offset = line_end_offset;
     }
     if reader.get_ref().limit() != 0 {
-        return Err(thread_store_io_error(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "durable rollout shrank during projection",
+        return Err(thread_store_io_error(rollout.reads.source_error(
+            rollout_path,
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "durable rollout shrank during projection",
+            ),
         )));
     }
     if next_offset != batch_start_offset {
