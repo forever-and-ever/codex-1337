@@ -221,7 +221,7 @@ pub struct CodexHarnessMetadata {
     pub tool_failed: bool,
 }
 
-/// Identifies the queue row whose canonical input this envelope records.
+/// Links a durable queue disposition to its row and turn.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct QueuedInputReceipt {
     pub id: String,
