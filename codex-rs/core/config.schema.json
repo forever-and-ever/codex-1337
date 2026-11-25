@@ -4090,6 +4090,12 @@
           ],
           "default": null
         },
+        "forgotten_models": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EndpointFilter"
+          },
+          "type": "object"
+        },
         "key_files": {
           "additionalProperties": {
             "$ref": "#/definitions/AbsolutePathBuf"

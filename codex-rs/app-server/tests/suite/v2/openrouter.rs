@@ -6,8 +6,11 @@ use codex_app_server_protocol::OpenRouterKeyAddResponse;
 use codex_app_server_protocol::OpenRouterKeyState;
 use codex_app_server_protocol::OpenRouterKeyStatusResponse;
 use codex_app_server_protocol::OpenRouterModelEndpointsResponse;
+use codex_app_server_protocol::OpenRouterModelForgetResponse;
 use codex_app_server_protocol::OpenRouterModelRouteResponse;
 use codex_app_server_protocol::OpenRouterModelSaveResponse;
+use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
@@ -50,6 +53,17 @@ async fn openrouter_saved_model_routes_spend_and_key_quota() -> Result<()> {
 async fn check_saved_model_routes_spend_and_key_quota(model: &str, host: &str) -> Result<()> {
     let home = TempDir::new()?;
     let server = MockServer::start().await;
+    let (filter, routing) = if model.starts_with("google/") {
+        (
+            json!({"ignore": [host]}),
+            json!({"sort": "exacto", "ignore": [host]}),
+        )
+    } else {
+        (
+            json!({"only": [host]}),
+            json!({"sort": "exacto", "only": [host]}),
+        )
+    };
     Box::pin(mock_server::run(&[&server], async {
         let key_path = home.path().join("openrouter.key");
         std::fs::write(&key_path, "sk-or-test\n")?;
@@ -162,6 +176,11 @@ stream_max_retries = 2
                         "raw": json!({"error": {"message": "Only function tools are supported"}}).to_string()
                     }
                 }})),
+                responses::sse_response(responses::sse(vec![responses::ev_completed("resumed-turn")])),
+                responses::sse_response(responses::sse(vec![responses::ev_completed("resaved-turn")])),
+                responses::sse_response(responses::sse(vec![responses::ev_completed("rerouted-turn")])),
+                responses::sse_response(responses::sse(vec![responses::ev_completed("direct-turn")])),
+                responses::sse_response(responses::sse(vec![responses::ev_completed("preset-turn")])),
             ],
         )
         .await;
@@ -233,7 +252,7 @@ stream_max_retries = 2
         assert_eq!(endpoints.hosts[0].slug.as_str(), host);
         assert_eq!(endpoints.hosts[0].endpoints[0].prompt_per_mtok, Some(Usd::from_nanodollars(300_000_000)));
         let request = app.send_request("openrouter/model/route", Some(json!({
-            "slug": model, "filter": {"only": [host]}
+            "slug": model, "filter": filter
         }))).await?;
         let _: OpenRouterModelRouteResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         let request = app.send_request("model/list", Some(json!({"modelProvider": "openrouter"}))).await?;
@@ -242,7 +261,8 @@ stream_max_retries = 2
         assert_eq!(listed.data[0].model, saved.model.model);
         assert!(listed.providers.iter().any(|provider| provider.id == "openrouter"));
         let stored: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
-        assert_eq!(stored["wrangler"]["openrouter"]["models"][model]["only"][0].as_str(), Some(host));
+        let filter_kind = if filter.get("only").is_some() { "only" } else { "ignore" };
+        assert_eq!(stored["wrangler"]["openrouter"]["models"][model][filter_kind][0].as_str(), Some(host));
         assert!(!std::fs::read_to_string(&config_path)?.contains("sk-or-test"));
 
         let request = app.send_turn_start_request(TurnStartParams {
@@ -295,10 +315,20 @@ stream_max_retries = 2
         assert_eq!(request.header("authorization"), Some("Bearer sk-or-test".into()));
         let body = request.body_json();
         assert!(!body["input"].to_string().contains("<harness_continuation>"));
-        assert_eq!(body["provider"], json!({"sort": "exacto", "only": [host]}));
+        for request in &requests {
+            assert_eq!(request.body_json()["provider"], routing);
+        }
         assert_eq!(body["model"], model);
         assert_eq!(body["store"], false);
         assert!(body["tools"].as_array().expect("request tools").iter().all(|tool| tool["type"] == "function"));
+
+        // Removing a picker entry must not widen the route of an already admitted
+        // thread, including after changing keys or rebuilding its runtime.
+        let request = app.send_request("openrouter/model/forget", Some(json!({"slug": model}))).await?;
+        let _: OpenRouterModelForgetResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        let request = app.send_request("model/list", Some(json!({"modelProvider": "openrouter"}))).await?;
+        let listed: ModelListResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        assert!(!listed.data.iter().any(|entry| entry.model == model));
 
         let request = app.send_turn_start_request(TurnStartParams {
             thread_id: started.thread.id.clone(),
@@ -384,8 +414,11 @@ stream_max_retries = 2
         let requests = wire.requests();
         assert_eq!(requests.len(), 7);
         assert_eq!(requests[6].header("authorization"), Some("Bearer sk-or-spare".into()));
+        for request in &requests[5..] {
+            assert_eq!(request.body_json()["provider"], routing);
+        }
         let request = app.send_turn_start_request(TurnStartParams {
-            thread_id: started.thread.id,
+            thread_id: started.thread.id.clone(),
             input: vec![UserInput::Text { text: "Check the host rejection.".into(), text_elements: Vec::new() }],
             ..Default::default()
         }).await?;
@@ -396,6 +429,67 @@ stream_max_retries = 2
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Failed);
         assert_eq!(wire.requests().len(), 8);
+        assert_eq!(wire.requests()[7].body_json()["provider"], routing);
+
+        drop(app);
+        let mut app = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(READ_TIMEOUT)
+            .await?;
+        let request = app.send_thread_resume_request(ThreadResumeParams {
+            thread_id: started.thread.id.clone(),
+            ..Default::default()
+        }).await?;
+        let resumed: ThreadResumeResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(resumed.thread.id, started.thread.id);
+        complete_turn(&mut app, &resumed.thread.id).await?;
+        assert_eq!(wire.requests()[8].body_json()["provider"], routing);
+
+        let request = app.send_request("openrouter/model/save", Some(json!({"slug": model}))).await?;
+        let _: OpenRouterModelSaveResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        complete_turn(&mut app, &resumed.thread.id).await?;
+        assert_eq!(wire.requests()[9].body_json()["provider"], routing);
+
+        let request = app.send_request("openrouter/model/route", Some(json!({
+            "slug": model, "filter": {}
+        }))).await?;
+        let _: OpenRouterModelRouteResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        complete_turn(&mut app, &resumed.thread.id).await?;
+        assert_eq!(wire.requests()[10].body_json()["provider"], json!({"sort": "exacto"}));
+
+        for (index, (model, provider)) in [
+            ("direct/never-saved", json!({"sort": "exacto"})),
+            ("@preset/never-saved", serde_json::Value::Null),
+        ].into_iter().enumerate() {
+            let request = app.send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some(model.into()),
+                ..Default::default()
+            }).await?;
+            let started: ThreadStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+            complete_turn(&mut app, &started.thread.id).await?;
+            let body = wire.requests()[11 + index].body_json();
+            assert_eq!(body["model"], model);
+            assert_eq!(body["provider"], provider);
+        }
         Ok(())
     })).await
+}
+
+async fn complete_turn(app: &mut TestAppServer, thread_id: &str) -> Result<()> {
+    let request = app
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread_id.into(),
+            input: vec![UserInput::Text {
+                text: "Reply briefly.".into(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+    let completed: TurnCompletedNotification =
+        timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+    Ok(())
 }

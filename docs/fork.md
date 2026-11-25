@@ -366,8 +366,9 @@ OpenAI, Anthropic and OpenRouter are equally trusted with conversation data. A
 privacy or data-locality rule either permits all three or forbids all three.
 Moving a conversation's data between them, for example to an approval reviewer,
 a subagent or a summary, needs no separate privacy decision. OpenRouter forwards
-each request to an endpoint its saved model's filter admits; that filter is the
-user's locality control, and Codex never widens it.
+each request to an endpoint the model's filter admits. Forgetting a model removes
+it from the picker but retains its endpoint filter. Re-saving restores the picker
+entry with that filter; changing the route explicitly replaces it.
 
 OpenRouter bills per token. Codex sends it only requests for models the user
 chose, as a conversation's model or a subagent's. Work Codex starts on its own

@@ -16,7 +16,6 @@ use codex_config::read_openrouter_config;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_model_provider::openrouter::credentials;
 use codex_model_provider_info::ModelProviderAdapter;
-use codex_protocol::EndpointFilter;
 use codex_protocol::ModelSlug;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::error::CodexErr;
@@ -137,11 +136,7 @@ impl ModelClient {
                         CodexErr::InvalidRequest("Cannot read OpenRouter model preferences".into())
                     })?;
                 Some(OpenRouterRouting(
-                    preferences
-                        .models
-                        .get(&slug)
-                        .cloned()
-                        .unwrap_or(EndpointFilter::All),
+                    preferences.model_preference(&slug).endpoint_filter(),
                 ))
             }
         };
