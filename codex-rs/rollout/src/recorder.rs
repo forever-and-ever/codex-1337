@@ -2131,7 +2131,7 @@ struct JsonlWriter {
     sink: RolloutSink,
     // Only framed rollout projection benefits from retaining serialized lines. The cap bounds
     // retention regardless of a caller's flush cadence; a missed suffix can be replayed.
-    suffix: Vec<u8>,
+    suffix: Option<Vec<u8>>,
 }
 
 #[derive(serde::Serialize)]

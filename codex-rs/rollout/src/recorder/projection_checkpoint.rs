@@ -92,18 +92,19 @@ impl RolloutWriterState {
     pub(super) async fn checkpoint(&mut self) -> Option<RolloutCheckpoint> {
         let ordinals = self.ordinal_state.projection_ordinals()?;
         let writer = self.writer.as_mut()?;
-        match writer.sink.flushed_logical_len().await {
+        let suffix = writer.suffix.as_mut()?;
+        match writer.sink.flushed_logical_len(&self.rollout_path).await {
             Ok(Some(end_byte_offset)) => Some(RolloutCheckpoint {
                 end_byte_offset,
                 ordinals,
-                suffix: take(&mut writer.suffix),
+                suffix: take(suffix),
             }),
             Ok(None) => {
-                writer.suffix.clear();
+                writer.suffix = None;
                 None
             }
             Err(err) => {
-                writer.suffix.clear();
+                writer.suffix = None;
                 warn!(rollout = %self.rollout_path.display(), "failed to get rollout watermark: {err}");
                 None
             }
@@ -117,17 +118,20 @@ impl JsonlWriter {
     pub(super) fn new(sink: RolloutSink) -> Self {
         Self {
             sink,
-            suffix: Vec::new(),
+            suffix: Some(Vec::new()),
         }
     }
 
     pub(super) fn capture_projection_suffix(&mut self, ordinal: Option<u64>, durable: &[u8]) {
-        if ordinal.is_some() && matches!(&self.sink, RolloutSink::Framed(_)) {
-            if self.suffix.len() + durable.len() > MAX_PROJECTION_SUFFIX_BYTES {
-                self.suffix.clear();
+        if ordinal.is_some()
+            && matches!(&self.sink, RolloutSink::Framed(_))
+            && let Some(suffix) = self.suffix.as_mut()
+        {
+            if suffix.len() + durable.len() > MAX_PROJECTION_SUFFIX_BYTES {
+                suffix.clear();
             }
             if durable.len() <= MAX_PROJECTION_SUFFIX_BYTES {
-                self.suffix.extend_from_slice(durable);
+                suffix.extend_from_slice(durable);
             }
         }
     }

@@ -100,11 +100,31 @@ impl RolloutSink {
         }
     }
 
-    pub(crate) async fn flushed_logical_len(&self) -> io::Result<Option<u64>> {
+    pub(crate) async fn flushed_logical_len(&self, path: &Path) -> io::Result<Option<u64>> {
+        let path = crate::plain_rollout_path(path);
         match self {
-            Self::Plain(file) => Ok(Some(file.metadata().await?.len())),
+            Self::Plain(file) => {
+                let open = file.metadata().await?;
+                let named = tokio::fs::metadata(path).await?;
+                Ok(same_file(&open, &named).then_some(open.len()))
+            }
             Self::Framed(writer) => {
-                off_runtime(writer, |writer| writer.flushed_logical_len()).await
+                off_runtime(writer, move |writer| {
+                    match std::fs::metadata(&path) {
+                        Ok(metadata) if metadata.is_file() => return Ok(None),
+                        Ok(_) => {}
+                        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                        Err(err) => return Err(err),
+                    }
+                    let named = std::fs::metadata(path.with_extension("jsonl.zst"))?;
+                    let open = writer.file().metadata()?;
+                    Ok(if same_file(&open, &named) {
+                        writer.flushed_logical_len(open.len())
+                    } else {
+                        None
+                    })
+                })
+                .await
             }
         }
     }
@@ -137,6 +157,18 @@ impl RolloutSink {
             Self::Plain(_) => Ok(()),
             Self::Framed(writer) => off_runtime(writer, FramedWriter::close_frame).await,
         }
+    }
+}
+
+fn same_file(open: &std::fs::Metadata, named: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (open.dev(), open.ino()) == (named.dev(), named.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        open.len() == named.len() && open.modified().ok() == named.modified().ok()
     }
 }
 
