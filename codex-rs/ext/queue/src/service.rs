@@ -542,13 +542,13 @@ impl QueuedItemService {
         if !supported_queue_input(&item.input) {
             return Err(QueueServiceError::InvalidInput);
         }
-        Ok(match self.route(thread, item, trace).await? {
-            QueuedItemDispatch::Routed(submission) => submission,
-            QueuedItemDispatch::Reconciled(turn_id) => StartIfIdleSubmission::Started {
-                root_turn_id: turn_id.clone(),
-                turn_id,
-            },
-        })
+        match self.route(thread, item, trace).await? {
+            QueuedItemDispatch::Routed(submission) => Ok(submission),
+            QueuedItemDispatch::Reconciled(turn_id) => Err(ThreadStoreError::InvalidRequest {
+                message: format!("queued submission was already accepted by turn {turn_id}"),
+            }
+            .into()),
+        }
     }
 
     async fn dispatch_if_idle(&self, thread_id: ThreadId) -> Result<(), QueueServiceError> {

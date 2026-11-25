@@ -14,9 +14,7 @@ use super::resolve_client_turn_input;
 impl CodexThread {
     /// Look up the canonical receipt for an already accepted queue row.
     pub async fn queued_input_turn_id(&self, id: &str) -> CodexResult<Option<String>> {
-        self.session
-            .queued_input_turn_id(id, self.rollout_path.as_deref())
-            .await
+        self.session.queued_input_turn_id(id).await
     }
 
     /// Started only reports routing. Core invokes cleanup after a canonical receipt

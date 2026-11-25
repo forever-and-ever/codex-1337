@@ -632,6 +632,11 @@ async fn queued_input_survives_both_sides_of_the_canonical_handoff() -> anyhow::
         resumed.thread.queued_input_turn_id(&item.id).await?
     );
     assert!(matches!(
+        queue.update(thread_id, item.id.clone(), user_input("lost edit")).await,
+        Err(QueueServiceError::Storage(ThreadStoreError::InvalidRequest { message }))
+            if message.contains("already accepted")
+    ));
+    assert!(matches!(
         queue
             .start(resumed.thread.as_ref(), Some(item.id.clone()), None)
             .await,
