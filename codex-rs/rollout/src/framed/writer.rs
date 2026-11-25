@@ -234,8 +234,14 @@ impl FramedWriter {
     }
 
     /// Decoded bytes written so far.
-    pub(crate) fn logical_len(&self) -> u64 {
+    #[cfg(test)]
+    pub(super) fn logical_len(&self) -> u64 {
         self.logical_end
+    }
+
+    /// The writer's offset is authoritative only while the open file is unchanged.
+    pub(crate) fn flushed_logical_len(&self) -> io::Result<Option<u64>> {
+        Ok((self.file.metadata()?.len() == self.end).then_some(self.logical_end))
     }
 
     pub(crate) fn file(&self) -> &File {

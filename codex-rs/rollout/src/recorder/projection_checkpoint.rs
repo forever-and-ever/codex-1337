@@ -92,13 +92,18 @@ impl RolloutWriterState {
     pub(super) async fn checkpoint(&mut self) -> Option<RolloutCheckpoint> {
         let ordinals = self.ordinal_state.projection_ordinals()?;
         let writer = self.writer.as_mut()?;
-        match writer.sink.logical_len().await {
-            Ok(end_byte_offset) => Some(RolloutCheckpoint {
+        match writer.sink.flushed_logical_len().await {
+            Ok(Some(end_byte_offset)) => Some(RolloutCheckpoint {
                 end_byte_offset,
                 ordinals,
                 suffix: take(&mut writer.suffix),
             }),
+            Ok(None) => {
+                writer.suffix.clear();
+                None
+            }
             Err(err) => {
+                writer.suffix.clear();
                 warn!(rollout = %self.rollout_path.display(), "failed to get rollout watermark: {err}");
                 None
             }

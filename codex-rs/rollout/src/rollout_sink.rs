@@ -100,10 +100,12 @@ impl RolloutSink {
         }
     }
 
-    pub(crate) async fn logical_len(&self) -> io::Result<u64> {
+    pub(crate) async fn flushed_logical_len(&self) -> io::Result<Option<u64>> {
         match self {
-            Self::Plain(file) => Ok(file.metadata().await?.len()),
-            Self::Framed(writer) => Ok(lock(writer)?.logical_len()),
+            Self::Plain(file) => Ok(Some(file.metadata().await?.len())),
+            Self::Framed(writer) => {
+                off_runtime(writer, |writer| writer.flushed_logical_len()).await
+            }
         }
     }
 
