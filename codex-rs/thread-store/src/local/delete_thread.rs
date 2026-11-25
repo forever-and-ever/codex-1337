@@ -7,7 +7,6 @@
 //! before removing rollouts, so cleanup failures remain retryable even without a state DB.
 //! Known diagnostic database failures must be rejected before any destructive cleanup.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -15,10 +14,8 @@ use std::path::PathBuf;
 
 use codex_protocol::ThreadId;
 use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
-use codex_rollout::RolloutReferenceIndex;
+use codex_rollout::RolloutDeletionIndex;
 use codex_rollout::SESSIONS_SUBDIR;
-use codex_rollout::find_archived_thread_path_by_id_str;
-use codex_rollout::find_thread_path_by_id_str;
 use codex_rollout::remove_thread_name_entries;
 
 use super::LocalThreadStore;
@@ -62,7 +59,7 @@ fn ensure_diagnostic_logs_available(store: &LocalThreadStore) -> ThreadStoreResu
 }
 
 fn check_attached_children(
-    reference_index: &RolloutReferenceIndex,
+    reference_index: &RolloutDeletionIndex,
     thread_ids: &[ThreadId],
 ) -> ThreadStoreResult<()> {
     let Some(child) = reference_index.attached_child(thread_ids) else {
@@ -77,7 +74,7 @@ fn check_attached_children(
 
 impl ThreadRollouts {
     fn from_index(
-        reference_index: &RolloutReferenceIndex,
+        reference_index: &RolloutDeletionIndex,
         thread_id: codex_protocol::ThreadId,
     ) -> Self {
         let mut rollout_ids = HashSet::new();
@@ -92,15 +89,6 @@ impl ThreadRollouts {
             thread_id,
             rollout_ids,
             paths,
-        }
-    }
-
-    fn add_path(&mut self, path: PathBuf) {
-        if let Some(rollout_id) = codex_rollout::rollout_id_from_path(path.as_path()) {
-            self.rollout_ids.insert(rollout_id);
-        }
-        if !self.paths.contains(&path) {
-            self.paths.push(path);
         }
     }
 }
@@ -197,45 +185,33 @@ pub(super) async fn delete_state_rows(
 }
 
 fn ensure_no_external_references(
-    reference_index: &RolloutReferenceIndex,
+    reference_index: &RolloutDeletionIndex,
     thread_rollouts: &[ThreadRollouts],
 ) -> ThreadStoreResult<()> {
     let deletion_rollout_ids = thread_rollouts
         .iter()
         .flat_map(|thread_rollouts| thread_rollouts.rollout_ids.iter().copied())
         .collect::<HashSet<_>>();
-    let mut internal_reference_counts = HashMap::new();
-    for source_rollout_id in &deletion_rollout_ids {
-        if let Some(history_base) = reference_index.history_base(*source_rollout_id)
-            && history_base.thread_id != *source_rollout_id
-            && deletion_rollout_ids.contains(&history_base.thread_id)
-        {
-            *internal_reference_counts
-                .entry(history_base.thread_id)
-                .or_default() += 1;
-        }
-    }
+    let external_history_bases = reference_index
+        .external_history_bases(&deletion_rollout_ids)
+        .collect::<HashSet<_>>();
     for thread_rollouts in thread_rollouts {
-        if thread_rollouts.rollout_ids.iter().any(|rollout_id| {
-            let internal_reference_count = internal_reference_counts
-                .get(rollout_id)
-                .copied()
-                .unwrap_or_default();
-            reference_index.reference_count(*rollout_id) > internal_reference_count
-        }) {
+        if !thread_rollouts
+            .rollout_ids
+            .is_disjoint(&external_history_bases)
+            || external_history_bases.contains(&thread_rollouts.thread_id)
+        {
             return Err(referenced_thread_error(thread_rollouts.thread_id));
         }
     }
     Ok(())
 }
 
-async fn scan_reference_index(
-    store: &LocalThreadStore,
-) -> ThreadStoreResult<RolloutReferenceIndex> {
-    RolloutReferenceIndex::scan(store.config.codex_home.as_path())
+async fn scan_reference_index(store: &LocalThreadStore) -> ThreadStoreResult<RolloutDeletionIndex> {
+    RolloutDeletionIndex::scan(store.config.codex_home.as_path())
         .await
         .map_err(|err| ThreadStoreError::Internal {
-            message: format!("failed to scan fork history references: {err}"),
+            message: format!("cannot verify rollout references for deletion: {err:#}"),
         })
 }
 
@@ -251,38 +227,6 @@ async fn delete_thread_after_reference_check(
     writer_guards: &mut Vec<super::WriterLockGuard>,
 ) -> ThreadStoreResult<()> {
     let thread_id = thread_rollouts.thread_id;
-    let thread_id_str = thread_id.to_string();
-    let state_db_ctx = store.state_db().await;
-    match find_thread_path_by_id_str(
-        store.config.codex_home.as_path(),
-        thread_id_str.as_str(),
-        state_db_ctx.as_deref(),
-    )
-    .await
-    {
-        Ok(Some(path)) => thread_rollouts.add_path(path),
-        Ok(None) => {}
-        Err(err) => {
-            return Err(ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate thread id {thread_id}: {err}"),
-            });
-        }
-    }
-    match find_archived_thread_path_by_id_str(
-        store.config.codex_home.as_path(),
-        thread_id_str.as_str(),
-        state_db_ctx.as_deref(),
-    )
-    .await
-    {
-        Ok(Some(path)) => thread_rollouts.add_path(path),
-        Ok(None) => {}
-        Err(err) => {
-            return Err(ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate archived thread id {thread_id}: {err}"),
-            });
-        }
-    }
     thread_rollouts.rollout_ids.insert(thread_id);
     for rollout_id in thread_rollouts.rollout_ids {
         super::thread_history::delete_thread(store, rollout_id).await?;
@@ -302,7 +246,7 @@ async fn delete_thread_after_reference_check(
     }
     let found_rollout_path = !thread_rollouts.paths.is_empty();
     for rollout_path in thread_rollouts.paths {
-        delete_rollout_file(store, rollout_path.as_path())?;
+        delete_rollout_path(store, rollout_path.as_path())?;
     }
     remove_thread_name_entries(store.config.codex_home.as_path(), thread_id)
         .await
@@ -388,7 +332,10 @@ mod tests {
             write_session_file(home.path(), "2025-01-03T12-00-00", Uuid::from_u128(301))
                 .expect("session file");
         let compressed_path = active_path.with_extension("jsonl.zst");
-        std::fs::write(&compressed_path, b"compressed sibling").expect("compressed sibling");
+        let active_bytes = std::fs::read(&active_path).expect("read active rollout");
+        let compressed =
+            zstd::stream::encode_all(active_bytes.as_slice(), 0).expect("compress active rollout");
+        std::fs::write(&compressed_path, compressed).expect("compressed sibling");
         let cases = [
             (Uuid::from_u128(301), active_path),
             (
@@ -438,6 +385,7 @@ mod tests {
             ThreadHistoryMode::Paginated,
         )
         .expect("child session file");
+        let independent_header = std::fs::read(&child_path).expect("read initial child rollout");
         set_history_base(
             child_path.as_path(),
             HistoryPosition {
@@ -448,6 +396,13 @@ mod tests {
                     .len(),
             },
         );
+        // A plain sibling can mask the compressed copy in ordinary lookup.
+        let compressed_path = child_path.with_extension("jsonl.zst");
+        let referenced_header = std::fs::read(&child_path).expect("read dependent child rollout");
+        let compressed = zstd::stream::encode_all(referenced_header.as_slice(), 0)
+            .expect("compress dependent child");
+        std::fs::write(&compressed_path, compressed).expect("write compressed child");
+        std::fs::write(&child_path, independent_header).expect("replace plain child");
 
         let err = store
             .delete_thread(DeleteThreadParams {
@@ -463,6 +418,29 @@ mod tests {
             )
         );
         assert!(source_path.exists());
+
+        std::fs::write(&compressed_path, b"damaged zstd data").expect("damage dependent header");
+        let err = store
+            .delete_thread(DeleteThreadParams {
+                thread_id: source_thread_id,
+            })
+            .await
+            .expect_err("unreadable copy cannot prove independence");
+        assert!(matches!(
+            err,
+            ThreadStoreError::Internal { message } if message.contains(&compressed_path.display().to_string())
+        ));
+        assert!(source_path.exists());
+
+        std::fs::remove_file(&compressed_path).expect("remove damaged copy");
+        store
+            .delete_thread(DeleteThreadParams {
+                thread_id: source_thread_id,
+            })
+            .await
+            .expect("remaining rollout is independent");
+        assert!(!source_path.exists());
+        assert!(child_path.exists());
     }
 
     #[tokio::test]
@@ -532,8 +510,9 @@ mod tests {
         assert!(replacement_path.exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
-    async fn delete_thread_ignores_unreadable_reference_metadata() {
+    async fn delete_threads_rejects_inaccessible_archive_root() {
         let home = TempDir::new().expect("temp dir");
         let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
         let source_uuid = Uuid::from_u128(305);
@@ -541,20 +520,23 @@ mod tests {
             ThreadId::from_string(&source_uuid.to_string()).expect("valid source thread id");
         let source_path = write_session_file(home.path(), "2025-01-03T12-00-00", source_uuid)
             .expect("source session file");
-        let unreadable_path = source_path.with_file_name(format!(
-            "rollout-2025-01-03T12-00-01-{}.jsonl",
-            Uuid::from_u128(306)
-        ));
-        std::fs::write(unreadable_path, "{not json}\n").expect("unreadable rollout metadata");
+        // An absent archive root is valid, but ENOENT through a dangling link proves nothing.
+        let archive = home.path().join(ARCHIVED_SESSIONS_SUBDIR);
+        std::os::unix::fs::symlink(home.path().join("unavailable"), &archive)
+            .expect("broken archive link");
 
-        store
-            .delete_thread(DeleteThreadParams {
-                thread_id: source_thread_id,
+        let err = store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![source_thread_id],
             })
             .await
-            .expect("unreadable metadata should not block delete");
+            .expect_err("a failed traversal must not authorize deletion");
 
-        assert!(!source_path.exists());
+        assert!(matches!(
+            err,
+            ThreadStoreError::Internal { message } if message.contains(&archive.display().to_string())
+        ));
+        assert!(source_path.exists());
     }
 
     #[tokio::test]
@@ -676,7 +658,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_threads_removes_rollout_with_unreadable_metadata() {
+    async fn delete_threads_rejects_rollout_with_unreadable_metadata() {
         let home = TempDir::new().expect("temp dir");
         let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
         let uuid = Uuid::from_u128(311);
@@ -690,9 +672,9 @@ mod tests {
                 thread_ids: vec![thread_id],
             })
             .await
-            .expect("delete rollout with unreadable metadata");
+            .expect_err("filename is not sufficient proof of ownership");
 
-        assert!(!rollout_path.exists());
+        assert!(rollout_path.exists());
     }
 
     #[tokio::test]
