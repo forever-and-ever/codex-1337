@@ -1231,6 +1231,18 @@ async fn referenced_paginated_rollout_projects_inherited_ordinal_range() {
         .persist_thread(sibling_id, PersistContext::Standard)
         .await
         .expect("persist later-cut sibling");
+    let state_db = store.state_db().await.expect("state database");
+    for id in [source_id, child_id, sibling_id] {
+        let path = store.live_rollout_path(id).await.expect("rollout path");
+        let metadata =
+            codex_state::ThreadMetadataBuilder::new(id, path, Utc::now(), SessionSource::Exec)
+                .with_history_mode(ThreadHistoryMode::Paginated)
+                .build("test-provider");
+        state_db
+            .upsert_thread(&metadata)
+            .await
+            .expect("seed saved paginated thread");
+    }
     store
         .shutdown_thread(source_id)
         .await
@@ -1257,14 +1269,14 @@ async fn referenced_paginated_rollout_projects_inherited_ordinal_range() {
     // shared projection must extend to that request's own end without an intervening write.
     for (first, second) in [(source_id, sibling_id), (sibling_id, source_id)] {
         sqlx::query(
-            "UPDATE thread_history_projection_state SET accessed_at_ms = 0 WHERE thread_id = ?",
+            "UPDATE thread_history_projection_state SET accessed_at_ms = 1 WHERE thread_id = ?",
         )
         .bind(source_id.to_string())
         .execute(&pool)
         .await
         .expect("age source projection");
         assert_eq!(
-            super::super::history_pruning::evict_unused(&store, 1)
+            super::super::history_pruning::evict_unused(&store, 2)
                 .await
                 .unwrap(),
             1
