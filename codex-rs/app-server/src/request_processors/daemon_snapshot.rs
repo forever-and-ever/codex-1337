@@ -58,42 +58,54 @@ impl ThreadRequestProcessor {
                 continue;
             };
             let config = thread.config_snapshot().await;
-            let interrupted = thread.interrupted_turn().await;
-            let paid = if let Some((turn, ..)) = &interrupted {
-                thread.has_paid_openrouter_step(turn).await.unwrap_or(false)
-            } else {
-                false
-            };
-            if !config.ephemeral
-                && (paid
-                    || config.parent_thread_id.is_none()
-                        && !config.session_source.is_non_root_agent())
-            {
-                if let Err(err) = self
-                    .thread_store
-                    .persist_thread(thread_id, PersistContext::Standard)
-                    .await
+            let child = config.parent_thread_id.is_some();
+            if config.ephemeral || !child && config.session_source.is_non_root_agent() {
+                continue;
+            }
+            let interrupted_turn = async || {
+                let interrupted = thread.interrupted_turn().await?;
+                if child
+                    && !thread
+                        .has_paid_openrouter_step(&interrupted.0)
+                        .await
+                        .unwrap_or(false)
                 {
-                    warn!(%thread_id, %err, "skipping daemon restore for thread that could not be persisted");
+                    return None;
+                }
+                Some(interrupted)
+            };
+            if child && interrupted_turn().await.is_none() {
+                continue;
+            }
+            if let Err(err) = self
+                .thread_store
+                .persist_thread(thread_id, PersistContext::Standard)
+                .await
+            {
+                warn!(%thread_id, %err, "skipping daemon restore for thread that could not be persisted");
+                continue;
+            }
+            // Recheck the queue receipt and paid ownership after the storage barrier.
+            let interrupted = interrupted_turn().await;
+            if child {
+                if interrupted.is_none() {
                     continue;
                 }
-                snapshot.loaded.insert(thread_id.to_string());
-                if paid && config.parent_thread_id.is_some() {
-                    snapshot.paid_children.insert(thread_id.to_string());
-                }
-                if let Some((turn_id, options, environment)) = interrupted {
-                    snapshot.interrupted.insert(
-                        thread_id.to_string(),
-                        InterruptedTurn {
-                            prompt_cache_ttl: options.prompt_cache_ttl,
-                            turn_id,
-                            output_schema: options.final_output_json_schema,
-                            service_tier: options.service_tier,
-                            cyber_access_program: options.cyber_access_program,
-                            local_environment: Some((&environment).into()),
-                        },
-                    );
-                }
+                snapshot.paid_children.insert(thread_id.to_string());
+            }
+            snapshot.loaded.insert(thread_id.to_string());
+            if let Some((turn_id, options, environment)) = interrupted {
+                snapshot.interrupted.insert(
+                    thread_id.to_string(),
+                    InterruptedTurn {
+                        prompt_cache_ttl: options.prompt_cache_ttl,
+                        turn_id,
+                        output_schema: options.final_output_json_schema,
+                        service_tier: options.service_tier,
+                        cyber_access_program: options.cyber_access_program,
+                        local_environment: Some((&environment).into()),
+                    },
+                );
             }
         }
         snapshot

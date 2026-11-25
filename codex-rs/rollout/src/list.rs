@@ -1050,8 +1050,8 @@ async fn read_head_summary(
             | RolloutItem::SecurityRiskScore(_) => {
                 // Not included in `head`; skip.
             }
-            RolloutItem::RealtimeItem(_) => {
-                // Realtime presentation does not affect model-visible thread summaries.
+            RolloutItem::QueuedInputRejected(_) | RolloutItem::RealtimeItem(_) => {
+                // Neither receipt nor presentation records affect thread summaries.
             }
             RolloutItem::Compacted(_) => {
                 // Not included in `head`; skip.
@@ -1124,6 +1124,7 @@ pub async fn read_head_for_summary(path: &Path) -> io::Result<Vec<serde_json::Va
                 | RolloutItem::TurnContext(_)
                 | RolloutItem::TokenUsageRecord(_)
                 | RolloutItem::WorldState(_)
+                | RolloutItem::QueuedInputRejected(_)
                 | RolloutItem::RealtimeItem(_)
                 | RolloutItem::RetainedContext(_)
                 | RolloutItem::DynamicToolsUpdated { .. }
@@ -1183,25 +1184,72 @@ impl std::error::Error for MetadataReadError {
 /// Read the SessionMetaLine from the head of a rollout file for reuse by
 /// callers that need the session metadata (e.g. to derive a cwd for config).
 pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
-    let mut lines = compression::open_rollout_line_reader(path).await?;
+    read_session_meta(path, MetadataReadPolicy::Advisory).await
+}
+
+pub(crate) async fn read_exact_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
+    read_session_meta(path, MetadataReadPolicy::ReferenceCensus).await
+}
+
+#[derive(Clone, Copy)]
+enum MetadataReadPolicy {
+    Advisory,
+    ReferenceCensus,
+}
+
+async fn read_session_meta(path: &Path, policy: MetadataReadPolicy) -> io::Result<SessionMetaLine> {
+    let resolution = match policy {
+        MetadataReadPolicy::Advisory => compression::LineReaderPath::ResolveSiblings,
+        MetadataReadPolicy::ReferenceCensus => compression::LineReaderPath::Exact,
+    };
+    let open = |scope| compression::open_line_reader(path, resolution, scope);
+    let lines = open(compression::ReaderScope::Head).await?;
+    match read_session_meta_lines(path, lines, policy).await {
+        Err(err)
+            if err
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<MetadataReadError>())
+                .is_some_and(|metadata| metadata.reason == "missing_metadata") =>
+        {
+            // A re-encoded rollout may have a valid preamble spanning more than its first frame.
+            let lines = open(compression::ReaderScope::Full).await?;
+            read_session_meta_lines(path, lines, policy).await
+        }
+        result => result,
+    }
+}
+
+async fn read_session_meta_lines(
+    path: &Path,
+    mut lines: compression::RolloutLineReader,
+    policy: MetadataReadPolicy,
+) -> io::Result<SessionMetaLine> {
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let Ok(rollout_line) = crate::parse_rollout_line(trimmed) else {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                crate::recorder::reject_unknown_thread_history_mode(&value).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        MetadataReadError {
-                            reason: "invalid_history_mode",
-                            error,
+        let rollout_line = match crate::parse_rollout_line(trimmed) {
+            Ok(rollout_line) => rollout_line,
+            Err(error) => {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    crate::recorder::reject_unknown_thread_history_mode(&value).map_err(
+                        |error| {
+                            io::Error::new(
+                                error.kind(),
+                                MetadataReadError {
+                                    reason: "invalid_history_mode",
+                                    error,
+                                },
+                            )
                         },
-                    )
-                })?;
+                    )?;
+                }
+                if matches!(policy, MetadataReadPolicy::ReferenceCensus) {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                }
+                continue;
             }
-            continue;
         };
         match rollout_line.item {
             RolloutItem::SessionMeta(session_meta_line) => return Ok(*session_meta_line),
@@ -1219,6 +1267,7 @@ pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> 
             | RolloutItem::TurnContext(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::WorldState(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::DynamicToolsUpdated { .. }

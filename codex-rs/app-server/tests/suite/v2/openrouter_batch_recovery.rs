@@ -264,7 +264,7 @@ async fn quarantine_spend(home: &TempDir, provider: &MockServer) -> Result<()> {
     mount_routed_catalog(provider, MODEL, "google").await;
     let submitted = Arc::new(Mutex::new(Vec::<Value>::new()));
     let effect = home.path().to_path_buf();
-    let read = Arc::new(Notify::new());
+    let read = Arc::new([Notify::new(), Notify::new()]);
     let release = Arc::new(AtomicBool::new(false));
     let deleted = Arc::new(Notify::new());
     let jobs = Arc::clone(&submitted);
@@ -274,37 +274,40 @@ async fn quarantine_spend(home: &TempDir, provider: &MockServer) -> Result<()> {
         .respond_with(move |r: &wiremock::Request| {
             let mut jobs = jobs.lock().expect("paid requests");
             jobs.push(r.body_json().expect("valid JSON"));
-            if jobs.len() == 1 {
-                ResponseTemplate::new(202).set_body_json(json!({"id":"batch_late"}))
+            if jobs.len() <= 2 {
+                ResponseTemplate::new(202)
+                    .set_body_json(json!({"id": format!("batch_late_{}", jobs.len())}))
             } else {
                 // A lost acknowledgement can hide a charge. No second POST or live retry.
                 ResponseTemplate::new(503)
             }
         })
-        .expect(2)
+        .expect(3)
         .mount(provider)
         .await;
     let jobs = Arc::clone(&submitted);
     let first = Arc::clone(&read);
     let released = Arc::clone(&release);
-    Mock::given(method("GET")).and(path("/batches/batch_late"))
-            .respond_with(move|_:&wiremock::Request|{
+    Mock::given(method("GET")).and(path_regex("^/batches/batch_late_[12]$"))
+            .respond_with(move|req:&wiremock::Request|{
+                let job = req.url.path().strip_prefix("/batches/").expect("job path");
+                let index = usize::from(job.ends_with('2'));
                 if !released.load(Ordering::Acquire) {
-                    first.notify_one();
-                    return ResponseTemplate::new(200).set_body_json(json!({"id":"batch_late","status":"in_progress"}));
+                    first[index].notify_one();
+                    return ResponseTemplate::new(200).set_body_json(json!({"id":job,"status":"in_progress"}));
                 }
                 let rows=jobs.lock().expect("paid requests");
                 let call=json!({"type":"function_call","id":"late-call","call_id":"late-effect","name":"exec_command","arguments":json!({"cmd":"touch late-effect","workdir":effect}).to_string(),"status":"completed"});
-                ResponseTemplate::new(200).set_body_json(json!({"id":"batch_late","status":"completed","usage":{"prompt_tokens":30,"completion_tokens":10,"total_tokens":40,"cost":0.015},"results":[{"custom_id":rows[0]["requests"][0]["custom_id"],"response":{"status_code":200,"body":{"id":"late","status":"completed","output":[call]}}}]}))
+                ResponseTemplate::new(200).set_body_json(json!({"id":job,"status":"completed","usage":{"prompt_tokens":30,"completion_tokens":10,"total_tokens":40,"cost":0.015},"results":[{"custom_id":rows[index]["requests"][0]["custom_id"],"response":{"status_code":200,"body":{"id":"late","status":"completed","output":[call]}}}]}))
             }).mount(provider).await;
     let cleaned = Arc::clone(&deleted);
     Mock::given(method("DELETE"))
-        .and(path("/batches/batch_late"))
+        .and(path_regex("^/batches/batch_late_[12]$"))
         .respond_with(move |_: &wiremock::Request| {
             cleaned.notify_one();
             ResponseTemplate::new(200).set_body_json(json!({}))
         })
-        .expect(1)
+        .expect(2)
         .mount(provider)
         .await;
     Mock::given(method("POST"))
@@ -346,56 +349,71 @@ async fn quarantine_spend(home: &TempDir, provider: &MockServer) -> Result<()> {
     let ack = request(&mut client, 6, "thread/settings/update", settings).await?;
     assert_eq!(ack["openrouterTransport"], "batch");
     let input = json!({"threadId":id,"input":[{"type":"text","text":"Execute once."}]});
-    let turn = request(&mut client, 7, "turn/start", input.clone()).await?;
-    timeout(READ_TIMEOUT, read.notified())
-        .await
-        .context("never polled the paid job")?;
-    request(
-        &mut client,
-        8,
-        "turn/interrupt",
-        json!({"threadId":id,"turnId":turn["turn"]["id"]}),
-    )
-    .await?;
-    release.store(true, Ordering::Release);
-    timeout(READ_TIMEOUT, deleted.notified())
-        .await
-        .context("late result was not settled and deleted")?;
-    assert!(!home.path().join("late-effect").exists());
     let dir = home
         .path()
         .join("openrouter-batches")
         .join(id.as_str().context("id")?);
-    let receipts = std::fs::read_dir(dir)?
-        .map(|e| Ok::<_, std::io::Error>(e?.path().join("generation.json")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let [receipt] = receipts.as_slice() else {
-        anyhow::bail!("expected the interrupted turn's single invoice");
-    };
-    let late: Value = serde_json::from_slice(&std::fs::read(receipt)?)?;
-    assert_eq!(
-        late["phase"]["Settled"]["settlement"]["usage"]["cost"],
-        0.015
-    );
-    let unknown = request(&mut client, 9, "turn/start", input).await?;
-    timeout(READ_TIMEOUT, async {
-        loop {
-            let Message::Text(raw) = client.next().await.context("disconnected")?? else {
-                continue;
-            };
-            let msg: Value = serde_json::from_str(raw.as_str())?;
-            if msg["method"] == "turn/completed"
-                && msg["params"]["turn"]["id"] == unknown["turn"]["id"]
-            {
-                anyhow::ensure!(
-                    msg["params"]["turn"]["status"] == "failed",
-                    "uncertain submission did not fail: {msg}"
-                );
-                break Ok::<(), anyhow::Error>(());
+    for revoke_route in [false, true] {
+        release.store(false, Ordering::Release);
+        let turn = request(&mut client, 7, "turn/start", input.clone()).await?;
+        let turn_id = &turn["turn"]["id"];
+        timeout(READ_TIMEOUT, read[usize::from(revoke_route)].notified())
+            .await
+            .context("never polled the paid job")?;
+        if revoke_route {
+            request(
+                &mut client,
+                8,
+                "openrouter/model/forget",
+                json!({"slug":MODEL}),
+            )
+            .await?;
+        } else {
+            request(
+                &mut client,
+                8,
+                "turn/interrupt",
+                json!({"threadId":id,"turnId":turn_id}),
+            )
+            .await?;
+        }
+        release.store(true, Ordering::Release);
+        timeout(READ_TIMEOUT, deleted.notified())
+            .await
+            .context("late result was not settled and deleted")?;
+        if revoke_route {
+            failed_turn(&mut client, turn_id).await?;
+            request(
+                &mut client,
+                9,
+                "openrouter/model/save",
+                json!({"slug":MODEL}),
+            )
+            .await?;
+        }
+        let mut invoice = None;
+        for entry in std::fs::read_dir(&dir)? {
+            let turn = entry?.path();
+            let journal: Value =
+                serde_json::from_slice(&std::fs::read(turn.join("generation.json"))?)?;
+            if journal["turn"] == *turn_id {
+                invoice = Some((turn, journal));
+                break;
             }
         }
-    })
-    .await??;
+        let (turn, late) = invoice.context("missing invoice for refused delivery")?;
+        assert_eq!(
+            late["phase"]["Settled"]["settlement"]["usage"]["cost"],
+            0.015
+        );
+        assert!(
+            turn.join("abandoned").try_exists()?,
+            "withdrawn authority must survive re-save and restart"
+        );
+        assert!(!home.path().join("late-effect").exists());
+    }
+    let unknown = request(&mut client, 9, "turn/start", input).await?;
+    failed_turn(&mut client, &unknown["turn"]["id"]).await?;
     request_shutdown(&server, &socket).await?;
     wait_success(&mut server).await?;
     let mut successor = spawn_server(home.path(), &socket)?;
@@ -412,11 +430,33 @@ async fn quarantine_spend(home: &TempDir, provider: &MockServer) -> Result<()> {
         status["keys"][0]["outstandingBatches"], 1,
         "uncertain spend must not become available after restart"
     );
-    assert_eq!(submitted.lock().expect("requests").len(), 2);
+    assert_eq!(submitted.lock().expect("requests").len(), 3);
     assert!(!home.path().join("late-effect").exists());
     request_shutdown(&successor, &socket).await?;
     wait_success(&mut successor).await?;
     Ok(())
+}
+
+async fn failed_turn(
+    client: &mut tokio_tungstenite::WebSocketStream<codex_uds::UnixStream>,
+    turn_id: &Value,
+) -> Result<()> {
+    timeout(READ_TIMEOUT, async {
+        loop {
+            let Message::Text(raw) = client.next().await.context("disconnected")?? else {
+                continue;
+            };
+            let msg: Value = serde_json::from_str(raw.as_str())?;
+            if msg["method"] == "turn/completed" && msg["params"]["turn"]["id"] == *turn_id {
+                anyhow::ensure!(
+                    msg["params"]["turn"]["status"] == "failed",
+                    "refused paid step did not fail: {msg}"
+                );
+                break Ok::<(), anyhow::Error>(());
+            }
+        }
+    })
+    .await?
 }
 
 async fn finished_turn(

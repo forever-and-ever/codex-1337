@@ -232,7 +232,8 @@ pub(super) fn truncate_sections(
     let budget = requested_bytes.min(model_policy.byte_budget());
     let reduction = if max_output_tokens.is_some() && budget < requested_bytes {
         format!(
-            "Warning: requested output cap {max_tokens} tokens reduced by model policy to {budget} approximate text bytes.\n"
+            "Output cap is {budget} bytes, about {} tokens, not the {max_tokens} tokens requested.\n",
+            budget / approx_bytes_for_tokens(1)
         )
     } else {
         String::new()
@@ -301,29 +302,27 @@ pub(super) fn truncate_sections(
     }
     let retained = retention.retain(&sections);
     let recovery = match &retained {
-        Ok(path) => format!(
-            "Truncated emitted text: {} (Codex host filesystem; a remote executor may not have access). Recovery retains only text available at this boundary, not upstream-discarded tool output. Retention: 16 MiB/artifact, 64 MiB and 32 artifacts/thread, oldest evicted first; removed when the thread service closes.",
-            path.display()
-        ),
-        Err(error) => format!("Recovery unavailable: {error}."),
+        Ok(path) => format!("Full text: {}", path.display()),
+        Err(error) => format!("Full text was not saved: {error}."),
     };
     let mut notice = format!(
-        "{reduction}Warning: truncated {} text sections under a shared {budget}-byte approximate text budget. Nonempty emitted text items are sections numbered in emission order, excluding this notice; media, this notice and minimum omission markers are outside the text budget.\n{recovery}\n",
-        sections.len()
+        "{reduction}Truncated {} of {} sections to fit {budget} bytes. {recovery}\n",
+        sections.len(),
+        limits.len()
     );
     for (index, text, limit) in sections.iter().take(16) {
         let demand = requested[index - 1];
-        let _ = writeln!(
-            notice,
-            "Section {index}: {} bytes → {limit} bytes (emission-capped demand {demand}).",
-            text.len()
-        );
+        let _ = write!(notice, "Section {index}: {} → {limit} bytes", text.len());
+        if demand < text.len() {
+            let _ = write!(notice, ", emission cap {demand}");
+        }
+        notice.push('\n');
     }
     if sections.len() > 16 {
         notice.push_str(if retained.is_ok() {
-            "Further section limits are recorded with the retained text.\n"
+            "The saved text gives the limits of the other sections.\n"
         } else {
-            "Further section limits are omitted from this bounded notice; recovery is unavailable.\n"
+            "The limits of the other sections are not listed.\n"
         });
     }
     drop(sections);

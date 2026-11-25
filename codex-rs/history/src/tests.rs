@@ -1201,7 +1201,15 @@ fn rollout_item_variants_preserve_existing_payload_shapes() -> Result<()> {
 fn rollout_item_schema_matches_tagged_payload_and_sibling_metadata() -> Result<()> {
     let schema = serde_json::to_value(schemars::schema_for!(RolloutItem))?;
     let variants = schema["oneOf"].as_array().expect("rollout variants");
-    assert_eq!(variants.len(), 13);
+    assert_eq!(variants.len(), 14);
+    let rejection = variants
+        .iter()
+        .find(|variant| variant["properties"]["type"]["enum"] == json!(["queued_input_rejected"]))
+        .expect("queued-input rejection schema");
+    assert_eq!(
+        rejection["properties"]["payload"]["$ref"],
+        json!("#/definitions/QueuedInputReceipt")
+    );
 
     for variant in variants {
         let required = variant["required"].as_array().expect("required fields");

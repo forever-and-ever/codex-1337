@@ -36,16 +36,16 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### mcp-roster
 
 - Telos: retain a broad tool catalogue without charging every conversation for every full schema. The short eager roster's per-tool context cost is intentional.
-- Holds: in Code Mode Only, every nested tool appears by exact JavaScript member and one short purpose sentence, including tools whose contracts are deferred to search. Bootstrap `exec_command`, `apply_patch`, and `tool_search` keep eager porcelain contracts; MCP contracts, remaining builtin contracts, and MCP server instructions arrive through `describe_tool`. Non-MCP client-supplied dynamic tools retain their configured exposure policy. Provider-sensitive reference spelling never changes a JavaScript member or native wire alias. Disclosure never removes execution capability.
-- Owners: `codex-rs/code-mode-protocol/src/roster.rs` (`UndeclaredTool`, `render_roster_for`), `codex-rs/code-mode-protocol/src/description.rs` (`build_exec_tool_description`), `codex-rs/core/src/tools/spec_plan.rs` (`register_code_mode_executors`), `codex-rs/core/src/tools/code_mode/disclosure.rs`, `codex-rs/core/src/tools/code_mode/execute_spec.rs`.
-- Tripwire: absence of declarations: `roster_retains_every_callable_and_purpose_in_each_dialect` (`codex-rs/code-mode-protocol/src/roster_tests.rs`), `code_mode_uses_the_first_normalized_tool_identity` (`codex-rs/core/src/tools/spec_plan_tests.rs`), `code_mode_excludes_mcp_servers_using_their_configured_identity` (`codex-rs/core/tests/suite/code_mode.rs`), connector cases in `codex-rs/core/tests/suite/app_tool_exposure.rs`. Description token budget and server-instruction routing: none.
+- Holds: in Code Mode Only, every nested tool appears by exact JavaScript member and one short purpose sentence, including tools whose contracts are deferred to search. The roster is the `<nested_tools>` world-state section: a window states it once in its opening context, a catalogue change amends it by name, and it is never part of the `exec` declaration, so no roster change moves a declaration on any protocol. It is context, not a managed instruction: compaction reads it as retained, keeping its request's cached prefix, and the next window restates it. A prediction fork that preserves inherited declarations leaves the inherited roster unamended. Bootstrap `exec_command`, `apply_patch`, and `tool_search` keep eager porcelain contracts; MCP contracts, remaining builtin contracts, and MCP server instructions arrive through `describe_tool`. Non-MCP client-supplied dynamic tools retain their configured exposure policy. Provider-sensitive reference spelling never changes a JavaScript member or native wire alias. Disclosure never removes execution capability.
+- Owners: `codex-rs/code-mode-protocol/src/roster.rs` (`UndeclaredTool`, `roster`, `render_roster`, `render_roster_amendment`), `codex-rs/core/src/context/world_state/nested_tools.rs` (`NestedToolsState`, `WorldState::add_nested_tools`), `codex-rs/core/src/session/world_state.rs` (`build_world_state_for_step`), `codex-rs/core/src/tools/router/nested_tools.rs`, `codex-rs/code-mode-protocol/src/description.rs` (`build_exec_tool_description`, which declares eager contracts only), `codex-rs/core/src/tools/spec_plan.rs` (`register_code_mode_executors`), `codex-rs/core/src/tools/code_mode/disclosure.rs`, `codex-rs/core/src/tools/code_mode/execute_spec.rs`.
+- Tripwire: absence of declarations: `roster_retains_every_callable_and_purpose_in_each_dialect` (`codex-rs/code-mode-protocol/src/roster_tests.rs`), `code_mode_uses_the_first_normalized_tool_identity` (`codex-rs/core/src/tools/spec_plan_tests.rs`), `code_mode_excludes_mcp_servers_using_their_configured_identity` (`codex-rs/core/tests/suite/code_mode.rs`), connector cases in `codex-rs/core/tests/suite/app_tool_exposure.rs`. Amendments and a fixed declaration: `changed_sections_and_entries_append_without_repeating_the_catalog` (`codex-rs/core/tests/suite/scenarios_exec_tools.rs`), `exec_description_ignores_the_undeclared_catalog` (`codex-rs/code-mode-protocol/src/description.rs`). Inherited roster: `prediction_fork_keeps_inherited_tools` (`codex-rs/core/tests/suite/scenarios_incremental_tools.rs`). Description token budget and server-instruction routing: none.
 - Pressure: 0.162 rewrites the same builders: #51209 (ranked `tool_search` in Code Mode), #50562 (discovery guidance always present), #50536 (shared MCP types always present in Code Mode Only), #50687 (strict third-party deferral) edit `description.rs`, `spec_plan.rs` or `execute_spec.rs`.
-- Evidence: 9b8fa789f6; owner clarification, 2026-10-13.
+- Evidence: 9b8fa789f6; owner clarification, 2026-10-13. Roster moved out of the declaration by owner-delegated decision, 2026-11-25: across seven native sessions, 9 of the 10 requests that followed a tool-declaration change were uncached, against 12 of 7,998 otherwise.
 
 ### append-only-tool-declarations
 
 - Telos: a tool catalog change appends context instead of invalidating the conversation's cached prefix.
-- Holds: `incremental_tools` defaults on; new Responses Lite context windows retain their initial declarations and append changed declarations and removal notices. The complete MCP name-and-purpose roster remains eager, including strict third-party mode; full MCP contracts remain on demand. Unsupported protocols retain their existing declaration path. Prediction/sample forks preserve inherited declarations unless `prediction_preserve_parent_tools = false`; a fork whose parent declared MCP tools also receives an MCP unavailability notice, which confers no MCP execution authority. An explicit `incremental_tools = false` selects that path for new windows; existing windows keep their established mode until replacement. Where declarations cannot be appended, cache churn from genuine catalogue or signature changes is accepted; this does not permit lookup-driven declaration changes.
+- Holds: `incremental_tools` defaults on; new Responses Lite context windows retain their initial declarations and append changed declarations and removal notices. The complete MCP name-and-purpose roster remains eager, including strict third-party mode, and changes by `<nested_tools>` amendment, never by declaration (`mcp-roster`); full MCP contracts remain on demand. Unsupported protocols retain their existing declaration path. Prediction/sample forks preserve inherited declarations unless `prediction_preserve_parent_tools = false`; a fork whose parent declared MCP tools also receives an MCP unavailability notice, which confers no MCP execution authority. An explicit `incremental_tools = false` selects that path for new windows; existing windows keep their established mode until replacement. Where declarations cannot be appended, cache churn from genuine catalogue or signature changes is accepted; this does not permit lookup-driven declaration changes.
 - Owners: `codex-rs/features/src/lib.rs` (`Feature::IncrementalTools`), `codex-rs/core/src/session/step_context.rs` (`incremental_tools_enabled`), `codex-rs/core/src/session/world_state.rs` (`current_window_uses_incremental_tools`, `build_world_state_for_step`).
 - Tripwire: `incremental_tools_append_changed_catalog_without_rewriting_history`, `tool_removal_appends_a_standalone_notice_without_rewriting_history` (`codex-rs/core/tests/suite/scenarios_incremental_tools.rs`), `strict_3p_mcp_refresh_preserves_cache_while_exec_tracks_available_tools` (`codex-rs/core/tests/suite/scenarios_strict_3p_cache.rs`), resume and opt-out cases in `codex-rs/core/tests/suite/scenarios_incremental_tools_resume.rs`.
 - Pressure: upstream defaults this feature off; strict-third-party cache tests assume that no roster declaration changes, rather than permitting append-only updates.
@@ -72,9 +72,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### claude-native-voice
 
 - Telos: native Claude is addressed as itself inside Codex-1337, not as Claude Code or as a GPT.
-- Holds: the second `system` block of every native request is `SUBSCRIPTION_HARNESS`; Claude catalog entries carry `ROOT_AGENT_ROLE` and `SUBAGENT_ROLE`, which use no GPT channel vocabulary, and list `request_user_input_async`; a namespace's description opens its first tool's description, and later members carry neither it nor a reference to it.
-- Owners: `codex-rs/codex-api/src/anthropic/request.rs` (`SUBSCRIPTION_HARNESS`), `codex-rs/model-provider/src/claude_catalog.rs`, `codex-rs/core/src/client_anthropic_tools.rs` (`project_tools`).
-- Tripwire: role texts: `account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks` (`codex-rs/model-provider/src/claude_catalog_tests.rs`). Harness block and namespace placement: none.
+- Holds: the second `system` block of every native request is `subscription_harness`, which names the model and the harness; Claude catalog entries carry `ROOT_AGENT_ROLE` and `SUBAGENT_ROLE`, which use no GPT channel vocabulary, and list `request_user_input_async`; an agent message is one `<agent_message from to type>` element, as the role texts describe, and a host notification one `<tool_notification from>` element; a text block that follows another in `system` or in a user message opens with a blank line, because the provider joins text blocks without a separator; a freeform tool's description names its `input` property and carries no grammar; a namespace's description opens its first tool's description, and later members carry neither it nor a reference to it.
+- Owners: `codex-rs/codex-api/src/anthropic/request.rs` (`subscription_harness`), `codex-rs/codex-api/src/anthropic/history.rs` (`agent_message`, `separate`), `codex-rs/model-provider/src/claude_catalog.rs`, `codex-rs/core/src/client_anthropic_tools.rs` (`project_tools`, `custom`).
+- Tripwire: role texts: `account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks` (`codex-rs/model-provider/src/claude_catalog_tests.rs`). Envelopes and separators: `positional_instruction_updates_do_not_rewrite_earlier_prefixes` (`codex-rs/codex-api/src/anthropic/history_tests.rs`). Harness block and namespace placement: none.
 - Pressure: none in 0.162; every owner is fork-owned.
 - Evidence: 9f19e7809e, 4d5c1e66f3.
 
@@ -172,7 +172,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### reminders-not-system
 
 - Telos: an instruction update never rewrites an earlier cached prefix.
-- Holds: besides the two subscription blocks, a native request's `system` holds only instructions that precede the first message; each later system or developer item becomes, at its original position, a user message of `<system-reminder>` text blocks.
+- Holds: besides the two subscription blocks, a native request's `system` holds only the instructions that open the window: those that precede the first message or directly follow a leading compaction checkpoint, so every window has the same layout. Each later system or developer item becomes, at its original position, a user message of `<system-reminder>` text blocks.
 - Owners: `codex-rs/codex-api/src/anthropic/history.rs` (`Encoder`).
 - Tripwire: `positional_instruction_updates_do_not_rewrite_earlier_prefixes` (`codex-rs/codex-api/src/anthropic/history_tests.rs`).
 - Pressure: 0.162 #51156 moves base instructions from the `instructions` field into a leading `developer` input message for Responses requests; the native encoder reads `prompt.instructions`.
@@ -746,7 +746,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/chatwidget/transcript_export.rs`: fast-ui-thread
 - `codex-rs/features/src/lib.rs`: append-only-tool-declarations, framed-rollouts
 - `codex-rs/core/src/session/step_context.rs`: append-only-tool-declarations
-- `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations, standing-context-trims
+- `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations, standing-context-trims, mcp-roster
 - `codex-rs/Cargo.toml`: one-dependency-graph, pipelined-crate-graph, removed-stacks
 - `codex-rs/app-server-client/Cargo.toml`: pipelined-crate-graph
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
@@ -775,7 +775,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/compact_model_fallback.rs`: compaction-stops-on-uncertainty
 - `codex-rs/core/src/compact_remote_v2.rs`: compaction-stops-on-uncertainty, compaction-is-not-input
 - `codex-rs/core/src/config/mod.rs`: adapter-not-transport
-- `codex-rs/core/src/context/world_state/mod.rs`: retained-goal-rules
+- `codex-rs/core/src/context/world_state/mod.rs`: retained-goal-rules, mcp-roster
 - `codex-rs/core/src/mcp_tool_call.rs`: human-only-facts, catalog-at-model-boundaries
 - `codex-rs/core/src/responses_retry.rs`: backpressure-waits
 - `codex-rs/core/src/session/context_window.rs`: adapter-not-transport
@@ -798,6 +798,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/parallel.rs`: response-order-fences
 - `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor
 - `codex-rs/core/src/tools/spec_plan.rs`: mcp-roster, standing-context-trims, turn-economy, local-coprocessor, response-order-fences
+- `codex-rs/core/src/tools/router.rs`: mcp-roster
 - `codex-rs/core/src/unified_exec/process_manager.rs`: local-coprocessor, alarm-watched-sessions
 - `codex-rs/ext/goal/src/extension.rs`: retained-goal-rules, goal-boxes
 - `codex-rs/ext/goal/src/runtime.rs`: retained-goal-rules, goal-boxes
@@ -1050,7 +1051,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/codex-api/src/anthropic/cache.rs`: cache-ttl-and-warming
 - `codex-rs/codex-api/src/anthropic/client.rs`: backpressure-waits
 - `codex-rs/codex-api/src/anthropic/decoder.rs`: native-robustness, backpressure-waits
-- `codex-rs/codex-api/src/anthropic/history.rs`: reminders-not-system, stable-native-identities, messages-from-canonical-history
+- `codex-rs/codex-api/src/anthropic/history.rs`: reminders-not-system, stable-native-identities, messages-from-canonical-history, claude-native-voice
 - `codex-rs/codex-api/src/anthropic/limits.rs`: native-robustness
 - `codex-rs/codex-api/src/anthropic/mod.rs`: messages-from-canonical-history
 - `codex-rs/codex-api/src/anthropic/request.rs`: claude-native-voice, subscription-boundary
@@ -1070,6 +1071,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/context/base_instructions.rs`: instruction-amendments
 - `codex-rs/core/src/context/world_state/instruction_diff.rs`: instruction-amendments
 - `codex-rs/core/src/context/world_state/instruction_projection.rs`: instruction-amendments
+- `codex-rs/core/src/context/world_state/nested_tools.rs`: mcp-roster
 - `codex-rs/core/src/context_manager/instruction_projection.rs`: instruction-amendments
 - `codex-rs/core/src/exec_policy/script_exec.rs`: local-coprocessor
 - `codex-rs/core/src/guardian/reviewer_route.rs`: provider-parity
@@ -1083,6 +1085,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/session/prepared_tool_budget.rs`: recoverable-output
 - `codex-rs/core/src/tools/code_mode/output_sections.rs`: recoverable-output
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
+- `codex-rs/core/src/tools/router/nested_tools.rs`: mcp-roster
 - `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`: server-hosted-agents
 - `codex-rs/core/src/session/input_queue/mailbox_batch.rs`: turn-economy

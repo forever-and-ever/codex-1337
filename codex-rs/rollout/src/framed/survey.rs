@@ -105,7 +105,7 @@ fn decode_trailer(trailer: &[u8], offset: u64) -> Option<(Span, u64)> {
     })
 }
 
-pub(super) fn survey(file: &File) -> io::Result<Survey> {
+fn read_hint(file: &File) -> io::Result<(u64, u64)> {
     let len = file.metadata()?.len();
     let mut hint = [0; HINT_LEN];
     read_exact_at(file, &mut hint, 0)?;
@@ -115,7 +115,29 @@ pub(super) fn survey(file: &File) -> io::Result<Survey> {
             "not a framed rollout",
         ));
     }
-    let hinted = u64_le(&hint[16..]);
+    Ok((len, u64_le(&hint[16..])))
+}
+
+/// Reads and verifies the first frame without surveying subsequent frames or the open tail.
+/// A nonzero index hint and an unverified first frame require the normal reader's recovery rules.
+pub(crate) fn read_first_frame(file: &File) -> io::Result<Option<Vec<u8>>> {
+    let (len, hinted) = read_hint(file)?;
+    let start = HINT_LEN as u64;
+    let mut source = Window::new(file, len);
+    if source
+        .slice(start, 4)?
+        .is_none_or(|magic| u32_le(magic) != FRAME_MAGIC)
+    {
+        return Ok((hinted == 0).then(Vec::new));
+    }
+    match scan_frame(&mut source, start)? {
+        Scanned::Complete { content, .. } => Ok(Some(content)),
+        Scanned::Open { content, .. } => Ok((hinted == 0).then_some(content)),
+    }
+}
+
+pub(super) fn survey(file: &File) -> io::Result<Survey> {
+    let (len, hinted) = read_hint(file)?;
     // A chain that fails verification is ignored; walking from the start recovers the layout.
     let (mut spans, mut last_trailer) = chain(file, hinted, len)?.unwrap_or_default();
     let mut logical = spans.last().map_or(0, Span::logical_end);

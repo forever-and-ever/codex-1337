@@ -4,6 +4,8 @@ mod compaction;
 mod context_inventory;
 #[path = "codex_thread_prompt_cache.rs"]
 mod prompt_cache;
+#[path = "codex_thread_queued_input.rs"]
+mod queued_input;
 
 use crate::WithTurnExtensionData;
 use crate::agent::AgentStatus;

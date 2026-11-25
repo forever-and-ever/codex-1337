@@ -2501,6 +2501,7 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
                         client_id: Some("rejected-draft".into()),
                     })),
                     mode,
+                    queued_input: None,
                     reply,
                 },
                 turn_extension_init: None,
@@ -4202,6 +4203,7 @@ async fn start_new_context_window_persists_checkpoint_state(clear_tools: bool) {
         | RolloutItem::RetainedContext(_)
         | RolloutItem::SecurityRiskScore(_)
         | RolloutItem::TokenUsageRecord(_)
+        | RolloutItem::QueuedInputRejected(_)
         | RolloutItem::RealtimeItem(_)
         | RolloutItem::EventMsg(_) => None,
     });
@@ -4307,6 +4309,7 @@ async fn record_initial_history_assigns_and_persists_id_for_forked_response_item
         | RolloutItem::RetainedContext(_)
         | RolloutItem::SecurityRiskScore(_)
         | RolloutItem::TokenUsageRecord(_)
+        | RolloutItem::QueuedInputRejected(_)
         | RolloutItem::RealtimeItem(_)
         | RolloutItem::EventMsg(_) => None,
     });

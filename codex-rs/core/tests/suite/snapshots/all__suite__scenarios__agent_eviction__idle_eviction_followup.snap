@@ -1,14 +1,13 @@
 ---
 source: core/tests/suite/scenarios_agent_eviction_tests.rs
-assertion_line: 290
 expression: "format!(\"{history}\\n\\nResumed worker mailbox:\\n{mailbox}\")"
 ---
 Scenario: A parent with no configured environment delegates an API migration and follows up after idle eviction. Each worker result wakes the parent for a turn of its own. The worker temporarily attaches a workspace, then resumes with no environment and its earlier answer. Complete model streams are grouped as parent, then worker.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=16be74d5d9e864e5):
-        - namespace/functions; hash=208cb04ca1e79b71
+00:additional_tools/developer (2; hash=de357f21fa75fd17):
+        - namespace/functions; hash=22dfe32b55b8d599
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -17,8 +16,20 @@ Scenario: A parent with no configured environment delegates an API migration and
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer:
     You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -61,8 +72,8 @@ Scenario: A parent with no configured environment delegates an API migration and
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=16be74d5d9e864e5):
-        - namespace/functions; hash=208cb04ca1e79b71
+00:additional_tools/developer (2; hash=de357f21fa75fd17):
+        - namespace/functions; hash=22dfe32b55b8d599
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -71,8 +82,20 @@ Scenario: A parent with no configured environment delegates an API migration and
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/developer:
     You are an agent in a team of agents collaborating to complete a task.
 
@@ -101,31 +124,46 @@ Scenario: A parent with no configured environment delegates an API migration and
 08:function_call_output:Mira owns the API migration.
 09:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-10:additional_tools/developer (1; hash=6456834740b63fd0):
-        - namespace/functions; hash=69f07551688a7ed2
+10:additional_tools/developer (1; hash=b615c1f3b2d5dffe):
+        - namespace/functions; hash=38e62844296ccf54
           - custom/exec
-11:message/user:
+11:message/developer:
+    <nested_tools>
+    Added or changed:
+    - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+    </nested_tools>
+12:message/user:
     <ENVIRONMENT_CONTEXT>
 -- request 9 (turn) --
-12:message/assistant:
+13:message/assistant:
     Mira owns the API migration.
-13:message/developer:
+14:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-14:additional_tools/developer (1; hash=20c2aae0dbf1b893):
-        - namespace/functions; hash=c82725358a6e5acf
+15:additional_tools/developer (1; hash=2a964c2044555d47):
+        - namespace/functions; hash=0e1b3fcc56c796c3
           - custom/exec
-15:message/user:
+16:message/developer:
+    <nested_tools>
+    Removed:
+    - tools.fs
+    </nested_tools>
+17:message/user:
     <ENVIRONMENT_CONTEXT>
-16:agent_message
+18:agent_message
 -- request 10 (turn) --
-17:function_call/client_echo:{"message":"I will continue with Mira using the new API."}
-18:function_call_output:I will continue with Mira using the new API.
-19:message/developer:
+19:function_call/client_echo:{"message":"I will continue with Mira using the new API."}
+20:function_call_output:I will continue with Mira using the new API.
+21:message/developer:
     This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-20:additional_tools/developer (1; hash=6456834740b63fd0):
-        - namespace/functions; hash=69f07551688a7ed2
+22:additional_tools/developer (1; hash=b615c1f3b2d5dffe):
+        - namespace/functions; hash=38e62844296ccf54
           - custom/exec
-21:message/user:
+23:message/developer:
+    <nested_tools>
+    Added or changed:
+    - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+    </nested_tools>
+24:message/user:
     <ENVIRONMENT_CONTEXT>
 
 Resumed worker mailbox:

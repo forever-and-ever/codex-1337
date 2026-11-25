@@ -266,4 +266,5 @@ pub use toml::Value as TomlValue;
 
 pub mod openrouter;
 pub use openrouter::OpenRouterConfig;
+pub use openrouter::OpenRouterModelPreference;
 pub use openrouter::read_openrouter_config;

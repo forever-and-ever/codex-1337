@@ -581,13 +581,19 @@ pub(super) async fn submission_loop(
                 SubmissionOp::TurnInput {
                     request,
                     mode,
+                    queued_input,
                     reply,
                 } => {
                     let request = WithTurnExtensionData {
                         request: *request,
                         turn_extension_init: sub.turn_extension_init,
                     };
-                    let result = turn_input::handle(&sess, request, mode, sub.id.clone()).await;
+                    let result = match queued_input {
+                        Some(queued_input) => {
+                            turn_input::handle_queued(&sess, request, sub.id.clone(), queued_input).await
+                        }
+                        None => turn_input::handle(&sess, request, mode, sub.id.clone()).await,
+                    };
                     let _ = reply.send(result);
                     return false;
                 }

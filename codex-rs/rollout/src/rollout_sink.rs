@@ -16,12 +16,19 @@ use std::time::Instant;
 
 use tokio::io::AsyncWriteExt;
 
+use crate::AppendWitness;
+use crate::RolloutRevision;
 use crate::framed::FramedReader;
 use crate::framed::FramedWriter;
 use crate::ordinal::RolloutOrdinalState;
 use crate::ordinal::ordinal_state_for_rollout;
 
-pub(crate) enum RolloutSink {
+pub(crate) struct RolloutSink {
+    output: RolloutOutput,
+    witness: Option<AppendWitness>,
+}
+
+enum RolloutOutput {
     Plain(tokio::fs::File),
     /// Compression and positional writes run on the blocking pool, which the writer moves to for
     /// each operation; the mutex is never contended.
@@ -65,7 +72,10 @@ impl RolloutSink {
             } else {
                 None
             };
-            return Ok((Self::Framed(Arc::new(Mutex::new(writer))), ordinal_state));
+            return Ok((
+                Self::new(RolloutOutput::Framed(Arc::new(Mutex::new(writer)))),
+                ordinal_state,
+            ));
         }
         let mut file = OpenOptions::new()
             .read(true)
@@ -78,20 +88,58 @@ impl RolloutSink {
         } else {
             None
         };
-        Ok((Self::Plain(tokio::fs::File::from_std(file)), ordinal_state))
+        Ok((
+            Self::new(RolloutOutput::Plain(tokio::fs::File::from_std(file))),
+            ordinal_state,
+        ))
     }
 
     /// Appends one newline-terminated line. A framed append is durable against a process crash
     /// when this returns.
-    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<()> {
-        match self {
-            Self::Plain(file) => {
+    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<Vec<u8>> {
+        match &mut self.output {
+            RolloutOutput::Plain(file) => {
                 file.write_all(&line).await?;
-                file.flush().await
+                file.flush().await?;
+                Ok(line)
             }
-            Self::Framed(writer) => {
+            RolloutOutput::Framed(writer) => {
                 off_runtime(writer, move |writer| {
-                    writer.append(&line, /*flush*/ true)
+                    writer.append(&line, /*flush*/ true)?;
+                    Ok(line)
+                })
+                .await
+            }
+        }
+    }
+
+    pub(crate) fn is_framed(&self) -> bool {
+        matches!(&self.output, RolloutOutput::Framed(_))
+    }
+
+    pub(crate) async fn flushed_logical_len(&self, path: &Path) -> io::Result<Option<u64>> {
+        let path = crate::plain_rollout_path(path);
+        match &self.output {
+            RolloutOutput::Plain(file) => {
+                let open = file.metadata().await?;
+                let named = tokio::fs::metadata(path).await?;
+                Ok(same_file(&open, &named).then_some(open.len()))
+            }
+            RolloutOutput::Framed(writer) => {
+                off_runtime(writer, move |writer| {
+                    match std::fs::metadata(&path) {
+                        Ok(metadata) if metadata.is_file() => return Ok(None),
+                        Ok(_) => {}
+                        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                        Err(err) => return Err(err),
+                    }
+                    let named = std::fs::metadata(path.with_extension("jsonl.zst"))?;
+                    let open = writer.file().metadata()?;
+                    Ok(if same_file(&open, &named) {
+                        writer.flushed_logical_len(open.len())
+                    } else {
+                        None
+                    })
                 })
                 .await
             }
@@ -99,41 +147,104 @@ impl RolloutSink {
     }
 
     pub(crate) async fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Self::Plain(file) => file.flush().await,
-            Self::Framed(_) => Ok(()),
+        match &mut self.output {
+            RolloutOutput::Plain(file) => file.flush().await,
+            RolloutOutput::Framed(_) => Ok(()),
         }
     }
 
     pub(crate) async fn sync_data(&mut self) -> io::Result<()> {
-        match self {
-            Self::Plain(file) => file.sync_data().await,
-            Self::Framed(writer) => off_runtime(writer, |writer| writer.file().sync_data()).await,
+        match &mut self.output {
+            RolloutOutput::Plain(file) => file.sync_data().await,
+            RolloutOutput::Framed(writer) => {
+                off_runtime(writer, |writer| writer.file().sync_data()).await
+            }
         }
     }
 
     /// When the open frame should close because no line arrived.
     pub(crate) fn idle_deadline(&self) -> Option<Instant> {
-        match self {
-            Self::Plain(_) => None,
-            Self::Framed(writer) => lock(writer).ok()?.idle_deadline(),
+        match &self.output {
+            RolloutOutput::Plain(_) => None,
+            RolloutOutput::Framed(writer) => lock(writer).ok()?.idle_deadline(),
         }
     }
 
     /// Ends the open frame so the next writer need not seal it.
     pub(crate) async fn close_frame(&mut self) -> io::Result<()> {
-        match self {
-            Self::Plain(_) => Ok(()),
-            Self::Framed(writer) => off_runtime(writer, FramedWriter::close_frame).await,
+        let before = self.begin_append().await;
+        if let RolloutOutput::Framed(writer) = &self.output {
+            off_runtime(writer, FramedWriter::close_frame).await?;
+        }
+        self.finish_append(before).await;
+        Ok(())
+    }
+
+    fn new(output: RolloutOutput) -> Self {
+        Self {
+            output,
+            witness: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_only_plain_for_test(file: File) -> Self {
+        Self::new(RolloutOutput::Plain(tokio::fs::File::from_std(file)))
+    }
+
+    async fn revision(&self) -> Option<RolloutRevision> {
+        let (metadata, compressed) = match &self.output {
+            RolloutOutput::Plain(file) => (file.metadata().await.ok()?, false),
+            RolloutOutput::Framed(writer) => (
+                off_runtime(writer, |writer| writer.file().metadata())
+                    .await
+                    .ok()?,
+                true,
+            ),
+        };
+        RolloutRevision::from_metadata(&metadata, compressed)
+    }
+
+    pub(crate) async fn observe_append_witness(&mut self) -> Option<AppendWitness> {
+        let Some(revision) = self.revision().await else {
+            self.witness = None;
+            return None;
+        };
+        Some(AppendWitness::observe(&mut self.witness, revision))
+    }
+
+    pub(crate) async fn begin_append(&mut self) -> Option<AppendWitness> {
+        let witness = self.witness.take()?;
+        let revision = self.revision().await?;
+        witness.matches(&revision).then_some(witness)
+    }
+
+    pub(crate) async fn finish_append(&mut self, before: Option<AppendWitness>) {
+        if let Some(before) = before
+            && let Some(revision) = self.revision().await
+        {
+            self.witness = before.advance(revision);
         }
     }
 }
 
+fn same_file(open: &std::fs::Metadata, named: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (open.dev(), open.ino()) == (named.dev(), named.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        open.len() == named.len() && open.modified().ok() == named.modified().ok()
+    }
+}
+
 /// Runs one framed-writer operation on the blocking pool.
-async fn off_runtime(
+async fn off_runtime<T: Send + 'static>(
     writer: &Arc<Mutex<FramedWriter>>,
-    operation: impl FnOnce(&mut FramedWriter) -> io::Result<()> + Send + 'static,
-) -> io::Result<()> {
+    operation: impl FnOnce(&mut FramedWriter) -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
     let writer = Arc::clone(writer);
     tokio::task::spawn_blocking(move || operation(&mut *lock(&writer)?))
         .await

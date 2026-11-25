@@ -161,7 +161,7 @@ impl Session {
         }
 
         let mut input_error = None;
-        for item in recordable_inputs(self, &model_info, &input) {
+        for item in recordable_inputs(self, &model_info, &input, PersistContext::Standard) {
             let item = match item {
                 Ok(item) => item,
                 Err(error) => {

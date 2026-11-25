@@ -1022,11 +1022,15 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
         vec!["apply_patch", "exec_command"],
         "Code Mode Only declares only its bootstrap tools"
     );
+    let roster = core_test_support::nested_tools::fragments(
+        first_body["input"].as_array().expect("request input"),
+    )
+    .concat();
     assert!(
-        exec_description.contains(
+        roster.contains(
             "\n- tools.view_image: View a local image file from the filesystem when visual inspection is needed.\n"
         ),
-        "other nested tools are rostered beside the purpose ALL_TOOLS reports: {exec_description}"
+        "other nested tools are rostered beside the purpose ALL_TOOLS reports: {roster}"
     );
 
     Ok(())
@@ -1296,11 +1300,15 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
                 })
                 .expect("Code Mode exec should remain available");
             let nested_tool_name = format!("{namespace}__echo");
+            let roster = core_test_support::nested_tools::fragments(
+                body["input"].as_array().expect("request input"),
+            )
+            .concat();
             if code_mode_only {
                 assert_eq!(
                     (
                         exec_description.contains(&format!("### `{nested_tool_name}`")),
-                        exec_description.contains(&format!("(tools.{nested_tool_name}):")),
+                        roster.contains(&format!("(tools.{nested_tool_name}):")),
                     ),
                     (false, !omit_code_mode),
                     "Code Mode Only must never declare an MCP tool and must name it in its \
@@ -1313,7 +1321,8 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
             let unrelated_nested_tool_name = format!("{namespace}__unrelated");
             if code_mode_only {
                 assert!(
-                    exec_description.contains(&unrelated_nested_tool_name),
+                    exec_description.contains(&unrelated_nested_tool_name)
+                        || roster.contains(&unrelated_nested_tool_name),
                     "MCP omissions must not exclude unrelated tools sharing its namespace; \
                  omit_tools_from={omit_tools_from:?}, \
                  supports_search_tool={supports_search_tool}, \
@@ -3634,11 +3643,15 @@ if (!tool) {
     let has_ranked_search = exec_description.contains("await tools.tool_search(");
     assert_eq!(has_ranked_search, ranked_search);
     assert!(!exec_description.contains("declare const tools"));
+    let roster = core_test_support::nested_tools::fragments(
+        first_body["input"].as_array().expect("request input"),
+    )
+    .concat();
     for index in 0..100 {
-        assert!(exec_description.contains(&format!(
+        assert!(roster.contains(&format!(
             "tools.mcp__codex_apps__calendar_timezone_option_{index}"
         )));
-        assert!(exec_description.contains(&format!("Read timezone option {index}.")));
+        assert!(roster.contains(&format!("Read timezone option {index}.")));
     }
     assert!(!exec_description.contains("schema_budget_marker"));
 
@@ -4258,7 +4271,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let notice = text_item(&items, /*index*/ 1);
-    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    assert!(notice.contains("not the 20000 tokens requested."));
     let output = text_item(&items, /*index*/ 2);
     assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
@@ -4294,7 +4307,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let notice = text_item(&items, /*index*/ 1);
-    assert!(notice.contains("requested output cap 25000 tokens reduced by model policy"));
+    assert!(notice.contains("not the 25000 tokens requested."));
     let output = text_item(&items, /*index*/ 2);
     // The nested 20,000-token budget leaves about 80,000 characters. This
     // ceiling independently proves the emitted sections honor the smaller model cap.
@@ -4342,7 +4355,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let notice = text_item(&items, /*index*/ 1);
-    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    assert!(notice.contains("not the 20000 tokens requested."));
     let output = text_item(&items, /*index*/ 2);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
@@ -4385,7 +4398,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let notice = text_item(&items, /*index*/ 1);
-    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    assert!(notice.contains("not the 20000 tokens requested."));
     let output = text_item(&items, /*index*/ 2);
     assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
@@ -4423,7 +4436,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let notice = text_item(&items, /*index*/ 1);
-    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    assert!(notice.contains("not the 20000 tokens requested."));
     let output = text_item(&items, /*index*/ 2);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
@@ -4472,9 +4485,8 @@ text("LAST:" + "c".repeat(120) + ":LAST", {max_tokens: 10});
     let output = custom_tool_output_items(&request, "call-1");
     assert_eq!(output.len(), 5, "unexpected code-mode output: {output:?}");
     let notice = text_item(&output, 1);
-    assert!(notice.contains("truncated 3 text sections"));
-    assert!(notice.contains("shared 48-byte"));
-    assert!(notice.contains("emission-capped demand 40"));
+    assert!(notice.contains("Truncated 3 of 3 sections to fit 48 bytes."));
+    assert!(notice.contains(", emission cap 40\n"));
     let sections = [
         text_item(&output, 2),
         text_item(&output, 3),
@@ -4489,11 +4501,11 @@ text("LAST:" + "c".repeat(120) + ":LAST", {max_tokens: 10});
     assert!(output.iter().all(|item| item.get("max_tokens").is_none()));
 
     let artifact = notice
-        .split_once("Truncated emitted text: ")
+        .split_once("Full text: ")
         .expect("truncation must expose its precise recovery artifact")
         .1
-        .split_once(" (Codex host filesystem;")
-        .expect("recovery must disclose its filesystem environment")
+        .split_once('\n')
+        .expect("section limits follow the artifact")
         .0;
     let retained = std::fs::read_to_string(artifact)?;
     for (identity, fill) in [("FIRST", 'a'), ("MIDDLE", 'b'), ("LAST", 'c')] {
@@ -5589,10 +5601,9 @@ text("phase 2");
     if client_truncation {
         let notice = text_item(&second_items, /*index*/ 1);
         assert!(
-            notice.contains("shared 20-byte approximate text budget"),
+            notice.contains("sections to fit 20 bytes. Full text: "),
             "{notice}"
         );
-        assert!(notice.contains("Truncated emitted text:"), "{notice}");
         assert_eq!(text_item(&second_items, /*index*/ 2), "01234567…123456789");
     } else {
         assert_eq!(
@@ -6312,9 +6323,8 @@ text("token one token two token three token four token five token six token seve
     );
     if client_truncation {
         assert!(
-            text_item(&first_items, /*index*/ 1).starts_with(
-                "Warning: requested output cap 2147483648 tokens reduced by model policy"
-            ),
+            text_item(&first_items, /*index*/ 1)
+                .contains("not the 2147483648 tokens requested."),
             "oversized exec budgets must disclose the policy reduction",
         );
     }
@@ -6362,8 +6372,7 @@ text("token one token two token three token four token five token six token seve
     );
     if client_truncation {
         let notice = text_item(&second_items, /*index*/ 1);
-        assert!(notice.contains("truncated 1 text sections under a shared 24-byte"));
-        assert!(notice.contains("Truncated emitted text: "));
+        assert!(notice.contains("Truncated 1 of 1 sections to fit 24 bytes. Full text: "));
         let output = text_item(&second_items, /*index*/ 2);
         assert!(output.starts_with("token one "));
         assert!(output.ends_with("token seven"));
@@ -9127,19 +9136,13 @@ async fn code_mode_only_keeps_mcp_tools_direct_when_nested_exposure_is_omitted()
         namespace_child_tool(&first_request, "mcp__rmcp", "echo").is_some(),
         "an MCP tool omitted only from Code Mode must remain directly callable"
     );
-    let exec_description = first_request["tools"]
-        .as_array()
-        .expect("request should contain tools")
-        .iter()
-        .find_map(|tool| {
-            (tool["name"].as_str() == Some("exec"))
-                .then(|| tool["description"].as_str())
-                .flatten()
-        })
-        .expect("Code Mode exec should remain available");
     assert!(
-        !exec_description.contains("mcp__rmcp__echo"),
-        "an MCP tool omitted from Code Mode must not appear in the exec declaration"
+        !core_test_support::nested_tools::fragments(
+            first_request["input"].as_array().expect("request input")
+        )
+        .concat()
+        .contains("mcp__rmcp__echo"),
+        "an MCP tool omitted from Code Mode must not be rostered"
     );
 
     let output = second_mock.single_request().function_call_output("call-1");
@@ -9227,18 +9230,12 @@ text(results.map(({ structuredContent }) => structuredContent?.echo ?? "missing"
         namespace_child_tool(&first_request, "mcp__rmcp", "echo").is_none(),
         "MCP tool omitted from direct and deferred exposure must remain hidden at the top level"
     );
-    let exec_description = first_request["tools"]
-        .as_array()
-        .expect("request should contain tools")
-        .iter()
-        .find_map(|tool| {
-            (tool["name"].as_str() == Some("exec"))
-                .then(|| tool["description"].as_str())
-                .flatten()
-        })
-        .expect("Code Mode exec should remain available");
     assert!(
-        exec_description.contains("mcp__rmcp__echo"),
+        core_test_support::nested_tools::fragments(
+            first_request["input"].as_array().expect("request input")
+        )
+        .concat()
+        .contains("mcp__rmcp__echo"),
         "hidden MCP tool must remain available inside Code Mode"
     );
 

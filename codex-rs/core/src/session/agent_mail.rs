@@ -135,7 +135,7 @@ pub(crate) fn is_accepted_agent_mail(communication: &InterAgentCommunication) ->
     communication
         .id
         .as_ref()
-        .is_some_and(|id| id.as_str().starts_with("amsg_mail_"))
+        .is_some_and(codex_thread_store::is_accepted_agent_mail_id)
 }
 
 pub(super) fn accepted_mail_submission_id(op: &codex_protocol::protocol::Op) -> Option<String> {

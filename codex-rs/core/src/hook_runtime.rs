@@ -780,8 +780,21 @@ pub(crate) async fn record_pending_input(
                 .await;
         }
         TurnInput::FunctionCallOutput(item) => {
-            sess.record_annotated_conversation_items(turn_context, model_info, vec![item.clone()])
+            if item
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.queued_input.is_some())
+            {
+                sess.record_queued_tool_output(turn_context, model_info, item.clone())
+                    .await?;
+            } else {
+                sess.record_annotated_conversation_items(
+                    turn_context,
+                    model_info,
+                    vec![item.clone()],
+                )
                 .await;
+            }
             if let ResponseItem::FunctionCallOutput {
                 id: Some(id),
                 call_id,

@@ -15,39 +15,33 @@ use crate::discovery::compact_tool_summary;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const MAX_YIELD_TIME_PLACEHOLDER: &str = "{{ max_yield_time_ms }}";
-const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "The inventory names every currently available nested tool. Contracts are on demand: call describe_tool before first use. Availability can change; ALL_TOOLS reflects the current catalogue.";
-const TOOL_DISCOVERY_GUIDANCE: &str = r#"Discovery (synchronous):
-- ALL_TOOLS: current name-and-purpose inventory.
-- search_tools(query, options?): case-insensitive literal words must all match a name or purpose; empty query browses. Optional namespace restricts callable prefix (functions for plain tools), limit defaults to 8 and is capped at 20, offset defaults to 0. Returns matches, truncated, next_offset; continue with the same query and next_offset.
-- describe_tool(name, options?): exact canonical names take precedence; accepts a tools. prefix and unambiguous exact namespace dot spellings. Aliases resolve descriptions only: invoke the canonical tools member shown in the contract. No fuzzy matching or disabled-tool lookup. Returns the complete instructions and schema-derived parameter contract. Optional detail is contract (default), output (complete return shape), or schema (raw machine schemas). Read a missing contract before calling; inspect output before using unfamiliar result fields.
-Print bounded search results, not the whole catalogue."#;
-const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Output: text/notify render directly returned exec_command/write_stdin results as literal output plus required execution state; dense nonempty arrays of only these results get ordinal headers. Default mode coalesces consecutive empty successes; metadata=true retains each result's metadata. JavaScript fields never change. Strings remain literal (including result.output and JSON.stringify); other values use generic serialization. Each nonempty emitted text item is a section; native result arrays and sh preserve separate indexed result/coalesced-empty sections, and a text emission cap covers its whole batch; truncation fairly shares the exec/wait approximate text budget across sections, preserving their head/tail and disclosing effective caps. Model policy may reduce the requested cap; every reduction is disclosed. Media, bounded recovery notices and minimum omission markers are outside that text budget; history preserves the budgeted result. Truncated emitted text alone is recoverable at the reported Codex-host path (not necessarily reachable from a remote executor): at most 16 MiB/artifact, 64 MiB and 32 artifacts/thread, oldest evicted first, removed on thread-service shutdown. Recovery cannot restore bytes discarded by a nested tool; storage failures and oversized artifacts are reported explicitly."#;
+const MAX_OUTPUT_TOKENS_PLACEHOLDER: &str = "{{ max_output_tokens }}";
+const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "`<nested_tools>` lists nested tools by name and purpose only: read a tool's contract with `describe_tool` before its first call. Later messages amend the list; `ALL_TOOLS` is always current.";
+const TOOL_DISCOVERY_GUIDANCE: &str = r#"Discovery, synchronous:
+- `ALL_TOOLS`: current names and purposes.
+- `search_tools(query, {namespace?, limit?, offset?}?)`: tools whose name or purpose contains every word of `query`, ignoring case; an empty query lists all. `namespace` restricts the callable prefix (`functions` for plain tools). `limit` defaults to 8 and is at most 20. Returns `{matches, truncated, next_offset}`; continue with the same query and `next_offset`.
+- `describe_tool(name, {detail?}?)`: the tool's instructions and parameter contract; `detail: "output"` gives the full return shape and `"schema"` the raw schemas. `name` is the exact member, optionally with a `tools.` prefix or in an unambiguous namespace-dot spelling, never a fuzzy match; call the member the contract names. Read the output shape before using result fields you have not seen.
+Print bounded search results, not the whole list."#;
+const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Output: `text` and `notify` print an `exec_command` or `write_stdin` result as its output plus exit state, and an array of such results under ordinal headers, merging consecutive empty successes. Strings print as written; other values are serialized. Each emitted text is a section, and a result array is one section per result; `max_tokens` on an emission caps its sections together. Past the budget, sections are cut to head and tail in fair shares, and the full text of the cut sections is saved to a temporary file on the Codex host, which a remote executor may not reach. The notice names the file: read it instead of re-running. Text a nested tool truncated itself is not recoverable, so send large command output to a file and print what you need. Media do not count against the budget."#;
 pub const TOOL_SEARCH_GUIDANCE: &str = r#"Use `await tools.tool_search({query: "...", limit: 8})` for ranked discovery of deferred tools. It returns `{tools: [{name, description}]}` with callable names and compact purpose summaries. Use `describe_tool(name)` for a missing contract before calling a tool."#;
-const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value, detail?)`: append an image. Value is a base64 data URL, an object with image_url and optional detail, or an individual MCP image block (image(result.content[0])). Detail is auto, low, high, original, or null; the second argument overrides embedded detail, including MCP _meta[\"codex/imageDetail\"]."#;
+const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value, detail?)`: append an image. Value is a base64 data URL, an object with image_url and optional detail, or an individual MCP image block (image(result.content[0])). Detail is auto, low, high, original, or null; the second argument overrides embedded detail, including MCP _meta["codex/imageDetail"]."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value)`: append an image. Value is a base64 data URL, an object with image_url, or an individual MCP image block (image(result.content[0]))."#;
 const AUDIO_HELPER_DESCRIPTION: &str = r#"`audio(value)`: append audio. Value is a base64 data URL, an object with audio_url, or an individual MCP audio block (audio(result.content[0]))."#;
 const GENERATED_IMAGE_HELPER_DESCRIPTION: &str = r#"`generatedImage(result)`: append a generated image. Result requires image_url and may include an output_hint string. HTTP(S) URLs are unsupported."#;
-const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direct network, or console. Call nested tools with await tools.NAME(args); freeform tools take a string. Tool permissions and approvals still apply.
-Await every operation: finishing the module destroys its isolate and discards outstanding promises. exec blocks until completion, yield_control(), new input, or {{ max_yield_time_ms }} ms; a returned cell ID means work continues. Resume with wait only after receiving that ID.
-Optional first line: // @exec: {"max_output_tokens": 1000}. Default output budget: 10000 tokens, subject to model policy.
-Output enters context only when explicitly emitted:
-- text(value, {metadata?, max_tokens?}?): append one output section; max_tokens is an optional nonnegative safe-integer total cap for this emission. notify(value, {metadata?}?): emit immediately. metadata=true includes native execution metadata.
-- yield_control(): emit accumulated output and hand control back while this cell keeps running.
-- exit(): end successfully now. fail(message): end unsuccessfully now with a message string; neither helper can be caught.
+const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript as one cell: a fresh V8 async module, without Node, a console or direct network access. The input is the source alone: no JSON wrapper, no Markdown fence.
+Call a nested tool with `await tools.NAME(args)`; a freeform tool takes a string. Tool permissions and approvals apply.
+Await every operation: when the module finishes, its isolate is destroyed and unfinished promises are discarded.
+`exec` returns when the cell finishes or calls `yield_control()`, when new input arrives, or after {{ max_yield_time_ms }} ms. A returned cell ID means the cell is still running: resume it with `wait`.
+Only emitted output reaches you. A call's output budget defaults to {{ max_output_tokens }} tokens; a first line `// @exec: {"max_output_tokens": N}` sets it, within this model's limit.
+- `text(value, {metadata?, max_tokens?}?)`: append one output section; `max_tokens` caps this emission. `notify(value, {metadata?}?)`: emit at once. `metadata: true` adds execution metadata.
+- `yield_control()`: emit the accumulated output and return while the cell keeps running.
+- `exit()`: end successfully now. `fail(message)`: end unsuccessfully now. Neither can be caught.
 {{ sh_helper }}
 {{ media_helpers }}
-- store(key, value), load(key): retain serializable values by string key across cells; missing keys return undefined.
-- setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers. Timers alone do not keep the isolate alive; await a promise when waiting."#;
-const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A cell succeeds on its own successful foreground completion; caught nested tool errors and handled nonzero process exits are data. Inspect collected outcomes and call fail(message) when they must reject the stage. Uncaught errors, cancellation, host failure or uncertainty, unawaited work, and any background/yielded work still fail the fence. Direct top-level tools retain their own failure verdicts.";
-const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
-- `cell_id` identifies the running `exec` cell to resume.
-- `wait` blocks until the script finishes or calls `yield_control()`.
-- `wait` returns early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
-- `max_tokens` limits how much new output this wait call returns. Defaults to 10000 tokens, subject to model policy.
-- `terminate: true` stops the running cell; false or omitted waits for output.
-- `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
-- If the cell is still running, `wait` may yield again with the same `cell_id`.
-- If the cell has already finished, `wait` returns the completed result and closes the cell."#;
+- `store(key, value)`, `load(key)`: keep serializable values under a string key across cells; a missing key loads `undefined`.
+- `setTimeout(callback, delayMs?)`, `clearTimeout(id?)`: timers. A timer alone does not keep the isolate alive: await a promise to wait."#;
+const EXECUTION_ORDER_GUIDANCE: &str = "`exec` and `wait` impose no order on a response's other calls: put `fence({})` between dependent stages. For a fence, a cell succeeds unless it throws, calls `fail(message)`, yields, or leaves work unawaited or in the background; tool errors it catches and nonzero exits it handles are data.";
+const WAIT_DESCRIPTION_TEMPLATE: &str = "The output is only what the cell emitted since its last yield. `wait` also returns, leaving the cell running, when new user or agent input arrives or after {{ max_yield_time_ms }} ms.";
 pub const CODE_MODE_PRAGMA_PREFIX: &str = "// @exec:";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -310,6 +304,10 @@ pub fn build_exec_tool_description_and_definitions_for(
         .unwrap_or(EXEC_DESCRIPTION_TEMPLATE)
         .replace(MAX_YIELD_TIME_PLACEHOLDER, &max_yield_time_ms.to_string())
         .replace(
+            MAX_OUTPUT_TOKENS_PLACEHOLDER,
+            &crate::DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL.to_string(),
+        )
+        .replace(
             "{{ sh_helper }}\n",
             crate::sh::helper(
                 enabled_tools
@@ -327,10 +325,9 @@ pub fn build_exec_tool_description_and_definitions_for(
         .chain(undeclared_tools.iter().map(UndeclaredTool::definition))
         .any(|tool| tool.tool_name.is_default_namespace() && tool.tool_name.name == "fs")
     {
-        sections.push("- `fs.readFile(path, options?)`: returns a Uint8Array, or an exact UTF-8 string with `\"utf8\"` or `{encoding: \"utf8\"}`.\n- `fs.writeFile(path, data, options?)`: writes a string as UTF-8 or a Uint8Array; resolves after the write. Both accept `{environment_id: \"...\"}` options, default to the primary executor, and resolve relative paths against its cwd. Await each operation. Transfers over 1 MiB fail; content enters model context only through explicit output. No filesystem escalation; normal permissions apply.".into());
+        sections.push("- `fs.readFile(path, options?)`: a `Uint8Array`, or a UTF-8 string with `\"utf8\"` or `{encoding: \"utf8\"}`.\n- `fs.writeFile(path, data, options?)`: write a string as UTF-8, or a `Uint8Array`. Both take `{environment_id: \"...\"}`, default to the primary executor, resolve relative paths against its cwd, fail above 1 MiB, and run under your normal permissions without escalation.".into());
     }
     sections.push(EXECUTION_ORDER_GUIDANCE.to_string());
-    sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
     sections.push(EXECUTION_OUTPUT_GUIDANCE.to_string());
     let default_guidance = match deferred_tool_discovery {
         // In Code Mode Only, the enabled search tool's description is rendered below.
@@ -347,10 +344,7 @@ pub fn build_exec_tool_description_and_definitions_for(
     if !guidance.is_empty() {
         sections.push(guidance.to_string());
     }
-    sections.extend(dialect.notes().map(str::to_owned));
-    // TELOS(mcp-roster): every inventory change participates in incremental context.
-    let roster = crate::roster::definitions_for(undeclared_tools, dialect);
-    sections.extend(crate::roster::render_definitions(&roster));
+    sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
     if !code_mode_only {
         return (sections.join("\n\n"), Vec::new());
     }
@@ -363,11 +357,7 @@ pub fn build_exec_tool_description_and_definitions_for(
         sections.push(preamble.to_owned());
     }
 
-    let mut entries = if incremental_exec_enabled {
-        roster
-    } else {
-        Vec::new()
-    };
+    let mut entries = Vec::new();
     if !enabled_tools.is_empty() {
         let mut current_namespace: Option<&str> = None;
         let mut seen_namespaces = BTreeSet::new();
@@ -961,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn exec_description_preserves_discovery_guidance_across_catalog_changes() {
+    fn exec_description_ignores_the_undeclared_catalog() {
         let deferred_tools = [ToolDefinition {
             summary: String::new(),
             name: "deferred_tool".to_string(),
@@ -1004,8 +994,8 @@ mod tests {
                     /*incremental_exec_enabled*/ false,
                     /*messages*/ None,
                 );
-                assert!(description.contains("inventory names every"));
-                assert!(description.contains("search_tools(query, options?)"));
+                assert!(description.contains(super::DEFERRED_NESTED_TOOLS_GUIDANCE));
+                assert!(description.contains(super::TOOL_DISCOVERY_GUIDANCE));
                 assert_eq!(
                     description.matches(super::TOOL_SEARCH_GUIDANCE).count(),
                     usize::from(discovery == DeferredToolDiscovery::RankedSearch),
@@ -1022,8 +1012,9 @@ mod tests {
                     /*incremental_exec_enabled*/ false,
                     /*messages*/ None,
                 );
-                assert!(description.contains("tools.deferred_tool: Deferred tool"));
-                assert!(!empty_catalog_description.contains("tools.deferred_tool: Deferred tool"));
+                // The roster is an instruction of its own, so a catalogue change never moves
+                // the declaration.
+                assert_eq!(description, empty_catalog_description);
             }
         }
     }

@@ -2,26 +2,33 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use codex_protocol::ResponseItemId;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_rollout::AppendWitness;
 use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::ReverseJsonlScanner;
 use codex_rollout::RolloutItem;
+use codex_rollout::RolloutRevision;
 use codex_rollout::ScanOutcome;
 use codex_rollout::StateDbHandle;
 use codex_state::AgentMailState;
 
 use super::LocalThreadStore;
 use super::rollout_lineage::RolloutLineage;
+use super::rollout_lineage::RolloutLineageSegment;
 use super::thread_rollout_resolver;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::is_accepted_agent_mail_id;
 use crate::live_thread::agent_mail::retain_accepted_agent_mail;
 use crate::validate_accepted_agent_mail;
 
@@ -59,97 +66,65 @@ impl LocalThreadStore {
                 self.resolve_rollout_lineage(thread_id, Some(path)).await?
             }
         };
-        Self::find_accepted_agent_mail_from_lineage(lineage, ids).await
+        self.find_accepted_agent_mail_from_lineage(lineage, ids)
+            .await
     }
 
-    pub(super) async fn find_accepted_agent_mail_from_lineage(
+    async fn find_accepted_agent_mail_from_lineage(
+        &self,
         lineage: RolloutLineage,
         ids: &[ResponseItemId],
     ) -> ThreadStoreResult<HashMap<ResponseItemId, ResponseItemEnvelope>> {
+        let cacheable = ids.iter().all(is_accepted_agent_mail_id);
+        let mut witnesses = HashMap::new();
+        if cacheable {
+            let recorders: Vec<_> = self
+                .live_recorders
+                .lock()
+                .await
+                .values()
+                .filter(|entry| {
+                    lineage
+                        .segments()
+                        .iter()
+                        .any(|segment| segment.rollout_id == entry.rollout_id)
+                })
+                .map(|entry| (entry.rollout_id, entry.recorder.clone()))
+                .collect();
+            for (rollout_id, recorder) in recorders {
+                if let Some(witness) = recorder.append_witness().await {
+                    witnesses.insert(rollout_id, witness);
+                }
+            }
+        }
         let ids: HashSet<_> = ids.iter().cloned().collect();
+        let cache = self.mail_receipts.clone();
         let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
         let result = tokio::task::spawn_blocking(move || {
             let mut found = HashMap::new();
-            for segment in lineage.segments() {
-                let mut reader =
-                    codex_rollout::open_rollout_seekable_reader(&segment.rollout_path, || {
-                        stop.is_closed()
-                    })
-                    .map_err(mail_history_error)?;
-                let end = match segment.end {
-                    Some(end) => end.end_byte_offset,
-                    None => reader.seek(SeekFrom::End(0)).map_err(mail_history_error)?,
+            // A lineage longer than the whole cache cannot admit every miss in order:
+            // each old miss would evict precisely the next segment about to be read.
+            let first_admission = lineage.segments.len().saturating_sub(MAX_CACHED_SEGMENTS);
+            for (index, segment) in lineage.segments.into_iter().enumerate() {
+                if stop.is_closed() {
+                    return Err(mail_history_error("rollout read cancelled"));
+                }
+                let witness = witnesses.remove(&segment.rollout_id);
+                let checkpoint_use = if !cacheable {
+                    CheckpointUse::Bypass
+                } else if index < first_admission {
+                    CheckpointUse::Reuse
+                } else {
+                    CheckpointUse::Populate
                 };
-                if end == 0 {
-                    return Err(mail_history_error("empty canonical lineage segment"));
-                }
-                reader
-                    .seek(SeekFrom::Start(end - 1))
-                    .map_err(mail_history_error)?;
-                let mut last_byte = [0];
-                reader
-                    .read_exact(&mut last_byte)
-                    .map_err(mail_history_error)?;
-                if last_byte != *b"\n" {
-                    return Err(mail_history_error(
-                        "incomplete canonical record at lineage cutoff",
-                    ));
-                }
-                let mut scanner =
-                    ReverseJsonlScanner::new_at(reader, end).map_err(mail_history_error)?;
-                let mut next_ordinal = segment.end.map(|end| end.end_ordinal_exclusive);
-                let mut valid_ordinals = true;
-                let mut oldest_header_mode = None;
-                let mut successor = Vec::new();
-                while let Some((outcome, record)) = scanner
-                    .scan_next_rollout_line_with_record()
-                    .map_err(mail_history_error)?
-                {
-                    let line = match outcome {
-                        ScanOutcome::Parsed(line) => line,
-                        ScanOutcome::Rejected(error)
-                            if error.is_eof() && retried_record_prefix(record, &successor) =>
-                        {
-                            // Reopening can newline-terminate a failed write before retrying
-                            // its unchanged ordinal. The complete adjacent retry owns admission;
-                            // a matching partial attempt adds no record and loses no bytes.
-                            tracing::warn!(rollout = %segment.rollout_path.display(),
-                                ordinal = ?next_ordinal, bytes = record.len(),
-                                "canonical reconciliation verified a truncated retry prefix");
-                            continue;
-                        }
-                        ScanOutcome::Rejected(error) => {
-                            return Err(mail_history_error(format!(
-                                "{} before ordinal {:?}: {error}",
-                                segment.rollout_path.display(),
-                                next_ordinal
-                            )));
-                        }
-                    };
-                    successor.clear();
-                    successor.extend_from_slice(record);
-                    valid_ordinals &= line.ordinal.is_some_and(|ordinal| {
-                        next_ordinal.is_none_or(|next| ordinal.checked_add(1) == Some(next))
-                    });
-                    next_ordinal = line.ordinal;
-                    // SessionMeta patches are appended records, not new segment headers.
-                    // Only the oldest physical record must be the canonical header.
-                    oldest_header_mode = match &line.item {
-                        RolloutItem::SessionMeta(meta) => Some(meta.meta.history_mode),
-                        _ => None,
-                    };
-                    if let RolloutItem::ResponseItem(envelope) = line.item {
-                        retain_accepted_agent_mail(&mut found, &ids, envelope)?;
-                    }
-                }
-                let Some(mode) = oldest_header_mode else {
-                    return Err(mail_history_error("missing canonical lineage header"));
-                };
-                if mode == ThreadHistoryMode::Paginated
-                    && (!valid_ordinals || next_ordinal != segment.start_ordinal.checked_sub(1))
-                {
-                    return Err(mail_history_error("incomplete canonical ordinal range"));
-                }
+                cache.reconcile_segment(
+                    segment,
+                    witness,
+                    checkpoint_use,
+                    &ids,
+                    &mut found,
+                    || stop.is_closed(),
+                )?;
             }
             Ok(found)
         })
@@ -175,7 +150,9 @@ impl LocalThreadStore {
             return Ok(());
         }
         let ids: Vec<_> = pending.iter().map(|record| record.id.clone()).collect();
-        let found = Self::find_accepted_agent_mail_from_lineage(lineage.clone(), &ids).await?;
+        let found = self
+            .find_accepted_agent_mail_from_lineage(lineage.clone(), &ids)
+            .await?;
         for record in pending {
             let AgentMailState::Pending(payload) = record.state else {
                 unreachable!()
@@ -196,6 +173,388 @@ impl LocalThreadStore {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy)]
+enum CheckpointUse {
+    Bypass,
+    Reuse,
+    Populate,
+}
+
+// Cache IDs and byte spans, not payloads. Overflow falls back to canonical scanning.
+const MAX_CACHED_SEGMENTS: usize = 64;
+const MAX_RECEIPT_RECORDS: usize = 16 * 1024;
+const MAX_RECEIPT_ID_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Default)]
+pub(super) struct ReceiptCache {
+    segments: Arc<Mutex<VecDeque<ReceiptCheckpoint>>>,
+    #[cfg(test)]
+    scanned_records: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+struct ReceiptCheckpoint {
+    segment: RolloutLineageSegment,
+    revision: RolloutRevision,
+    witness: Option<AppendWitness>,
+    prefix: ValidatedPrefix,
+    index: ReceiptIndex,
+}
+
+#[derive(Clone, Copy)]
+struct ValidatedPrefix {
+    end: u64,
+    mode: ThreadHistoryMode,
+    last_ordinal: Option<u64>,
+}
+
+#[derive(Default)]
+struct ReceiptIndex {
+    entries: HashMap<String, Vec<RecordSpan>>,
+    record_count: usize,
+    id_bytes: usize,
+}
+
+#[derive(Clone, Copy)]
+struct RecordSpan {
+    offset: u64,
+    len: usize,
+}
+
+impl ReceiptCache {
+    fn take(&self, segment: &RolloutLineageSegment) -> Option<ReceiptCheckpoint> {
+        let mut segments = self.segments.lock().ok()?;
+        let index = segments
+            .iter()
+            .position(|checkpoint| checkpoint.segment == *segment)?;
+        segments.remove(index)
+    }
+
+    fn save(&self, checkpoint: ReceiptCheckpoint) {
+        let Ok(mut segments) = self.segments.lock() else {
+            return;
+        };
+        segments.retain(|entry| entry.segment != checkpoint.segment);
+        segments.push_front(checkpoint);
+        segments.truncate(MAX_CACHED_SEGMENTS);
+    }
+
+    fn reconcile_segment(
+        &self,
+        segment: RolloutLineageSegment,
+        witness: Option<AppendWitness>,
+        checkpoint_use: CheckpointUse,
+        ids: &HashSet<ResponseItemId>,
+        found: &mut HashMap<ResponseItemId, ResponseItemEnvelope>,
+        is_cancelled: impl Fn() -> bool,
+    ) -> ThreadStoreResult<()> {
+        let revision = match checkpoint_use {
+            CheckpointUse::Bypass => None,
+            CheckpointUse::Reuse | CheckpointUse::Populate => {
+                RolloutRevision::read(&segment.rollout_path)
+            }
+        };
+        let witness = witness.filter(|witness| {
+            revision
+                .as_ref()
+                .is_some_and(|revision| witness.matches(revision))
+        });
+        let checkpoint = revision.as_ref().and_then(|revision| {
+            self.take(&segment).filter(|checkpoint| {
+                checkpoint.revision == *revision
+                    || witness.as_ref().is_some_and(|witness| {
+                        checkpoint
+                            .witness
+                            .as_ref()
+                            .is_some_and(|prior| witness.extends(prior))
+                    })
+            })
+        });
+        if let (Some(revision), Some(mut checkpoint)) = (&revision, checkpoint) {
+            let mut resolved = HashMap::new();
+            let mut delta = Some(ReceiptIndex::default());
+            let before = checkpoint.revision == *revision || segment.end.is_some();
+            let prefix = if before {
+                checkpoint.prefix
+            } else {
+                // Only an observed append can reuse an active segment's validated prefix.
+                // The new suffix still has to prove its records, ordinals and retry bytes.
+                scan_segment(
+                    #[cfg(test)]
+                    &self.scanned_records,
+                    &segment,
+                    Some(checkpoint.prefix),
+                    &is_cancelled,
+                    |envelope, span| collect_record(&mut delta, &mut resolved, ids, envelope, span),
+                )?
+            };
+            let read_indexed_record =
+                checkpoint
+                    .index
+                    .collect(&segment, ids, &mut resolved, &is_cancelled)?;
+            if (before && !read_indexed_record)
+                || RolloutRevision::read(&segment.rollout_path).as_ref() == Some(revision)
+            {
+                for envelope in resolved.into_values() {
+                    retain_accepted_agent_mail(found, ids, envelope)?;
+                }
+                if let Some(delta) = delta
+                    && checkpoint.index.extend(delta)
+                {
+                    checkpoint.prefix = prefix;
+                    checkpoint.revision = revision.clone();
+                    checkpoint.witness = witness;
+                    self.save(checkpoint);
+                }
+                return Ok(());
+            }
+            // A seal or external change raced the read. A mixed revision is not a checkpoint.
+        }
+
+        let mut index = matches!(checkpoint_use, CheckpointUse::Populate)
+            .then_some(revision.as_ref())
+            .flatten()
+            .map(|_| ReceiptIndex::default());
+        let prefix = scan_segment(
+            #[cfg(test)]
+            &self.scanned_records,
+            &segment,
+            None,
+            is_cancelled,
+            |envelope, span| collect_record(&mut index, found, ids, envelope, span),
+        )?;
+        if let (Some(index), Some(revision)) = (index, revision)
+            && RolloutRevision::read(&segment.rollout_path).as_ref() == Some(&revision)
+        {
+            self.save(ReceiptCheckpoint {
+                segment,
+                revision,
+                witness,
+                prefix,
+                index,
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn scanned_records(&self) -> usize {
+        self.scanned_records
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+fn collect_record(
+    index: &mut Option<ReceiptIndex>,
+    found: &mut HashMap<ResponseItemId, ResponseItemEnvelope>,
+    ids: &HashSet<ResponseItemId>,
+    envelope: ResponseItemEnvelope,
+    span: RecordSpan,
+) -> ThreadStoreResult<()> {
+    if let Some(index_live) = index
+        && let Some(id) = envelope.id().filter(|id| is_accepted_agent_mail_id(id))
+        && !index_live.note(id, span)
+    {
+        *index = None;
+    }
+    retain_accepted_agent_mail(found, ids, envelope)
+}
+
+impl ReceiptIndex {
+    fn in_bounds(&self) -> bool {
+        self.record_count <= MAX_RECEIPT_RECORDS && self.id_bytes <= MAX_RECEIPT_ID_BYTES
+    }
+
+    fn note(&mut self, id: &ResponseItemId, span: RecordSpan) -> bool {
+        self.record_count += 1;
+        self.id_bytes = self.id_bytes.saturating_add(id.len());
+        if !self.in_bounds() {
+            return false;
+        }
+        self.entries.entry(id.to_string()).or_default().push(span);
+        true
+    }
+
+    fn collect(
+        &self,
+        segment: &RolloutLineageSegment,
+        ids: &HashSet<ResponseItemId>,
+        found: &mut HashMap<ResponseItemId, ResponseItemEnvelope>,
+        is_cancelled: impl Fn() -> bool,
+    ) -> ThreadStoreResult<bool> {
+        let mut hits = ids
+            .iter()
+            .filter_map(|id| Some((id, self.entries.get(id.as_str())?)))
+            .peekable();
+        if hits.peek().is_none() {
+            return Ok(false);
+        }
+        let mut reader =
+            codex_rollout::open_rollout_seekable_reader(&segment.rollout_path, is_cancelled)
+                .map_err(mail_history_error)?;
+        let mut bytes = Vec::new();
+        for (id, spans) in hits {
+            for span in spans {
+                reader
+                    .seek(SeekFrom::Start(span.offset))
+                    .map_err(mail_history_error)?;
+                bytes.resize(span.len, 0);
+                reader.read_exact(&mut bytes).map_err(mail_history_error)?;
+                let line = std::str::from_utf8(&bytes).map_err(mail_history_error)?;
+                let line = codex_rollout::parse_rollout_line(line).map_err(mail_history_error)?;
+                let RolloutItem::ResponseItem(envelope) = line.item else {
+                    return Err(mail_history_error(
+                        "indexed agent mail is not a response item",
+                    ));
+                };
+                if envelope.id() != Some(id) {
+                    return Err(mail_history_error(
+                        "indexed agent mail has the wrong identity",
+                    ));
+                }
+                retain_accepted_agent_mail(found, ids, envelope)?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn extend(&mut self, newer: Self) -> bool {
+        self.record_count += newer.record_count;
+        self.id_bytes += newer.id_bytes;
+        if !self.in_bounds() {
+            return false;
+        }
+        for (id, mut spans) in newer.entries {
+            match self.entries.entry(id) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(spans);
+                }
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    spans.append(entry.get_mut());
+                    entry.insert(spans);
+                }
+            }
+        }
+        true
+    }
+}
+
+fn scan_segment(
+    #[cfg(test)] counter: &std::sync::atomic::AtomicUsize,
+    segment: &RolloutLineageSegment,
+    prefix: Option<ValidatedPrefix>,
+    is_cancelled: impl Fn() -> bool,
+    mut record_item: impl FnMut(ResponseItemEnvelope, RecordSpan) -> ThreadStoreResult<()>,
+) -> ThreadStoreResult<ValidatedPrefix> {
+    // A suffix bounds logical records, not the framed layout survey done at open.
+    let mut reader =
+        codex_rollout::open_rollout_seekable_reader(&segment.rollout_path, is_cancelled)
+            .map_err(mail_history_error)?;
+    let end = match segment.end {
+        Some(end) => end.end_byte_offset,
+        None => reader.seek(SeekFrom::End(0)).map_err(mail_history_error)?,
+    };
+    if end == 0 {
+        return Err(mail_history_error("empty canonical lineage segment"));
+    }
+    reader
+        .seek(SeekFrom::Start(end - 1))
+        .map_err(mail_history_error)?;
+    let mut last_byte = [0];
+    reader
+        .read_exact(&mut last_byte)
+        .map_err(mail_history_error)?;
+    if last_byte != *b"\n" {
+        return Err(mail_history_error(
+            "incomplete canonical record at lineage cutoff",
+        ));
+    }
+
+    let start = prefix.map_or(0, |prefix| prefix.end);
+    let mut scanner =
+        ReverseJsonlScanner::new_range(reader, start, end).map_err(mail_history_error)?;
+    let mut next_ordinal = segment.end.map(|end| end.end_ordinal_exclusive);
+    let mut last_ordinal = None;
+    let mut valid_ordinals = true;
+    let mut oldest_header_mode = None;
+    let mut successor = Vec::new();
+    while let Some(scanned) = scanner
+        .scan_next_rollout_line_with_record()
+        .map_err(mail_history_error)?
+    {
+        #[cfg(test)]
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let record = scanned.bytes;
+        let line = match scanned.outcome {
+            ScanOutcome::Parsed(line) => line,
+            ScanOutcome::Rejected(error)
+                if error.is_eof() && retried_record_prefix(record, &successor) =>
+            {
+                // Reopening can newline-terminate a failed write before retrying its unchanged
+                // ordinal. Only the complete adjacent retry owns admission.
+                tracing::warn!(rollout = %segment.rollout_path.display(),
+                ordinal = ?next_ordinal, bytes = record.len(),
+                "canonical reconciliation verified a truncated retry prefix");
+                continue;
+            }
+            ScanOutcome::Rejected(error) => {
+                return Err(mail_history_error(format!(
+                    "{} before ordinal {:?}: {error}",
+                    segment.rollout_path.display(),
+                    next_ordinal
+                )));
+            }
+        };
+        if successor.is_empty() {
+            last_ordinal = line.ordinal;
+        }
+        successor.clear();
+        successor.extend_from_slice(record);
+        valid_ordinals &= line.ordinal.is_some_and(|ordinal| {
+            next_ordinal.is_none_or(|next| ordinal.checked_add(1) == Some(next))
+        });
+        next_ordinal = line.ordinal;
+        // SessionMeta patches are appended records, not new segment headers.
+        oldest_header_mode = match &line.item {
+            RolloutItem::SessionMeta(meta) => Some(meta.meta.history_mode),
+            _ => None,
+        };
+        if let RolloutItem::ResponseItem(envelope) = line.item {
+            record_item(
+                envelope,
+                RecordSpan {
+                    offset: scanned.offset,
+                    len: record.len(),
+                },
+            )?;
+        }
+    }
+
+    let (mode, expected_start) = if let Some(prefix) = prefix {
+        if successor.is_empty() {
+            return Ok(ValidatedPrefix { end, ..prefix });
+        }
+        (
+            prefix.mode,
+            prefix
+                .last_ordinal
+                .and_then(|ordinal| ordinal.checked_add(1)),
+        )
+    } else {
+        let Some(mode) = oldest_header_mode else {
+            return Err(mail_history_error("missing canonical lineage header"));
+        };
+        (mode, segment.start_ordinal.checked_sub(1))
+    };
+    if mode == ThreadHistoryMode::Paginated && (!valid_ordinals || next_ordinal != expected_start) {
+        return Err(mail_history_error("incomplete canonical ordinal range"));
+    }
+    Ok(ValidatedPrefix {
+        end,
+        mode,
+        last_ordinal,
+    })
 }
 
 fn retried_record_prefix(partial: &[u8], complete: &[u8]) -> bool {

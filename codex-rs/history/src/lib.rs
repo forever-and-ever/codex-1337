@@ -84,6 +84,8 @@ pub enum ModelSearchState {
 ///
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct CodexHarnessMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_input: Option<QueuedInputReceipt>,
     /// Realtime provenance for an accepted ordinary turn input. Never model-visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realtime_handoff: Option<Box<RealtimeHandoffMetadata>>,
@@ -217,6 +219,13 @@ pub struct CodexHarnessMetadata {
     /// Loading moves it into the payload; it is never set in memory.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tool_failed: bool,
+}
+
+/// Links a durable queue disposition to its row and turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+pub struct QueuedInputReceipt {
+    pub id: String,
+    pub turn_id: String,
 }
 
 /// Facts that connect an ordinary accepted input to its originating realtime frames.
@@ -437,6 +446,8 @@ pub enum RolloutItem {
     SecurityRiskScore(SecurityRiskScore),
     RetainedContext(RetainedContextEvent),
     EventMsg(EventMsg),
+    /// A prompt hook rejected this dispatch before it became model input.
+    QueuedInputRejected(QueuedInputReceipt),
     /// Sparse, model-invisible facts used to reconstruct realtime presentation.
     RealtimeItem(RealtimeItem),
 }

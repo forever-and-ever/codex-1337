@@ -15,6 +15,7 @@ mod original_history;
 mod paginated_fork;
 mod pending_thread_metadata;
 mod projects;
+mod queued_input;
 mod read_thread;
 mod revert_thread;
 mod rollout_migration;
@@ -159,6 +160,7 @@ pub struct LocalThreadStore {
     live_recorders: Arc<Mutex<HashMap<ThreadId, LiveRecorderEntry>>>,
     pending_thread_metadata: pending_thread_metadata::PendingThreadMetadataRegistry,
     live_writer_locks: Arc<LiveWriterLocks>,
+    mail_receipts: agent_mail::ReceiptCache,
     writer_lock_coordinator: Arc<WriterLockCoordinator>,
     projection_warden: Arc<history_pruning::ProjectionWarden>,
     state_db: Option<StateDbHandle>,
@@ -299,6 +301,7 @@ impl LocalThreadStore {
             pending_thread_metadata:
                 pending_thread_metadata::PendingThreadMetadataRegistry::default(),
             live_writer_locks: Arc::new(LiveWriterLocks::default()),
+            mail_receipts: agent_mail::ReceiptCache::default(),
             writer_lock_coordinator,
             projection_warden: Arc::default(),
             state_db,

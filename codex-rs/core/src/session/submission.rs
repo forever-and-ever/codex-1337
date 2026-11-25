@@ -17,6 +17,7 @@ pub(crate) enum SubmissionOp {
     TurnInput {
         request: Box<TurnInputRequest<ResolvedUserInput>>,
         mode: TurnInputMode,
+        queued_input: Option<super::queued_input::QueuedInputAdmission>,
         reply: oneshot::Sender<CodexResult<TurnInputSubmission>>,
     },
 }

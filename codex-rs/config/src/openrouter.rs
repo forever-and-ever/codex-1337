@@ -9,12 +9,29 @@ use serde::de::Error;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub enum OpenRouterModelPreference<'a> {
+    Saved(&'a EndpointFilter),
+    Forgotten(&'a EndpointFilter),
+    Unlisted,
+}
+
+impl OpenRouterModelPreference<'_> {
+    pub fn endpoint_filter(self) -> EndpointFilter {
+        match self {
+            Self::Saved(filter) | Self::Forgotten(filter) => filter.clone(),
+            Self::Unlisted => EndpointFilter::All,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[schemars(default, deny_unknown_fields)]
 pub struct OpenRouterConfig {
     pub default_key: Option<KeyName>,
     pub key_files: BTreeMap<KeyName, AbsolutePathBuf>,
     pub models: BTreeMap<ModelSlug, EndpointFilter>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    forgotten_models: BTreeMap<ModelSlug, EndpointFilter>,
 }
 
 impl OpenRouterConfig {
@@ -23,6 +40,16 @@ impl OpenRouterConfig {
             Some(key) => Some(key),
             None if self.key_files.len() == 1 => self.key_files.keys().next(),
             None => None,
+        }
+    }
+
+    pub fn model_preference(&self, slug: &ModelSlug) -> OpenRouterModelPreference<'_> {
+        if let Some(filter) = self.models.get(slug) {
+            OpenRouterModelPreference::Saved(filter)
+        } else if let Some(filter) = self.forgotten_models.get(slug) {
+            OpenRouterModelPreference::Forgotten(filter)
+        } else {
+            OpenRouterModelPreference::Unlisted
         }
     }
 }
@@ -35,11 +62,13 @@ impl<'de> Deserialize<'de> for OpenRouterConfig {
             default_key: Option<KeyName>,
             key_files: BTreeMap<KeyName, String>,
             models: BTreeMap<ModelSlug, EndpointFilter>,
+            forgotten_models: BTreeMap<ModelSlug, EndpointFilter>,
         }
         let Input {
             default_key,
             key_files,
             models,
+            forgotten_models,
         } = Input::deserialize(deserializer)?;
         if default_key
             .as_ref()
@@ -54,6 +83,15 @@ impl<'de> Deserialize<'de> for OpenRouterConfig {
         }) {
             return Err(D::Error::custom(
                 "OpenRouter presets own their routing and accept only {}",
+            ));
+        }
+        if forgotten_models.iter().any(|(slug, filter)| {
+            models.contains_key(slug)
+                || matches!(slug, ModelSlug::Preset(_))
+                || matches!(filter, EndpointFilter::All)
+        }) {
+            return Err(D::Error::custom(
+                "OpenRouter forgotten_models must contain only restricted, unsaved models",
             ));
         }
         let key_files = key_files
@@ -71,6 +109,7 @@ impl<'de> Deserialize<'de> for OpenRouterConfig {
             default_key,
             key_files,
             models,
+            forgotten_models,
         })
     }
 }
@@ -122,6 +161,13 @@ mod tests {
         assert_eq!(
             config.models[&"@preset/example".parse::<ModelSlug>().expect("preset slug")],
             EndpointFilter::All
+        );
+        // A slug has one route even while absent from the picker.
+        assert!(
+            toml::from_str::<OpenRouterConfig>(
+                "[models]\n'author/model' = {}\n[forgotten_models]\n'author/model' = { only = ['host'] }"
+            )
+            .is_err()
         );
         for filter in ["{ only = ['host'] }", "{ ignore = ['host'] }"] {
             assert!(

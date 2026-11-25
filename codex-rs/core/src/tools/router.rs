@@ -41,6 +41,7 @@ use crate::tools::context::AgentMessageEncoding;
 pub use crate::tools::context::ToolCallSource;
 
 mod mcp_declarations;
+mod nested_tools;
 
 const EXPOSURE_DIRECT: &str = "direct";
 const EXPOSURE_DIRECT_MODEL_ONLY: &str = "direct_model_only";
@@ -147,6 +148,7 @@ pub struct ToolRouter {
     exec_definitions: Option<Arc<Vec<codex_code_mode::ExecDefinition>>>,
     tool_namespaces_info: Option<TurnToolNamespacesInfo>,
     can_manage_children: bool,
+    nested_tools: Arc<[codex_code_mode::RosterEntry]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +199,7 @@ impl ToolRouter {
             exec_definitions,
             tool_namespaces_info,
             can_manage_children: false,
+            nested_tools: Arc::default(),
         };
         router.can_manage_children = !child_management_tools.is_empty()
             && child_management_tools

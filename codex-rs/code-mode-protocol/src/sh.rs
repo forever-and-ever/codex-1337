@@ -4,7 +4,7 @@ use codex_protocol::ToolName;
 
 use crate::ToolDefinition;
 
-const HELPER: &str = "- `sh(...commands)`: runs Bash commands concurrently through `tools.exec_command` (or the selected environment's reported shell), each a `cmd` string or its arguments object; appends their results in order like `text(results)`, with `Error` for a rejected call; resolves to the results. Rejected calls and nonzero exits are data; inspect results and call `fail(message)` to reject a fenced stage. The script waits for `sh` even unawaited.\n";
+const HELPER: &str = "- `sh(...commands)`: run shell commands concurrently through `tools.exec_command`, each a `cmd` string or an arguments object, in Bash or a remote environment's reported shell. Appends their results in order, as `text(results)` would, with `Error` for a rejected call, and resolves to the results. Rejected calls and nonzero exits are data. The cell waits for `sh` even when it is not awaited.\n";
 
 /// The nested tool `sh` runs commands through; a cell without it has no `sh`.
 pub fn is_exec_command(tool_name: &ToolName) -> bool {

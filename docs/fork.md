@@ -35,6 +35,10 @@ qualified forms.
   not alarms or prompt-cache warming. `clock.sleep` blocks its current tool call;
   an alarm leaves the agent free to work. XSync desktop attention
   (`desktop_attention.rs`) watches desktop activity, not thread alarm conditions.
+- nested tool, roster: a nested tool is one that a Code Mode cell calls as
+  `tools.<member>`. The roster lists, by name and one purpose sentence, the nested
+  tools whose contracts wait for `describe_tool`; the model reads it as the
+  `<nested_tools>` section. Qualify every other roster: agent roster, skill roster.
 - native: never used alone. Native history
   (`codex-rs/tui/src/app/native_history.rs`) is output written to the terminal's own
   scrollback. Provider-native items are a model provider's own wire format and
@@ -275,6 +279,9 @@ Continue a thread only in a build at least as new as the last one that wrote it:
 older build also drops model input it cannot parse. `scripts/uninstall-local
 --staging` removes staging alone.
 
+After a user-requested staging trial reaches production, disable the staging service:
+`systemctl --user disable --now codex-app-server-staging.service`.
+
 ## UI latency recorder
 
 Each TUI worker keeps content-free, fixed-capacity wall-time counters. Inspect it
@@ -366,8 +373,9 @@ OpenAI, Anthropic and OpenRouter are equally trusted with conversation data. A
 privacy or data-locality rule either permits all three or forbids all three.
 Moving a conversation's data between them, for example to an approval reviewer,
 a subagent or a summary, needs no separate privacy decision. OpenRouter forwards
-each request to an endpoint its saved model's filter admits; that filter is the
-user's locality control, and Codex never widens it.
+each request to an endpoint the model's filter admits. Forgetting a model removes
+it from the picker but retains its endpoint filter. Re-saving restores the picker
+entry with that filter; changing the route explicitly replaces it.
 
 OpenRouter bills per token. Codex sends it only requests for models the user
 chose, as a conversation's model or a subagent's. Work Codex starts on its own
@@ -388,7 +396,9 @@ the material to review rather than forking the full history.
 On an OpenRouter thread, `/slow` selects batch inference for subsequent model
 steps; `/slow off` restores live inference. A batch picker entry uses the
 ordinary model and key. Codex requires a verified live/batch pair and a host
-allowlist that does not widen the saved route. Batch runs on OpenRouter's
+allowlist that does not widen the saved route. A forgotten model cannot submit
+a batch step or deliver its result, even when its live route is retained.
+Batch runs on OpenRouter's
 global infrastructure, retains requests and results, and cannot satisfy ZDR.
 Each step, including a tool continuation or summary, is a separate paid row.
 Cache hints survive the queue; a cache hit is not guaranteed. Compaction

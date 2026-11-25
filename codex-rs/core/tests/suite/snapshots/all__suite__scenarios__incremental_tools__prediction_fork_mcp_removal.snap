@@ -1,9 +1,8 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
-assertion_line: 163
 expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: The prediction fork preserves the parent's complete prefix, then updates functions.exec to omit unavailable MCP helpers. Its second turn retains that update without repeating it; continuing the parent keeps its original tools.
+Scenario: The prediction fork preserves the parent's complete prefix, then amends the nested-tool roster to drop the unavailable MCP helpers. Its second turn retains that amendment without repeating it; continuing the parent keeps its original tools.
 
 ## Window 1
 Settings:
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
-        - namespace/functions; hash=c0252986b104f5e0
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -28,29 +27,48 @@ Settings:
           - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
     Start with the echo service.
 -- request 2 (turn) --
 05:message/developer:
-    This is an incremental tools update. Previously declared tools remain available for direct calls unless ...here, its latest definition replaces the earlier one. [hash=bceb65fad1afdf9c]
-06:additional_tools/developer (1; hash=c41d03c2d167ee59):
-        - namespace/functions; hash=4ed68e1a30942a9f
-          - custom/exec
-07:message/user:
+    <nested_tools>
+    Removed:
+    - mcp__echo_service.echo (tools.mcp__echo_service__echo)
+    - tools.list_mcp_resource_templates
+    - tools.list_mcp_resources
+    - tools.read_mcp_resource
+    </nested_tools>
+06:message/user:
     Predict the next message.
 -- request 3 (turn) --
-08:message/user:
+07:message/user:
     Predict again.
 
 ## Window 2 (after request 3: input diverged at item 05)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=9dbd67dd5839cac2):
-        - namespace/functions; hash=c0252986b104f5e0
+00:additional_tools/developer (1; hash=e3961616d651e8d7):
+        - namespace/functions; hash=10ea473d99bcfa17
           - custom/exec
           - function/wait
           - custom/python
@@ -60,8 +78,24 @@ Settings: same as window 1
           - function/fence
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__echo_service.echo (tools.mcp__echo_service__echo): Echo back the provided message and include environment data.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.list_mcp_resource_templates: Lists resource templates provided by MCP servers.
+        - tools.list_mcp_resources: Lists resources provided by MCP servers.
+        - tools.read_mcp_resource: Read a specific resource from an MCP server given the server name and resource URI.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:

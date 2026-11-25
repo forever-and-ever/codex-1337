@@ -249,14 +249,14 @@ INSERT INTO thread_history_projection_state (
 ON CONFLICT(thread_id) DO UPDATE SET
     next_rollout_byte_offset = excluded.next_rollout_byte_offset,
     next_rollout_ordinal = excluded.next_rollout_ordinal,
-    accessed_at_ms = MAX(accessed_at_ms, excluded.accessed_at_ms)
+    accessed_at_ms = MAX(accessed_at_ms, excluded.accessed_at_ms),
+    rebuilding = 1
         "#,
     )
     .bind(thread_id.as_str())
     .bind(sqlite_integer(next_offset, "rollout byte offset")?)
     .bind(next_ordinal)
-    // TELOS(history-pruning): a projected write is a use; a new row stays rebuilding until its
-    // pass reaches the end of the rollout.
+    // Only an unrestricted pass can certify that this checkpoint reached EOF.
     .bind(super::history_pruning::now_ms())
     .execute(&mut *transaction)
     .await

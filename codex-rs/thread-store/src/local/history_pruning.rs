@@ -105,13 +105,19 @@ fn millis(duration: Duration) -> i64 {
 pub(super) async fn finish_rebuild(
     store: &LocalThreadStore,
     rollout_id: ThreadId,
+    next_offset: u64,
 ) -> ThreadStoreResult<()> {
     let pool = store.thread_history_db().await?;
-    sqlx::query("UPDATE thread_history_projection_state SET rebuilding = 0 WHERE thread_id = ?")
-        .bind(rollout_id.to_string())
-        .execute(pool)
-        .await
-        .map_err(pruning_error)?;
+    let next_offset = i64::try_from(next_offset).map_err(pruning_error)?;
+    sqlx::query(
+        "UPDATE thread_history_projection_state SET rebuilding = 0
+         WHERE thread_id = ? AND next_rollout_byte_offset = ? AND rebuilding = 1",
+    )
+    .bind(rollout_id.to_string())
+    .bind(next_offset)
+    .execute(pool)
+    .await
+    .map_err(pruning_error)?;
     Ok(())
 }
 
@@ -126,17 +132,21 @@ pub(super) async fn ensure_projected(
         return Ok(());
     }
     let _projection = store.projection_warden.lock(rollout_id).await;
+    let covers_request = |state: &RolloutProjectionState| match reads.cutoff(rollout_path) {
+        Some(end) => state.next_byte_offset >= end.end_byte_offset,
+        None => !state.rebuilding,
+    };
     if let Some(state) = projection_state(store, rollout_id).await?
-        && !state.rebuilding
+        && covers_request(&state)
     {
         return touch_locked(store, rollout_id, &state).await;
     }
     let started = Instant::now();
     let built = materialize_to_sqlite_locked(store, rollout_id, rollout_path, reads).await;
-    // Another process may finish the same build first; only an unfinished one is an error.
+    // The checkpoint covers inherited prefixes even when the suffix could not be projected.
     let state = projection_state(store, rollout_id).await?;
     match (built, state) {
-        (_, Some(state)) if !state.rebuilding => {
+        (_, Some(state)) if covers_request(&state) => {
             info!(
                 %rollout_id,
                 elapsed_ms = millis(started.elapsed()),
@@ -144,10 +154,12 @@ pub(super) async fn ensure_projected(
             );
             touch_locked(store, rollout_id, &state).await
         }
-        (Ok(()), None) => Ok(()),
+        (Ok(()), None) if !reads.tracks(rollout_path) => Ok(()),
         (Err(err), _) => Err(err),
-        (Ok(()), Some(_)) => Err(ThreadStoreError::Internal {
-            message: format!("thread history projection for {rollout_id} is still rebuilding"),
+        (Ok(()), _) => Err(ThreadStoreError::Internal {
+            message: format!(
+                "thread history projection for {rollout_id} did not reach the requested end"
+            ),
         }),
     }
 }

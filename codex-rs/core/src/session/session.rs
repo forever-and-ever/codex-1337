@@ -1743,6 +1743,7 @@ impl Session {
                     | RolloutItem::InterAgentCommunicationMetadata { .. }
                     | RolloutItem::TurnContext(_)
                     | RolloutItem::WorldState(_)
+                    | RolloutItem::QueuedInputRejected(_)
                     | RolloutItem::RealtimeItem(_)
                     | RolloutItem::TokenUsageRecord(_)
                     | RolloutItem::RetainedContext(_)

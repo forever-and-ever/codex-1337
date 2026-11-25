@@ -96,14 +96,19 @@ Scenario: A historical MAv2 send_message call and an encrypted parent reply reac
 
 ## Window 3 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=e091919057553ef1):
-        - namespace/functions; hash=8c05db64566d7d31
+00:additional_tools/developer (1; hash=eda427ceed3215f5):
+        - namespace/functions; hash=e60dd454f57a8f05
           - custom/exec
           - function/wait
 01:message/developer:
     <GUARDIAN_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user[6]:
@@ -232,14 +237,19 @@ Scenario: A historical MAv2 send_message call and an encrypted parent reply reac
 
 ## Window 5 (after request 5: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 6 (turn) --
-00:additional_tools/developer (1; hash=e091919057553ef1):
-        - namespace/functions; hash=8c05db64566d7d31
+00:additional_tools/developer (1; hash=eda427ceed3215f5):
+        - namespace/functions; hash=e60dd454f57a8f05
           - custom/exec
           - function/wait
 01:message/developer:
     <GUARDIAN_INSTRUCTIONS>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user[6]:

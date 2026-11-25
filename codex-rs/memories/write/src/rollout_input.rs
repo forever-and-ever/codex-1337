@@ -117,6 +117,7 @@ pub(crate) fn serialize_tiered_input(
             | RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::Compacted(_)
             | RolloutItem::TurnContext(_)
+            | RolloutItem::QueuedInputRejected(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::SecurityRiskScore(_)

@@ -304,7 +304,7 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "fence".into(),
-            description: "Barrier for client-dispatched tool calls within this model response; provider-hosted tools are outside its scope. Calls before it must all finish successfully in the foreground before any call after it starts. A cell succeeds on its own successful foreground completion: caught tool errors and handled nonzero exits do not fail it. Inspect collected outcomes and call fail(message) when they must reject the stage. Uncaught errors, failed direct tools, rejection, cancellation, lost dispatch, unawaited work, explicit backgrounding, or a yielded exec skip all following calls. Does not join background work or fence calls from earlier responses. Calls within each stage may run concurrently; use files for intermediate data. Takes {}.".into(),
+            description: "A barrier between the tool calls of one response. Calls after a fence start only when every call before it has succeeded in the foreground; otherwise they are skipped. A call does not succeed if it fails, is rejected or cancelled, runs in the background, or yields. Calls between fences may run concurrently: pass data between stages in files. A fence does not wait for background work and covers neither calls from earlier responses nor provider-hosted tools. Takes `{}`.".into(),
             strict: true,
             defer_loading: None,
             parameters: JsonSchema::object(BTreeMap::new(), Some(Vec::new()), Some(false.into())),

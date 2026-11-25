@@ -349,6 +349,7 @@ impl ThreadMetadataSync {
                 | RolloutItem::InterAgentCommunication(_)
                 | RolloutItem::InterAgentCommunicationMetadata { .. }
                 | RolloutItem::Compacted(_)
+                | RolloutItem::QueuedInputRejected(_)
                 | RolloutItem::RealtimeItem(_)
                 | RolloutItem::TokenUsageRecord(_)
                 | RolloutItem::RetainedContext(_)

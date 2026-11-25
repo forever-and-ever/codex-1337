@@ -29,6 +29,7 @@ use codex_app_server_protocol::OpenRouterModelSaveResponse;
 use codex_app_server_protocol::OpenRouterSpend;
 use codex_app_server_protocol::ThreadAccountSelectResponse;
 use codex_config::OpenRouterConfig;
+use codex_config::OpenRouterModelPreference;
 use codex_config::read_openrouter_config;
 use codex_core::CodexThread;
 use codex_core::config::Config;
@@ -286,6 +287,59 @@ fn filter_value(filter: &EndpointFilter) -> toml_edit::Item {
     toml_edit::Item::Value(table.into())
 }
 
+enum ModelEdit<'a> {
+    Save,
+    Forget,
+    Route(&'a EndpointFilter),
+}
+
+async fn edit_model(
+    config: &Config,
+    slug: &ModelSlug,
+    edit: ModelEdit<'_>,
+) -> Result<(), JSONRPCErrorError> {
+    use OpenRouterModelPreference::Forgotten;
+    use OpenRouterModelPreference::Saved;
+    use OpenRouterModelPreference::Unlisted;
+
+    if matches!(edit, ModelEdit::Route(_)) && matches!(slug, ModelSlug::Preset(_)) {
+        return Err(invalid_request(
+            "OpenRouter presets own their endpoint routing",
+        ));
+    }
+    let _lock = codex_config::lock_account_preferences(&config.codex_home)
+        .await
+        .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
+    let prefs = preferences(config).await?;
+    let clear = |section| ConfigEdit::ClearPath {
+        segments: path(section, slug.as_str()),
+    };
+    let set = |section, filter| ConfigEdit::SetPath {
+        segments: path(section, slug.as_str()),
+        value: filter_value(filter),
+    };
+
+    let edits = match (edit, prefs.model_preference(slug)) {
+        (ModelEdit::Save, Saved(_)) | (ModelEdit::Forget, Forgotten(_) | Unlisted) => return Ok(()),
+        (ModelEdit::Save, Unlisted) => vec![set("models", &EndpointFilter::All)],
+        (ModelEdit::Save, Forgotten(filter)) => {
+            vec![set("models", filter), clear("forgotten_models")]
+        }
+        // Forget removes the picker entry, not the permission boundary.
+        (ModelEdit::Forget, Saved(EndpointFilter::All)) => vec![clear("models")],
+        (ModelEdit::Forget, Saved(filter)) => {
+            vec![clear("models"), set("forgotten_models", filter)]
+        }
+        (ModelEdit::Route(filter), Saved(_)) => vec![set("models", filter)],
+        (ModelEdit::Route(_), Forgotten(_) | Unlisted) => {
+            return Err(invalid_request(
+                "Save the OpenRouter model before choosing its endpoints",
+            ));
+        }
+    };
+    apply(config, edits).await
+}
+
 async fn default_bearer(
     preferences: &OpenRouterConfig,
 ) -> Result<Option<Bearer>, JSONRPCErrorError> {
@@ -541,22 +595,7 @@ impl TurnRequestProcessor {
                 params.slug
             )));
         }
-        {
-            let _lock = codex_config::lock_account_preferences(&config.codex_home)
-                .await
-                .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
-            let prefs = preferences(&config).await?;
-            if !prefs.models.contains_key(&params.slug) {
-                apply(
-                    &config,
-                    [ConfigEdit::SetPath {
-                        segments: path("models", params.slug.as_str()),
-                        value: filter_value(&EndpointFilter::All),
-                    }],
-                )
-                .await?;
-            }
-        }
+        edit_model(&config, &params.slug, ModelEdit::Save).await?;
         let presets = catalog(&config)?
             .list_models(
                 RefreshStrategy::OnlineIfUncached,
@@ -575,16 +614,7 @@ impl TurnRequestProcessor {
         params: OpenRouterModelForgetParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let config = self.openrouter_config().await?;
-        let _lock = codex_config::lock_account_preferences(&config.codex_home)
-            .await
-            .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
-        apply(
-            &config,
-            [ConfigEdit::ClearPath {
-                segments: path("models", params.slug.as_str()),
-            }],
-        )
-        .await?;
+        edit_model(&config, &params.slug, ModelEdit::Forget).await?;
         Ok(Some(OpenRouterModelForgetResponse {}.into()))
     }
 
@@ -632,11 +662,7 @@ impl TurnRequestProcessor {
         Ok(Some(
             OpenRouterModelEndpointsResponse {
                 hosts: hosts.into_values().collect(),
-                filter: preferences
-                    .models
-                    .get(&params.slug)
-                    .cloned()
-                    .unwrap_or_default(),
+                filter: preferences.model_preference(&params.slug).endpoint_filter(),
             }
             .into(),
         ))
@@ -646,29 +672,8 @@ impl TurnRequestProcessor {
         &self,
         params: OpenRouterModelRouteParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        if matches!(params.slug, ModelSlug::Preset(_)) {
-            return Err(invalid_request(
-                "OpenRouter presets own their endpoint routing",
-            ));
-        }
         let config = self.openrouter_config().await?;
-        let _lock = codex_config::lock_account_preferences(&config.codex_home)
-            .await
-            .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
-        let preferences = preferences(&config).await?;
-        if !preferences.models.contains_key(&params.slug) {
-            return Err(invalid_request(
-                "Save the OpenRouter model before choosing its endpoints",
-            ));
-        }
-        apply(
-            &config,
-            [ConfigEdit::SetPath {
-                segments: path("models", params.slug.as_str()),
-                value: filter_value(&params.filter),
-            }],
-        )
-        .await?;
+        edit_model(&config, &params.slug, ModelEdit::Route(&params.filter)).await?;
         Ok(Some(OpenRouterModelRouteResponse {}.into()))
     }
 

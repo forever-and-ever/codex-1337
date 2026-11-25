@@ -19,6 +19,7 @@ use std::collections::HashSet;
 
 const USER: &str = "user";
 const ASSISTANT: &str = "assistant";
+const NOTIFICATION_CLOSE: &str = "</tool_notification>";
 
 #[derive(Serialize)]
 pub(super) struct Message {
@@ -129,6 +130,19 @@ impl<'a> Encoder<'a> {
         self.history.messages.last().map(|message| message.role)
     }
 
+    /// Nothing but a signed checkpoint precedes the next item, so instructions arriving now
+    /// open the window and belong to `system`, as they do in a first window.
+    // TELOS(reminders-not-system): later instructions keep their position as reminders.
+    fn opens_window(&self) -> bool {
+        self.history.messages.iter().all(|message| {
+            message.role == ASSISTANT
+                && message
+                    .content
+                    .iter()
+                    .all(|block| block["type"] == "compaction")
+        })
+    }
+
     /// The open batch's calls that await results, in call order.
     pub(super) fn pending(&self) -> &[(String, CallKind)] {
         &self.pending
@@ -210,7 +224,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    pub(super) fn finish(self) -> Result<History, ApiError> {
+    pub(super) fn finish(mut self) -> Result<History, ApiError> {
         if !self.pending.is_empty() {
             return Err(invalid("Anthropic history ends with unresolved tool calls"));
         }
@@ -218,6 +232,11 @@ impl<'a> Encoder<'a> {
             return Err(invalid(
                 "Anthropic history contains no conversation messages",
             ));
+        }
+        for message in &mut self.history.messages {
+            if message.role == USER {
+                separate(&mut message.content);
+            }
         }
         Ok(self.history)
     }
@@ -235,15 +254,10 @@ impl<'a> Encoder<'a> {
                 }
                 let text = plaintext_agent_message_content(content)
                     .ok_or_else(|| invalid("Anthropic cannot replay encrypted agent messages"))?;
-                let author = serde_json::to_string(author)
-                    .map_err(|err| invalid(format!("cannot encode agent-message author: {err}")))?;
-                let recipient = serde_json::to_string(recipient).map_err(|err| {
-                    invalid(format!("cannot encode agent-message recipient: {err}"))
-                })?;
                 Entry::Free {
                     role: USER,
                     content: vec![
-                        json!({"type":"text", "text":format!("[Agent message from {author} to {recipient}]\n{text}")}),
+                        json!({"type":"text", "text":agent_message(author, recipient, &text)}),
                     ],
                 }
             }
@@ -269,7 +283,7 @@ impl<'a> Encoder<'a> {
                                 "Anthropic system instructions must contain only text",
                             ));
                         }
-                        if self.history.messages.is_empty() {
+                        if self.opens_window() {
                             return Ok(Entry::System(blocks));
                         }
                         // Native system-message placement cannot represent arbitrary
@@ -389,15 +403,28 @@ impl<'a> Encoder<'a> {
                     Some(namespace) => format!("{namespace}.{name}"),
                     None => name.clone(),
                 };
-                let label = if output.success == Some(false) {
-                    "Failed tool notification"
+                let failed = if output.success == Some(false) {
+                    " failed=\"true\""
                 } else {
-                    "Tool notification"
+                    ""
                 };
-                let mut content = vec![
-                    json!({"type":"text", "text":format!("[{label} from {}]", json!(source))}),
-                ];
-                content.extend(encode_result_blocks(output, self.modalities)?);
+                let open = format!("<tool_notification from={}{failed}>", json!(source));
+                let blocks = encode_result_blocks(output, self.modalities)?;
+                // Text alone shares one block with its envelope, at no cost in paragraph breaks.
+                let texts = blocks
+                    .iter()
+                    .map(|block| block["text"].as_str().filter(|_| block["type"] == "text"))
+                    .collect::<Option<Vec<_>>>();
+                let content = match texts {
+                    Some(texts) => vec![json!({"type":"text", "text":format!(
+                        "{open}\n{}\n{NOTIFICATION_CLOSE}",
+                        texts.join("\n")
+                    )})],
+                    None => std::iter::once(json!({"type":"text", "text":open}))
+                        .chain(blocks)
+                        .chain([json!({"type":"text", "text":NOTIFICATION_CLOSE})])
+                        .collect(),
+                };
                 Entry::Free {
                     role: USER,
                     content,
@@ -486,6 +513,46 @@ impl<'a> Encoder<'a> {
                 ));
             }
         })
+    }
+}
+
+/// The provider joins adjacent text blocks without a separator. A text block that follows
+/// another therefore opens its own paragraph: prefixing the later block leaves every block
+/// already sent, and so the cached prefix, unchanged.
+pub(super) fn separate(blocks: &mut [Value]) {
+    let mut follows_text = false;
+    for block in blocks {
+        let text = block["type"] == "text";
+        if text
+            && follows_text
+            && let Some(body) = block["text"].as_str()
+        {
+            block["text"] = Value::String(format!("\n\n{body}"));
+        }
+        follows_text = text;
+    }
+}
+
+/// Canonical mail opens with upstream's header, which restates the addresses the item
+/// already holds. Native Claude reads one envelope; text without that header is kept whole.
+fn agent_message(author: &str, recipient: &str, text: &str) -> String {
+    let addresses = format!("from={} to={}", json!(author), json!(recipient));
+    let typed = [
+        ("MESSAGE", "message"),
+        ("NEW_TASK", "new_task"),
+        ("FINAL_ANSWER", "final_answer"),
+    ]
+    .into_iter()
+    .find_map(|(wire, kind)| {
+        let header =
+            format!("Message Type: {wire}\nTask name: {recipient}\nSender: {author}\nPayload:\n");
+        text.strip_prefix(&header).map(|payload| (kind, payload))
+    });
+    match typed {
+        Some((kind, payload)) => {
+            format!("<agent_message {addresses} type=\"{kind}\">\n{payload}\n</agent_message>")
+        }
+        None => format!("<agent_message {addresses}>\n{text}\n</agent_message>"),
     }
 }
 

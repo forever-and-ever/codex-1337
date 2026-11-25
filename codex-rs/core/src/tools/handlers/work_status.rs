@@ -32,7 +32,7 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
         ToolSpec::Function(ResponsesApiTool {
             name: "update_work_status".into(),
             description: format!(
-                "Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most {} characters. Whitespace is normalized; longer summaries are truncated with a warning. Malformed cosmetic updates are ignored with a warning rather than failing the call. Suppressed sessions accept updates without displaying them. Replaces the previous activity and clears when the turn ends. Never changes the goal.",
+                "Set `activity` to show what you are working on, without posting a chat message. Call it at the start of substantive work and whenever your activity changes, in place of progress-only chat updates. The activity is a concrete summary of at most {} characters, not private reasoning; it replaces the previous one and clears when the turn ends. A longer summary is truncated and a malformed update ignored, each with a warning and never a failed call. It never changes the goal.",
                 WorkStatus::MAX_ACTIVITY_CHARS
             ),
             strict: false,

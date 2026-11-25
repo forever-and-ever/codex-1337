@@ -6,8 +6,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (2; hash=2c9af3dc99abf842):
-        - namespace/functions; hash=d17415e4b1d663e8
+00:additional_tools/developer (2; hash=9fa474e692f32a7c):
+        - namespace/functions; hash=4ac470b205b120e8
           - custom/exec
           - function/wait
           - custom/python
@@ -20,10 +20,26 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[3]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
-    [03] install_budget: 400 tokens remain.
+02:message/developer[4]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <COLLABORATION_MODE>
+    [04] install_budget: 400 tokens remain.
 03:message/developer:
     <MULTI_AGENT_ROLE>
 04:message/developer:
@@ -42,8 +58,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 2 (after request 2: input diverged at item 10)
 -- request 3 (request) --
-00:additional_tools/developer (2; hash=2c9af3dc99abf842):
-        - namespace/functions; hash=d17415e4b1d663e8
+00:additional_tools/developer (2; hash=9fa474e692f32a7c):
+        - namespace/functions; hash=4ac470b205b120e8
           - custom/exec
           - function/wait
           - custom/python
@@ -56,10 +72,26 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
           - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[3]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
-    [03] install_budget: 400 tokens remain.
+02:message/developer[4]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <COLLABORATION_MODE>
+    [04] install_budget: 400 tokens remain.
 03:message/developer:
     <MULTI_AGENT_ROLE>
 04:message/developer:
@@ -98,8 +130,8 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 
 ## Window 3 (after request 3: input diverged at item 02)
 -- request 4 (request) --
-00:additional_tools/developer (2; hash=2c9af3dc99abf842):
-        - namespace/functions; hash=d17415e4b1d663e8
+00:additional_tools/developer (2; hash=9fa474e692f32a7c):
+        - namespace/functions; hash=4ac470b205b120e8
           - custom/exec
           - function/wait
           - custom/python
@@ -115,10 +147,26 @@ Scenario: Astra compacts a completed launch-notes turn in the background. The us
 02:message/user:
     Draft the launch notes.
 03:compaction:encrypted=true; chars=23; hash=159cfcb231cc70f0
-04:message/developer[3]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <COLLABORATION_MODE>
-    [03] install_budget: 400 tokens remain.
+04:message/developer[4]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.retire_agent: Retire a stopped descendant and its stopped descendants from the persistent family roster.
+        - tools.set_agent_service_tier: Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        - wrangler_agents.followup_task (tools.wrangler_agents__followup_task): Send a follow-up task to an exis...n-root target agent and trigger a turn if it is idle. [hash=474c3519e27ad661]
+        - wrangler_agents.interrupt_agent (tools.wrangler_agents__interrupt_agent): Interrupt an agent's current turn, if any, and return its previous status.
+        - wrangler_agents.list_agents (tools.wrangler_agents__list_agents): List retained agents in the current ...tree, including unloaded agents (agent_status: null). [hash=e7c3805d318aabbc]
+        - wrangler_agents.send_message (tools.wrangler_agents__send_message): Send a message to an existing agent.
+        - wrangler_agents.spawn_agent (tools.wrangler_agents__spawn_agent): Spawns an agent to work on the specified task.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
+    [03] <COLLABORATION_MODE>
+    [04] install_budget: 400 tokens remain.
 05:message/developer:
     <MULTI_AGENT_ROLE>
 06:message/developer:

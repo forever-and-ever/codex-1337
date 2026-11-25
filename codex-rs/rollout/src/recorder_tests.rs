@@ -1095,13 +1095,11 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     File::create(&rollout_path)?;
     let read_only_file = std::fs::OpenOptions::new().read(true).open(&rollout_path)?;
     let mut state = RolloutWriterState {
-        writer: Some(JsonlWriter {
-            sink: crate::rollout_sink::RolloutSink::Plain(tokio::fs::File::from_std(
-                read_only_file,
-            )),
-        }),
+        writer: Some(JsonlWriter::new(
+            crate::rollout_sink::RolloutSink::read_only_plain_for_test(read_only_file),
+        )),
         deferred_creation: false,
-        realtime_sync_pending: false,
+        input_sync_pending: false,
         #[cfg(unix)]
         directories_to_sync: Vec::new(),
         pending_items: Vec::new(),

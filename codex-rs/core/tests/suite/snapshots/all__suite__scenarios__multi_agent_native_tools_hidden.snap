@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 2359
 expression: "context_snapshot::format_request_history_snapshot(description,\n&mock.requests(),\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Native tools and native usage guidance are unavailable.
@@ -17,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=822845f51560cc5a):
-        - namespace/functions; hash=2d0747505bd36074
+00:additional_tools/developer (1; hash=40d33457bfe0017a):
+        - namespace/functions; hash=41ffa6f2ca155228
           - custom/exec
           - function/wait
           - custom/python
@@ -45,12 +44,21 @@ Settings:
 
     A user can also tag a plugin using `[@plugin-name](plugin://{{plugin_id}})` or an app using `[$app-name]... app, prefer its relevant capabilities for that turn. [hash=8730f69f41534f8f]
 
-02:message/developer[2]:
-    [01] <permissions instructions>
+02:message/developer[3]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - clock.curr_time (tools.clock__curr_time): Return the current time in UTC.
+        - clock.sleep (tools.clock__sleep): Pause execution for a specified duration.
+        - tools.fs: Filesystem transport for the fs.readFile/fs.writeFile JS helpers.
+        - tools.update_work_status: Set `activity` to show what you are working on, without posting a chat message.
+        - tools.view_image: View a local image file from the filesystem when visual inspection is needed.
+        - tools.write_stdin: Writes characters to an existing unified exec session and returns recent output.
+        </nested_tools>
+    [02] <permissions instructions>
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`...ll commands are permitted. Network access is enabled. [hash=c134061cebb94a1b]
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
-    [02] <collaboration_mode># Collaboration Mode: Default
+    [03] <collaboration_mode># Collaboration Mode: Default
 
         You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 

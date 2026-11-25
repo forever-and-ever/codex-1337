@@ -1768,16 +1768,14 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
         .collect::<Vec<_>>();
     assert_eq!(guardian_declared_tool_names, vec!["exec_command"]);
-    // The roster uses canonical tool addresses; guidance bullets do not.
-    let guardian_rostered_tool_names = guardian_exec_description
+    let guardian_roster = core_test_support::nested_tools::fragments(
+        request_body["input"].as_array().expect("guardian input"),
+    )
+    .concat();
+    let guardian_rostered_tool_names = guardian_roster
         .lines()
-        .filter_map(|line| {
-            let entry = line.strip_prefix("- tools.")?;
-            let name = entry.split_once(": ").map_or(entry, |(name, _)| name);
-            name.chars()
-                .all(|ch| ch == '_' || ch.is_ascii_lowercase())
-                .then_some(name)
-        })
+        .filter_map(|line| line.strip_prefix("- tools.")?.split_once(": "))
+        .map(|(name, _)| name)
         .collect::<Vec<_>>();
     assert_eq!(
         guardian_rostered_tool_names,

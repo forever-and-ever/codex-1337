@@ -685,11 +685,12 @@ impl ModelClient {
                     if journal.base_url == base_url
                         && journal.thread == step.thread_id
                         && journal.turn == step.turn_id
-                        && matches!(journal.phase, Phase::Submitted(_))
                     {
                         abandon(&home, step.thread_id, &step.turn_id)?;
-                        drop(lock);
-                        recovery::collect_detached(home, step.path.clone(), client, journal);
+                        if matches!(journal.phase, Phase::Submitted(_)) {
+                            drop(lock);
+                            recovery::collect_detached(home, step.path.clone(), client, journal);
+                        }
                     }
                     return Err(fatal(
                         "pending step no longer matches its captured history, tools, settings or payer; not submitting or delivering",
@@ -840,6 +841,8 @@ impl ModelClient {
         if payer.batch_fingerprint() != lease.journal.fingerprint
             || current.models.get(lease.journal.route.model()) != Some(&lease.journal.authority)
         {
+            // Re-saving the same filter must not resurrect an already refused tool call.
+            abandon(&home, step.thread_id, &step.turn_id)?;
             return Err(fatal(
                 "captured endpoint policy or payer changed while the step was remote; not delivering",
             ));

@@ -33,6 +33,7 @@ pub mod exec_server;
 pub mod guardian;
 pub mod hooks;
 pub mod mock_server;
+pub mod nested_tools;
 pub mod network_policy_mcp;
 pub mod oauth;
 pub mod process;

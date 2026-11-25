@@ -1,9 +1,10 @@
 //! Captures interrupted turns for daemon recovery and restores persisted turn attribution.
-//! Callers must flush the rollout after capturing a live turn before persisting its snapshot.
+//! Publish the final turn selection only after the caller has persisted the thread.
 
 use super::Session;
 use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use std::sync::Arc;
 
 /// Turn input and turn-start injections have entered the rollout writer.
 pub(super) struct RecordedTurnInput;
@@ -19,19 +20,31 @@ impl Session {
             .recovered_turn_start_options(turn_id)
     }
 
-    /// Captures a regular turn only after its input is recorded. The caller must flush the rollout.
+    /// Only recorded input or a journaled standalone compaction may be continued.
     pub(crate) async fn interrupted_turn(
         &self,
     ) -> Option<(String, crate::TurnStartOptions, TurnEnvironmentSelection)> {
-        let active = self.active_turn.lock().await;
+        let mut active = self.active_turn.lock().await;
         let task = active.as_ref()?.task.as_ref()?;
         if task.cancellation_token.is_cancelled() {
             return None;
         }
-        let context = &task.turn_context;
+        let context = Arc::clone(&task.turn_context);
         match task.kind {
             crate::state::TaskKind::Regular => {
-                context.extension_data.get::<RecordedTurnInput>()?;
+                if context.extension_data.get::<RecordedTurnInput>().is_none() {
+                    drop(active);
+                    if !self.recoverable_queued_turn(&context).await {
+                        return None;
+                    }
+                    active = self.active_turn.lock().await;
+                    let task = active.as_ref()?.task.as_ref()?;
+                    if !Arc::ptr_eq(&task.turn_context, &context)
+                        || task.cancellation_token.is_cancelled()
+                    {
+                        return None;
+                    }
+                }
             }
             crate::state::TaskKind::Compact
                 if crate::client::openrouter_batch::has_standalone_compaction(

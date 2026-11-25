@@ -8,8 +8,26 @@ Scenario: Code Mode forwards MCP text and image blocks to the model in their ori
 -- request 1 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>
-01:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+01:message/developer[2]:
+    [01] <nested_tools>
+        Nested tools, each called inside `exec` by its `tools` member:
+        - mcp__rmcp.client_capabilities (tools.mcp__rmcp__client_capabilities): Return capabilities advertised by the MCP client.
+        - mcp__rmcp.cwd (tools.mcp__rmcp__cwd): Return the current working directory of this test server process.
+        - mcp__rmcp.echo (tools.mcp__rmcp__echo): Echo back the provided message and include environment data.
+        - mcp__rmcp.echo_tool (tools.mcp__rmcp__echo_tool): Echo back the provided message via a tool name that is not a legal JS identifier.
+        - mcp__rmcp.encrypted_output (tools.mcp__rmcp__encrypted_output): Return mixed plaintext and encrypted content for integration tests.
+        - mcp__rmcp.image (tools.mcp__rmcp__image): Return a single image content block.
+        - mcp__rmcp.image_scenario (tools.mcp__rmcp__image_scenario): Return content blocks for manual testing of MCP image rendering scenarios.
+        - mcp__rmcp.sandbox_meta (tools.mcp__rmcp__sandbox_meta): Return the MCP request metadata received by this test server.
+        - mcp__rmcp.sync (tools.mcp__rmcp__sync): Synchronize concurrent test calls and optionally delay before or after the barrier.
+        - mcp__rmcp.sync_readonly (tools.mcp__rmcp__sync_readonly): Synchronize concurrent test calls and optionally delay before or after the barrier.
+        - multi_agent_v1.close_agent (tools.multi_agent_v1__close_agent): Close an agent and any open descendant...gent's previous status before shutdown was requested. [hash=c5c2ae68cd1f7ce5]
+        - multi_agent_v1.resume_agent (tools.multi_agent_v1__resume_agent): Resume a previously closed agent by id so it can receive send_input and wait_agent calls.
+        - multi_agent_v1.send_input (tools.multi_agent_v1__send_input): Send a message to an existing agent.
+        - multi_agent_v1.spawn_agent (tools.multi_agent_v1__spawn_agent): Spawn a sub-agent for a well-scoped task.
+        - multi_agent_v1.wait_agent (tools.multi_agent_v1__wait_agent): Wait for agents to reach a final status.
+        </nested_tools>
+    [02] <PERMISSIONS_INSTRUCTIONS>
 02:message/user:
     <ENVIRONMENT_CONTEXT>
 03:message/user:
