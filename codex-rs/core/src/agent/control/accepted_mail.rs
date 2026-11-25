@@ -96,7 +96,8 @@ impl LocalAgentControl {
             .ok_or_else(|| {
                 CodexErr::InvalidRequest("agent family root is not registered".into())
             })?;
-        let id = (thread.session.item_id_generator)("amsg_mail");
+        let id =
+            (thread.session.item_id_generator)(codex_thread_store::ACCEPTED_AGENT_MAIL_ID_KIND);
         let origin = context.durable_origin(id.as_str());
         communication.id = None;
         let payload = serde_json::to_string(&communication).map_err(|error| {

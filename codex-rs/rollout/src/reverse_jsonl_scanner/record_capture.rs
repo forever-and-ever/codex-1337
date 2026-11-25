@@ -8,24 +8,43 @@ use super::ReverseJsonlScanner;
 use super::ScanOutcome;
 use crate::RolloutLine;
 
+#[derive(Default)]
+pub(super) struct RecordCapture {
+    bytes: Vec<u8>,
+    offset: u64,
+}
+
 impl<R: Read + Seek> ReverseJsonlScanner<R> {
-    /// Returns the exact nonblank record bytes alongside the ordinary decoder outcome.
-    /// The borrowed bytes remain valid until the next scan. Capture is enabled lazily here.
-    pub fn scan_next_rollout_line_with_record(
-        &mut self,
-    ) -> io::Result<Option<(ScanOutcome<RolloutLine>, &[u8])>> {
-        self.record_capture.get_or_insert_default();
-        let outcome = self.scan_next_rollout_line()?;
-        let Some(record) = self.record_capture.as_deref() else {
-            unreachable!("record capture enabled before scanning");
-        };
-        Ok(outcome.map(|outcome| (outcome, record)))
+    /// Reverse scan a record-aligned logical suffix without reading the validated prefix.
+    pub fn new_range(reader: R, start: u64, end: u64) -> io::Result<Self> {
+        if start > end {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "reverse JSONL scan start is past its end",
+            ));
+        }
+        let mut scanner = Self::new_at(reader, end)?;
+        scanner.min_byte_offset = start;
+        Ok(scanner)
     }
 
-    pub(super) fn capture_record(&mut self) {
+    /// Returns the nonblank record's outcome, exact bytes and starting logical byte offset.
+    pub fn scan_next_rollout_line_with_record(
+        &mut self,
+    ) -> io::Result<Option<(ScanOutcome<RolloutLine>, &[u8], u64)>> {
+        self.record_capture.get_or_insert_default();
+        let outcome = self.scan_next_rollout_line()?;
+        let Some(record) = self.record_capture.as_ref() else {
+            unreachable!("record capture enabled before scanning");
+        };
+        Ok(outcome.map(|outcome| (outcome, record.bytes.as_slice(), record.offset)))
+    }
+
+    pub(super) fn capture_record(&mut self, offset: u64) {
         if let Some(capture) = &mut self.record_capture {
-            capture.clear();
-            capture.extend_from_slice(&self.record_reversed);
+            capture.bytes.clear();
+            capture.bytes.extend_from_slice(&self.record_reversed);
+            capture.offset = offset;
         }
     }
 }

@@ -94,6 +94,34 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         })
         .await
         .expect("append turns");
+    let ids: Vec<_> = mail
+        .iter()
+        .map(|mail| mail.id.clone().expect("mail ID"))
+        .collect();
+    store
+        .find_accepted_agent_mail(thread_id, &ids)
+        .await
+        .expect("validate and index the initial canonical prefix");
+    let before = store.mail_receipts.scanned_records();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![RolloutItem::ResponseItem(ResponseItemEnvelope::new(
+                mail[0].to_model_input_item(),
+            ))],
+        })
+        .await
+        .expect("append an identical canonical retry");
+    assert_eq!(
+        store
+            .find_accepted_agent_mail(thread_id, &ids)
+            .await
+            .expect("reconcile the appended retry")
+            .len(),
+        2
+    );
+    assert_eq!(store.mail_receipts.scanned_records() - before, 1);
+
     let original_path = store
         .live_rollout_path(thread_id)
         .await
@@ -117,6 +145,27 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     // A failed append was newline-terminated on reopen, then durably retried with the same
     // ordinal and a new timestamp. Reconciliation must prove the retry, never skip bad mail.
     let original = codex_rollout::read_rollout_text(&original_path).expect("read canonical source");
+    let duplicate = original
+        .rfind("retained canonical mail")
+        .expect("canonical retry");
+    let mut conflicting = original.clone();
+    conflicting.replace_range(
+        duplicate..duplicate + "retained canonical mail".len(),
+        "altered! canonical mail",
+    );
+    std::fs::write(&original_path, conflicting).expect("rewrite only the duplicate receipt");
+    assert!(
+        store
+            .find_accepted_agent_mail(thread_id, &ids[2..])
+            .await
+            .expect("index valid records while querying an unrelated ID")
+            .is_empty()
+    );
+    assert!(matches!(
+        store.find_accepted_agent_mail(thread_id, &ids[..1]).await,
+        Err(crate::ThreadStoreError::Conflict { .. })
+    ));
+
     let mut retried = String::new();
     for line in original.lines() {
         if line.contains(mail[0].id.as_ref().expect("mail identity").as_str()) {
@@ -132,12 +181,14 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         retried.push_str(line);
         retried.push('\n');
     }
-    let ids: Vec<_> = mail
-        .iter()
-        .map(|mail| mail.id.clone().expect("mail ID"))
-        .collect();
-    let conflicting = retried.replacen("retained canonical mail", "conflicting canonical mail", 1);
-    std::fs::write(&original_path, &conflicting).expect("write conflicting partial attempt");
+    std::fs::write(&original_path, &retried).expect("write exact partial retry");
+    store
+        .find_accepted_agent_mail(thread_id, &ids)
+        .await
+        .expect("validate the rewritten partial retry");
+    let conflicting = retried.replacen("retained canonical mail", "altered! canonical mail", 1);
+    assert_eq!(conflicting.len(), retried.len());
+    std::fs::write(&original_path, &conflicting).expect("rewrite cached partial attempt in place");
     assert!(
         store
             .find_accepted_agent_mail(thread_id, &ids)
@@ -262,6 +313,20 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         !retained.contains_key(&ids[1]),
         "discarded suffix is not canonical merely because its file survives"
     );
+
+    // New IDs must not decode the validated compressed ancestor or unchanged child again.
+    let before = store.mail_receipts.scanned_records();
+    for _ in 0..10 {
+        let id = ResponseItemId::with_suffix("amsg_mail", uuid::Uuid::now_v7());
+        assert!(
+            store
+                .find_accepted_agent_mail(thread_id, &[id])
+                .await
+                .expect("look up a new ID in the retained lineage")
+                .is_empty()
+        );
+    }
+    assert_eq!(store.mail_receipts.scanned_records(), before);
 
     // Simulate an older binary replacing the rollout without the creator fields it does not know.
     let rollout = codex_rollout::read_rollout_text(&first_replacement_path)

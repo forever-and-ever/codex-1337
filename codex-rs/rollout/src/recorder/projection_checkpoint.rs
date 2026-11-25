@@ -124,7 +124,7 @@ impl JsonlWriter {
 
     pub(super) fn capture_projection_suffix(&mut self, ordinal: Option<u64>, durable: &[u8]) {
         if ordinal.is_some()
-            && matches!(&self.sink, RolloutSink::Framed(_))
+            && self.sink.is_framed()
             && let Some(suffix) = self.suffix.as_mut()
         {
             if suffix.len() + durable.len() > MAX_PROJECTION_SUFFIX_BYTES {
