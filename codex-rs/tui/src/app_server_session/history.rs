@@ -3,7 +3,9 @@
 use color_eyre::eyre::eyre;
 
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use std::collections::HashSet;
+use std::path::Path;
 
 use super::AppServerSession;
 use crate::history_cell::HistoryRenderMode;
@@ -187,6 +189,10 @@ impl HistoryCursor {
 }
 
 impl ThreadHistoryPagination {
+    fn advance_turn_cursor(&mut self, cursor: &str, next: Option<String>) {
+        self.next_turn_cursor = advancing_cursor(Some(cursor), next, &mut self.seen_turn_cursors);
+    }
+
     fn next_page(&self) -> Option<HistoryCursor> {
         self.next_item_cursor
             .clone()
@@ -201,8 +207,7 @@ fn merge_turn_page(
     state: &mut ThreadHistoryPagination,
     turns: &mut Vec<Turn>,
 ) -> Vec<Turn> {
-    state.next_turn_cursor =
-        advancing_cursor(Some(cursor), page.next_cursor, &mut state.seen_turn_cursors);
+    state.advance_turn_cursor(cursor, page.next_cursor);
     let admitted = page
         .data
         .into_iter()
@@ -422,8 +427,8 @@ impl AppServerSession {
 
 fn rendered_history_rows(
     thread_id: ThreadId,
-    thread: &Thread,
-    items: Vec<HistoryItem>,
+    cwd: &Path,
+    items: Vec<ThreadItemPayload>,
     config: &Config,
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
@@ -442,8 +447,8 @@ fn rendered_history_rows(
     };
     thread_items_to_transcript_cells(
         Some(thread_id),
-        thread.cwd.as_path(),
-        items.into_iter().map(|item| item.item.payload),
+        cwd,
+        items,
         visibility,
         Some(config),
         &|_| crate::multi_agents::AgentMetadata::default(),

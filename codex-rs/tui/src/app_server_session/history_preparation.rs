@@ -1,11 +1,15 @@
 //! Handle-based history effects produce cache observations; the live session alone installs them.
 
+use std::collections::HashMap;
+use std::future::Future;
+
 use super::AppServerSession;
 use super::ClientRequest;
 use super::Config;
 use super::HISTORY_ITEM_PAGE_LIMIT;
 use super::HashSet;
 use super::HistoryHydrationScope;
+use super::HistoryItem;
 use super::HistoryLoadBudget;
 use super::INITIAL_HISTORY_TURN_LIMIT;
 use super::LocalSettings;
@@ -28,6 +32,7 @@ use super::merge_turn_page;
 use super::rendered_history_rows;
 use super::thread_items_page_params;
 use codex_app_server_client::TypedRequestError;
+use codex_app_server_protocol::ThreadItemEntry;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 
@@ -113,6 +118,193 @@ pub(super) async fn thread_turns_page(
     .wrap_err("failed to load a bounded thread history page")
 }
 
+struct HistoryTurns<'a> {
+    turns: &'a mut Vec<Turn>,
+    order: HistoryTurnOrder,
+}
+
+enum HistoryTurnOrder {
+    Chronological,
+    Hydrating {
+        positions: HashMap<String, usize>,
+        seen_items: Vec<HashSet<String>>,
+    },
+}
+
+impl HistoryTurns<'_> {
+    fn chronological(turns: &mut Vec<Turn>) -> HistoryTurns<'_> {
+        HistoryTurns {
+            turns,
+            order: HistoryTurnOrder::Chronological,
+        }
+    }
+
+    // Page order makes both the turn list and each turn's items append-only.
+    fn hydrating(turns: &mut Vec<Turn>) -> HistoryTurns<'_> {
+        turns.reverse();
+        let (positions, seen_items) = turns
+            .iter_mut()
+            .enumerate()
+            .map(|(index, turn)| ((turn.id.clone(), index), reverse_and_index_items(turn)))
+            .unzip();
+        HistoryTurns {
+            turns,
+            order: HistoryTurnOrder::Hydrating {
+                positions,
+                seen_items,
+            },
+        }
+    }
+
+    fn position(&self, turn_id: &str) -> Option<usize> {
+        match &self.order {
+            HistoryTurnOrder::Chronological => {
+                self.turns.iter().position(|turn| turn.id == turn_id)
+            }
+            HistoryTurnOrder::Hydrating { positions, .. } => positions.get(turn_id).copied(),
+        }
+    }
+
+    fn has_items_older_than(&self, turn_id: &str) -> bool {
+        self.position(turn_id).is_some_and(|index| {
+            let older = match self.order {
+                HistoryTurnOrder::Chronological => &self.turns[..index],
+                HistoryTurnOrder::Hydrating { .. } => &self.turns[index + 1..],
+            };
+            older.iter().any(|turn| !turn.items.is_empty())
+        })
+    }
+
+    fn merge_metadata(
+        &mut self,
+        cursor: &str,
+        page: ThreadTurnsListResponse,
+        state: &mut ThreadHistoryPagination,
+        mut admitted: impl FnMut(&str),
+    ) {
+        match &mut self.order {
+            HistoryTurnOrder::Chronological => {
+                for turn in merge_turn_page(cursor, page, state, self.turns) {
+                    admitted(&turn.id);
+                }
+            }
+            HistoryTurnOrder::Hydrating {
+                positions,
+                seen_items,
+            } => {
+                state.advance_turn_cursor(cursor, page.next_cursor);
+                let before_page = self.turns.len();
+                for mut turn in page.data {
+                    // Overlap is tested against earlier pages, not against this page.
+                    if positions
+                        .get(&turn.id)
+                        .is_some_and(|&index| index < before_page)
+                    {
+                        continue;
+                    }
+                    admitted(&turn.id);
+                    positions.insert(turn.id.clone(), self.turns.len());
+                    seen_items.push(reverse_and_index_items(&mut turn));
+                    self.turns.push(turn);
+                }
+            }
+        }
+    }
+
+    async fn merge_items<F>(
+        &mut self,
+        page: ThreadItemsListResponse,
+        state: &mut ThreadHistoryPagination,
+        mut fetch_turns: impl FnMut(String, u32) -> F,
+        mut admitted: impl FnMut(&str, &ThreadItem),
+    ) -> Result<()>
+    where
+        F: Future<Output = Result<ThreadTurnsListResponse>>,
+    {
+        let mut missing_turn_ids = page
+            .data
+            .iter()
+            .filter(|entry| self.position(&entry.turn_id).is_none())
+            .map(|entry| entry.turn_id.clone())
+            .collect::<HashSet<_>>();
+        for entry in page.data {
+            let index = loop {
+                if let Some(index) = self.position(&entry.turn_id) {
+                    break index;
+                }
+                let Some(cursor) = state.next_turn_cursor.clone() else {
+                    return Err(eyre!(
+                        "history item {} refers to missing turn {}",
+                        entry.item.id(),
+                        entry.turn_id
+                    ));
+                };
+                // Fetch only the remaining item-backed turns so metadata does not run ahead
+                // of this page. Empty turns between them may require another bounded request.
+                let limit = u32::try_from(missing_turn_ids.len())
+                    .unwrap_or(u32::MAX)
+                    .min(HISTORY_ITEM_PAGE_LIMIT);
+                let page = fetch_turns(cursor.clone(), limit).await?;
+                self.merge_metadata(&cursor, page, state, |turn_id| {
+                    missing_turn_ids.remove(turn_id);
+                });
+            };
+            state.user_prompt_clocks.record(&entry);
+            self.merge_item(index, entry, &mut admitted)?;
+        }
+        // Leave the item cursor retryable if a page only partially loads.
+        state.next_item_cursor = advancing_cursor(
+            state.next_item_cursor.as_deref(),
+            page.next_cursor,
+            &mut state.seen_item_cursors,
+        );
+        Ok(())
+    }
+
+    fn merge_item(
+        &mut self,
+        index: usize,
+        entry: ThreadItemEntry,
+        admitted: &mut impl FnMut(&str, &ThreadItem),
+    ) -> Result<()> {
+        let turn = &mut self.turns[index];
+        let id = entry.item.id();
+        let duplicate = match &mut self.order {
+            HistoryTurnOrder::Chronological => turn.items.iter().any(|item| item.id() == id),
+            HistoryTurnOrder::Hydrating { seen_items, .. } => {
+                !seen_items[index].insert(id.to_owned())
+            }
+        };
+        if duplicate {
+            return Ok(());
+        }
+        let item = ThreadItem::try_from(entry)?;
+        admitted(&turn.id, &item);
+        match self.order {
+            HistoryTurnOrder::Chronological => turn.items.insert(/*index*/ 0, item),
+            HistoryTurnOrder::Hydrating { .. } => turn.items.push(item),
+        }
+        turn.items_view = TurnItemsView::Summary;
+        Ok(())
+    }
+}
+
+impl Drop for HistoryTurns<'_> {
+    fn drop(&mut self) {
+        if matches!(self.order, HistoryTurnOrder::Hydrating { .. }) {
+            for turn in &mut *self.turns {
+                turn.items.reverse();
+            }
+            self.turns.reverse();
+        }
+    }
+}
+
+fn reverse_and_index_items(turn: &mut Turn) -> HashSet<String> {
+    turn.items.reverse();
+    turn.items.iter().map(|item| item.id().to_owned()).collect()
+}
+
 pub(super) async fn merge_thread_item_page(
     policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
@@ -120,56 +312,23 @@ pub(super) async fn merge_thread_item_page(
     page: ThreadItemsListResponse,
     state: &mut ThreadHistoryPagination,
     turns: &mut Vec<Turn>,
-) -> Result<Vec<super::HistoryItem>> {
-    let mut missing_turn_ids = page
-        .data
-        .iter()
-        .filter(|entry| !turns.iter().any(|turn| turn.id == entry.turn_id))
-        .map(|entry| entry.turn_id.clone())
-        .collect::<HashSet<_>>();
-    let mut items = Vec::new();
-    for entry in page.data {
-        while !turns.iter().any(|turn| turn.id == entry.turn_id) {
-            let Some(cursor) = state.next_turn_cursor.clone() else {
-                return Err(eyre!(
-                    "history item {} refers to missing turn {}",
-                    entry.item.id(),
-                    entry.turn_id
-                ));
-            };
-            // Fetch only the remaining item-backed turns so metadata does not run ahead
-            // of this page. Empty turns between them may require another bounded request.
-            let limit = u32::try_from(missing_turn_ids.len())
-                .unwrap_or(u32::MAX)
-                .min(HISTORY_ITEM_PAGE_LIMIT);
-            let page =
-                thread_turns_page(policy, handle, thread_id, Some(cursor.clone()), limit).await?;
-            for turn in merge_turn_page(&cursor, page, state, turns) {
-                missing_turn_ids.remove(&turn.id);
-            }
-        }
-        state.user_prompt_clocks.record(&entry);
-        if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
-            && !turn.items.iter().any(|item| item.id() == entry.item.id())
-        {
-            let item = ThreadItem::try_from(entry)?;
-            items.push(super::HistoryItem {
-                turn_id: turn.id.clone(),
-                item: item.clone(),
-            });
-            turn.items.insert(/*index*/ 0, item);
-            turn.items_view = TurnItemsView::Summary;
-        }
-    }
-    // Commit the item frontier only after every item has its turn metadata.
-    // A failed metadata request leaves this page retryable; retained items deduplicate.
-    state.next_item_cursor = advancing_cursor(
-        state.next_item_cursor.as_deref(),
-        page.next_cursor,
-        &mut state.seen_item_cursors,
-    );
-    items.reverse();
-    Ok(items)
+) -> Result<Vec<HistoryItem>> {
+    let mut admitted = Vec::new();
+    HistoryTurns::chronological(turns)
+        .merge_items(
+            page,
+            state,
+            |cursor, limit| thread_turns_page(policy, handle, thread_id, Some(cursor), limit),
+            |turn_id, item| {
+                admitted.push(HistoryItem {
+                    turn_id: turn_id.to_owned(),
+                    item: item.clone(),
+                });
+            },
+        )
+        .await?;
+    admitted.reverse();
+    Ok(admitted)
 }
 
 pub(in crate::app_server_session) async fn read_thread(
@@ -359,6 +518,8 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
         let (width, height) = crossterm::terminal::size().unwrap_or(/*default*/ (80, 24));
         let width = width.max(/*other*/ 1);
         let budget = HistoryLoadBudget::new(scope, config, local_settings, height);
+        let render_budget = budget.rows.and(config.zip(local_settings));
+        let mut turns = HistoryTurns::hydrating(&mut thread.turns);
         let mut scanned_items = 0;
         let mut rendered_rows = 0;
         while let Some(limit) = budget.next_page_size(rendered_rows, scanned_items) {
@@ -377,36 +538,40 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
             progress();
             let empty_page = page.data.is_empty();
             scanned_items = scanned_items.saturating_add(page.data.len());
-            let items = merge_thread_item_page(
-                policy,
-                handle,
-                thread_id,
-                page,
-                &mut state,
-                &mut thread.turns,
-            )
-            .await?;
+            let mut payloads = Vec::new();
+            let mut admitted_count = 0;
+            turns
+                .merge_items(
+                    page,
+                    &mut state,
+                    |cursor, limit| {
+                        thread_turns_page(policy, handle, thread_id, Some(cursor), limit)
+                    },
+                    |_, item| {
+                        if render_budget.is_some() {
+                            payloads.push(item.payload.clone());
+                        } else if budget.rows.is_some() {
+                            admitted_count += 1;
+                        }
+                    },
+                )
+                .await?;
             // Finish the anchor turn so prompt editing can detect earlier steers,
             // but do not scan history older than the displayed transcript.
             if let HistoryHydrationScope::ThroughTurn(anchor) = scope
-                && let Some(index) = thread.turns.iter().position(|turn| turn.id == anchor)
-                && thread.turns[..index]
-                    .iter()
-                    .any(|turn| !turn.items.is_empty())
+                && turns.has_items_older_than(anchor)
             {
                 break;
             }
             if empty_page || state.next_item_cursor.is_none() {
                 break;
             }
-            if budget.rows.is_none() {
-                continue;
-            }
-            if let Some((config, local_settings)) = config.zip(local_settings) {
+            if let Some((config, local_settings)) = render_budget {
+                payloads.reverse();
                 rendered_rows = rendered_history_rows(
                     thread_id,
-                    thread,
-                    items,
+                    thread.cwd.as_path(),
+                    payloads,
                     config,
                     local_settings,
                     width,
@@ -414,10 +579,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                     image_origin,
                 );
             } else {
-                rendered_rows = rendered_rows.saturating_add(items.len());
-            }
-            if empty_page || state.next_item_cursor.is_none() {
-                break;
+                rendered_rows = rendered_rows.saturating_add(admitted_count);
             }
         }
         if matches!(
@@ -434,9 +596,10 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                 )
                 .await?;
                 progress();
-                merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
+                turns.merge_metadata(&cursor, page, &mut state, |_| {});
             }
         }
+        drop(turns);
         super::mark_loaded_interruptions(&mut thread.turns, state.next_item_cursor.as_deref());
         Ok(())
     }
@@ -502,3 +665,7 @@ pub(in crate::app_server_session) async fn prepare_safety_retry_history(
     }
     Ok(thread)
 }
+
+#[cfg(test)]
+#[path = "history_preparation_tests.rs"]
+mod tests;
