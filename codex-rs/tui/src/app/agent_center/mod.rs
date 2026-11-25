@@ -10,12 +10,12 @@ use super::*;
 pub(super) use navigation::SectionDirection;
 
 // Counts and filtering use the same status groups.
-pub(super) const TASK_FILTERS: &[(&str, Option<AgentsOverviewGroup>)] = &[
-    ("All", None),
-    ("Needs you", Some(AgentsOverviewGroup::NeedsYou)),
-    ("Working", Some(AgentsOverviewGroup::Working)),
-    ("Ready", Some(AgentsOverviewGroup::Ready)),
-    ("Inactive", Some(AgentsOverviewGroup::Finished)),
+pub(super) const TASK_FILTERS: &[Option<AgentsOverviewGroup>] = &[
+    None,
+    Some(AgentsOverviewGroup::NeedsIntervention),
+    Some(AgentsOverviewGroup::Active),
+    Some(AgentsOverviewGroup::Stopped),
+    Some(AgentsOverviewGroup::Unloaded),
 ];
 
 impl AgentsOverviewView {

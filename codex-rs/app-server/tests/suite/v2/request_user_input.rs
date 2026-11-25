@@ -7,8 +7,12 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerRequestResolvedNotification;
+use codex_app_server_protocol::ThreadActiveFlag;
+use codex_app_server_protocol::ThreadReadParams;
+use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
@@ -141,6 +145,22 @@ async fn request_user_input_round_trip_for_mode(
         assert_eq!(params.is_blocking, expected_is_blocking);
         assert_eq!(params.auto_resolution_ms, None);
         let resolved_request_id = request_id.clone();
+
+        let read: ThreadReadResponse = mcp
+            .request(|request_id| ClientRequest::ThreadRead {
+                request_id,
+                params: ThreadReadParams {
+                    thread_id: thread.id.clone(),
+                    include_turns: false,
+                },
+            })
+            .await?;
+        let active_flags = if expected_is_blocking {
+            vec![ThreadActiveFlag::WaitingOnUserInput]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(read.thread.status, ThreadStatus::Active { active_flags });
 
         mcp.send_response(
             request_id,

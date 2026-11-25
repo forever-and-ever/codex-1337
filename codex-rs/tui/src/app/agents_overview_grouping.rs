@@ -4,7 +4,6 @@
 use super::super::App;
 use super::super::agents_overview::AgentsOverviewState;
 use super::super::agents_overview_discovery::matches_query;
-use super::AgentsOverviewGroup;
 use super::AgentsOverviewGrouping;
 use super::AgentsOverviewView;
 use crate::legacy_core::config::edit::ConfigEdit;
@@ -21,74 +20,63 @@ pub(super) fn model_name(thread: &Thread) -> &str {
 
 impl AgentsOverviewView {
     pub(super) fn is_pinned(&self, index: usize) -> bool {
+        self.pin_rank(index).is_some()
+    }
+
+    fn pin_rank(&self, index: usize) -> Option<usize> {
         self.pinned_thread_ranks
-            .as_ref()
-            .is_some_and(|ranks| ranks.contains_key(&self.rows[index].thread_id))
+            .as_ref()?
+            .get(&self.rows[index].thread_id)
+            .copied()
     }
 
     pub(in crate::app) fn visible_indices(&self) -> Vec<usize> {
         let state = self.state();
         let search = state.search.to_lowercase();
-        let (_, status_group) = super::command_center::TASK_FILTERS[state.status_filter];
-        let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, row)| {
-                (state.rename_target == Some(row.thread_id)
-                    || (state.includes_row(row)
-                        && (search.is_empty() || matches_query(&row.thread, &search))
-                        && status_group.is_none_or(|group| group == row.group)))
-                .then_some(index)
-            })
-            .partition(|index| self.is_pinned(*index));
-        if let Some(ranks) = &self.pinned_thread_ranks {
-            pinned.sort_by_key(|index| ranks.get(&self.rows[*index].thread_id).copied());
-        }
+        let status_group = super::command_center::TASK_FILTERS[state.status_filter];
+        let visible = self.rows.iter().enumerate().filter_map(|(index, row)| {
+            (state.rename_target == Some(row.thread_id)
+                || (state.includes_row(row)
+                    && (search.is_empty() || matches_query(&row.thread, &search))
+                    && status_group.is_none_or(|group| group == row.group)))
+            .then_some(index)
+        });
         match state.grouping {
             AgentsOverviewGrouping::Project => {
-                let mut projects = std::collections::HashMap::new();
-                for (index, row) in self.rows.iter().enumerate() {
-                    let activity = match row.group {
-                        AgentsOverviewGroup::NeedsYou => AgentsOverviewGroup::Working,
-                        group => group,
-                    };
-                    projects
-                        .entry(&self.project_groups[index].key)
-                        .and_modify(|(strongest, latest): &mut (AgentsOverviewGroup, i64)| {
-                            *strongest = (*strongest).min(activity);
-                            *latest = (*latest).max(row.thread.updated_at);
-                        })
-                        .or_insert((activity, row.thread.updated_at));
-                }
-                visible.sort_by_key(|index| {
-                    let row = &self.rows[*index];
-                    let project = &self.project_groups[*index].key;
-                    let (activity, latest) = projects[project];
+                let mut visible = visible.collect::<Vec<_>>();
+                visible.sort_by_cached_key(|&index| {
+                    let row = &self.rows[index];
+                    let rank = self.pin_rank(index);
                     (
-                        activity,
-                        std::cmp::Reverse(latest),
-                        project,
                         row.group,
+                        &self.project_groups[index].key,
+                        rank.is_none(),
+                        rank,
                         std::cmp::Reverse(row.thread.updated_at),
                     )
                 });
+                visible
             }
-            AgentsOverviewGrouping::Status => {
-                pinned.extend(visible);
-                // Stable grouping preserves pin order, then the supplied newest-first order.
-                pinned.sort_by_key(|index| self.rows[*index].group);
-                return pinned;
+            grouping @ (AgentsOverviewGrouping::Status | AgentsOverviewGrouping::Model) => {
+                let (mut pinned, mut unpinned): (Vec<_>, Vec<_>) =
+                    visible.partition(|&index| self.is_pinned(index));
+                pinned.sort_by_key(|&index| self.pin_rank(index));
+                if grouping == AgentsOverviewGrouping::Status {
+                    pinned.extend(unpinned);
+                    // Stable sorting keeps pin order, then the supplied newest-first order.
+                    pinned.sort_by_key(|&index| self.rows[index].group);
+                } else {
+                    unpinned.sort_by_key(|&index| {
+                        (
+                            model_name(&self.rows[index].thread),
+                            std::cmp::Reverse(self.rows[index].thread.updated_at),
+                        )
+                    });
+                    pinned.extend(unpinned);
+                }
+                pinned
             }
-            AgentsOverviewGrouping::Model => visible.sort_by_key(|index| {
-                (
-                    model_name(&self.rows[*index].thread),
-                    std::cmp::Reverse(self.rows[*index].thread.updated_at),
-                )
-            }),
         }
-        pinned.extend(visible);
-        pinned
     }
 
     pub(super) fn same_group(
@@ -99,11 +87,12 @@ impl AgentsOverviewView {
     ) -> bool {
         match grouping {
             AgentsOverviewGrouping::Status => self.rows[left].group == self.rows[right].group,
-            _ if self.is_pinned(left) || self.is_pinned(right) => {
-                self.is_pinned(left) && self.is_pinned(right)
-            }
             AgentsOverviewGrouping::Project => {
-                self.project_groups[left].key == self.project_groups[right].key
+                self.rows[left].group == self.rows[right].group
+                    && self.project_groups[left].key == self.project_groups[right].key
+            }
+            AgentsOverviewGrouping::Model if self.is_pinned(left) || self.is_pinned(right) => {
+                self.is_pinned(left) && self.is_pinned(right)
             }
             AgentsOverviewGrouping::Model => {
                 model_name(&self.rows[left].thread) == model_name(&self.rows[right].thread)

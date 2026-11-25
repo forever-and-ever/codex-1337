@@ -3,23 +3,23 @@ source: tui/src/app/agents_overview_tests.rs
 expression: "age.replace_all(&rendered, \" [age]\")"
 ---
   Agent command center  Group: Project  ⌃s
-   All 10   Needs you 0   Working 0   Ready 0   Inactive 10
+   All 10   Needs intervention 0   Active 0   Stopped 0   Unloaded 10
   ────────────────────────────────────────────────────────────────────────────
       Tasks                                            Status         Updated
+  Unloaded
   /  10
-  › △ Task 12                                          Inactive [age]
-    △ Task 11                                          Inactive [age]
-    △ Task 10                                          Inactive [age]
-    △ Task 9                                           Inactive [age]
-    △ Task 8                                           Inactive [age]
-    △ Task 7                                           Inactive [age]
-    △ Task 6                                           Inactive [age]
-    △ Task 5                                           Inactive [age]
-    △ Task 4                                           Inactive [age]
-    △ Task 3                                           Inactive [age]
+  › △ Task 12                                          Unloaded [age]
+    △ Task 11                                          Unloaded [age]
+    △ Task 10                                          Unloaded [age]
+    △ Task 9                                           Unloaded [age]
+    △ Task 8                                           Unloaded [age]
+    △ Task 7                                           Unloaded [age]
+    △ Task 6                                           Unloaded [age]
+    △ Task 5                                           Unloaded [age]
+    △ Task 4                                           Unloaded [age]
+    △ Task 3                                           Unloaded [age]
 
       Show more
-
 
 
 

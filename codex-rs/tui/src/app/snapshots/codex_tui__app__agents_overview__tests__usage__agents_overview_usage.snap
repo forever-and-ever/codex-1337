@@ -4,16 +4,16 @@ assertion_line: 135
 expression: "render_bottom_popup(&app.chat_widget,\n96).replace(&format!(\"{project}  2\"),\n&group).replace(&project, \"/tmp/project\").replace(\"fwd del\", \"del\")"
 ---
   Agent command center  Group: Project  ⌃s
-   All 2   Needs you 1   Working 0   Ready 1   Inactive 0                      tab/⇧tab filter
+   All 2   Needs intervention 1   Active 0   Stopped 1   Unloaded 0            tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                           │ Task details
-  /tmp/project  2                                     │
-  › ■ Review parser                                   │ Review parser
-    ■ Other task                                      │ ■ Needs input
+  Needs intervention                                  │
+  /tmp/project  1                                     │ Review parser
+  › ■ Review parser                                   │ ■ Needs input
                                                       │
-                                                      │ Model: Unknown
-                                                      │ Reasoning: Unknown
-                                                      │
+  Stopped                                             │ Model: Unknown
+  /tmp/project  1                                     │ Reasoning: Unknown
+    ■ Other task                                      │
                                                       │ Project
                                                       │ /tmp/project
                                                       │ Tokens: 13K in · 4K out

@@ -3,13 +3,13 @@ source: tui/src/app/agent_center_tests.rs
 expression: rendered
 ---
   Agent command center  Group: Projec…
-   All 1   Needs you 0   Working 0   ›
+   All 1   Needs intervention 0      ›
   ────────────────────────────────────
   Rename › 界 界 界 界 界 界 界 日 本 語  é 👩‍💻
       Tasks
+  Stopped
   /tmp/project  1
   › ■ Retained task
-
 
 
 

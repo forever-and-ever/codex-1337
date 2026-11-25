@@ -37,7 +37,6 @@ use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::remap_wrapped_line;
 use crate::terminal_hyperlinks::visible_lines;
-use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadActiveFlag;
 use codex_app_server_protocol::ThreadStatus;
@@ -68,10 +67,10 @@ use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum AgentsOverviewGroup {
-    NeedsYou,
-    Working,
-    Ready,
-    Finished,
+    NeedsIntervention,
+    Active,
+    Stopped,
+    Unloaded,
 }
 
 impl AgentsOverviewGroup {
@@ -81,28 +80,22 @@ impl AgentsOverviewGroup {
                 if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
                     || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
             {
-                Self::NeedsYou
+                Self::NeedsIntervention
             }
-            ThreadStatus::Active { .. } => Self::Working,
-            ThreadStatus::Idle => Self::Ready,
-            // A subagent failure ends its work without asking the user to act.
-            ThreadStatus::SystemError if !is_subagent(thread) => Self::NeedsYou,
-            ThreadStatus::SystemError | ThreadStatus::NotLoaded => Self::Finished,
+            ThreadStatus::Active { .. } => Self::Active,
+            ThreadStatus::Idle | ThreadStatus::SystemError => Self::Stopped,
+            ThreadStatus::NotLoaded => Self::Unloaded,
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            Self::NeedsYou => "Needs input",
-            Self::Working => "Working",
-            Self::Ready => "Ready",
-            Self::Finished => "Inactive",
+            Self::NeedsIntervention => "Needs intervention",
+            Self::Active => "Active",
+            Self::Stopped => "Stopped",
+            Self::Unloaded => "Unloaded",
         }
     }
-}
-
-fn is_subagent(thread: &Thread) -> bool {
-    thread.parent_thread_id.is_some() || matches!(thread.source, SessionSource::SubAgent(_))
 }
 
 #[derive(Clone)]
@@ -446,15 +439,11 @@ impl AgentsOverviewView {
 
     fn status(row: &AgentsOverviewRow) -> (&'static str, Span<'static>) {
         let label = match row.group {
-            AgentsOverviewGroup::NeedsYou
-                if row.thread.status == ThreadStatus::SystemError && !is_subagent(&row.thread) =>
-            {
+            AgentsOverviewGroup::NeedsIntervention => "Needs input",
+            AgentsOverviewGroup::Stopped if row.thread.status == ThreadStatus::SystemError => {
                 "Error"
             }
-            AgentsOverviewGroup::NeedsYou => "Needs input",
-            AgentsOverviewGroup::Working => "Working",
-            AgentsOverviewGroup::Ready => "Ready",
-            AgentsOverviewGroup::Finished => "Inactive",
+            group => group.label(),
         };
         (label, crate::agent_status::marker(Some(&row.thread.status)))
     }

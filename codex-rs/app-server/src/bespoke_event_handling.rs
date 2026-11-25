@@ -884,9 +884,15 @@ pub(crate) async fn apply_bespoke_event_handling(
             }
         }
         EventMsg::RequestUserInput(request) => {
-            let user_input_guard = thread_watch_manager
-                .note_user_input_requested(&conversation_id.to_string())
-                .await;
+            let user_input_guard = if request.is_blocking {
+                Some(
+                    thread_watch_manager
+                        .note_user_input_requested(&conversation_id.to_string())
+                        .await,
+                )
+            } else {
+                None
+            };
             let questions = request
                 .questions
                 .into_iter()
@@ -1797,7 +1803,7 @@ async fn on_request_user_input_response(
     receiver: oneshot::Receiver<ClientRequestResult>,
     conversation: Arc<CodexThread>,
     thread_state: Arc<Mutex<ThreadState>>,
-    user_input_guard: ThreadWatchActiveGuard,
+    user_input_guard: Option<ThreadWatchActiveGuard>,
 ) {
     let response = receiver.await;
     resolve_server_request_on_thread_listener(&thread_state, pending_request_id).await;

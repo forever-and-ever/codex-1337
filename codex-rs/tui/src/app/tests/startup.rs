@@ -1551,7 +1551,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
     insta::assert_snapshot!(rendered.lines().take(2).collect::<Vec<_>>().join("\n"), @"
     Agent command center  Group: Project  ⌃s
-     All 0   Needs you 0   Working 0   Ready 0   Inactive 0
+     All 0   Needs intervention 0   Active 0   Stopped 0   Unloaded 0
     ");
     app.chat_widget.remote_connection =
         crate::status::remote_connection::remote_connection_status_value(
@@ -1572,7 +1572,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
     insta::assert_snapshot!(rendered.lines().take(2).collect::<Vec<_>>().join("\n"), @"
     Agent command center  Group: Project  ⌃s
-     All 0   Needs you 0   Working 0   Ready 0   Inactive 0
+     All 0   Needs intervention 0   Active 0   Stopped 0   Unloaded 0
     ");
     app.pending_server_version_notice =
         Some(crate::status::remote_connection::ServerVersionNotice {

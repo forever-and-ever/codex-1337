@@ -3,15 +3,15 @@ source: tui/src/app/agent_center_tests.rs
 expression: "screen(&view, area.width, area.height)"
 ---
   Agent command center  Group: Project  ⌃s
-   All 1   Needs you 0   Working 0   Ready 1   Inactive 0
+   All 1   Needs intervention 0   Active 0   Stopped 1   Unloaded 0
   ────────────────────────────────────────────────────────────────────────────────────
   Search › find
       Tasks                                                    Status         Updated
+  Stopped
   /tmp/project  1
-  › ■ Task to find                                             Ready           2m ago
+  › ■ Task to find                                             Stopped         2m ago
 
       Searching history…
-
 
 
 

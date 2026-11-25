@@ -126,7 +126,7 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
         .iter_mut()
         .find(|row| row.thread_id == selected)
         .unwrap();
-    row.group = AgentsOverviewGroup::NeedsYou;
+    row.group = AgentsOverviewGroup::NeedsIntervention;
     row.details.lines = vec![
         Line::default(),
         "Needs attention".into(),

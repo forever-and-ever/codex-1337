@@ -156,7 +156,8 @@ impl Renderable for AgentsOverviewView {
         let history = state.history.as_ref();
         let labels = TASK_FILTERS
             .iter()
-            .map(|(label, group)| {
+            .map(|group| {
+                let label = group.map_or("All", AgentsOverviewGroup::label);
                 let count = self
                     .rows
                     .iter()

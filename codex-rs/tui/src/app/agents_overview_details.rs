@@ -143,8 +143,10 @@ impl App {
         let priority = |thread: &Thread| {
             let group = AgentsOverviewGroup::for_thread(thread);
             let has_detail = ThreadId::from_string(&thread.id).is_ok_and(|id| match group {
-                AgentsOverviewGroup::NeedsYou => self.agents_overview_request_preview(id).is_some(),
-                AgentsOverviewGroup::Working => {
+                AgentsOverviewGroup::NeedsIntervention => {
+                    self.agents_overview_request_preview(id).is_some()
+                }
+                AgentsOverviewGroup::Active => {
                     self.thread_event_channels
                         .get(&id)
                         .is_none_or(|channel| channel.attachment() == ThreadEventAttachment::Live)
@@ -155,7 +157,7 @@ impl App {
                             .and_then(|activity| activity.reasoning.as_ref())
                             .is_some_and(|reasoning| reasoning.header.is_some())
                 }
-                AgentsOverviewGroup::Ready | AgentsOverviewGroup::Finished => false,
+                AgentsOverviewGroup::Stopped | AgentsOverviewGroup::Unloaded => false,
             });
             (group, !has_detail)
         };
@@ -182,7 +184,7 @@ impl App {
             lines.push(Line::default());
             lines.push(vec!["Agent: ".dim(), preview_text(name).into()].into());
         }
-        if AgentsOverviewGroup::for_thread(source) == AgentsOverviewGroup::NeedsYou {
+        if AgentsOverviewGroup::for_thread(source) == AgentsOverviewGroup::NeedsIntervention {
             if !is_child {
                 lines.extend([Line::default(), "Needs attention".red().into()]);
             }
@@ -190,18 +192,16 @@ impl App {
                 lines.push(request.into());
             }
             lines.push("Open task to review.".dim().into());
-            match &source.status {
-                ThreadStatus::Active { active_flags } => {
-                    if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval) {
-                        lines.push("Waiting for approval.".into());
-                    }
-                    if active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) {
-                        lines.push("Waiting for your response.".into());
-                    }
+            if let ThreadStatus::Active { active_flags } = &source.status {
+                if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval) {
+                    lines.push("Waiting for approval.".into());
                 }
-                ThreadStatus::SystemError => lines.push("Task encountered an error.".into()),
-                ThreadStatus::NotLoaded | ThreadStatus::Idle => {}
+                if active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) {
+                    lines.push("Waiting for your response.".into());
+                }
             }
+        } else if source.status == ThreadStatus::SystemError {
+            lines.push("Task encountered an error.".into());
         }
         let activity = self.agents_overview.activity.get(&thread_id).filter(|_| {
             channel.is_none_or(|channel| channel.attachment() == ThreadEventAttachment::Live)
@@ -288,7 +288,7 @@ fn request_preview(request: &ServerRequest) -> Option<String> {
             | McpServerElicitationRequest::Url { message, .. } => Some(message.as_str()),
             McpServerElicitationRequest::UserVerification { .. } => None,
         },
-        ServerRequest::ToolRequestUserInput { params, .. } => params
+        ServerRequest::ToolRequestUserInput { params, .. } if params.is_blocking => params
             .questions
             .first()
             .map(|question| question.question.as_str()),

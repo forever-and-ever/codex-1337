@@ -51,7 +51,13 @@ async fn live_center_keeps_status_order_across_progress_refreshes() {
             20,
         ),
         ("Ready task", ThreadStatus::Idle, 40),
-        ("Needs input", ThreadStatus::SystemError, 0),
+        (
+            "Needs input",
+            ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::WaitingOnUserInput],
+            },
+            0,
+        ),
     ]
     .into_iter()
     .zip(ids)
@@ -123,10 +129,15 @@ async fn failed_background_worker_only_needs_attention_for_a_pending_request() {
         "Background review",
         ThreadStatus::SystemError,
     );
-    worker.source = SessionSource::SubAgent(SubAgentSource::Review);
-    let view = app.agents_overview_view(vec![worker.clone()], Some(worker_id));
-    assert_eq!(view.rows[0].group, AgentsOverviewGroup::Finished);
-    assert!(view.rows[0].details.lines.is_empty());
+    for source in [
+        worker.source.clone(),
+        SessionSource::SubAgent(SubAgentSource::Review),
+    ] {
+        worker.source = source;
+        let view = app.agents_overview_view(vec![worker.clone()], Some(worker_id));
+        assert_eq!(view.rows[0].group, AgentsOverviewGroup::Stopped);
+        assert!(screen(&view, /*width*/ 100, /*height*/ 32).contains("Error"));
+    }
 
     let child = overview_thread(
         ThreadId::new(),
@@ -137,7 +148,7 @@ async fn failed_background_worker_only_needs_attention_for_a_pending_request() {
         },
     );
     let view = app.agents_overview_view(vec![worker, child], Some(worker_id));
-    assert_eq!(view.rows[0].group, AgentsOverviewGroup::NeedsYou);
+    assert_eq!(view.rows[0].group, AgentsOverviewGroup::NeedsIntervention);
     let rendered = screen(&view, /*width*/ 100, /*height*/ 32);
     assert!(rendered.contains("■ Needs input"));
     assert!(rendered.contains("Waiting for approval."));
@@ -195,7 +206,7 @@ async fn live_center_sorts_arrivals_and_status_transitions_by_update_time() {
     let view = app.agents_overview_view(threads.clone(), Some(bravo));
     assert_eq!(view.thread_ids(), vec![delta, alpha, bravo, charlie]);
     let selected = &view.rows[view.selected_index().unwrap()];
-    assert_eq!(selected.group, AgentsOverviewGroup::Ready);
+    assert_eq!(selected.group, AgentsOverviewGroup::Stopped);
     assert!(selected.details.lines.is_empty());
     // A request from a descendant can still bring its idle parent to the top.
     threads.last_mut().unwrap().status = ThreadStatus::Active {
@@ -477,6 +488,116 @@ async fn live_center_navigates_sections() {
 }
 
 #[tokio::test]
+async fn live_center_project_order_keeps_status_before_directory_and_pins() {
+    let app = make_test_app().await;
+    let [
+        blocked,
+        newer,
+        older,
+        first,
+        second,
+        other,
+        stopped,
+        unloaded,
+    ] = [1, 2, 3, 4, 5, 6, 7, 8].map(ThreadId::from_u128);
+    let active = ThreadStatus::Active {
+        active_flags: Vec::new(),
+    };
+    let threads = [
+        (first, "First", "/tmp/alpha", active.clone(), 0),
+        (second, "Second", "/tmp/alpha", active.clone(), 20),
+        (older, "Older", "/tmp/alpha", active.clone(), 30),
+        (newer, "Newer", "/tmp/alpha", active.clone(), 40),
+        (other, "Other", "/tmp/zulu", active, 100),
+        (
+            stopped,
+            "Stopped task",
+            "/tmp/alpha",
+            ThreadStatus::Idle,
+            200,
+        ),
+        (
+            unloaded,
+            "Unloaded task",
+            "/tmp/zulu",
+            ThreadStatus::NotLoaded,
+            300,
+        ),
+        (
+            blocked,
+            "Blocked",
+            "/tmp/zulu",
+            ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::WaitingOnApproval],
+            },
+            -100,
+        ),
+    ]
+    .into_iter()
+    .map(|(id, title, cwd, status, age)| {
+        let mut thread = overview_thread(id, /*parent_thread_id*/ None, title, status);
+        thread.cwd = test_path_buf(cwd).abs().into();
+        thread.updated_at += age;
+        thread
+    })
+    .collect();
+    let mut view = app.agents_overview_view(threads, Some(second));
+    view.pinned_thread_ranks = Some([(stopped, 0), (other, 1), (first, 2), (second, 3)].into());
+    let visible = |view: &AgentsOverviewView| {
+        view.visible_indices()
+            .into_iter()
+            .map(|index| view.rows[index].thread_id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        visible(&view),
+        vec![
+            blocked, first, second, newer, older, other, stopped, unloaded
+        ],
+    );
+
+    let output = screen(&view, /*width*/ 120, /*height*/ 40);
+    let headings = output
+        .lines()
+        .map(|line| line.split('│').next().unwrap_or_default().trim())
+        .filter(|line| {
+            matches!(
+                *line,
+                "Needs intervention" | "Active" | "Stopped" | "Unloaded"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        headings,
+        ["Needs intervention", "Active", "Stopped", "Unloaded"]
+    );
+    assert!(
+        !output
+            .lines()
+            .any(|line| line.trim_start().starts_with("Pinned"))
+    );
+    assert_eq!(output.matches("📌").count(), 4);
+
+    // Section navigation treats each status/directory pair as one target, including
+    // a project that straddles statuses. Heading rows themselves are not selectable.
+    for (key, expected) in [
+        (KeyCode::Down, other),
+        (KeyCode::Down, stopped),
+        (KeyCode::Down, unloaded),
+        (KeyCode::Up, stopped),
+        (KeyCode::Up, other),
+        (KeyCode::Up, first),
+        (KeyCode::Up, blocked),
+    ] {
+        view.handle_key_event(KeyEvent::new(key, KeyModifiers::SHIFT));
+        assert_eq!(
+            view.rows[view.selected_index().unwrap()].thread_id,
+            expected
+        );
+    }
+}
+
+#[tokio::test]
 async fn live_center_metadata_clips_at_grapheme_boundaries() {
     let app = make_test_app().await;
     let mut view = app.agents_overview_view(
@@ -541,7 +662,7 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
     for key in [KeyCode::Esc, KeyCode::Enter] {
         threads[0].status = ThreadStatus::Idle;
         let mut view = app.agents_overview_view(threads.clone(), Some(id));
-        // Reuse the Ready tab after the first iteration.
+        // Reuse the Stopped tab after the first iteration.
         if key == KeyCode::Esc {
             for _ in 0..3 {
                 view.handle_key_event(KeyCode::Tab.into());
@@ -552,7 +673,7 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
             view.cursor_style(Rect::default()),
             crossterm::cursor::SetCursorStyle::SteadyBar
         );
-        threads[0].status = ThreadStatus::SystemError;
+        threads[0].status = ThreadStatus::NotLoaded;
         view = app.agents_overview_view(threads.clone(), Some(id));
         if key == KeyCode::Enter {
             for edit in [
@@ -635,7 +756,9 @@ async fn live_center_navigation_and_complete_hints() {
                 needs_you,
                 /*parent_thread_id*/ None,
                 "Needs input",
-                ThreadStatus::SystemError,
+                ThreadStatus::Active {
+                    active_flags: vec![ThreadActiveFlag::WaitingOnUserInput],
+                },
             ),
             overview_thread(
                 unloaded,

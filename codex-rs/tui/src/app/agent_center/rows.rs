@@ -107,6 +107,14 @@ impl AgentsOverviewView {
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
             let index = match entry {
                 CenterRow::Group(index) | CenterRow::Task(index) => *index,
+                CenterRow::Status(group) => {
+                    line(
+                        group.label().bold(),
+                        row(viewport, offset as u16, /*height*/ 1),
+                        buf,
+                    );
+                    continue;
+                }
                 CenterRow::Gap => continue,
                 CenterRow::ShowMore => {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
@@ -152,11 +160,11 @@ impl AgentsOverviewView {
             if matches!(entry, CenterRow::Group(_)) {
                 let group = match state.grouping {
                     AgentsOverviewGrouping::Status => task.group.label().to_owned(),
-                    _ if self.is_pinned(index) => "Pinned".to_owned(),
                     AgentsOverviewGrouping::Project => format_directory_display(
                         &self.project_groups[index].heading,
                         /*max_width*/ None,
                     ),
+                    AgentsOverviewGrouping::Model if self.is_pinned(index) => "Pinned".to_owned(),
                     AgentsOverviewGrouping::Model => model_name(&task.thread).to_owned(),
                 };
                 let count = indices
@@ -174,9 +182,7 @@ impl AgentsOverviewView {
                 } else {
                     format!("{count} of {total}")
                 };
-                let group = if state.grouping == AgentsOverviewGrouping::Project
-                    && !self.is_pinned(index)
-                {
+                let group = if state.grouping == AgentsOverviewGrouping::Project {
                     crate::text_formatting::center_truncate_path(
                         &group,
                         usize::from(rect.width)
@@ -243,7 +249,7 @@ impl AgentsOverviewView {
             };
             let task_title = display_title(&task.thread);
             let task_title =
-                if state.grouping == AgentsOverviewGrouping::Status && self.is_pinned(index) {
+                if state.grouping != AgentsOverviewGrouping::Model && self.is_pinned(index) {
                     format!("📌 {task_title}")
                 } else {
                     task_title.to_owned()

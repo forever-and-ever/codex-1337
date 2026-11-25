@@ -247,16 +247,12 @@ async fn archiving_selects_the_next_displayed_task() -> Result<()> {
                     view.handle_key_event(KeyCode::Down.into());
                 }
                 let expected = match (grouping, filtered) {
-                    (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Status, false) => {
-                        vec![3, 2, 1, 4]
-                    }
-                    (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Status, true) => {
-                        vec![3, 1, 4]
-                    }
-                    (AgentsOverviewGrouping::Model, false) => {
+                    (AgentsOverviewGrouping::Status, false) => vec![3, 2, 1, 4],
+                    (AgentsOverviewGrouping::Status, true) => vec![3, 1, 4],
+                    (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Model, false) => {
                         vec![3, 4, 2, 1]
                     }
-                    (AgentsOverviewGrouping::Model, true) => {
+                    (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Model, true) => {
                         vec![3, 4, 1]
                     }
                 };
@@ -384,10 +380,8 @@ async fn external_removals_preserve_adjacent_selection() {
                 Some(&ids[2])
             );
             let expected = match grouping {
-                AgentsOverviewGrouping::Status | AgentsOverviewGrouping::Project => {
-                    [ids[0], ids[3]]
-                }
-                AgentsOverviewGrouping::Model => [ids[3], ids[0]],
+                AgentsOverviewGrouping::Status => [ids[0], ids[3]],
+                AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Model => [ids[3], ids[0]],
             };
             let archive = ServerNotification::ThreadArchived(ThreadArchivedNotification {
                 thread_id: ids[2].to_string(),
@@ -494,9 +488,8 @@ async fn hiding_tasks_keeps_selection_adjacent_in_display_order() -> Result<()> 
                 ThreadId::from_u128(/*value*/ 3)
             );
             let order = match grouping {
-                AgentsOverviewGrouping::Project => [3, 2, 1, 4],
                 AgentsOverviewGrouping::Status => [3, 2, 1, 4],
-                AgentsOverviewGrouping::Model => [3, 4, 2, 1],
+                AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Model => [3, 4, 2, 1],
             };
             let expected = order
                 .into_iter()

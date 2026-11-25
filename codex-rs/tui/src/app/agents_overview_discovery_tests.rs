@@ -210,7 +210,8 @@ async fn check_discovery(mixed_sources: bool) -> Result<()> {
     view = app.agents_overview_view(browse_rows(), /*selected_thread_id*/ None);
     let rendered = super::command_center::screen(&view, /*width*/ 100, /*height*/ 16);
     assert!(rendered.contains("All 11 "));
-    assert!(rendered.contains("1 of 10"), "{rendered}"); // The pinned task has its own group.
+    // Pinned tasks count toward their directory section alongside other tasks.
+    assert!(rendered.contains("1 of 11"), "{rendered}");
     view.handle_key_event(KeyCode::Esc.into());
 
     app.track_agents_overview_notification(&ServerNotification::ThreadArchived(

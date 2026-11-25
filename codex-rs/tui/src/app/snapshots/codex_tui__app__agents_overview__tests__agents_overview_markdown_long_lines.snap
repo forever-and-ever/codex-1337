@@ -3,12 +3,12 @@ source: tui/src/app/agents_overview_tests.rs
 expression: "normalize_agent_center_snapshot(render_bottom_popup(&app.chat_widget, 96))"
 ---
   Agent command center  Group: Project  ⌃s
-   All 1   Needs you 0   Working 0   Ready 1   Inactive 0                      tab/⇧tab filter
+   All 1   Needs intervention 0   Active 0   Stopped 1   Unloaded 0            tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                           │ Task details
-  /tmp/project  1                                     │
-  › ■ Review parser                                   │ Review parser
-                                                      │ ■ Ready
+  Stopped                                             │
+  /tmp/project  1                                     │ Review parser
+  › ■ Review parser                                   │ ■ Stopped
                                                       │
                                                       │ Model: Unknown
                                                       │ Reasoning: Unknown

@@ -4,16 +4,16 @@ assertion_line: 1227
 expression: "render_bottom_popup(&app.chat_widget,\n96).replace(&format!(\"{project}  2\"),\n&normalized_group).replace(&project, \"/tmp/project\")"
 ---
   Agent command center  Group: Project  ⌃s
-   All 2   Needs you 1   Working 0   Ready 0   Inactive 1                      tab/⇧tab filter
+   All 2   Needs intervention 1   Active 0   Stopped 0   Unloaded 1            tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                           │ Task details
-  /tmp/project  2                                     │
-    ■ Repair authentication                           │ Investigate parser
-  › △ Investigate parser                              │ △ Inactive
+  Needs intervention                                  │
+  /tmp/project  1                                     │ Investigate parser
+    ■ Repair authentication                           │ △ Unloaded
                                                       │
-                                                      │ Model: provider/provider/provider/pro…
-                                                      │ Reasoning: deliberatedeliberatedelibe…
-                                                      │
+  Unloaded                                            │ Model: provider/provider/provider/pro…
+  /tmp/project  1                                     │ Reasoning: deliberatedeliberatedelibe…
+  › △ Investigate parser                              │
                                                       │ Project
                                                       │ /tmp/project
                                                       │

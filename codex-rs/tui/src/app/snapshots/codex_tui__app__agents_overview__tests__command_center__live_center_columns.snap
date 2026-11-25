@@ -3,24 +3,24 @@ source: tui/src/app/agent_center_tests.rs
 expression: "screen(&view, 160, 22)"
 ---
   Agent command center  Group: Project  ⌃s
-   All 6   Needs you 2   Working 1   Ready 2   Inactive 1                                                                                      tab/⇧tab filter
+   All 6   Needs intervention 1   Active 1   Stopped 3   Unloaded 1                                                                            tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                                                                   Status         Updated  │ Task details
-  Pinned  2                                                                                                           │
-  › ■ Current task                                                                            Ready              now  │ Current task
-    ■ Needs an answer                                                                         Needs input     2h ago  │ ■ Ready
+  Needs intervention                                                                                                  │
+  /tmp/project  1                                                                                                     │ Current task
+    ■ 📌  Needs an answer                                                                      Needs input     2h ago  │ ■ Stopped
                                                                                                                       │
-  /tmp/project  4                                                                                                     │ Model: Unknown
-    ■ Failed task                                                                             Error           1h ago  │ Reasoning: Unknown
-    ● Working task                                                                            Working         1d ago  │
-    ■ A longer task title that uses the available column                              voice   Ready           5m ago  │ Project
-    △ Unloaded task                                                                           Inactive        2d ago  │ /tmp/project
+  Active                                                                                                              │ Model: Unknown
+  /tmp/project  1                                                                                                     │ Reasoning: Unknown
+    ● Working task                                                                            Active          1d ago  │
+                                                                                                                      │ Project
+  Stopped                                                                                                             │ /tmp/project
+  /tmp/project  3                                                                                                     │
+  › ■ 📌  Current task                                                                         Stopped            now  │ Prompt
+    ■ A longer task title that uses the available column                              voice   Stopped         5m ago  │ Current task
+    ■ Failed task                                                                             Error           1h ago  │
                                                                                                                       │
-                                                                                                                      │ Prompt
-                                                                                                                      │ Current task
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
+  Unloaded                                                                                                            │
+  /tmp/project  1                                                                                                     │
+  ↓                                                                                                                   │
   ? help  esc back  ↑/↓ move  enter open  ⌃n new

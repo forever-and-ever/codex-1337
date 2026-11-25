@@ -3,16 +3,16 @@ source: tui/src/app/tests/navigation_reconnect_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 100)"
 ---
   Agent command center  Group: Project  ⌃s
-   All 2   Needs you 0   Working 1   Ready 1   Inactive 0                          tab/⇧tab filter
+   All 2   Needs intervention 0   Active 1   Stopped 1   Unloaded 0                tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                               │ Task details
-  /tmp/project  2                                         │
-    ● New task                                            │ Selected task
-  › ■ Selected task                                       │ ■ Ready
+  Active                                                  │
+  /tmp/project  1                                         │ Selected task
+    ● New task                                            │ ■ Stopped
                                                           │
-                                                          │ Model: Unknown
-                                                          │ Reasoning: Unknown
-                                                          │
+  Stopped                                                 │ Model: Unknown
+  /tmp/project  1                                         │ Reasoning: Unknown
+  › ■ Selected task                                       │
                                                           │ Project
                                                           │ /tmp/project
                                                           │

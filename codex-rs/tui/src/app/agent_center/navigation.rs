@@ -4,6 +4,7 @@
 use super::*;
 
 pub(super) enum CenterRow {
+    Status(AgentsOverviewGroup),
     Group(usize),
     Task(usize),
     Gap,
@@ -21,6 +22,7 @@ impl AgentsOverviewView {
         indices: &[usize],
         grouping: AgentsOverviewGrouping,
     ) -> Vec<CenterRow> {
+        let group = |index: usize| self.rows[index].group;
         let mut entries = Vec::new();
         let mut previous = None;
         for index in indices.iter().copied() {
@@ -32,6 +34,11 @@ impl AgentsOverviewView {
             if previous.is_none_or(|previous| !self.same_group(grouping, previous, index)) {
                 if previous.is_some() {
                     entries.push(CenterRow::Gap);
+                }
+                if grouping == AgentsOverviewGrouping::Project
+                    && previous.is_none_or(|previous| group(previous) != group(index))
+                {
+                    entries.push(CenterRow::Status(group(index)));
                 }
                 entries.push(CenterRow::Group(index));
             }
@@ -61,7 +68,10 @@ impl AgentsOverviewView {
                 CenterRow::ShowMore if self.selected == usize::MAX => {
                     current = Some(sections.len())
                 }
-                CenterRow::Task(_) | CenterRow::Gap | CenterRow::ShowMore => {}
+                CenterRow::Status(_)
+                | CenterRow::Task(_)
+                | CenterRow::Gap
+                | CenterRow::ShowMore => {}
             }
         }
         let target = current.and_then(|current| match direction {
