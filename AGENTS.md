@@ -29,11 +29,10 @@ codex-1337: downstream fork of openai/codex; Linux and fullscreen TUI only
 - After tests, delete only temp paths your run created; shared owner, empty dir, or empty `lsof` ≠ ownership
 - Paste-burst or chat-composer state machine change: keep `chat_composer.rs` and `paste_burst.rs` module docs true to code
 - `feature:` prompts: executor works in new `.worktrees/` worktree; primary fixes data model, placement, names, then reviews design fit
-- After a user-requested staging trial reaches production, `systemctl --user disable --now codex-app-server-staging.service`
 
 ## routes
-- Merging upstream or resolving merge conflicts → `docs/teleology.md`
-- Naming native, owned, receipt, family, farm, retire, unload, close, reload → `docs/fork.md` Glossary
+- Merging upstream, resolving merge conflicts, changing model-visible text or tool declarations → `docs/teleology.md`
+- Naming native, owned, receipt, family, farm, retire, unload, close, reload, nested tool, roster → `docs/fork.md` Glossary
 - Changing Cargo inputs, V8 artifacts, or profiles → `docs/fork.md` Build inputs
 - Snapshot changes → `docs/fork.md` Snapshots
 - Installing or numbering TUI builds → `docs/fork.md` Local TUI releases
@@ -42,3 +41,4 @@ codex-1337: downstream fork of openai/codex; Linux and fullscreen TUI only
 ## grants
 - Staging only on explicit user request: never deploy (`scripts/install-local --staging`), enable or start it autonomously
 - Auto-deploy validated, merged minor changes to production with `scripts/install-local`; major changes require explicit approval
+- Kaizen stops at upstream-owned files: edit only seams and what fork change breaks or falsifies; other defects → jira-at-home note
