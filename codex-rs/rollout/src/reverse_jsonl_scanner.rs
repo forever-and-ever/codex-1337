@@ -25,10 +25,11 @@ pub enum ScanOutcome<T> {
 pub struct ReverseJsonlScanner<R> {
     reader: R,
     next_chunk_end: u64,
+    min_byte_offset: u64,
     chunk_position: usize,
     chunk: Vec<u8>,
     record_reversed: Vec<u8>,
-    record_capture: Option<Vec<u8>>,
+    record_capture: Option<record_capture::RecordCapture>,
     max_record_bytes: Option<usize>,
     discarding_oversized_record: bool,
 }
@@ -57,6 +58,7 @@ where
         Ok(Self {
             reader,
             next_chunk_end: end_byte_offset,
+            min_byte_offset: 0,
             chunk_position: 0,
             chunk: vec![0; READ_CHUNK_SIZE],
             record_reversed: Vec::new(),
@@ -82,15 +84,16 @@ where
     {
         loop {
             if self.chunk_position == 0 {
-                if self.next_chunk_end == 0 {
+                let remaining = self.next_chunk_end - self.min_byte_offset;
+                if remaining == 0 {
                     if self.discarding_oversized_record {
                         self.discarding_oversized_record = false;
                         return Ok(None);
                     }
-                    return Ok(self.finish_record());
+                    return Ok(self.finish_record(self.min_byte_offset));
                 }
 
-                let read_size = usize::try_from(self.next_chunk_end.min(READ_CHUNK_SIZE as u64))
+                let read_size = usize::try_from(remaining.min(READ_CHUNK_SIZE as u64))
                     .map_err(io::Error::other)?;
                 self.next_chunk_end -= read_size as u64;
                 self.reader.seek(SeekFrom::Start(self.next_chunk_end))?;
@@ -116,7 +119,8 @@ where
                     self.discarding_oversized_record = false;
                     continue;
                 }
-                if let Some(outcome) = self.finish_record() {
+                let offset = self.next_chunk_end + newline_position as u64 + 1;
+                if let Some(outcome) = self.finish_record(offset) {
                     return Ok(Some(outcome));
                 }
             } else {
@@ -146,7 +150,7 @@ where
         }))
     }
 
-    fn finish_record<T>(&mut self) -> Option<ScanOutcome<T>>
+    fn finish_record<T>(&mut self, offset: u64) -> Option<ScanOutcome<T>>
     where
         T: DeserializeOwned,
     {
@@ -159,7 +163,7 @@ where
                 Err(error) => ScanOutcome::Rejected(error),
             })
         };
-        self.capture_record();
+        self.capture_record(offset);
         self.record_reversed.clear();
         outcome
     }

@@ -102,6 +102,13 @@ pub fn validate_accepted_agent_mail(
     Ok(())
 }
 
+pub const ACCEPTED_AGENT_MAIL_ID_KIND: &str = "amsg_mail";
+
+pub fn is_accepted_agent_mail_id(id: &ResponseItemId) -> bool {
+    id.strip_prefix(ACCEPTED_AGENT_MAIL_ID_KIND)
+        .is_some_and(|suffix| suffix.starts_with('_'))
+}
+
 fn same_agent_mail(left: &ResponseItem, right: &ResponseItem) -> bool {
     matches!((left, right), (
         ResponseItem::AgentMessage { author: left_author, recipient: left_recipient, content: left_content, .. },

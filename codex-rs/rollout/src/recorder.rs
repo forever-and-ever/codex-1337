@@ -117,6 +117,8 @@ pub enum RolloutRecorderParams {
     },
 }
 
+pub mod append_witness;
+
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
     ReadUnpersistedSessionMeta {
@@ -134,6 +136,9 @@ enum RolloutCmd {
     },
     Discard {
         ack: oneshot::Sender<()>,
+    },
+    ObserveAppendWitness {
+        ack: oneshot::Sender<Option<append_witness::AppendWitness>>,
     },
 }
 
@@ -1935,7 +1940,7 @@ impl RolloutWriterState {
         self.ensure_writer_open().await?;
         self.write_session_meta_if_needed().await?;
 
-        self.write_pending_items_once().await?;
+        self.write_pending_items_with_witness().await?;
 
         if let Some(writer) = self.writer.as_mut() {
             writer.sink.flush().await?;
@@ -2001,6 +2006,9 @@ async fn rollout_writer(
             break;
         };
         match cmd {
+            RolloutCmd::ObserveAppendWitness { ack } => {
+                let _ = ack.send(state.observe_append_witness().await);
+            }
             RolloutCmd::ReadUnpersistedSessionMeta { ack } => {
                 let metadata = if state.is_deferred() {
                     state.meta.clone()

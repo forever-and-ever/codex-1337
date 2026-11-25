@@ -18,6 +18,9 @@ mod ordinal;
 mod persistence_metrics;
 pub(crate) mod policy;
 pub(crate) mod recorder;
+
+pub use recorder::append_witness::AppendWitness;
+pub use recorder::append_witness::RolloutRevision;
 mod reverse_jsonl_scanner;
 mod rollout_file_name;
 mod rollout_reference_index;
