@@ -3238,7 +3238,9 @@ async fn try_run_sampling_request(
             return Err(error.into());
         }
     };
-    if let Some(step)=&batch_step {step.clear_waiting(&sess,&step_context).await;}
+    if let Some(step) = &batch_step {
+        step.clear_waiting(&sess, &step_context).await;
+    }
     let can_interrupt = turn_context
         .config
         .features

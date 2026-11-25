@@ -60,7 +60,32 @@ pub(crate) enum Operation {
     StandaloneCompaction,
 }
 
-pub(crate) struct ResumeStandaloneCompaction;
+#[derive(Default)]
+struct StandaloneCompactionRecovery(Mutex<Option<String>>);
+
+pub(crate) fn arm_standalone(sess: &Session, turn: &str) {
+    let slot = sess
+        .services
+        .thread_extension_data
+        .get_or_init(StandaloneCompactionRecovery::default);
+    *slot
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(turn.to_owned());
+}
+
+pub(crate) fn take_standalone(sess: &Session, turn: &str) -> bool {
+    sess.services
+        .thread_extension_data
+        .get::<StandaloneCompactionRecovery>()
+        .is_some_and(|slot| {
+            slot.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take_if(|id| id == turn)
+                .is_some()
+        })
+}
 
 /// Only a sample owner may read its ephemeral fork's paid result.
 pub struct OpenRouterSample(pub ThreadId);
@@ -156,7 +181,7 @@ impl Step {
         let history = sess.conversation_history_snapshot().await;
         let mut revision = Sha256::new();
         for item in history.items() {
-            let mut value=serde_json::to_value(item).map_err(fatal)?;
+            let mut value = serde_json::to_value(item).map_err(fatal)?;
             value.sort_all_objects();
             serde_json::to_writer(&mut revision, &value).map_err(fatal)?;
         }
@@ -225,10 +250,18 @@ impl Step {
         lease.save()
     }
 
-    pub(crate) async fn clear_waiting(&self,sess:&Session,ctx:&StepContext) {
-        sess.send_event(&ctx.turn,codex_protocol::protocol::EventMsg::WorkStatusUpdated(codex_protocol::protocol::WorkStatus{
-            turn_id:self.turn_id.clone(),activity:String::new(),emitted_at:Some(chrono::Utc::now().timestamp()),
-        })).await;
+    pub(crate) async fn clear_waiting(&self, sess: &Session, ctx: &StepContext) {
+        sess.send_event(
+            &ctx.turn,
+            codex_protocol::protocol::EventMsg::WorkStatusUpdated(
+                codex_protocol::protocol::WorkStatus {
+                    turn_id: self.turn_id.clone(),
+                    activity: String::new(),
+                    emitted_at: Some(chrono::Utc::now().timestamp()),
+                },
+            ),
+        )
+        .await;
     }
 }
 
@@ -296,7 +329,7 @@ pub(crate) async fn park(sess: &Session, turn_id: &str) -> Result<bool> {
             if let Some(job) = load(&dir.join(name))? {
                 match job.phase {
                     Phase::Submitting | Phase::Submitted(_) | Phase::Settled { .. } => {
-                        parkable = true
+                        parkable = true;
                     }
                     Phase::Admitting { .. } => return Ok(false),
                     Phase::Consumed | Phase::Rejected(_) => {}
@@ -634,12 +667,14 @@ impl ModelClient {
                 {
                     // Changed history or authority vetoes delivery, not an invoice.
                     // Only the recorded origin and credential may retrieve an old job.
-                    if journal.base_url==base_url && journal.thread==step.thread_id && journal.turn==step.turn_id
-                        && matches!(journal.phase,Phase::Submitted(_))
+                    if journal.base_url == base_url
+                        && journal.thread == step.thread_id
+                        && journal.turn == step.turn_id
+                        && matches!(journal.phase, Phase::Submitted(_))
                     {
-                        abandon(&home,step.thread_id,&step.turn_id)?;
+                        abandon(&home, step.thread_id, &step.turn_id)?;
                         drop(lock);
-                        recovery::collect_detached(home,step.path.clone(),client,journal);
+                        recovery::collect_detached(home, step.path.clone(), client, journal);
                     }
                     return Err(fatal(
                         "pending step no longer matches its captured history, tools, settings or payer; not submitting or delivering",

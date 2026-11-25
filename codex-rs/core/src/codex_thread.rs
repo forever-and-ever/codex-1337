@@ -1415,15 +1415,12 @@ impl CodexThread {
     ) -> CodexResult<StartIfIdleSubmission> {
         let home = self.config().await.codex_home.clone();
         crate::client::openrouter_batch::unpark(&home, self.session.thread_id(), &request.turn_id)?;
-        let mut request = WithTurnExtensionData::from(request);
         if crate::client::openrouter_batch::has_standalone_compaction(
             &home,
             self.session.thread_id(),
-            &request.request.turn_id,
+            &request.turn_id,
         )? {
-            request
-                .turn_extension_init
-                .insert(crate::client::openrouter_batch::ResumeStandaloneCompaction);
+            crate::client::openrouter_batch::arm_standalone(&self.session, &request.turn_id);
         }
         self.recover_turn_if_idle(request).await
     }

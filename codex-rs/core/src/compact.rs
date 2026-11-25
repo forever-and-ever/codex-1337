@@ -981,7 +981,9 @@ async fn drain_to_completed(
         )
         .or_cancel(cancellation)
         .await??;
-    if let Some(step)=&batch_step {step.clear_waiting(sess,step_context).await;}
+    if let Some(step) = &batch_step {
+        step.clear_waiting(sess, step_context).await;
+    }
     let mut output = Vec::new();
     loop {
         let Some(SamplingEvent { event, hook_output }) = stream.next_for_turn(cancellation).await

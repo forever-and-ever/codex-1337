@@ -354,7 +354,12 @@ impl Session {
         turn_context
             .turn_metadata_state
             .set_root_turn_id(turn_context.sub_id.clone());
-        let task: Arc<dyn AnySessionTask> = Arc::new(task);
+        let task: Arc<dyn AnySessionTask> =
+            if crate::client::openrouter_batch::take_standalone(self, &turn_context.sub_id) {
+                Arc::new(CompactTask)
+            } else {
+                Arc::new(task)
+            };
         let task_kind = task.kind();
         let span_name = task.span_name();
         crate::turn_timing::review_execution::observe_pending_review_execution(
