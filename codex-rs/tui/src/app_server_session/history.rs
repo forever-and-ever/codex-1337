@@ -3,7 +3,9 @@
 use color_eyre::eyre::eyre;
 
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use std::collections::HashSet;
+use std::path::Path;
 
 use super::AppServerSession;
 use crate::history_cell::HistoryRenderMode;
@@ -195,24 +197,6 @@ impl ThreadHistoryPagination {
     }
 }
 
-fn merge_turn_page(
-    cursor: &str,
-    page: ThreadTurnsListResponse,
-    state: &mut ThreadHistoryPagination,
-    turns: &mut Vec<Turn>,
-) -> Vec<Turn> {
-    state.next_turn_cursor =
-        advancing_cursor(Some(cursor), page.next_cursor, &mut state.seen_turn_cursors);
-    let admitted = page
-        .data
-        .into_iter()
-        .rev()
-        .filter(|turn| !turns.iter().any(|known| known.id == turn.id))
-        .collect::<Vec<_>>();
-    turns.splice(0..0, admitted.iter().cloned());
-    admitted
-}
-
 // Turn metadata can extend before the loaded item window. Inside the window an empty
 // interrupted turn is genuinely itemless and its notice is ready to replay.
 fn mark_loaded_interruptions(turns: &mut [Turn], older_cursor: Option<&str>) {
@@ -338,9 +322,9 @@ impl AppServerSession {
                 self.merge_thread_item_page(thread_id, page, &mut state, turns)
                     .await?,
             ),
-            (HistoryPage::Turns(cursor), HistoryPage::Turns(page)) => {
-                HistoryPage::Turns(merge_turn_page(cursor, page, &mut state, turns))
-            }
+            (HistoryPage::Turns(cursor), HistoryPage::Turns(page)) => HistoryPage::Turns(
+                preparation::merge_thread_turn_page(cursor, page, &mut state, turns),
+            ),
             _ => return Err(eyre!("history response does not match its cursor domain")),
         };
         mark_loaded_interruptions(turns, state.next_item_cursor.as_deref());
@@ -422,8 +406,8 @@ impl AppServerSession {
 
 fn rendered_history_rows(
     thread_id: ThreadId,
-    thread: &Thread,
-    items: Vec<HistoryItem>,
+    cwd: &Path,
+    items: Vec<ThreadItemPayload>,
     config: &Config,
     local_settings: &crate::local_settings::LocalSettings,
     width: u16,
@@ -442,8 +426,8 @@ fn rendered_history_rows(
     };
     thread_items_to_transcript_cells(
         Some(thread_id),
-        thread.cwd.as_path(),
-        items.into_iter().map(|item| item.item.payload),
+        cwd,
+        items,
         visibility,
         Some(config),
         &|_| crate::multi_agents::AgentMetadata::default(),
