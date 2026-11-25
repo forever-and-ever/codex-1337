@@ -24,12 +24,12 @@ pub struct BatchRoute {
     model: ModelSlug,
     canonical_slug: String,
     hosts: BTreeSet<String>,
-    live_audio: bool,
+    live_images: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum LiveReason {
-    CompactionContainsAudio,
+    CompactionNeedsInlineImage,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,12 +108,12 @@ impl BatchRoute {
             model: live.slug.clone(),
             canonical_slug: canonical_slug.clone(),
             hosts,
-            live_audio: live
+            live_images: live
                 .model
                 .architecture
                 .input_modalities
                 .iter()
-                .any(|kind| kind == "audio"),
+                .any(|kind| kind == "image"),
         })
     }
 
@@ -122,7 +122,6 @@ impl BatchRoute {
         request: &ResponsesApiRequest,
         compaction: bool,
     ) -> Result<BatchDispatch, Error> {
-        use codex_protocol::models::AudioReference;
         use codex_protocol::models::ContentItem;
         use codex_protocol::models::FunctionCallOutputBody;
         use codex_protocol::models::FunctionCallOutputContentItem;
@@ -130,14 +129,22 @@ impl BatchRoute {
         use codex_protocol::models::ResponseItem;
         // Inline images need a separate account allowlist that model discovery
         // does not attest. A native file ID is not a public batch input either.
-        let image = |reference: &ImageReference| match reference {
+        let mut dispatch = BatchDispatch::Batch;
+        let mut image = |reference: &ImageReference| match reference {
             ImageReference::Inline { image_url } if image_url.starts_with("https://") => Ok(()),
-            _ => Err(Error::BatchUnavailable),
-        };
-        let mut inline_audio = false;
-        let mut audio = |reference: &AudioReference| match reference {
-            AudioReference::Inline { audio_url } if audio_url.starts_with("data:audio/") => {
-                inline_audio = true;
+            ImageReference::Inline { image_url }
+                if compaction
+                    && self.live_images
+                    && (image_url.starts_with("data:image/png;base64,")
+                        || image_url.starts_with("data:image/jpeg;base64,"))
+                    && self
+                        .hosts
+                        .iter()
+                        .all(|host| matches!(host.as_str(), "together" | "fireworks")) =>
+            {
+                // Both live vision APIs accept inline PNG/JPEG. Neither batch
+                // host admits inline images, even on an allowlisted account.
+                dispatch = BatchDispatch::NecessaryLive(LiveReason::CompactionNeedsInlineImage);
                 Ok(())
             }
             _ => Err(Error::BatchUnavailable),
@@ -150,7 +157,7 @@ impl BatchRoute {
                             ContentItem::InputImage {
                                 image: reference, ..
                             } => image(reference)?,
-                            ContentItem::InputAudio { audio: reference } => audio(reference)?,
+                            ContentItem::InputAudio { .. } => return Err(Error::BatchUnavailable),
                             _ => {}
                         }
                     }
@@ -164,8 +171,8 @@ impl BatchRoute {
                                     image: reference,
                                     ..
                                 } => image(reference)?,
-                                FunctionCallOutputContentItem::InputAudio { audio: reference } => {
-                                    audio(reference)?
+                                FunctionCallOutputContentItem::InputAudio { .. } => {
+                                    return Err(Error::BatchUnavailable);
                                 }
                                 _ => {}
                             }
@@ -175,18 +182,7 @@ impl BatchRoute {
                 _ => {}
             }
         }
-        if !inline_audio {
-            return Ok(BatchDispatch::Batch);
-        }
-        // OpenRouter explicitly excludes inline audio from Batch. Never upload it or
-        // change payer; only required compaction may use the verified live twin.
-        if compaction && self.live_audio {
-            Ok(BatchDispatch::NecessaryLive(
-                LiveReason::CompactionContainsAudio,
-            ))
-        } else {
-            Err(Error::BatchUnavailable)
-        }
+        Ok(dispatch)
     }
 
     /// The serialized order is a wire contract: `OpenRouter` reads routing fields before requests.
@@ -267,42 +263,34 @@ impl From<BatchId> for String {
     }
 }
 
+// Decode the wire object directly: Serde's internally tagged/flattened buffering
+// turns arbitrary-precision JSON decimals into maps, losing the invoice.
 #[derive(Debug, Deserialize)]
 struct Job {
     id: BatchId,
-    #[serde(flatten)]
-    state: JobState,
+    status: JobStatus,
+    results: Option<Vec<Row>>,
+    usage: Option<BatchUsage>,
+    error: Option<RowError>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum JobState {
+#[serde(rename_all = "snake_case")]
+enum JobStatus {
     Validating,
     InProgress,
     Finalizing,
-    Completed {
-        results: Vec<Row>,
-        usage: Option<BatchUsage>,
-    },
-    Failed {
-        error: Option<RowError>,
-        usage: Option<BatchUsage>,
-    },
-    Expired {
-        error: Option<RowError>,
-        usage: Option<BatchUsage>,
-    },
-    Cancelled {
-        error: Option<RowError>,
-        usage: Option<BatchUsage>,
-    },
+    Completed,
+    Failed,
+    Expired,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUsage {
-    #[serde(alias="input_tokens")]
+    #[serde(alias = "input_tokens")]
     pub prompt_tokens: i64,
-    #[serde(alias="output_tokens")]
+    #[serde(alias = "output_tokens")]
     pub completion_tokens: i64,
     pub total_tokens: i64,
     pub cost: Option<Usd>,
@@ -434,9 +422,13 @@ impl Client {
         if &job.id != id {
             return Err(Error::InvalidResponse);
         }
-        let settlement = match job.state {
-            JobState::Validating | JobState::InProgress | JobState::Finalizing => return Ok(None),
-            JobState::Completed { results, usage } => {
+        let usage = job.usage;
+        let settlement = match job.status {
+            JobStatus::Validating | JobStatus::InProgress | JobStatus::Finalizing => {
+                return Ok(None);
+            }
+            JobStatus::Completed => {
+                let results = job.results.ok_or(Error::InvalidResponse)?;
                 let [row]: [Row; 1] = results.try_into().map_err(|_| Error::InvalidResponse)?;
                 if row.custom_id != custom_id {
                     return Err(Error::InvalidResponse);
@@ -452,11 +444,9 @@ impl Client {
                 };
                 Settlement { usage, response }
             }
-            JobState::Failed { error, usage }
-            | JobState::Expired { error, usage }
-            | JobState::Cancelled { error, usage } => Settlement {
+            JobStatus::Failed | JobStatus::Expired | JobStatus::Cancelled => Settlement {
                 usage,
-                response: Err(error.map_or_else(
+                response: Err(job.error.map_or_else(
                     || "OpenRouter batch ended without a result".into(),
                     |e| e.message.chars().take(300).collect(),
                 )),

@@ -797,16 +797,24 @@ async fn start_if_idle(
             }
         }
     }
-    let outcome = session
-        .start_task(
-            turn_context,
-            TaskAdmission::Reserved {
-                input: task_input,
-                turn_state,
-            },
-            RegularTask::new(),
-        )
-        .await?;
+    let reserved = TaskAdmission::Reserved {
+        input: task_input,
+        turn_state,
+    };
+    let outcome = if kind == TurnStartKind::Recovery
+        && turn_context
+            .extension_data
+            .get::<crate::client::openrouter_batch::ResumeStandaloneCompaction>()
+            .is_some()
+    {
+        session
+            .start_task(turn_context, reserved, crate::tasks::CompactTask)
+            .await?
+    } else {
+        session
+            .start_task(turn_context, reserved, RegularTask::new())
+            .await?
+    };
     if let TurnInputSubmission::Started { turn_id, .. } = &outcome {
         session.retain_turn_admission(turn_id, admission).await;
     }

@@ -925,7 +925,7 @@ fn build_compacted_history_with_limit(
 }
 
 struct CompactionResponse {
-    batch_step: Option<crate::client::openrouter_batch::Step>,
+    batch_step: Option<Arc<crate::client::openrouter_batch::Step>>,
     response_id: String,
     output: Vec<ResponseItem>,
 }
@@ -945,7 +945,11 @@ async fn drain_to_completed(
     let batch_step = crate::client::openrouter_batch::Step::capture(
         sess,
         step_context,
-        crate::client::openrouter_batch::Operation::Compaction,
+        if matches!(phase, CompactionPhase::StandaloneTurn) {
+            crate::client::openrouter_batch::Operation::StandaloneCompaction
+        } else {
+            crate::client::openrouter_batch::Operation::Compaction
+        },
     )
     .await?;
     let mut stream = request
@@ -977,6 +981,7 @@ async fn drain_to_completed(
         )
         .or_cancel(cancellation)
         .await??;
+    if let Some(step)=&batch_step {step.clear_waiting(sess,step_context).await;}
     let mut output = Vec::new();
     loop {
         let Some(SamplingEvent { event, hook_output }) = stream.next_for_turn(cancellation).await

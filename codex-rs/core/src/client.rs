@@ -603,7 +603,7 @@ impl WebsocketSession {
 /// Generation settings shared by HTTP and WebSocket, including transport fallback.
 #[derive(Clone)]
 pub(crate) struct SamplingOptions {
-    pub(crate) batch_step: Option<openrouter_batch::Step>,
+    pub(crate) batch_step: Option<Arc<openrouter_batch::Step>>,
     pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
     pub(crate) reasoning_summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
@@ -2300,10 +2300,12 @@ impl ResponsesHttpExecutor<'_> {
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
             let stream_result = if let Some(step) = &sampling.batch_step {
-                let (wire, stream) = self
-                    .client
-                    .open_batch_step(step, request, openrouter_projection.as_ref())
-                    .await?;
+                let (wire, stream) = Box::pin(self.client.open_batch_step(
+                    step,
+                    request,
+                    openrouter_projection.as_ref(),
+                ))
+                .await?;
                 inference_trace_attempt.record_started(
                     wire,
                     Arc::clone(prompt),

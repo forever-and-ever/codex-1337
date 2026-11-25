@@ -83,7 +83,7 @@ impl App {
                                 None,
                             );
                         }
-                        Err(error) => self.chat_widget.show_openrouter_error(error),
+                        Err(error) => self.chat_widget.add_error_message(error),
                     }
                 }
             }

@@ -122,13 +122,7 @@ pub async fn recover_openrouter_batches(
                 }
                 if detached {
                     if matches!(journal.phase, Phase::Submitted(_)) {
-                        let client = client.clone();
-                        let home = home.to_owned();
-                        tokio::spawn(async move {
-                            if let Err(error) = collect(&home, &path, client, journal).await {
-                                tracing::warn!(%error,"unsettled detached OpenRouter batch");
-                            }
-                        });
+                        collect_detached(home.to_owned(),path,client.clone(),journal);
                     }
                 } else {
                     recover.push((journal.thread, journal.turn, journal.recovery));
@@ -137,6 +131,14 @@ pub async fn recover_openrouter_batches(
         }
     }
     Ok(recover)
+}
+
+pub(super) fn collect_detached(home:PathBuf,path:PathBuf,client:Client,prior:Journal){
+    tokio::spawn(async move{
+        if let Err(error)=collect(&home,&path,client,prior).await{
+            tracing::warn!(%error,"unsettled detached OpenRouter batch");
+        }
+    });
 }
 
 async fn collect(home: &Path, path: &Path, client: Client, prior: Journal) -> Result<()> {

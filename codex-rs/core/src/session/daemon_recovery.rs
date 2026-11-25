@@ -25,11 +25,23 @@ impl Session {
     ) -> Option<(String, crate::TurnStartOptions, TurnEnvironmentSelection)> {
         let active = self.active_turn.lock().await;
         let task = active.as_ref()?.task.as_ref()?;
-        if task.kind != crate::state::TaskKind::Regular || task.cancellation_token.is_cancelled() {
+        if task.cancellation_token.is_cancelled() {
             return None;
         }
         let context = &task.turn_context;
-        context.extension_data.get::<RecordedTurnInput>()?;
+        match task.kind {
+            crate::state::TaskKind::Regular => {
+                context.extension_data.get::<RecordedTurnInput>()?;
+            }
+            crate::state::TaskKind::Compact
+                if crate::client::openrouter_batch::has_standalone_compaction(
+                    &context.config.codex_home,
+                    self.thread_id(),
+                    &context.sub_id,
+                )
+                .ok()? => {}
+            _ => return None,
+        }
         let settings = context.next_step_settings.load();
         let environments = self.services.turn_environments.snapshot_now();
         // Remote identities/configuration are not persisted across daemon restarts.

@@ -53,11 +53,14 @@ fn fatal(error: impl std::fmt::Display) -> CodexErr {
     CodexErr::Fatal(format!("OpenRouter batch: {error}"))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) enum Operation {
     Generation,
     Compaction,
+    StandaloneCompaction,
 }
+
+pub(crate) struct ResumeStandaloneCompaction;
 
 /// Only a sample owner may read its ephemeral fork's paid result.
 pub struct OpenRouterSample(pub ThreadId);
@@ -77,7 +80,6 @@ pub struct OpenRouterBatchRecovery {
     pub cyber_access_program: Option<codex_protocol::turn_input::CyberAccessProgram>,
 }
 
-#[derive(Clone)]
 pub(crate) struct Step {
     cancellation: tokio_util::sync::CancellationToken,
     recovery: OpenRouterBatchRecovery,
@@ -87,7 +89,7 @@ pub(crate) struct Step {
     thread_id: ThreadId,
     turn_id: String,
     sample_for: Option<ThreadId>,
-    receipt: Arc<Mutex<Option<Lease>>>,
+    receipt: Mutex<Option<Lease>>,
 }
 
 impl Step {
@@ -95,7 +97,7 @@ impl Step {
         sess: &Session,
         ctx: &StepContext,
         operation: Operation,
-    ) -> Result<Option<Self>> {
+    ) -> Result<Option<Arc<Self>>> {
         if !sess.services.model_client.uses_openrouter()
             && ctx.settings.openrouter_transport() == OpenRouterTransport::Live
         {
@@ -106,11 +108,11 @@ impl Step {
         let dir = turn_directory(&ctx.turn.config.codex_home, thread_id, turn_id);
         let path = dir.join(match operation {
             Operation::Generation => "generation.json",
-            Operation::Compaction => "compaction.json",
+            Operation::Compaction | Operation::StandaloneCompaction => "compaction.json",
         });
         let other = match operation {
             Operation::Generation => "compaction.json",
-            Operation::Compaction => "generation.json",
+            Operation::Compaction | Operation::StandaloneCompaction => "generation.json",
         };
         if load(&dir.join(other))?
             .is_some_and(|job| !matches!(job.phase, Phase::Consumed | Phase::Rejected(_)))
@@ -139,7 +141,7 @@ impl Step {
         let environment = ctx
             .environments
             .single_local_environment()
-            .map(|e| e.selection())
+            .map(crate::session::turn_context::TurnEnvironment::selection)
             .filter(|e| e.config == codex_protocol::protocol::EnvironmentConfigState::FromThread)
             .ok_or_else(|| {
                 fatal("batch recovery requires a persistent local thread environment")
@@ -154,7 +156,9 @@ impl Step {
         let history = sess.conversation_history_snapshot().await;
         let mut revision = Sha256::new();
         for item in history.items() {
-            serde_json::to_writer(&mut revision, item).map_err(fatal)?;
+            let mut value=serde_json::to_value(item).map_err(fatal)?;
+            value.sort_all_objects();
+            serde_json::to_writer(&mut revision, &value).map_err(fatal)?;
         }
         let revision = format!("{:x}", revision.finalize());
         sess.flush_rollout().await.map_err(fatal)?;
@@ -169,7 +173,7 @@ impl Step {
             ),
         )
         .await;
-        Ok(Some(Self {
+        Ok(Some(Arc::new(Self {
             cancellation: ctx.turn_cancellation.clone(),
             recovery: OpenRouterBatchRecovery {
                 root: sess.session_id().into(),
@@ -183,13 +187,13 @@ impl Step {
             thread_id,
             turn_id: turn_id.clone(),
             sample_for: sample.map(|sample| sample.0),
-            receipt: Arc::default(),
+            receipt: Mutex::default(),
             settings: json!({
                 "history_revision":revision,
                 "model":ctx.settings.model_info.slug, "effort":ctx.settings.effective_reasoning_effort(), "approval":ctx.settings.approval_policy(),
                 "reviewer":ctx.settings.approvals_reviewer(), "permissions":ctx.turn.permission_profile_for_environments(&ctx.environments),
             }),
-        }))
+        })))
     }
 
     /// Called only after the ordinary executor has awaited every dispatched tool
@@ -219,6 +223,12 @@ impl Step {
         });
         lease.journal.phase = Phase::Consumed;
         lease.save()
+    }
+
+    pub(crate) async fn clear_waiting(&self,sess:&Session,ctx:&StepContext) {
+        sess.send_event(&ctx.turn,codex_protocol::protocol::EventMsg::WorkStatusUpdated(codex_protocol::protocol::WorkStatus{
+            turn_id:self.turn_id.clone(),activity:String::new(),emitted_at:Some(chrono::Utc::now().timestamp()),
+        })).await;
     }
 }
 
@@ -253,59 +263,72 @@ pub(crate) fn has_paid_step(home: &Path, thread: ThreadId, turn: &str) -> Result
     Ok(false)
 }
 
+pub(crate) fn has_standalone_compaction(home: &Path, thread: ThreadId, turn: &str) -> Result<bool> {
+    Ok(
+        load(&turn_directory(home, thread, turn).join("compaction.json"))?.is_some_and(|journal| {
+            matches!(journal.operation, Operation::StandaloneCompaction)
+                && !matches!(journal.phase, Phase::Consumed | Phase::Rejected(_))
+        }),
+    )
+}
+
 pub(crate) async fn park(sess: &Session, turn_id: &str) -> Result<bool> {
-    let mut active = sess.active_turn.lock().await;
-    let Some(task) = active
-        .as_ref()
-        .and_then(|turn| turn.task.as_ref())
-        .filter(|task| task.turn_context.sub_id == turn_id)
-    else {
-        return Ok(false);
-    };
-    let dir = turn_directory(
-        &task.turn_context.config.codex_home,
-        sess.thread_id(),
-        turn_id,
-    );
-    if !dir.try_exists().map_err(fatal)? {
-        return Ok(false);
-    }
-    let guard = admission_lock(&dir)?;
-    let mut parkable = false;
-    for name in ["generation.json", "compaction.json"] {
-        if let Some(job) = load(&dir.join(name))? {
-            match job.phase {
-                Phase::Submitting | Phase::Submitted(_) | Phase::Settled { .. } => parkable = true,
-                Phase::Admitting { .. } => return Ok(false),
-                Phase::Consumed | Phase::Rejected(_) => {}
+    let (turn, handle) = {
+        let mut active = sess.active_turn.lock().await;
+        let Some(task) = active
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .filter(|task| task.turn_context.sub_id == turn_id)
+        else {
+            return Ok(false);
+        };
+        let dir = turn_directory(
+            &task.turn_context.config.codex_home,
+            sess.thread_id(),
+            turn_id,
+        );
+        if !dir.try_exists().map_err(fatal)? {
+            return Ok(false);
+        }
+        let guard = admission_lock(&dir)?;
+        let mut parkable = false;
+        for name in ["generation.json", "compaction.json"] {
+            if let Some(job) = load(&dir.join(name))? {
+                match job.phase {
+                    Phase::Submitting | Phase::Submitted(_) | Phase::Settled { .. } => {
+                        parkable = true
+                    }
+                    Phase::Admitting { .. } => return Ok(false),
+                    Phase::Consumed | Phase::Rejected(_) => {}
+                }
             }
         }
-    }
-    if !parkable || dir.join("abandoned").try_exists().map_err(fatal)? {
-        return Ok(false);
-    }
-    OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(dir.join("parked"))
-        .and_then(|f| f.sync_all())
-        .map_err(fatal)?;
-    let mut turn = active.take().ok_or_else(|| fatal("parked turn missing"))?;
-    drop(active);
-    let task = turn
-        .task
-        .take()
-        .ok_or_else(|| fatal("parked task missing"))?;
-    drop(task.outcome_handoff);
-    task.cancellation_token.cancel();
-    task.turn_context
-        .turn_metadata_state
-        .cancel_git_enrichment_task();
-    task.handle.abort();
-    drop(guard);
-    let _ = task.handle.await;
+        if !parkable || dir.join("abandoned").try_exists().map_err(fatal)? {
+            return Ok(false);
+        }
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(dir.join("parked"))
+            .and_then(|f| f.sync_all())
+            .map_err(fatal)?;
+        let mut turn = active.take().ok_or_else(|| fatal("parked turn missing"))?;
+        let task = turn
+            .task
+            .take()
+            .ok_or_else(|| fatal("parked task missing"))?;
+        drop(task.outcome_handoff);
+        task.cancellation_token.cancel();
+        task.turn_context
+            .turn_metadata_state
+            .cancel_git_enrichment_task();
+        task.handle.abort();
+        drop(guard);
+        (turn, task.handle)
+    };
+    let _ = handle.await;
     sess.input_queue.clear_pending(&turn).await;
     sess.flush_rollout().await.map_err(fatal)?;
     Ok(true)
@@ -382,6 +405,7 @@ enum Phase {
 
 #[derive(Serialize, Deserialize)]
 struct Journal {
+    operation: Operation,
     recovery: OpenRouterBatchRecovery,
     dispatch: BatchDispatch,
     sample_for: Option<ThreadId>,
@@ -512,11 +536,10 @@ impl Lease {
                 .read_batch(bearer, job, &self.journal.custom_id)
                 .await
             {
-                Ok(None) => {}
                 Ok(Some(settlement)) => {
                     return self.settle(client, bearer, job, settlement).await;
                 }
-                Err(Error::Timeout | Error::Transport) => {}
+                Ok(None) | Err(Error::Timeout | Error::Transport) => {}
                 Err(Error::Http(status))
                     if status.is_server_error()
                         || matches!(
@@ -609,6 +632,15 @@ impl ModelClient {
                     || journal.settings != step.settings
                     || journal.projection != projection
                 {
+                    // Changed history or authority vetoes delivery, not an invoice.
+                    // Only the recorded origin and credential may retrieve an old job.
+                    if journal.base_url==base_url && journal.thread==step.thread_id && journal.turn==step.turn_id
+                        && matches!(journal.phase,Phase::Submitted(_))
+                    {
+                        abandon(&home,step.thread_id,&step.turn_id)?;
+                        drop(lock);
+                        recovery::collect_detached(home,step.path.clone(),client,journal);
+                    }
                     return Err(fatal(
                         "pending step no longer matches its captured history, tools, settings or payer; not submitting or delivering",
                     ));
@@ -655,10 +687,11 @@ impl ModelClient {
                     .map_err(fatal)?;
                 let custom_id = Uuid::new_v4().to_string();
                 let dispatch = route
-                    .dispatch(&request, matches!(step.operation, Operation::Compaction))
+                    .dispatch(&request, !matches!(step.operation, Operation::Generation))
                     .map_err(fatal)?;
                 let wire = route.encode(&custom_id, request, dispatch).map_err(fatal)?;
                 let journal = Journal {
+                    operation: step.operation,
                     recovery: step.recovery.clone(),
                     dispatch,
                     sample_for: step.sample_for,
