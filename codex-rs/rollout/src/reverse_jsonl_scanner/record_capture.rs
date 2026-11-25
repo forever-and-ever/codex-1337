@@ -14,6 +14,12 @@ pub(super) struct RecordCapture {
     offset: u64,
 }
 
+pub struct ScannedRolloutRecord<'a> {
+    pub outcome: ScanOutcome<RolloutLine>,
+    pub bytes: &'a [u8],
+    pub offset: u64,
+}
+
 impl<R: Read + Seek> ReverseJsonlScanner<R> {
     /// Reverse scan a record-aligned logical suffix without reading the validated prefix.
     pub fn new_range(reader: R, start: u64, end: u64) -> io::Result<Self> {
@@ -31,13 +37,17 @@ impl<R: Read + Seek> ReverseJsonlScanner<R> {
     /// Returns the nonblank record's outcome, exact bytes and starting logical byte offset.
     pub fn scan_next_rollout_line_with_record(
         &mut self,
-    ) -> io::Result<Option<(ScanOutcome<RolloutLine>, &[u8], u64)>> {
+    ) -> io::Result<Option<ScannedRolloutRecord<'_>>> {
         self.record_capture.get_or_insert_default();
         let outcome = self.scan_next_rollout_line()?;
         let Some(record) = self.record_capture.as_ref() else {
             unreachable!("record capture enabled before scanning");
         };
-        Ok(outcome.map(|outcome| (outcome, record.bytes.as_slice(), record.offset)))
+        Ok(outcome.map(|outcome| ScannedRolloutRecord {
+            outcome,
+            bytes: &record.bytes,
+            offset: record.offset,
+        }))
     }
 
     pub(super) fn capture_record(&mut self, offset: u64) {
