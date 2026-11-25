@@ -7,10 +7,11 @@ import type { LegacyAppPathString } from "../LegacyAppPathString";
 import type { ReasoningEffort } from "../ReasoningEffort";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
+import type { OpenRouterTransport } from "./OpenRouterTransport";
 import type { SandboxPolicy } from "./SandboxPolicy";
 import type { Thread } from "./Thread";
 
-export type ThreadResumeResponse = {thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
+export type ThreadResumeResponse = {openrouterTransport?: OpenRouterTransport, thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
  * Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
  */
 disabledPluginIds: Array<string>, cwd: AbsolutePathBuf, /**

@@ -181,6 +181,7 @@ impl ChatWidget {
             );
         }
         self.config.service_tier = session.service_tier.clone();
+        self.config.openrouter_transport = session.openrouter_transport;
         self.effective_service_tier = session.service_tier.clone();
         if let Err(err) = self
             .config

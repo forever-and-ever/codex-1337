@@ -978,8 +978,9 @@ pub async fn run_main_with_transport_options(
                 // Run independently: snapshot locks can require the event loop to make progress.
                 let task = tokio::spawn(async move {
                     let saved = processor.daemon_recovery_snapshot().await;
-                    if let Err(err) = daemon_thread_recovery::snapshot(recovery_file, saved).await {
-                        warn!("failed to save threads during daemon shutdown: {err}");
+                    match daemon_thread_recovery::snapshot(recovery_file, saved.clone()).await {
+                        Ok(()) => processor.park_openrouter_steps(&saved).await,
+                        Err(err) => warn!("failed to save threads during daemon shutdown: {err}"),
                     }
                 });
                 let _ = tokio_util::task::AbortOnDropHandle::new(task).await;

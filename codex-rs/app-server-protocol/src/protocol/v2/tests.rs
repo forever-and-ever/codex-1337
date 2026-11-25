@@ -292,6 +292,7 @@ fn thread_resume_params_accept_turns_page_bootstrap() {
 #[test]
 fn thread_resume_response_round_trips_initial_turns_page() {
     let response = ThreadResumeResponse {
+        openrouter_transport: Default::default(),
         disabled_plugin_ids: Vec::new(),
         thread: Thread {
             theme: None,

@@ -15859,6 +15859,13 @@
         "key": {
           "$ref": "#/definitions/OpenRouterKey"
         },
+        "outstandingBatches": {
+          "default": 0,
+          "description": "Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "state": {
           "$ref": "#/definitions/OpenRouterKeyState"
         }
@@ -16020,6 +16027,14 @@
         "weekly"
       ],
       "type": "object"
+    },
+    "OpenRouterTransport": {
+      "description": "Dispatch selected for a thread's next `OpenRouter` model step.",
+      "enum": [
+        "live",
+        "batch"
+      ],
+      "type": "string"
     },
     "OtelExporter": {
       "oneOf": [
@@ -25042,6 +25057,9 @@
         "modelProvider": {
           "type": "string"
         },
+        "openrouterTransport": {
+          "$ref": "#/definitions/OpenRouterTransport"
+        },
         "reasoningEffort": {
           "anyOf": [
             {
@@ -29954,6 +29972,9 @@
         "modelProvider": {
           "type": "string"
         },
+        "openrouterTransport": {
+          "$ref": "#/definitions/OpenRouterTransport"
+        },
         "reasoningEffort": {
           "anyOf": [
             {
@@ -30584,6 +30605,14 @@
         "modelProvider": {
           "type": "string"
         },
+        "openrouterTransport": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OpenRouterTransport"
+            }
+          ],
+          "default": "live"
+        },
         "personality": {
           "anyOf": [
             {
@@ -30875,6 +30904,9 @@
         },
         "modelProvider": {
           "type": "string"
+        },
+        "openrouterTransport": {
+          "$ref": "#/definitions/OpenRouterTransport"
         },
         "reasoningEffort": {
           "anyOf": [

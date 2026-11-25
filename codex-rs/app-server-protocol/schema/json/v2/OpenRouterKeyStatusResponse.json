@@ -134,6 +134,13 @@
         "key": {
           "$ref": "#/definitions/OpenRouterKey"
         },
+        "outstandingBatches": {
+          "default": 0,
+          "description": "Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "state": {
           "$ref": "#/definitions/OpenRouterKeyState"
         }

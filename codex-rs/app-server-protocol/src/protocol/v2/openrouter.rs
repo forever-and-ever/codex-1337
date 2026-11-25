@@ -23,6 +23,9 @@ pub struct OpenRouterKey {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct OpenRouterKeyStatus {
+    /// Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.
+    #[serde(default)]
+    pub outstanding_batches: u32,
     pub key: OpenRouterKey,
     pub state: OpenRouterKeyState,
 }

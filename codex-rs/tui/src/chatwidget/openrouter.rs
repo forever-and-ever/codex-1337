@@ -35,6 +35,28 @@ pub(super) struct OpenRouterUi {
 }
 
 impl ChatWidget {
+    pub(super) fn openrouter_slow(&mut self, argument: &str) {
+        use codex_protocol::openrouter::OpenRouterTransport;
+        let transport = match argument {
+            "" | "on" => OpenRouterTransport::Batch,
+            "off" => OpenRouterTransport::Live,
+            _ => {
+                self.add_error_message("Use /slow or /slow off.".into());
+                return;
+            }
+        };
+        if let Some(thread_id) = self.thread_id.filter(|_| self.on_openrouter()) {
+            self.app_event_tx
+                .send(AppEvent::OpenRouter(Event::SelectTransport {
+                    thread_id,
+                    model: None,
+                    transport,
+                }));
+        } else {
+            self.add_error_message("/slow requires an OpenRouter thread.".into());
+        }
+    }
+
     pub(super) fn on_openrouter(&self) -> bool {
         self.config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
     }
@@ -127,15 +149,35 @@ impl ChatWidget {
             .map(|model| {
                 let action_model = model.clone();
                 let menu = menu.clone();
+                let batch_base = model.model.strip_suffix(":batch").map(str::to_owned);
+                let thread_id = self.thread_id;
                 let effort_picker = matches!(menu, ModelMenu::Current)
+                    && batch_base.is_none()
                     && model.supported_reasoning_efforts.len() > 1;
                 SelectionItem {
                     name: model.display_name.clone(),
                     description: Some(model.description.clone()),
                     is_current: matches!(menu, ModelMenu::Current)
-                        && self.current_model() == model.model,
+                        && match self.config.openrouter_transport {
+                            codex_protocol::openrouter::OpenRouterTransport::Live => {
+                                self.current_model() == model.model
+                            }
+                            codex_protocol::openrouter::OpenRouterTransport::Batch => {
+                                batch_base.as_deref() == Some(self.current_model())
+                            }
+                        },
                     search_value: Some(format!("{} {}", model.model, model.display_name)),
                     actions: vec![Box::new(move |tx| match &menu {
+                        ModelMenu::Current if batch_base.is_some() => {
+                            if let Some(thread_id) = thread_id {
+                                tx.send(AppEvent::OpenRouter(Event::SelectTransport {
+                                    thread_id,
+                                    model: batch_base.clone(),
+                                    transport:
+                                        codex_protocol::openrouter::OpenRouterTransport::Batch,
+                                }));
+                            }
+                        }
                         ModelMenu::Current => tx.send(AppEvent::OpenReasoningPopup {
                             model: action_model.clone(),
                         }),
@@ -555,6 +597,9 @@ impl ChatWidget {
 
     pub(super) fn openrouter_balance_value(&self) -> Option<String> {
         let status = self.openrouter_ui.status.as_ref()?;
+        if status.outstanding_batches > 0 {
+            return Some(format!("{} unsettled", status.outstanding_batches));
+        }
         match &status.state {
             OpenRouterKeyState::Read { balance, limit, .. } => {
                 let remaining = match (balance, limit) {

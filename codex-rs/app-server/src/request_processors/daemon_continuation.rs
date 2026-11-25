@@ -68,9 +68,6 @@ impl ThreadRequestProcessor {
             }
             _ => None,
         });
-        let Some(previous_context) = previous_context else {
-            return;
-        };
         let config = thread.config_snapshot().await;
         let [environment] = config.environment_selections() else {
             return;
@@ -82,9 +79,36 @@ impl ThreadRequestProcessor {
             return;
         }
         // Recovery must not override a stricter saved or newly configured policy.
-        if previous_context.permission_profile != config.permission_profile {
+        if previous_context
+            .is_some_and(|context| context.permission_profile != config.permission_profile)
+        {
             return;
         }
+        match thread.has_paid_openrouter_step(&saved.turn_id).await {
+            Ok(true) => {
+                if let Err(error) = thread
+                    .recover_openrouter_step(codex_protocol::turn_input::RecoverTurnRequest {
+                        turn_id: saved.turn_id,
+                        thread_settings: Default::default(),
+                        trace: None,
+                        prompt_cache_ttl: saved.prompt_cache_ttl,
+                        cyber_access_program: saved.cyber_access_program,
+                    })
+                    .await
+                {
+                    tracing::warn!(%thread_id,%error,"failed to recover paid step");
+                }
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(%thread_id,%error,"cannot establish ownership of interrupted paid step");
+                return;
+            }
+            Ok(false) => {}
+        }
+        let Some(previous_context) = previous_context else {
+            return;
+        };
         let continuation = ContextualUserFragment::into(InternalModelContextFragment::new(
             InternalContextSource::from_static("daemon_recovery"),
             "The server restarted and interrupted the previous turn. Continue the unfinished work from the saved conversation. Check the current state before repeating actions that may already have completed.",

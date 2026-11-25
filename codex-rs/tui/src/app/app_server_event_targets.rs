@@ -281,6 +281,7 @@ mod tests {
 
     fn test_thread_settings() -> ThreadSettings {
         ThreadSettings {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             environments: None,
             cwd: test_path_buf("/tmp/thread-settings").abs().into(),

@@ -203,6 +203,11 @@ pub struct MockExperimentalMethodResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadStartResponse {
+    #[serde(
+        default,
+        skip_serializing_if = "codex_protocol::openrouter::OpenRouterTransport::is_live"
+    )]
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub thread: Thread,
     /// Startup ceiling enforced by this server. Missing on older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -291,6 +296,8 @@ pub struct ThreadSettingsUpdateParams {
     /// Override the model for subsequent turns.
     #[ts(optional = nullable)]
     pub model: Option<String>,
+    #[ts(optional = nullable)]
+    pub openrouter_transport: Option<codex_protocol::openrouter::OpenRouterTransport>,
     /// Override the service tier for subsequent turns. `null` clears the
     /// current service tier; omission leaves it unchanged.
     #[serde(
@@ -327,7 +334,12 @@ pub struct ThreadSettingsUpdateParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadSettingsUpdateResponse {}
+pub struct ThreadSettingsUpdateResponse {
+    /// Absent on servers that do not recognize this setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub openrouter_transport: Option<codex_protocol::openrouter::OpenRouterTransport>,
+}
 
 /// Attach a connection-owned MCP server without replacing thread configuration.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -380,6 +392,8 @@ pub struct ThreadSettings {
     pub sandbox_policy: SandboxPolicy,
     pub active_permission_profile: Option<ActivePermissionProfile>,
     pub model: String,
+    #[serde(default)]
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub model_provider: String,
     pub service_tier: Option<String>,
     pub effort: Option<ReasoningEffort>,
@@ -505,6 +519,11 @@ pub struct ThreadResumeParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadResumeResponse {
+    #[serde(
+        default,
+        skip_serializing_if = "codex_protocol::openrouter::OpenRouterTransport::is_live"
+    )]
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -737,6 +756,11 @@ pub struct ThreadForkParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadForkResponse {
+    #[serde(
+        default,
+        skip_serializing_if = "codex_protocol::openrouter::OpenRouterTransport::is_live"
+    )]
+    pub openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,

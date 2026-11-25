@@ -33,6 +33,7 @@ fn settings_item(
         ThreadSettingsAppliedEvent {
             thread_id,
             thread_settings: ThreadSettingsSnapshot {
+                openrouter_transport: Default::default(),
                 account_id: None,
                 disabled_plugin_ids: Vec::new(),
                 model: "gpt-5".to_string(),

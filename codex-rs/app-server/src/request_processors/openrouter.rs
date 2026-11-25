@@ -124,6 +124,16 @@ impl KeyStatusReader {
             key(&preferences(&config).await.map_err(unreadable)?, name).map_err(unreadable)?;
         let client = client(&config).map_err(unreadable)?;
         let url = base_url(&config).map_err(unreadable)?;
+        if openrouter_liability(&config, url, &key)
+            .await
+            .map_err(QuotaError::Unreadable)?
+            > 0
+        {
+            // A dollar quota watches guaranteed available funds, not an optimistic balance.
+            return Ok(QuotaReading::UsdAvailable {
+                usd: Usd::default(),
+            });
+        }
         match self.cache.state(&client, url, &key).await {
             OpenRouterKeyState::Read { balance, limit, .. } => balance
                 .into_iter()
@@ -138,6 +148,25 @@ impl KeyStatusReader {
             OpenRouterKeyState::Failed { error } => Err(QuotaError::Unreadable(error)),
         }
     }
+}
+
+async fn openrouter_liability(
+    config: &Config,
+    url: &str,
+    key: &OpenRouterKey,
+) -> Result<u32, String> {
+    let fingerprint = read_key_file(key.path.as_path())
+        .await
+        .map_err(|e| e.to_string())?
+        .batch_fingerprint();
+    let home = config.codex_home.clone();
+    let url = url.to_owned();
+    tokio::task::spawn_blocking(move || {
+        codex_core::outstanding_openrouter_batches(&home, &url, &fingerprint)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 fn base_url(config: &Config) -> Result<&str, JSONRPCErrorError> {
@@ -361,7 +390,16 @@ impl TurnRequestProcessor {
         let mut statuses = Vec::with_capacity(keys.len());
         for key in keys {
             let state = self.openrouter_key_cache.state(&client, url, &key).await;
-            statuses.push(OpenRouterKeyStatus { key, state });
+            let outstanding_batches = openrouter_liability(config, url, &key).await;
+            let (state, outstanding_batches) = match outstanding_batches {
+                Ok(count) => (state, count),
+                Err(error) => (OpenRouterKeyState::Failed { error }, 0),
+            };
+            statuses.push(OpenRouterKeyStatus {
+                key,
+                state,
+                outstanding_batches,
+            });
         }
         Ok(statuses)
     }
@@ -476,6 +514,10 @@ impl TurnRequestProcessor {
         &self,
         params: OpenRouterModelSaveParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let mut params = params;
+        if let Some(base) = params.slug.as_str().strip_suffix(":batch") {
+            params.slug = base.parse().map_err(invalid_request)?;
+        }
         let config = self.openrouter_config().await?;
         let prefs = preferences(&config).await?;
         let bearer = default_bearer(&prefs).await?;

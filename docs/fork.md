@@ -385,6 +385,28 @@ no sampler-specific byte cap; context limits and ordinary inference charges
 still apply. For a review on another provider today, give a fresh subagent
 the material to review rather than forking the full history.
 
+On an OpenRouter thread, `/slow` selects batch inference for subsequent model
+steps; `/slow off` restores live inference. A batch picker entry uses the
+ordinary model and key. Codex requires a verified live/batch pair and a host
+allowlist that does not widen the saved route. Batch runs on OpenRouter's
+global infrastructure, retains requests and results, and cannot satisfy ZDR.
+Each step, including a tool continuation or summary, is a separate paid row.
+Cache hints survive the queue; a cache hit is not guaranteed. Compaction
+containing an inline PNG or JPEG can use the same admitted vision model live
+if every admitted host is Together or Fireworks: their batch routes cannot
+take inline images. Codex never uploads an attachment to make a URL. A slow
+queue or a rejected batch never justifies
+buying a live request.
+
+Interrupting a batch stops local delivery, not remote billing. Codex journals
+the job before admitting its answer, and does not resubmit an uncertain POST
+or repeat a tool whose effects are uncertain. Batch samples use
+`thread/sample/start`, then `thread/sample/read` with the returned handle;
+reading the handle cannot start another inference. Key status distinguishes
+unsettled batches from invoiced spend. Because acceptance does not quote a
+maximum bill, a dollar quotabox treats that key's guaranteed uncommitted
+balance as zero until outstanding jobs settle.
+
 A memory startup job is an independently admitted operation. It captures its
 conversation's committed credential authority before any worker is queued and
 pins it through extraction (including dual-write) and consolidation. A later

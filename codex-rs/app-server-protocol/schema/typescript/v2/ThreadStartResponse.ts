@@ -6,11 +6,12 @@ import type { LegacyAppPathString } from "../LegacyAppPathString";
 import type { ReasoningEffort } from "../ReasoningEffort";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
+import type { OpenRouterTransport } from "./OpenRouterTransport";
 import type { SandboxPolicy } from "./SandboxPolicy";
 import type { Thread } from "./Thread";
 import type { ToolPolicyCeiling } from "./ToolPolicyCeiling";
 
-export type ThreadStartResponse = {thread: Thread, /**
+export type ThreadStartResponse = {openrouterTransport?: OpenRouterTransport, thread: Thread, /**
  * Startup ceiling enforced by this server. Missing on older servers.
  */
 toolPolicy?: ToolPolicyCeiling, model: string, modelProvider: string, serviceTier: string | null, /**

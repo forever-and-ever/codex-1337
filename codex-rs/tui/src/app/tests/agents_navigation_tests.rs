@@ -28,6 +28,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     let mut settings = codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: child.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             environments: None,
             cwd: app.config.cwd.clone().into(),

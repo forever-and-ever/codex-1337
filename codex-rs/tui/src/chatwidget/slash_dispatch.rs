@@ -402,6 +402,7 @@ impl ChatWidget {
                 self.app_event_tx.compact();
             }
             SlashCommand::Warm => self.toggle_warming(),
+            SlashCommand::Slow => self.openrouter_slow(""),
             SlashCommand::Alarms => self.open_alarms(),
             SlashCommand::Recap => {
                 let Some(thread_id) = self.thread_id else {
@@ -906,6 +907,7 @@ impl ChatWidget {
         }
         match cmd {
             SlashCommand::Yolo => self.dispatch_yolo(trimmed, source),
+            SlashCommand::Slow => self.openrouter_slow(trimmed),
             SlashCommand::Comms => self.dispatch_comms(trimmed),
             SlashCommand::ContextRole => self.dispatch_context_role(trimmed),
             SlashCommand::Account => {
@@ -1353,6 +1355,7 @@ impl ChatWidget {
             | SlashCommand::Voice
             | SlashCommand::Recap
             | SlashCommand::Warm
+            | SlashCommand::Slow
             | SlashCommand::TestApproval => QueueDrain::Continue,
             SlashCommand::Cd => match self.thread_id {
                 Some(thread_id) if self.can_change_working_directory(thread_id) => QueueDrain::Stop,

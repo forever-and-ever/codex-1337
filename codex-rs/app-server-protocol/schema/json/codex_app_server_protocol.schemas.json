@@ -20110,6 +20110,13 @@
           "key": {
             "$ref": "#/definitions/v2/OpenRouterKey"
           },
+          "outstandingBatches": {
+            "default": 0,
+            "description": "Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
           "state": {
             "$ref": "#/definitions/v2/OpenRouterKeyState"
           }
@@ -20271,6 +20278,14 @@
           "weekly"
         ],
         "type": "object"
+      },
+      "OpenRouterTransport": {
+        "description": "Dispatch selected for a thread's next `OpenRouter` model step.",
+        "enum": [
+          "live",
+          "batch"
+        ],
+        "type": "string"
       },
       "OtelExporter": {
         "oneOf": [
@@ -27371,6 +27386,9 @@
           "modelProvider": {
             "type": "string"
           },
+          "openrouterTransport": {
+            "$ref": "#/definitions/v2/OpenRouterTransport"
+          },
           "reasoningEffort": {
             "anyOf": [
               {
@@ -32283,6 +32301,9 @@
           "modelProvider": {
             "type": "string"
           },
+          "openrouterTransport": {
+            "$ref": "#/definitions/v2/OpenRouterTransport"
+          },
           "reasoningEffort": {
             "anyOf": [
               {
@@ -32913,6 +32934,14 @@
           "modelProvider": {
             "type": "string"
           },
+          "openrouterTransport": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/v2/OpenRouterTransport"
+              }
+            ],
+            "default": "live"
+          },
           "personality": {
             "anyOf": [
               {
@@ -33204,6 +33233,9 @@
           },
           "modelProvider": {
             "type": "string"
+          },
+          "openrouterTransport": {
+            "$ref": "#/definitions/v2/OpenRouterTransport"
           },
           "reasoningEffort": {
             "anyOf": [

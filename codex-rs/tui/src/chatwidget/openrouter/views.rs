@@ -97,7 +97,12 @@ impl BottomPaneView for ModelView {
             else {
                 return;
             };
-            let slug = match model.model.parse::<ModelSlug>() {
+            let slug = match model
+                .model
+                .strip_suffix(":batch")
+                .unwrap_or(&model.model)
+                .parse::<ModelSlug>()
+            {
                 Ok(slug) => slug,
                 Err(error) => {
                     self.tx.send(AppEvent::OpenRouter(Event::Error(error)));
@@ -413,6 +418,12 @@ pub(super) fn status_lines(
         Err(error) => lines.push(Line::from(format!("  Unavailable: {error}"))),
         Ok(status) => {
             lines.push(Line::from(format!("  Key: {}", status.key.name)));
+            if status.outstanding_batches != 0 {
+                lines.push(Line::from(format!(
+                    "  Unsettled batches: {} · final cost unknown",
+                    status.outstanding_batches
+                )));
+            }
             match &status.state {
                 OpenRouterKeyState::Failed { error } => {
                     lines.push(Line::from(format!("  Unavailable: {error}")));

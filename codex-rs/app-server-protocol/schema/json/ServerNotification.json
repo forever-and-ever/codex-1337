@@ -4490,6 +4490,14 @@
       ],
       "type": "string"
     },
+    "OpenRouterTransport": {
+      "description": "Dispatch selected for a thread's next `OpenRouter` model step.",
+      "enum": [
+        "live",
+        "batch"
+      ],
+      "type": "string"
+    },
     "PatchApplyStatus": {
       "enum": [
         "inProgress",
@@ -12963,6 +12971,14 @@
         },
         "modelProvider": {
           "type": "string"
+        },
+        "openrouterTransport": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OpenRouterTransport"
+            }
+          ],
+          "default": "live"
         },
         "personality": {
           "anyOf": [

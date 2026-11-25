@@ -28,6 +28,7 @@ pub(crate) struct MessageHistoryMetadata {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
+    pub(crate) openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     /// This TUI opened saved history without a live attachment.
     pub(crate) read_only_history: bool,
     /// Inferred child sessions can carry settings copied from the primary thread.

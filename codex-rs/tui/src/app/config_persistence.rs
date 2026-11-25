@@ -1543,6 +1543,7 @@ enabled = false
 
         app.chat_widget
             .handle_thread_session(crate::session_state::ThreadSessionState {
+                openrouter_transport: Default::default(),
                 read_only_history: false,
                 thread_settings_confirmed: true,
                 primary_environment_cwd: None,

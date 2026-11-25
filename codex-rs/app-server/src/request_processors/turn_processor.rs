@@ -156,6 +156,7 @@ struct ThreadEnvironmentOverride {
 }
 
 struct ThreadSettingsBuildParams {
+    openrouter_transport: Option<codex_protocol::openrouter::OpenRouterTransport>,
     method: &'static str,
     disabled_plugin_ids: Option<Vec<String>>,
     environment_override: ThreadEnvironmentOverride,
@@ -779,6 +780,7 @@ impl TurnRequestProcessor {
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
                     method: "turn/start",
+                    openrouter_transport: None,
                     disabled_plugin_ids: params.disabled_plugin_ids,
                     environment_override,
                     approval_policy: params.approval_policy,
@@ -961,6 +963,7 @@ impl TurnRequestProcessor {
         params: ThreadSettingsBuildParams,
     ) -> Result<codex_protocol::protocol::ThreadSettingsOverrides, JSONRPCErrorError> {
         let ThreadSettingsBuildParams {
+            mut openrouter_transport,
             method,
             disabled_plugin_ids,
             environment_override:
@@ -972,7 +975,7 @@ impl TurnRequestProcessor {
             approvals_reviewer,
             sandbox_policy,
             permissions,
-            model,
+            mut model,
             service_tier,
             effort,
             summary,
@@ -986,8 +989,49 @@ impl TurnRequestProcessor {
             ));
         }
 
-        let collaboration_mode =
+        let mut collaboration_mode =
             collaboration_mode.map(|mode| self.normalize_collaboration_mode(mode));
+        let chosen = collaboration_mode
+            .as_mut()
+            .map(|mode| &mut mode.settings.model)
+            .or(model.as_mut());
+        if let Some(chosen) = chosen
+            && let Some(base) = chosen.strip_suffix(":batch")
+            && thread.config_snapshot().await.model_provider_adapter
+                == codex_model_provider_info::ModelProviderAdapter::OpenRouter
+        {
+            if openrouter_transport == Some(codex_protocol::openrouter::OpenRouterTransport::Live) {
+                return Err(invalid_request(
+                    "a batch model selection conflicts with live transport",
+                ));
+            }
+            *chosen = base.to_owned();
+            openrouter_transport = Some(codex_protocol::openrouter::OpenRouterTransport::Batch);
+        }
+        if openrouter_transport == Some(codex_protocol::openrouter::OpenRouterTransport::Batch) {
+            let current = thread.thread_settings_snapshot().await;
+            if service_tier
+                .as_ref()
+                .unwrap_or(&current.service_tier)
+                .as_deref()
+                .is_some_and(|tier| {
+                    tier != codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE
+                })
+            {
+                return Err(invalid_request(
+                    "OpenRouter batch does not accept an explicit service tier",
+                ));
+            }
+            let model = collaboration_mode
+                .as_ref()
+                .map(|mode| mode.model())
+                .or(model.as_deref())
+                .unwrap_or(&current.model);
+            thread
+                .validate_openrouter_batch_model(model)
+                .await
+                .map_err(|error| invalid_request(error.to_string()))?;
+        }
         let has_environment_override = environment_requests.is_some();
         let snapshot = if permissions.is_some() {
             Some(thread.config_snapshot().await)
@@ -996,6 +1040,7 @@ impl TurnRequestProcessor {
         };
 
         let has_any_overrides = has_environment_override
+            || openrouter_transport.is_some()
             || disabled_plugin_ids.is_some()
             || approval_policy.is_some()
             || approvals_reviewer.is_some()
@@ -1056,6 +1101,7 @@ impl TurnRequestProcessor {
         if has_any_overrides {
             thread
                 .preview_thread_settings_overrides(CodexThreadSettingsOverrides {
+                    openrouter_transport,
                     request_country: None,
                     turn_extension_init: None,
                     disabled_plugin_ids: disabled_plugin_ids.clone(),
@@ -1083,6 +1129,7 @@ impl TurnRequestProcessor {
         }
 
         Ok(codex_protocol::protocol::ThreadSettingsOverrides {
+            openrouter_transport,
             request_country: None,
             disabled_plugin_ids,
             environments: environment_requests,
@@ -1127,6 +1174,7 @@ impl TurnRequestProcessor {
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
                     method: "thread/settings/update",
+                    openrouter_transport: params.openrouter_transport,
                     disabled_plugin_ids: params.disabled_plugin_ids,
                     environment_override,
                     approval_policy: params.approval_policy,
@@ -1143,6 +1191,7 @@ impl TurnRequestProcessor {
             )
             .await?;
 
+        let openrouter_transport = thread_settings.openrouter_transport;
         if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
             let (reply, outcome) = oneshot::channel();
             self.submit_core_op(
@@ -1164,7 +1213,9 @@ impl TurnRequestProcessor {
                 })?;
         }
 
-        Ok(ThreadSettingsUpdateResponse {})
+        Ok(ThreadSettingsUpdateResponse {
+            openrouter_transport,
+        })
     }
 
     async fn thread_inject_items_response_inner(

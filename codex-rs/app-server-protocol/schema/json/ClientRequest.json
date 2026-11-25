@@ -3096,6 +3096,14 @@
       ],
       "type": "object"
     },
+    "OpenRouterTransport": {
+      "description": "Dispatch selected for a thread's next `OpenRouter` model step.",
+      "enum": [
+        "live",
+        "batch"
+      ],
+      "type": "string"
+    },
     "PermissionProfileListParams": {
       "properties": {
         "cursor": {

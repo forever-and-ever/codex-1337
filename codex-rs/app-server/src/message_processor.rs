@@ -877,7 +877,16 @@ impl MessageProcessor {
         &self,
         mut snapshot: codex_app_server_transport::daemon_recovery::RecoverySnapshot,
     ) {
-        for thread_id in snapshot.loaded {
+        self.thread_processor
+            .restore_openrouter_candidates(&mut snapshot)
+            .await;
+        let paid_children = std::mem::take(&mut snapshot.paid_children);
+        for thread_id in snapshot
+            .loaded
+            .difference(&paid_children)
+            .cloned()
+            .collect::<Vec<_>>()
+        {
             let Ok(_permit) = self.turn_admission.admit() else {
                 break;
             };
@@ -901,6 +910,35 @@ impl MessageProcessor {
                 tracing::warn!(code = err.code, "failed to restore saved daemon thread");
             }
         }
+        for child in paid_children {
+            let Ok(_permit) = self.turn_admission.admit() else {
+                break;
+            };
+            let Ok(thread_id) = codex_protocol::ThreadId::from_string(&child) else {
+                continue;
+            };
+            if let Err(error) = self
+                .thread_processor
+                .thread_manager
+                .ensure_multi_agent_v2_child_loaded(thread_id)
+                .await
+            {
+                tracing::warn!(%thread_id,%error,"cannot restore paid child through its owner");
+                continue;
+            }
+            if let Some(saved) = snapshot.interrupted.remove(&child) {
+                self.thread_processor
+                    .continue_daemon_turn(&child, saved)
+                    .await;
+            }
+        }
+    }
+
+    pub(crate) async fn park_openrouter_steps(
+        &self,
+        snapshot: &codex_app_server_transport::daemon_recovery::RecoverySnapshot,
+    ) {
+        self.thread_processor.park_openrouter_steps(snapshot).await;
     }
 
     pub(crate) async fn send_initialize_notifications_to_connection(
@@ -1122,6 +1160,7 @@ impl MessageProcessor {
             | ClientRequest::ThreadRetire { .. }
             | ClientRequest::ThreadArchive { .. } => (Some(self.turn_admission.admit()?), false),
             ClientRequest::ThreadSample { .. }
+            | ClientRequest::ThreadSampleStart { .. }
             | ClientRequest::ThreadGuardianReview { .. }
             | ClientRequest::TurnStart { .. }
             | ClientRequest::TurnSteer { .. }
@@ -1521,6 +1560,16 @@ impl MessageProcessor {
                 .thread_sample(params, Arc::clone(&session.rpc_gate), request_context)
                 .await
                 .map(|response| Some(response.into())),
+            ClientRequest::ThreadSampleStart { params, .. } => self
+                .thread_processor
+                .thread_sample_start(params, request_context)
+                .await
+                .map(|r| Some(r.into())),
+            ClientRequest::ThreadSampleRead { params, .. } => self
+                .thread_processor
+                .thread_sample_read(params)
+                .await
+                .map(|r| Some(r.into())),
             ClientRequest::ThreadSampleCancel { params, .. } => {
                 self.outgoing
                     .cancel_thread_sample_request(&ConnectionRequestId {

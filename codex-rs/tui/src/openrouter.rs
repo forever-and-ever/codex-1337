@@ -104,6 +104,15 @@ pub(crate) enum StatusFailure {
 
 #[derive(Debug)]
 pub(crate) enum Event {
+    SelectTransport {
+        thread_id: ThreadId,
+        model: Option<String>,
+        transport: codex_protocol::openrouter::OpenRouterTransport,
+    },
+    TransportSelected {
+        thread_id: ThreadId,
+        result: Result<codex_protocol::openrouter::OpenRouterTransport, String>,
+    },
     Request(Request),
     Finished {
         id: uuid::Uuid,

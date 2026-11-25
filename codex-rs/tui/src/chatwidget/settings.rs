@@ -574,6 +574,7 @@ impl ChatWidget {
     }
 
     fn apply_thread_settings(&mut self, mut settings: ThreadSettings) {
+        self.config.openrouter_transport = settings.openrouter_transport;
         let Ok(cwd) = crate::app_server_session::decode_thread_cwd(
             &settings.cwd,
             self.app_server_path_convention,

@@ -3647,6 +3647,11 @@ class OpenRouterModelSaveParams(BaseModel):
     slug: ModelSlug
 
 
+class OpenRouterTransport(Enum):
+    live = "live"
+    batch = "batch"
+
+
 class OtelExporterValue(Enum):
     none = "none"
     statsig = "statsig"
@@ -13746,6 +13751,9 @@ class ThreadSettings(BaseModel):
     effort: ReasoningEffort | None = None
     model: str
     model_provider: Annotated[str, Field(alias="modelProvider")]
+    openrouter_transport: Annotated[
+        OpenRouterTransport | None, Field(alias="openrouterTransport")
+    ] = "live"
     personality: Annotated[
         Personality | None,
         Field(
@@ -14885,6 +14893,14 @@ class OpenRouterKeyStatus(BaseModel):
         populate_by_name=True,
     )
     key: OpenRouterKey
+    outstanding_batches: Annotated[
+        int | None,
+        Field(
+            alias="outstandingBatches",
+            description="Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.",
+            ge=0,
+        ),
+    ] = 0
     state: OpenRouterKeyState
 
 
@@ -17103,6 +17119,9 @@ class ThreadForkResponse(BaseModel):
     ] = []
     model: str
     model_provider: Annotated[str, Field(alias="modelProvider")]
+    openrouter_transport: Annotated[
+        OpenRouterTransport | None, Field(alias="openrouterTransport")
+    ] = None
     reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
     sandbox: Annotated[
         SandboxPolicy,
@@ -17268,6 +17287,9 @@ class ThreadResumeResponse(BaseModel):
     ] = None
     model: str
     model_provider: Annotated[str, Field(alias="modelProvider")]
+    openrouter_transport: Annotated[
+        OpenRouterTransport | None, Field(alias="openrouterTransport")
+    ] = None
     reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
     sandbox: Annotated[
         SandboxPolicy,
@@ -17358,6 +17380,9 @@ class ThreadStartResponse(BaseModel):
     ] = []
     model: str
     model_provider: Annotated[str, Field(alias="modelProvider")]
+    openrouter_transport: Annotated[
+        OpenRouterTransport | None, Field(alias="openrouterTransport")
+    ] = None
     reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
     sandbox: Annotated[
         SandboxPolicy,

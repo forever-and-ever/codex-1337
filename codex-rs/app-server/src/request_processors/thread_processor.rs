@@ -785,6 +785,51 @@ impl ThreadRequestProcessor {
         .await
     }
 
+    pub(crate) async fn thread_sample_start(
+        &self,
+        params: ThreadSampleParams,
+        context: RequestContext,
+    ) -> Result<codex_app_server_protocol::ThreadSampleStartResponse, JSONRPCErrorError> {
+        let id =
+            ThreadId::from_string(&params.thread_id).map_err(|e| invalid_request(e.to_string()))?;
+        let parent = self
+            .thread_manager
+            .get_thread(id)
+            .await
+            .map_err(|_| invalid_request("a batch sample requires a loaded source"))?;
+        self.config_manager
+            .check_thread_model_provider(parent.config().await.as_ref())
+            .await
+            .map_err(|e| config_load_error(&e))?;
+        crate::thread_sample::SampleHandle::start(
+            SampleTask {
+                manager: Arc::clone(&self.thread_manager),
+                store: Arc::clone(&self.thread_store),
+                parent,
+                samples: Arc::clone(&self.sample_responses),
+                params,
+                trace: context.request_trace(),
+                cancellation: context.cancellation,
+            },
+            &self.background_tasks,
+        )
+        .await
+    }
+
+    pub(crate) async fn thread_sample_read(
+        &self,
+        params: codex_app_server_protocol::ThreadSampleReadParams,
+    ) -> Result<codex_app_server_protocol::ThreadSampleReadResponse, JSONRPCErrorError> {
+        let id =
+            ThreadId::from_string(&params.thread_id).map_err(|e| invalid_request(e.to_string()))?;
+        let parent = self
+            .thread_manager
+            .get_thread(id)
+            .await
+            .map_err(|_| invalid_request("resume the sample's source thread first"))?;
+        crate::thread_sample::SampleHandle::read(&parent, params).await
+    }
+
     pub(crate) async fn thread_revert(
         &self,
         request_id: ConnectionRequestId,
@@ -1825,6 +1870,7 @@ impl ThreadRequestProcessor {
         let thread_originator = config_snapshot.originator.clone();
 
         let response = ThreadStartResponse {
+            openrouter_transport: config_snapshot.openrouter_transport,
             thread: thread.clone(),
             tool_policy,
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
@@ -2543,6 +2589,9 @@ impl ThreadRequestProcessor {
         }
         if let Some(service_tier) = settings.service_tier.as_ref() {
             config.service_tier.clone_from(service_tier);
+        }
+        if let Some(transport) = settings.openrouter_transport {
+            config.openrouter_transport = transport;
         }
         config.personality = settings.personality;
         let thread_id_string = thread_id.to_string();
@@ -4514,6 +4563,14 @@ impl ThreadRequestProcessor {
             config.model_reasoning_effort = None;
         }
         if let Some(settings) = persisted_model_settings {
+            if config
+                .model
+                .as_ref()
+                .is_some_and(|model| model == &settings.model)
+                && config.model_provider_id == settings.model_provider_id
+            {
+                config.openrouter_transport = settings.openrouter_transport;
+            }
             if restore_service_tier {
                 config.service_tier.clone_from(&settings.service_tier);
             }
@@ -4718,6 +4775,7 @@ impl ThreadRequestProcessor {
 
                 let thread_originator = config_snapshot.originator.clone();
                 let response = ThreadResumeResponse {
+                    openrouter_transport: config_snapshot.openrouter_transport,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -6177,6 +6235,7 @@ impl ThreadRequestProcessor {
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
         let response = ThreadForkResponse {
+            openrouter_transport: config_snapshot.openrouter_transport,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),

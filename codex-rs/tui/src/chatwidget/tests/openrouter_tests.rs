@@ -127,6 +127,7 @@ async fn openrouter_status_snapshot() {
         request.unwrap(),
         StatusRefresh::Show,
         &Ok(OpenRouterKeyStatus {
+            outstanding_batches: 0,
             key: OpenRouterKey {
                 name: "main".parse().unwrap(),
                 path: AbsolutePathBuf::try_from("/secrets/openrouter.token").unwrap(),

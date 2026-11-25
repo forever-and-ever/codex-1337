@@ -1903,6 +1903,7 @@ async fn thread_session_state_from_thread_start_response(
         response.model.clone(),
         response.model_provider.clone(),
         response.service_tier.clone(),
+        response.openrouter_transport,
         response.approval_policy,
         response.approvals_reviewer.to_core(),
         permission_profile,
@@ -1942,6 +1943,7 @@ async fn thread_session_state_from_thread_resume_response(
         response.model.clone(),
         response.model_provider.clone(),
         response.service_tier.clone(),
+        response.openrouter_transport,
         response.approval_policy,
         response.approvals_reviewer.to_core(),
         permission_profile,
@@ -1980,6 +1982,7 @@ async fn thread_session_state_from_thread_fork_response(
         response.model.clone(),
         response.model_provider.clone(),
         response.service_tier.clone(),
+        response.openrouter_transport,
         response.approval_policy,
         response.approvals_reviewer.to_core(),
         permission_profile,
@@ -2045,6 +2048,7 @@ async fn thread_session_state_from_thread_response(
     model: String,
     model_provider_id: String,
     service_tier: Option<String>,
+    openrouter_transport: codex_protocol::openrouter::OpenRouterTransport,
     approval_policy: AskForApproval,
     approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer,
     permission_profile: PermissionProfile,
@@ -2069,6 +2073,7 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        openrouter_transport,
         read_only_history: false,
         thread_settings_confirmed: true,
         daybreak_enabled: false,
@@ -3813,6 +3818,7 @@ mod tests {
         let forked_from_id = ThreadId::new();
         let read_only_profile = PermissionProfile::read_only();
         let response = ThreadResumeResponse {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
                 theme: None,
@@ -4080,6 +4086,7 @@ mod tests {
             "gpt-5.4".to_string(),
             "openai".to_string(),
             /*service_tier*/ None,
+            Default::default(),
             AskForApproval::Never,
             codex_protocol::config_types::ApprovalsReviewer::User,
             PermissionProfile::read_only(),
@@ -4116,6 +4123,7 @@ mod tests {
             "gpt-5.4".to_string(),
             "openai".to_string(),
             /*service_tier*/ None,
+            Default::default(),
             AskForApproval::Never,
             codex_protocol::config_types::ApprovalsReviewer::User,
             PermissionProfile::read_only(),

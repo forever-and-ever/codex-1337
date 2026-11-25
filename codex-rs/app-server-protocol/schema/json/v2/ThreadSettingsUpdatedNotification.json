@@ -142,6 +142,14 @@
       ],
       "type": "string"
     },
+    "OpenRouterTransport": {
+      "description": "Dispatch selected for a thread's next `OpenRouter` model step.",
+      "enum": [
+        "live",
+        "batch"
+      ],
+      "type": "string"
+    },
     "Personality": {
       "description": "Deprecated: `friendly` and `pragmatic` no longer select a style.",
       "enum": [
@@ -373,6 +381,14 @@
         },
         "modelProvider": {
           "type": "string"
+        },
+        "openrouterTransport": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OpenRouterTransport"
+            }
+          ],
+          "default": "live"
         },
         "personality": {
           "anyOf": [

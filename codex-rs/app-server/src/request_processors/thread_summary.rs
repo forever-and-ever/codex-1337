@@ -202,6 +202,7 @@ pub(crate) fn thread_settings_from_config_snapshot(
         ),
         model: config_snapshot.model.clone(),
         model_provider: config_snapshot.model_provider_id.clone(),
+        openrouter_transport: config_snapshot.openrouter_transport,
         service_tier: config_snapshot.service_tier.clone(),
         effort: config_snapshot.reasoning_effort.clone(),
         summary: config_snapshot.reasoning_summary,

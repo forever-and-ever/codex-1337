@@ -91,6 +91,7 @@ impl App {
             session
         } else {
             ThreadSessionState {
+                openrouter_transport: Default::default(),
                 read_only_history: true,
                 thread_settings_confirmed: false,
                 primary_environment_cwd: None,
@@ -194,6 +195,7 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,

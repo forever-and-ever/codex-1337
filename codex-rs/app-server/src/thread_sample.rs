@@ -2,9 +2,12 @@
 //! Tool calls produce a null sample; an owned task retains startup and cleanup.
 
 use crate::connection_rpc_gate::ConnectionRpcGate;
+#[path = "thread_sample_batch.rs"]
+mod batch;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use crate::request_processors::build_legacy_api_turns_from_rollout_items;
+pub(crate) use batch::SampleHandle;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ThreadSampleParams;
 use codex_app_server_protocol::ThreadSampleResponse;
@@ -134,6 +137,17 @@ pub(crate) async fn generate_sample(
     tasks: &TaskTracker,
     rpc_gate: Arc<ConnectionRpcGate>,
 ) -> SampleResult {
+    if task
+        .parent
+        .thread_settings_snapshot()
+        .await
+        .openrouter_transport
+        == codex_protocol::openrouter::OpenRouterTransport::Batch
+    {
+        return Err(invalid_request(
+            "Use thread/sample/start and thread/sample/read for a batch sample.",
+        ));
+    }
     let deadline = Instant::now() + SAMPLE_TIMEOUT;
     if task.params.expected_turn_id.trim().is_empty() || task.params.prompt.trim().is_empty() {
         return Err(invalid_request(
@@ -145,7 +159,7 @@ pub(crate) async fn generate_sample(
     tasks.spawn(async move {
         rpc_gate
             .run(originator.scope(async move {
-                let result = Box::pin(task.run(deadline)).await;
+                let result = Box::pin(task.run(deadline, None)).await;
                 let _ = sender.send(result);
             }))
             .await;
@@ -157,7 +171,7 @@ pub(crate) async fn generate_sample(
 }
 
 impl SampleTask {
-    async fn run(self, deadline: Instant) -> SampleResult {
+    async fn run(self, deadline: Instant, durable: Option<&SampleHandle>) -> SampleResult {
         let Self {
             manager,
             store,
@@ -178,6 +192,9 @@ impl SampleTask {
             ));
         }
         let parent_history = parent.conversation_history_snapshot().await;
+        let unchanged = (durable.is_some() && !params.allow_in_progress_turn)
+            .then(|| SampleHandle::source_stamp(parent_history.as_ref()))
+            .transpose()?;
         let revision = parent_history.history_version();
         parent
             .flush_rollout()
@@ -269,6 +286,11 @@ impl SampleTask {
                 .insert(codex_core::McpServersDisabled);
         }
         options.thread_extension_init.insert(SampleThread);
+        if durable.is_some() {
+            options
+                .thread_extension_init
+                .insert(codex_core::OpenRouterSample(id));
+        }
         let is_openai = options.config.model_provider.is_openai();
         options.session_source = Some(SessionSource::Custom("thread_sample".to_string()));
         options.thread_source = Some(
@@ -307,6 +329,9 @@ impl SampleTask {
                 Arc::new(Mutex::new(Some(sender))),
             );
         let sample = async {
+            if let Some(handle) = durable {
+                handle.bind(fork.thread_id, unchanged)?;
+            }
             Box::pin(fork.thread.restore_thread_settings(*settings))
                 .await
                 .map_err(|error| internal_error(error.to_string()))?;
@@ -333,6 +358,8 @@ impl SampleTask {
             }])
             .with_thread_settings(ThreadSettingsOverrides {
                 model: params.model,
+                openrouter_transport: durable
+                    .map(|_| codex_protocol::openrouter::OpenRouterTransport::Batch),
                 effort: params
                     .effort
                     .filter(|_| model.supports_reasoning_effort_updates && is_openai)

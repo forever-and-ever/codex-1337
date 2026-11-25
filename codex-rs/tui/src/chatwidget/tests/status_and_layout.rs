@@ -4559,6 +4559,7 @@ async fn session_configured_clears_goal_status_footer() {
 
     let rollout_file = NamedTempFile::new().unwrap();
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,

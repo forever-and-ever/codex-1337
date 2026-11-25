@@ -16,6 +16,7 @@ fn thread_settings_for_test(
     codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: thread_id.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             environments: None,
             cwd: test_path_buf("/tmp/thread-settings").abs().into(),
@@ -50,6 +51,7 @@ pub(super) fn configured_thread_session(
     thread_id: ThreadId,
 ) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,

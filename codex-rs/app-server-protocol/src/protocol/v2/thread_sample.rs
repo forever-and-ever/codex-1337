@@ -67,3 +67,35 @@ pub struct ThreadSampleCancelParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSampleCancelResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSampleStartResponse {
+    pub handle: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSampleReadParams {
+    pub thread_id: String,
+    pub handle: String,
+    /// Maximum wait, capped at 30 seconds. Omission checks once.
+    #[serde(default)]
+    pub wait_ms: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum ThreadSampleReadResponse {
+    Pending,
+    Ready {
+        #[schemars(schema_with = "ThreadSampleResponse::json_schema")]
+        result: ThreadSampleResponse,
+    },
+    Failed {
+        message: String,
+    },
+}

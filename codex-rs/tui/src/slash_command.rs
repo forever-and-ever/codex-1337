@@ -46,6 +46,7 @@ pub enum SlashCommand {
     Config,
     Recap,
     Warm,
+    Slow,
     Alarms,
     Plan,
     Voice,
@@ -101,6 +102,9 @@ impl SlashCommand {
     pub fn description(self) -> &'static str {
         match self {
             SlashCommand::Config => "configure Codex preferences",
+            SlashCommand::Slow => {
+                "use OpenRouter batch inference; /slow off restores live requests"
+            }
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
@@ -190,6 +194,7 @@ impl SlashCommand {
         matches!(
             self,
             SlashCommand::Review
+                | SlashCommand::Slow
                 | SlashCommand::Comms
                 | SlashCommand::ContextRole
                 | SlashCommand::Account
@@ -319,6 +324,7 @@ impl SlashCommand {
             | SlashCommand::Comms
             | SlashCommand::ContextRole
             | SlashCommand::Warm
+            | SlashCommand::Slow
             | SlashCommand::Alarms
             | SlashCommand::Daemon
             | SlashCommand::Reload

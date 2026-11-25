@@ -251,6 +251,7 @@ pub(super) fn apply_thread_settings_to_session(
         session.reasoning_effort = settings.effort.clone();
     }
     session.model_provider_id = settings.model_provider.clone();
+    session.openrouter_transport = settings.openrouter_transport;
     session.service_tier = settings.service_tier.clone();
     session.approval_policy = settings.approval_policy;
     session.approvals_reviewer = settings.approvals_reviewer.to_core();

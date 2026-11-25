@@ -4,4 +4,8 @@
 import type { OpenRouterKey } from "./OpenRouterKey";
 import type { OpenRouterKeyState } from "./OpenRouterKeyState";
 
-export type OpenRouterKeyStatus = { key: OpenRouterKey, state: OpenRouterKeyState, };
+export type OpenRouterKeyStatus = {
+/**
+ * Locally admitted jobs whose invoice is not yet known, including ambiguous submissions.
+ */
+outstandingBatches: number, key: OpenRouterKey, state: OpenRouterKeyState, };

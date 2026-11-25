@@ -8379,6 +8379,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_cwd = test_path_buf("/tmp/main").abs();
     let shared_root = test_path_buf("/tmp/shared").abs();
     let primary_session = ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,
@@ -9128,6 +9129,7 @@ async fn side_thread_snapshot_hides_forked_parent_transcript() {
     let side_thread_id = ThreadId::new();
     let mut store = ThreadEventStore::new(/*capacity*/ 4);
     let session = ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,
@@ -9202,6 +9204,7 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
     let snapshot = ThreadEventSnapshot {
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,
@@ -9810,6 +9813,7 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,
@@ -10538,6 +10542,7 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
 
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,
@@ -11571,6 +11576,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,
@@ -11647,6 +11653,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,
@@ -13010,6 +13017,7 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,
@@ -13772,6 +13780,7 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
     let notification = ThreadSettingsUpdatedNotification {
         thread_id: inactive_thread_id.to_string(),
         thread_settings: ThreadSettings {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             environments: None,
             cwd: test_absolute_path("/tmp/thread-settings").into(),
@@ -13838,6 +13847,7 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            openrouter_transport: Default::default(),
             read_only_history: false,
             thread_settings_confirmed: true,
             primary_environment_cwd: None,

@@ -593,6 +593,18 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadSampleResponse,
     },
+    #[experimental("thread/sample/start")]
+    ThreadSampleStart => "thread/sample/start" {
+        params: v2::ThreadSampleParams,
+        serialization: None,
+        response: v2::ThreadSampleStartResponse,
+    },
+    #[experimental("thread/sample/read")]
+    ThreadSampleRead => "thread/sample/read" {
+        params: v2::ThreadSampleReadParams,
+        serialization: None,
+        response: v2::ThreadSampleReadResponse,
+    },
     #[experimental("thread/sample/cancel")]
     ThreadSampleCancel => "thread/sample/cancel" {
         params: v2::ThreadSampleCancelParams,
@@ -3471,6 +3483,7 @@ mod tests {
         let response = ClientResponse::ThreadStart {
             request_id: RequestId::Integer(7),
             response: v2::ThreadStartResponse {
+                openrouter_transport: Default::default(),
                 tool_policy: None,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
@@ -4693,6 +4706,7 @@ mod tests {
             ServerNotification::ThreadSettingsUpdated(v2::ThreadSettingsUpdatedNotification {
                 thread_id: "thr_123".to_string(),
                 thread_settings: v2::ThreadSettings {
+                    openrouter_transport: Default::default(),
                     disabled_plugin_ids: Vec::new(),
                     environments: Some(Vec::new()),
                     cwd: absolute_path("/tmp/repo").into(),

@@ -33,6 +33,60 @@ use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 impl App {
     pub(super) fn handle_openrouter_event(&mut self, server: &mut AppServerSession, event: Event) {
         match event {
+            Event::SelectTransport {
+                thread_id,
+                model,
+                transport,
+            } => {
+                let handle = server.request_handle();
+                let request_id = server.next_request_id();
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let ack = handle
+                        .request_typed::<codex_app_server_protocol::ThreadSettingsUpdateResponse>(
+                            ClientRequest::ThreadSettingsUpdate {
+                                request_id,
+                                params: codex_app_server_protocol::ThreadSettingsUpdateParams {
+                                    thread_id: thread_id.to_string(),
+                                    model,
+                                    openrouter_transport: Some(transport),
+                                    ..Default::default()
+                                },
+                            },
+                        )
+                        .await;
+                    let result = match ack {
+                        Ok(ack) if ack.openrouter_transport == Some(transport) => Ok(transport),
+                        Ok(_) => {
+                            Err("This server did not acknowledge OpenRouter batch mode.".into())
+                        }
+                        Err(error) => Err(error.to_string()),
+                    };
+                    tx.send(AppEvent::OpenRouter(Event::TransportSelected {
+                        thread_id,
+                        result,
+                    }));
+                });
+            }
+            Event::TransportSelected { thread_id, result } => {
+                if self.current_displayed_thread_id() == Some(thread_id) {
+                    match result {
+                        Ok(codex_protocol::openrouter::OpenRouterTransport::Batch) => {
+                            self.chat_widget.add_info_message(
+                                "Future model steps use OpenRouter batch inference.".into(),
+                                None,
+                            );
+                        }
+                        Ok(codex_protocol::openrouter::OpenRouterTransport::Live) => {
+                            self.chat_widget.add_info_message(
+                                "Future model steps use live OpenRouter inference.".into(),
+                                None,
+                            );
+                        }
+                        Err(error) => self.chat_widget.show_openrouter_error(error),
+                    }
+                }
+            }
             Event::Error(error) => self.chat_widget.show_openrouter_error(error),
             Event::ModelSubmitted { menu, input } => match input.parse() {
                 Ok(slug) => self

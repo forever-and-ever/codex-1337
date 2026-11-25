@@ -434,6 +434,7 @@ export type { OpenRouterModelRouteResponse } from "./OpenRouterModelRouteRespons
 export type { OpenRouterModelSaveParams } from "./OpenRouterModelSaveParams";
 export type { OpenRouterModelSaveResponse } from "./OpenRouterModelSaveResponse";
 export type { OpenRouterSpend } from "./OpenRouterSpend";
+export type { OpenRouterTransport } from "./OpenRouterTransport";
 export type { OtelExporter } from "./OtelExporter";
 export type { OtelHttpProtocol } from "./OtelHttpProtocol";
 export type { OtelRequirements } from "./OtelRequirements";

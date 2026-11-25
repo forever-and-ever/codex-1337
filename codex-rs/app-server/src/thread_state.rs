@@ -405,6 +405,7 @@ mod tests {
 
     fn thread_settings(model: &str) -> ThreadSettings {
         ThreadSettings {
+            openrouter_transport: Default::default(),
             disabled_plugin_ids: Vec::new(),
             environments: Some(Vec::new()),
             cwd: AbsolutePathBuf::from_absolute_path("/tmp")

@@ -627,6 +627,7 @@ fn image_generation_call_renders_saved_path() {
 
 fn session_configured_event(model: &str) -> ThreadSessionState {
     ThreadSessionState {
+        openrouter_transport: Default::default(),
         read_only_history: false,
         thread_settings_confirmed: true,
         primary_environment_cwd: None,
