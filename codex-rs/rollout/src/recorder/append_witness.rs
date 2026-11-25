@@ -62,6 +62,8 @@ impl RolloutRevision {
 }
 
 /// Taken from an open writer, never from a projection. A failed write or reopening breaks its epoch.
+/// Continuity assumes writers hold the rollout writer lock; a concurrent foreign write does not
+/// participate in this protocol.
 #[derive(Clone, Debug)]
 pub struct AppendWitness {
     revision: RolloutRevision,

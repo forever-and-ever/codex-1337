@@ -102,14 +102,29 @@ impl LocalThreadStore {
         let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
         let result = tokio::task::spawn_blocking(move || {
             let mut found = HashMap::new();
-            for segment in lineage.segments {
+            // A lineage longer than the whole cache cannot admit every miss in order:
+            // each old miss would evict precisely the next segment about to be read.
+            let first_admission = lineage.segments.len().saturating_sub(MAX_CACHED_SEGMENTS);
+            for (index, segment) in lineage.segments.into_iter().enumerate() {
                 if stop.is_closed() {
                     return Err(mail_history_error("rollout read cancelled"));
                 }
                 let witness = witnesses.remove(&segment.rollout_id);
-                cache.reconcile_segment(segment, witness, cacheable, &ids, &mut found, || {
-                    stop.is_closed()
-                })?;
+                let checkpoint_use = if !cacheable {
+                    CheckpointUse::Bypass
+                } else if index < first_admission {
+                    CheckpointUse::Reuse
+                } else {
+                    CheckpointUse::Populate
+                };
+                cache.reconcile_segment(
+                    segment,
+                    witness,
+                    checkpoint_use,
+                    &ids,
+                    &mut found,
+                    || stop.is_closed(),
+                )?;
             }
             Ok(found)
         })
@@ -158,6 +173,13 @@ impl LocalThreadStore {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy)]
+enum CheckpointUse {
+    Bypass,
+    Reuse,
+    Populate,
 }
 
 // Cache IDs and byte spans, not payloads. Overflow falls back to canonical scanning.
@@ -226,14 +248,17 @@ impl ReceiptCache {
         &self,
         segment: RolloutLineageSegment,
         witness: Option<AppendWitness>,
-        cacheable: bool,
+        checkpoint_use: CheckpointUse,
         ids: &HashSet<ResponseItemId>,
         found: &mut HashMap<ResponseItemId, ResponseItemEnvelope>,
         is_cancelled: impl Fn() -> bool,
     ) -> ThreadStoreResult<()> {
-        let revision = cacheable
-            .then(|| RolloutRevision::read(&segment.rollout_path))
-            .flatten();
+        let revision = match checkpoint_use {
+            CheckpointUse::Bypass => None,
+            CheckpointUse::Reuse | CheckpointUse::Populate => {
+                RolloutRevision::read(&segment.rollout_path)
+            }
+        };
         let witness = witness.filter(|witness| {
             revision
                 .as_ref()
@@ -289,7 +314,10 @@ impl ReceiptCache {
             // A seal or external change raced the read. A mixed revision is not a checkpoint.
         }
 
-        let mut index = revision.as_ref().map(|_| ReceiptIndex::default());
+        let mut index = matches!(checkpoint_use, CheckpointUse::Populate)
+            .then_some(revision.as_ref())
+            .flatten()
+            .map(|_| ReceiptIndex::default());
         let prefix = self.scan_segment(&segment, None, is_cancelled, |envelope, span| {
             collect_record(&mut index, found, ids, envelope, span)
         })?;
@@ -417,6 +445,7 @@ impl ReceiptCache {
         is_cancelled: impl Fn() -> bool,
         mut record_item: impl FnMut(ResponseItemEnvelope, RecordSpan) -> ThreadStoreResult<()>,
     ) -> ThreadStoreResult<ValidatedPrefix> {
+        // A suffix bounds logical records, not the framed layout survey done at open.
         let mut reader =
             codex_rollout::open_rollout_seekable_reader(&segment.rollout_path, is_cancelled)
                 .map_err(mail_history_error)?;
