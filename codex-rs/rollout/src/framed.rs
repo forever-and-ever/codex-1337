@@ -22,6 +22,8 @@
 mod quarantine;
 mod reader;
 mod survey;
+
+pub(crate) use survey::read_first_frame;
 mod writer;
 mod xxh64;
 

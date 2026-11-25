@@ -83,15 +83,46 @@ impl RolloutSink {
 
     /// Appends one newline-terminated line. A framed append is durable against a process crash
     /// when this returns.
-    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<()> {
+    pub(crate) async fn append_line(&mut self, line: Vec<u8>) -> io::Result<Vec<u8>> {
         match self {
             Self::Plain(file) => {
                 file.write_all(&line).await?;
-                file.flush().await
+                file.flush().await?;
+                Ok(line)
             }
             Self::Framed(writer) => {
                 off_runtime(writer, move |writer| {
-                    writer.append(&line, /*flush*/ true)
+                    writer.append(&line, /*flush*/ true)?;
+                    Ok(line)
+                })
+                .await
+            }
+        }
+    }
+
+    pub(crate) async fn flushed_logical_len(&self, path: &Path) -> io::Result<Option<u64>> {
+        let path = crate::plain_rollout_path(path);
+        match self {
+            Self::Plain(file) => {
+                let open = file.metadata().await?;
+                let named = tokio::fs::metadata(path).await?;
+                Ok(same_file(&open, &named).then_some(open.len()))
+            }
+            Self::Framed(writer) => {
+                off_runtime(writer, move |writer| {
+                    match std::fs::metadata(&path) {
+                        Ok(metadata) if metadata.is_file() => return Ok(None),
+                        Ok(_) => {}
+                        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                        Err(err) => return Err(err),
+                    }
+                    let named = std::fs::metadata(path.with_extension("jsonl.zst"))?;
+                    let open = writer.file().metadata()?;
+                    Ok(if same_file(&open, &named) {
+                        writer.flushed_logical_len(open.len())
+                    } else {
+                        None
+                    })
                 })
                 .await
             }
@@ -129,11 +160,23 @@ impl RolloutSink {
     }
 }
 
+fn same_file(open: &std::fs::Metadata, named: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (open.dev(), open.ino()) == (named.dev(), named.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        open.len() == named.len() && open.modified().ok() == named.modified().ok()
+    }
+}
+
 /// Runs one framed-writer operation on the blocking pool.
-async fn off_runtime(
+async fn off_runtime<T: Send + 'static>(
     writer: &Arc<Mutex<FramedWriter>>,
-    operation: impl FnOnce(&mut FramedWriter) -> io::Result<()> + Send + 'static,
-) -> io::Result<()> {
+    operation: impl FnOnce(&mut FramedWriter) -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
     let writer = Arc::clone(writer);
     tokio::task::spawn_blocking(move || operation(&mut *lock(&writer)?))
         .await

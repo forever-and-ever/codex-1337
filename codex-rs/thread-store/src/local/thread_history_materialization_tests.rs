@@ -508,10 +508,61 @@ WHERE thread_id = ?
     items.extend(events.iter().cloned());
     items.extend(events);
     items.push(turn_completed("turn-2"));
-    store
+    // The writer already owns its file descriptor. Denying new read opens tests that neither
+    // append projection nor an unchanged flush needs a separate compressed reader.
+    #[cfg(unix)]
+    let denied_path = {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = codex_rollout::test_support::rollout_file(&rollout_path);
+        assert_eq!(
+            path.extension().and_then(std::ffi::OsStr::to_str),
+            Some("zst")
+        );
+        let original = fs::metadata(&path).unwrap().permissions();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o200)).unwrap();
+        (path, original)
+    };
+    let appended = store
         .append_items(AppendThreadItemsParams { thread_id, items })
+        .await;
+    let unchanged = store.flush_thread(thread_id).await;
+    let before_shutdown = self::projection_state(&pool, thread_id).await;
+    #[cfg(unix)]
+    fs::set_permissions(denied_path.0, denied_path.1).unwrap();
+    appended.expect("append thought snapshots and duplicate completions");
+    unchanged.expect("flush without a new batch");
+    assert_eq!(before_shutdown.1, 11);
+
+    // A failed SQLite transaction does not move the checkpoint past rows it did not commit.
+    sqlx::query(
+        "CREATE TRIGGER reject_projection BEFORE UPDATE ON thread_history_projection_state
+                 BEGIN SELECT RAISE(ABORT, 'projection unavailable'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("replayed-turn")],
+        })
         .await
-        .expect("append thought snapshots and duplicate completions");
+        .expect("write canonical bytes despite projection failure");
+    assert_eq!(
+        self::projection_state(&pool, thread_id).await,
+        before_shutdown
+    );
+    sqlx::query("DROP TRIGGER reject_projection")
+        .execute(&pool)
+        .await
+        .unwrap();
+    store
+        .flush_thread(thread_id)
+        .await
+        .expect("replay from the committed checkpoint");
+    assert_eq!(self::projection_state(&pool, thread_id).await.1, 12);
+
     store
         .shutdown_thread(thread_id)
         .await
@@ -1151,6 +1202,89 @@ async fn referenced_paginated_rollout_projects_inherited_ordinal_range() {
     .await
     .expect("read child projection ordinal");
     assert_eq!((turn_ordinal, next_ordinal), (5, 8));
+
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: source_id,
+            items: vec![
+                turn_started("later-turn"),
+                user_message("later message"),
+                turn_completed("later-turn"),
+            ],
+        })
+        .await
+        .expect("append later source history");
+    let (_, end_byte_offset) = rollout_line_byte_offsets(source_path.as_path(), /*ordinal*/ 6);
+    let sibling_id = ThreadId::default();
+    create_paginated_subagent_thread(
+        &store,
+        sibling_id,
+        Some(HistoryPosition {
+            thread_id: source_id,
+            end_ordinal_exclusive: 7,
+            end_byte_offset: u64::try_from(end_byte_offset).unwrap(),
+        }),
+        /*subagent_history_start_ordinal*/ None,
+    )
+    .await;
+    store
+        .persist_thread(sibling_id, PersistContext::Standard)
+        .await
+        .expect("persist later-cut sibling");
+    let state_db = store.state_db().await.expect("state database");
+    for id in [source_id, child_id, sibling_id] {
+        let path = store.live_rollout_path(id).await.expect("rollout path");
+        let metadata =
+            codex_state::ThreadMetadataBuilder::new(id, path, Utc::now(), SessionSource::Exec)
+                .with_history_mode(ThreadHistoryMode::Paginated)
+                .build("test-provider");
+        state_db
+            .upsert_thread(&metadata)
+            .await
+            .expect("seed saved paginated thread");
+    }
+    store
+        .shutdown_thread(source_id)
+        .await
+        .expect("unload source");
+    let read_turns = async |thread_id| {
+        store
+            .list_turns(ListTurnsParams {
+                thread_id,
+                include_archived: false,
+                cursor: None,
+                page_size: 10,
+                sort_direction: SortDirection::Asc,
+                items_view: StoredTurnItemsView::NotLoaded,
+            })
+            .await
+            .expect("read saved turns")
+            .turns
+            .into_iter()
+            .map(|turn| turn.turn_id)
+            .collect::<Vec<_>>()
+    };
+
+    // Whether the parent or the later-cut sibling follows the first bounded rebuild, the
+    // shared projection must extend to that request's own end without an intervening write.
+    for (first, second) in [(source_id, sibling_id), (sibling_id, source_id)] {
+        sqlx::query(
+            "UPDATE thread_history_projection_state SET accessed_at_ms = 1 WHERE thread_id = ?",
+        )
+        .bind(source_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("age source projection");
+        assert_eq!(
+            super::super::history_pruning::evict_unused(&store, 2)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(read_turns(child_id).await, ["source-turn", "child-turn"]);
+        assert_eq!(read_turns(first).await, ["source-turn", "later-turn"]);
+        assert_eq!(read_turns(second).await, ["source-turn", "later-turn"]);
+    }
 }
 
 #[tokio::test]

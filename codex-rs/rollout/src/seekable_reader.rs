@@ -7,6 +7,7 @@
 
 use std::fs::File;
 use std::io;
+use std::io::BufRead;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -186,6 +187,62 @@ impl<R: Seek, F: Fn() -> bool> Seek for CancellableReader<R, F> {
         self.check_cancelled()?;
         self.inner.seek(position)
     }
+}
+
+/// Opens only the requested logical byte range of a rollout.
+pub fn open_rollout_range(
+    path: &Path,
+    start: u64,
+    end: u64,
+    is_cancelled: impl Fn() -> bool,
+) -> io::Result<impl Read> {
+    let count = end
+        .checked_sub(start)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid rollout byte range"))?;
+    let mut source = match RolloutReader::open(path)? {
+        RolloutReader::Plain(file) => Snapshot::File(file),
+        RolloutReader::Framed(file) => Snapshot::Framed(FramedReader::open(file)?),
+        RolloutReader::SingleFrame(file) => {
+            // Validate through the frame containing the cutoff, without touching a later frame.
+            let file = CancellableReader {
+                inner: file,
+                is_cancelled: &is_cancelled,
+            };
+            let mut decoded = tempfile::tempfile()?;
+            let mut decoder = crate::compression::max_window_decoder(file)?;
+            let mut offset = 0;
+            while offset < end {
+                let mut frame = decoder.single_frame();
+                offset += io::copy(&mut frame, &mut decoded)?;
+                if offset >= end {
+                    break;
+                }
+                let mut input = frame.finish();
+                if input.fill_buf()?.is_empty() {
+                    return Err(cutoff_past_end());
+                }
+                decoder = zstd::stream::read::Decoder::with_buffer(input)?;
+                decoder.window_log_max(31)?;
+            }
+            Snapshot::File(decoded)
+        }
+    };
+    if source.seek(SeekFrom::End(0))? < end {
+        return Err(cutoff_past_end());
+    }
+    source.seek(SeekFrom::Start(start))?;
+    Ok(CancellableReader {
+        inner: source,
+        is_cancelled,
+    }
+    .take(count))
+}
+
+fn cutoff_past_end() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::UnexpectedEof,
+        "cutoff byte offset is past the source rollout",
+    )
 }
 
 /// Checks a frozen prefix's byte bound using a blocking read of the logical JSONL representation.

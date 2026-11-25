@@ -6,6 +6,7 @@ use super::super::LocalThreadStore;
 use super::super::thread_history::RolloutProjectionStep;
 use super::super::thread_history::apply_projection;
 use super::ProjectionRollout;
+use super::project_records;
 use super::read_projection_batches;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
@@ -25,6 +26,7 @@ pub(super) async fn read_and_apply(
     store: &LocalThreadStore,
     thread_id: ThreadId,
     rollout: ProjectionRollout,
+    committed_suffix: Option<Vec<u8>>,
     start_offset: u64,
     expected_ordinal: u64,
     initial_ordinal: u64,
@@ -32,29 +34,45 @@ pub(super) async fn read_and_apply(
 ) -> ThreadStoreResult<()> {
     // Two queued batches, one being produced and one being consumed. Each is limited by
     // source bytes and step count; an oversized individual record remains indivisible.
+    let bounded = rollout.reads.tracks(&rollout.path);
     let (sender, receiver) = tokio::sync::mpsc::channel(QUEUED_BATCHES);
     let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
     let span = tracing::Span::current();
     let worker = tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
-        let read = read_projection_batches(
-            &rollout,
-            start_offset,
-            expected_ordinal,
-            thread_id,
-            subagent_history_start_ordinal,
-            || stop.is_closed(),
-            |projections, next_offset| {
-                sender
-                    .blocking_send(ProjectionMessage::Batch {
-                        projections,
-                        next_offset,
-                    })
-                    .map_err(|_| ThreadStoreError::Internal {
-                        message: "projection consumer stopped".to_string(),
-                    })
-            },
-        );
+        let emit = |projections, next_offset| {
+            sender
+                .blocking_send(ProjectionMessage::Batch {
+                    projections,
+                    next_offset,
+                })
+                .map_err(|_| ThreadStoreError::Internal {
+                    message: "projection consumer stopped".to_string(),
+                })
+        };
+        let is_cancelled = || stop.is_closed();
+        let read = match committed_suffix {
+            Some(bytes) => project_records(
+                &rollout,
+                bytes.as_slice(),
+                bytes.len() as u64,
+                start_offset,
+                expected_ordinal,
+                thread_id,
+                subagent_history_start_ordinal,
+                is_cancelled,
+                emit,
+            ),
+            None => read_projection_batches(
+                &rollout,
+                start_offset,
+                expected_ordinal,
+                thread_id,
+                subagent_history_start_ordinal,
+                is_cancelled,
+                emit,
+            ),
+        };
         let completion = match read {
             Ok(()) => ProjectionMessage::Complete,
             Err(error) => ProjectionMessage::Failed(error),
@@ -67,14 +85,11 @@ pub(super) async fn read_and_apply(
     worker.await.map_err(|err| ThreadStoreError::Internal {
         message: format!("projection producer failed: {err}"),
     })?;
-    result
-}
-
-pub(super) async fn finish_projection(
-    store: &LocalThreadStore,
-    thread_id: ThreadId,
-) -> ThreadStoreResult<()> {
-    super::super::history_pruning::finish_rebuild(store, thread_id).await
+    let complete_at = result?;
+    if !bounded {
+        super::super::history_pruning::finish_rebuild(store, thread_id, complete_at).await?;
+    }
+    Ok(())
 }
 
 pub(super) async fn apply_batches(
@@ -83,7 +98,7 @@ pub(super) async fn apply_batches(
     mut start_offset: u64,
     initial_ordinal: u64,
     mut receiver: tokio::sync::mpsc::Receiver<ProjectionMessage>,
-) -> ThreadStoreResult<()> {
+) -> ThreadStoreResult<u64> {
     // Receive before opening the transaction so a slow reader cannot hold the SQLite writer.
     while let Some(message) = receiver.recv().await {
         match message {
@@ -102,10 +117,7 @@ pub(super) async fn apply_batches(
                 .await?;
                 start_offset = next_offset;
             }
-            ProjectionMessage::Complete => {
-                // TELOS(history-pruning): publish readiness only after the last committed batch.
-                return finish_projection(store, thread_id).await;
-            }
+            ProjectionMessage::Complete => return Ok(start_offset),
             ProjectionMessage::Failed(error) => return Err(error),
         }
     }

@@ -1190,18 +1190,39 @@ pub(crate) async fn read_exact_session_meta_line(path: &Path) -> io::Result<Sess
     read_session_meta(path, MetadataReadPolicy::ReferenceCensus).await
 }
 
+#[derive(Clone, Copy)]
 enum MetadataReadPolicy {
     Advisory,
     ReferenceCensus,
 }
 
 async fn read_session_meta(path: &Path, policy: MetadataReadPolicy) -> io::Result<SessionMetaLine> {
-    let mut lines = match policy {
-        MetadataReadPolicy::Advisory => compression::open_rollout_line_reader(path).await?,
-        MetadataReadPolicy::ReferenceCensus => {
-            compression::open_exact_rollout_line_reader(path).await?
-        }
+    let resolution = match policy {
+        MetadataReadPolicy::Advisory => compression::LineReaderPath::ResolveSiblings,
+        MetadataReadPolicy::ReferenceCensus => compression::LineReaderPath::Exact,
     };
+    let open = |scope| compression::open_line_reader(path, resolution, scope);
+    let lines = open(compression::ReaderScope::Head).await?;
+    match read_session_meta_lines(path, lines, policy).await {
+        Err(err)
+            if err
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<MetadataReadError>())
+                .is_some_and(|metadata| metadata.reason == "missing_metadata") =>
+        {
+            // A re-encoded rollout may have a valid preamble spanning more than its first frame.
+            let lines = open(compression::ReaderScope::Full).await?;
+            read_session_meta_lines(path, lines, policy).await
+        }
+        result => result,
+    }
+}
+
+async fn read_session_meta_lines(
+    path: &Path,
+    mut lines: compression::RolloutLineReader,
+    policy: MetadataReadPolicy,
+) -> io::Result<SessionMetaLine> {
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
         if trimmed.is_empty() {

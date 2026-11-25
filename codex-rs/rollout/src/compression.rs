@@ -38,27 +38,31 @@ pub(crate) async fn file_modified_time(path: &Path) -> io::Result<Option<time::O
 /// If the requested path disappears during a representation transition, this briefly retries
 /// resolution so callers do not need to know which representation is on disk.
 pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineReader> {
-    open_line_reader(path, LineReaderPath::ResolveSiblings).await
+    open_line_reader(path, LineReaderPath::ResolveSiblings, ReaderScope::Full).await
 }
 
-pub(crate) async fn open_exact_rollout_line_reader(path: &Path) -> io::Result<RolloutLineReader> {
-    open_line_reader(path, LineReaderPath::Exact).await
-}
-
-enum LineReaderPath {
+#[derive(Clone, Copy)]
+pub(crate) enum LineReaderPath {
     ResolveSiblings,
     Exact,
 }
 
-async fn open_line_reader(
+#[derive(Clone, Copy)]
+pub(crate) enum ReaderScope {
+    Head,
+    Full,
+}
+
+pub(crate) async fn open_line_reader(
     path: &Path,
     resolution: LineReaderPath,
+    scope: ReaderScope,
 ) -> io::Result<RolloutLineReader> {
     let started_at = Instant::now();
     let mut metrics = ReadMetrics::default();
     let result = match resolution {
-        LineReaderPath::ResolveSiblings => open_with_retries(path, &mut metrics).await,
-        LineReaderPath::Exact => reader::open_exact(path.to_path_buf(), &mut metrics).await,
+        LineReaderPath::ResolveSiblings => open_with_retries(path, &mut metrics, scope).await,
+        LineReaderPath::Exact => reader::open_exact(path.to_path_buf(), &mut metrics, scope).await,
     };
     metrics.duration = started_at.elapsed();
     match result {
@@ -73,9 +77,10 @@ async fn open_line_reader(
 async fn open_with_retries(
     path: &Path,
     metrics: &mut ReadMetrics,
+    scope: ReaderScope,
 ) -> io::Result<RolloutLineReaderInner> {
     for _ in 0..MAX_NOT_FOUND_RETRIES {
-        match reader::open_once(path, metrics).await {
+        match reader::open_once(path, metrics, scope).await {
             Ok(reader) => return Ok(reader),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 tokio::time::sleep(OPEN_ROLLOUT_LINE_READER_RETRY_DELAY).await;
@@ -83,7 +88,7 @@ async fn open_with_retries(
             Err(err) => return Err(err),
         }
     }
-    reader::open_once(path, metrics).await
+    reader::open_once(path, metrics, scope).await
 }
 
 #[cfg(test)]
@@ -405,6 +410,7 @@ mod reader {
 
     use super::ReadFailureSource;
     use super::ReadMetrics;
+    use super::ReaderScope;
     use super::RolloutLineReaderInner;
     use super::path;
     use tokio::io::AsyncBufReadExt;
@@ -412,16 +418,18 @@ mod reader {
     pub(super) async fn open_once(
         path: &Path,
         metrics: &mut ReadMetrics,
+        scope: ReaderScope,
     ) -> io::Result<RolloutLineReaderInner> {
         let path = path::existing_rollout_path(path)
             .await
             .unwrap_or_else(|| path.to_path_buf());
-        open_exact(path, metrics).await
+        open_exact(path, metrics, scope).await
     }
 
     pub(super) async fn open_exact(
         path: std::path::PathBuf,
         metrics: &mut ReadMetrics,
+        scope: ReaderScope,
     ) -> io::Result<RolloutLineReaderInner> {
         if path::is_compressed_rollout_path(path.as_path()) {
             let (format, reader) = tokio::task::spawn_blocking(move || {
@@ -430,7 +438,16 @@ mod reader {
                     if crate::framed::is_framed(&input)? {
                         (
                             "framed",
-                            Box::new(crate::framed::FramedReader::open(input)?),
+                            match scope {
+                                ReaderScope::Head => match crate::framed::read_first_frame(&input)?
+                                {
+                                    Some(head) => Box::new(io::Cursor::new(head)),
+                                    None => Box::new(crate::framed::FramedReader::open(input)?),
+                                },
+                                ReaderScope::Full => {
+                                    Box::new(crate::framed::FramedReader::open(input)?)
+                                }
+                            },
                         )
                     } else {
                         (

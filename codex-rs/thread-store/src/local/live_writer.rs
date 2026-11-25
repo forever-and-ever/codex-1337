@@ -283,8 +283,12 @@ async fn seal_realtime_records(
         )
     };
     let mut seals = seals.lock_owned().await;
+    let mut checkpoint = None;
     if let Some(pending) = seals.pending.clone() {
-        recorder.flush().await.map_err(thread_store_io_error)?;
+        checkpoint = recorder
+            .flush_with_checkpoint()
+            .await
+            .map_err(thread_store_io_error)?;
         seals.pending = None;
         seals.committed.insert(pending);
     }
@@ -297,15 +301,19 @@ async fn seal_realtime_records(
             .map_err(thread_store_io_error)?;
         *cursor = next;
         seals.pending = Some(id.clone());
-        recorder.flush().await.map_err(thread_store_io_error)?;
+        checkpoint = recorder
+            .flush_with_checkpoint()
+            .await
+            .map_err(thread_store_io_error)?;
         seals.pending = None;
         seals.committed.insert(id);
     }
     if history_mode == ThreadHistoryMode::Paginated
-        && let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
+        && let Err(err) = super::thread_history_materialization::materialize_durable_suffix(
             store,
             rollout_id,
             recorder.rollout_path(),
+            checkpoint,
         )
         .await
     {
@@ -545,8 +553,7 @@ async fn write_and_project(
     let mut cursor = store.live_writer_locks.lock(thread_id).await;
     let (recorder, rollout_id, history_mode) = live_writer_parts(store, thread_id).await?;
     let sync_rollout_path = matches!(&write_op, RolloutWriteOp::Persist | RolloutWriteOp::Flush);
-    let is_flush = matches!(&write_op, RolloutWriteOp::Flush);
-    match write_op {
+    let checkpoint = match write_op {
         RolloutWriteOp::AppendItems(items) => {
             let mut items = into_persisted_rollout_items(items, history_mode);
             if items.is_empty() {
@@ -559,34 +566,22 @@ async fn write_and_project(
                 .map_err(thread_store_io_error)?;
             // Once queued, the recorder owns the batch even if flush is cancelled or retried.
             *cursor = next;
-            recorder.flush().await.map_err(thread_store_io_error)?;
+            recorder.flush_with_checkpoint().await
         }
-        RolloutWriteOp::Persist => recorder.persist().await.map_err(thread_store_io_error)?,
-        RolloutWriteOp::Flush => recorder.flush().await.map_err(thread_store_io_error)?,
+        RolloutWriteOp::Persist => recorder.persist_with_checkpoint().await,
+        RolloutWriteOp::Flush => recorder.flush_with_checkpoint().await,
     }
-    if matches!(history_mode, ThreadHistoryMode::Paginated) {
-        // SQLite is a rebuildable view and must never get ahead of canonical history.
-        let rollout_path = recorder.rollout_path();
-        // Only the plain file's length is a decoded JSONL byte offset.
-        let flushed_len = if is_flush && store.state_db.is_some() {
-            tokio::fs::metadata(codex_rollout::plain_rollout_path(rollout_path))
-                .await
-                .ok()
-                .filter(std::fs::Metadata::is_file)
-                .map(|file| file.len())
-        } else {
-            None
-        };
-        if let Err(err) = super::thread_history_materialization::materialize_durable_suffix(
+    .map_err(thread_store_io_error)?;
+    if history_mode == ThreadHistoryMode::Paginated
+        && let Err(err) = super::thread_history_materialization::materialize_durable_suffix(
             store,
             rollout_id,
-            rollout_path,
-            flushed_len,
+            recorder.rollout_path(),
+            checkpoint,
         )
         .await
-        {
-            warn!("failed to project durable rollout for {thread_id}: {err}");
-        }
+    {
+        warn!("failed to project durable rollout for {thread_id}: {err}");
     }
     if sync_rollout_path {
         sync_materialized_rollout_path(store, thread_id, recorder.rollout_path()).await?;

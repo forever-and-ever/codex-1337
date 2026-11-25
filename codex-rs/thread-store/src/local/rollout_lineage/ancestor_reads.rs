@@ -87,10 +87,16 @@ impl AncestorReads {
             file.rewind()?;
             Ok(file)
         })
-        .map_err(|err| {
+        .map_err(|err| self.source_error(path, err))
+    }
+
+    pub(in crate::local) fn source_error(&self, path: &Path, err: io::Error) -> io::Error {
+        if self.tracks(path) {
             self.record_failure(path);
             io::Error::new(err.kind(), format!("{}: {err}", path.display()))
-        })
+        } else {
+            err
+        }
     }
 }
 

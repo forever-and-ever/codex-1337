@@ -199,6 +199,17 @@ async fn unreadable_ancestor_recovers_from_another_copy_of_the_same_rollout() {
             .ends_with(&format!("{}: incomplete frame", compressed.display())),
         "{error}"
     );
+    // An incomplete later frame cannot prevent a fresh projection of the real prefix.
+    let prefix = &contents[..end.end_byte_offset as usize];
+    let mut compressed_prefix = zstd::encode_all(prefix.as_bytes(), /*level*/ 0).unwrap();
+    compressed_prefix.extend_from_slice(&[0x28, 0xb5, 0x2f, 0xfd]);
+    fs::write(&compressed, compressed_prefix).expect("write prefix with an incomplete suffix");
+    store
+        .resolve_rollout_lineage_for_history_page(child)
+        .await
+        .expect("project the inherited prefix without reading the bad tail");
+    write_unfinished_frame(&compressed, header);
+
     let child_contents = fs::read_to_string(&child_path).expect("read child");
     let checkpoint = serde_json::json!({
         "timestamp": "2026-07-16T00:00:00.000Z", "ordinal": 5, "type": "compacted",

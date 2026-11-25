@@ -6,8 +6,10 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
 
-use codex_protocol::protocol::HistoryPosition;
+use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::ThreadHistoryMode;
+
+use crate::ProjectionOrdinals;
 
 use crate::RolloutItem;
 use crate::reverse_jsonl_scanner::ReverseJsonlScanner;
@@ -16,26 +18,37 @@ use crate::reverse_jsonl_scanner::ScanOutcome;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RolloutOrdinalState {
     Legacy,
-    Paginated { next: Option<u64> },
+    Paginated {
+        next: Option<u64>,
+        header: ProjectionOrdinals,
+    },
 }
 
 impl RolloutOrdinalState {
-    pub(crate) fn for_new_rollout(
-        history_mode: ThreadHistoryMode,
-        history_base: Option<HistoryPosition>,
-    ) -> Self {
-        match history_mode {
+    pub(crate) fn for_new_rollout(meta: &SessionMeta) -> Self {
+        match meta.history_mode {
             ThreadHistoryMode::Legacy => Self::Legacy,
-            ThreadHistoryMode::Paginated => Self::Paginated {
-                next: Some(history_base.map_or(0, |base| base.end_ordinal_exclusive)),
-            },
+            ThreadHistoryMode::Paginated => {
+                let header = ProjectionOrdinals::from(meta);
+                Self::Paginated {
+                    next: Some(header.initial_ordinal),
+                    header,
+                }
+            }
+        }
+    }
+
+    pub(crate) fn projection_ordinals(&self) -> Option<ProjectionOrdinals> {
+        match self {
+            Self::Legacy => None,
+            Self::Paginated { header, .. } => Some(*header),
         }
     }
 
     pub(crate) fn current(&self) -> io::Result<Option<u64>> {
         match self {
             Self::Legacy => Ok(None),
-            Self::Paginated { next } => {
+            Self::Paginated { next, .. } => {
                 let ordinal = (*next)
                     .ok_or_else(|| io::Error::other("paginated rollout record ordinal overflow"))?;
                 Ok(Some(ordinal))
@@ -44,7 +57,7 @@ impl RolloutOrdinalState {
     }
 
     pub(crate) fn advance(&mut self) {
-        if let Self::Paginated { next } = self
+        if let Self::Paginated { next, .. } = self
             && let Some(ordinal) = *next
         {
             *next = ordinal.checked_add(1);
@@ -56,11 +69,10 @@ pub(crate) fn ordinal_state_for_rollout(
     file: &mut (impl Read + Seek),
     path: &Path,
 ) -> io::Result<RolloutOrdinalState> {
-    let Some((history_mode, subagent_history_start_ordinal)) = read_history_metadata(file, path)?
-    else {
+    let Some(meta) = read_history_metadata(file, path)? else {
         return Ok(RolloutOrdinalState::Legacy);
     };
-    if matches!(history_mode, ThreadHistoryMode::Legacy) {
+    if matches!(meta.history_mode, ThreadHistoryMode::Legacy) {
         return Ok(RolloutOrdinalState::Legacy);
     }
 
@@ -86,7 +98,10 @@ pub(crate) fn ordinal_state_for_rollout(
     // Child records must start at `subagent_history_start_ordinal`. If initialization died while
     // copying the inherited parent records, resuming would append child records before that
     // boundary.
-    if let Some(prefix_end) = subagent_history_start_ordinal.and_then(|start| start.checked_sub(1))
+    let header = ProjectionOrdinals::from(&meta);
+    if let Some(prefix_end) = header
+        .subagent_history_start_ordinal
+        .and_then(|start| start.checked_sub(1))
         && ordinal < prefix_end
     {
         return Err(io::Error::other(format!(
@@ -96,13 +111,14 @@ pub(crate) fn ordinal_state_for_rollout(
     }
     Ok(RolloutOrdinalState::Paginated {
         next: ordinal.checked_add(1),
+        header,
     })
 }
 
 fn read_history_metadata(
     file: &mut (impl Read + Seek),
     path: &Path,
-) -> io::Result<Option<(ThreadHistoryMode, Option<u64>)>> {
+) -> io::Result<Option<SessionMeta>> {
     file.seek(SeekFrom::Start(0))?;
     let reader = BufReader::new(&mut *file);
     for line in reader.lines() {
@@ -122,10 +138,7 @@ fn read_history_metadata(
                 path.display()
             )));
         };
-        return Ok(Some((
-            session_meta.meta.history_mode,
-            session_meta.meta.subagent_history_start_ordinal,
-        )));
+        return Ok(Some(session_meta.meta));
     }
     Ok(None)
 }
