@@ -28,6 +28,7 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::input_text;
+use codex_tools::ToolName;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -45,10 +46,13 @@ pub(crate) struct TopLevelToolsState {
     definitions: Vec<Value>,
     hashes: BTreeMap<String, WorldStateHash>,
     metrics: Option<Arc<dyn ExtensionMetrics>>,
-    /// Whether this captured step uses granular exec catalog updates.
-    incremental_exec_tools: bool,
-    /// Diffable entries for the current CodeModeOnly catalog; absent in other tool modes.
-    exec_definitions: Option<Arc<Vec<ExecDefinition>>>,
+    incremental_exec: Option<IncrementalExec>,
+}
+
+struct IncrementalExec {
+    /// The dispatch map, including callable members whose contracts are deferred to the roster.
+    members: Arc<BTreeMap<String, ToolName>>,
+    definitions: Option<Arc<Vec<ExecDefinition>>>,
 }
 
 /// Ordinary catalogs keep their landed flat format; exec mode adds its own comparison state.
@@ -100,18 +104,20 @@ impl TopLevelToolsState {
             definitions,
             hashes,
             metrics,
-            incremental_exec_tools: false,
-            exec_definitions: None,
+            incremental_exec: None,
         })
     }
 
     /// Track granular exec updates as part of this tool catalog.
     pub(crate) fn with_incremental_exec_tools(
         mut self,
-        exec_definitions: Option<Arc<Vec<ExecDefinition>>>,
+        members: Arc<BTreeMap<String, ToolName>>,
+        definitions: Option<Arc<Vec<ExecDefinition>>>,
     ) -> Self {
-        self.incremental_exec_tools = true;
-        self.exec_definitions = exec_definitions;
+        self.incremental_exec = Some(IncrementalExec {
+            members,
+            definitions,
+        });
         self
     }
 }
@@ -180,26 +186,34 @@ impl WorldStateSection for TopLevelToolsState {
             PreviousSectionState::Absent | PreviousSectionState::Unknown => (None, None),
         };
         // Only an advertised CodeModeOnly exec declaration gets granular updates.
-        let exec_catalog = self.exec_definitions.as_ref().and_then(|entries| {
-            self.definitions.iter().find_map(|namespace| {
-                if namespace["type"] != "namespace"
-                    || namespace["name"] != DEFAULT_FUNCTION_NAMESPACE
-                {
-                    return None;
-                }
-                let exec = namespace["tools"]
-                    .as_array()?
-                    .iter()
-                    .find(|tool| tool["type"] == "custom" && tool["name"] == PUBLIC_TOOL_NAME)?;
-                Some((namespace, exec, entries.as_slice()))
-            })
-        });
+        let exec_catalog = self
+            .incremental_exec
+            .as_ref()
+            .and_then(|exec| exec.definitions.as_ref())
+            .and_then(|entries| {
+                self.definitions.iter().find_map(|namespace| {
+                    if namespace["type"] != "namespace"
+                        || namespace["name"] != DEFAULT_FUNCTION_NAMESPACE
+                    {
+                        return None;
+                    }
+                    let exec = namespace["tools"].as_array()?.iter().find(|tool| {
+                        tool["type"] == "custom" && tool["name"] == PUBLIC_TOOL_NAME
+                    })?;
+                    Some((namespace, exec, entries.as_slice()))
+                })
+            });
         let manages_exec = exec_catalog.is_some();
         let mut updates = self.render_declaration_updates(previous, manages_exec);
         self.append_removed_tools(previous, &mut updates);
-        let snapshot = if self.incremental_exec_tools {
-            let exec =
-                self.append_exec_updates(previous, previous_exec, exec_catalog, &mut updates);
+        let snapshot = if let Some(incremental) = &self.incremental_exec {
+            let exec = self.append_exec_updates(
+                previous,
+                previous_exec,
+                exec_catalog,
+                &incremental.members,
+                &mut updates,
+            );
             TopLevelToolsSnapshot::WithExec {
                 tools: self.hashes.clone(),
                 exec,
@@ -361,6 +375,7 @@ impl TopLevelToolsState {
         previous: Option<&BTreeMap<String, WorldStateHash>>,
         previous_exec: Option<&BTreeMap<String, WorldStateHash>>,
         exec_catalog: Option<(&Value, &Value, &[ExecDefinition])>,
+        members: &BTreeMap<String, ToolName>,
         updates: &mut Vec<WorldStateUpdate>,
     ) -> BTreeMap<String, WorldStateHash> {
         // Retain entry hashes while functions.exec is not advertised.
@@ -445,6 +460,12 @@ impl TopLevelToolsState {
                 let removed = previous
                     .keys()
                     .filter(|key| !exec.contains_key(*key))
+                    // Older snapshots also stored roster entries here. Losing an inline
+                    // definition does not withdraw a member the captured router still dispatches.
+                    .filter(|key| {
+                        !key.strip_prefix("Tool: tools.")
+                            .is_some_and(|member| members.contains_key(member))
+                    })
                     .cloned()
                     .collect::<Vec<_>>();
                 if !removed.is_empty() {

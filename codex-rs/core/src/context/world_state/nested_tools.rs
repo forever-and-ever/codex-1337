@@ -46,9 +46,10 @@ impl WorldStateSection for NestedToolsState {
         let Some(entries) = self.0.as_deref() else {
             return (None, Vec::new());
         };
+        let current = codex_code_mode::roster_record(entries);
         let body = match previous {
             PreviousSectionState::Known(told) => {
-                codex_code_mode::render_roster_amendment(entries, told)
+                codex_code_mode::render_roster_amendment(&current, told)
             }
             PreviousSectionState::Absent | PreviousSectionState::Unknown => {
                 codex_code_mode::render_roster(entries)
@@ -67,10 +68,7 @@ impl WorldStateSection for NestedToolsState {
                 .with_metadata(ContentItemMetadata::tool(/*namespace*/ None)),
             )
         });
-        (
-            Some(codex_code_mode::roster_record(entries)),
-            update.into_iter().collect(),
-        )
+        (Some(current), update.into_iter().collect())
     }
 }
 

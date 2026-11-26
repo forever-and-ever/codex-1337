@@ -37,20 +37,21 @@ fn roster_retains_every_callable_and_purpose_in_each_dialect() {
         );
         assert_eq!(render_roster(&roster(&[], dialect)), None);
         // An amendment names what the model must add or forget, and nothing else.
-        let mut told = roster_record(&entries);
-        assert_eq!(render_roster_amendment(&entries, &told), None);
+        let current = roster_record(&entries);
+        let mut told = current.clone();
+        assert_eq!(render_roster_amendment(&current, &told), None);
         told.remove(&entries[0].name);
         told.insert("tools.retired".to_owned(), "Retired.".to_owned());
         assert_eq!(
-            render_roster_amendment(&entries, &told),
+            render_roster_amendment(&current, &told),
             Some(format!(
                 "\nAdded or changed:\n- {}: {}\nRemoved:\n- tools.retired\n",
                 entries[0].name, entries[0].purpose
             ))
         );
         assert_eq!(
-            render_roster_amendment(&[], &told).as_deref(),
-            Some("\nNo nested tools remain.\n")
+            render_roster_amendment(&RosterRecord::new(), &told).as_deref(),
+            Some("\nNo rostered tools remain.\n")
         );
     }
 }

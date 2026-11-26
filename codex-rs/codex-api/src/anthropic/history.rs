@@ -12,9 +12,12 @@ use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::plaintext_agent_message_content;
 use codex_protocol::openai_models::InputModality;
+use quick_xml::escape::escape;
+use quick_xml::escape::partial_escape;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 const USER: &str = "user";
@@ -408,8 +411,20 @@ impl<'a> Encoder<'a> {
                 } else {
                     ""
                 };
-                let open = format!("<tool_notification from={}{failed}>", json!(source));
-                let blocks = encode_result_blocks(output, self.modalities)?;
+                let open = format!(
+                    "<tool_notification from=\"{}\"{failed}>",
+                    envelope_attribute(&source)
+                );
+                let mut blocks = encode_result_blocks(output, self.modalities)?;
+                // Only unsolicited notification text is enclosed in markup. Ordinary paired
+                // tool_result blocks, images and their native wire boundaries stay untouched.
+                for block in &mut blocks {
+                    if let Some(Value::String(body)) = block.get_mut("text")
+                        && let Cow::Owned(escaped) = partial_escape(body.as_str())
+                    {
+                        *body = escaped;
+                    }
+                }
                 // Text alone shares one block with its envelope, at no cost in paragraph breaks.
                 let texts = blocks
                     .iter()
@@ -533,10 +548,28 @@ pub(super) fn separate(blocks: &mut [Value]) {
     }
 }
 
+fn envelope_attribute(value: &str) -> Cow<'_, str> {
+    let escaped = escape(value);
+    if escaped.contains(['\n', '\r', '\t']) {
+        Cow::Owned(
+            escaped
+                .replace('\n', "&#10;")
+                .replace('\r', "&#13;")
+                .replace('\t', "&#9;"),
+        )
+    } else {
+        escaped
+    }
+}
+
 /// Canonical mail opens with upstream's header, which restates the addresses the item
 /// already holds. Native Claude reads one envelope; text without that header is kept whole.
 fn agent_message(author: &str, recipient: &str, text: &str) -> String {
-    let addresses = format!("from={} to={}", json!(author), json!(recipient));
+    let addresses = format!(
+        "from=\"{}\" to=\"{}\"",
+        envelope_attribute(author),
+        envelope_attribute(recipient),
+    );
     let typed = [
         ("MESSAGE", "message"),
         ("NEW_TASK", "new_task"),
@@ -550,9 +583,15 @@ fn agent_message(author: &str, recipient: &str, text: &str) -> String {
     });
     match typed {
         Some((kind, payload)) => {
-            format!("<agent_message {addresses} type=\"{kind}\">\n{payload}\n</agent_message>")
+            format!(
+                "<agent_message {addresses} type=\"{kind}\">\n{}\n</agent_message>",
+                partial_escape(payload)
+            )
         }
-        None => format!("<agent_message {addresses}>\n{text}\n</agent_message>"),
+        None => format!(
+            "<agent_message {addresses}>\n{}\n</agent_message>",
+            partial_escape(text)
+        ),
     }
 }
 

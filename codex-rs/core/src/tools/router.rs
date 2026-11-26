@@ -144,7 +144,7 @@ pub struct ToolRouter {
     registry: ToolRegistry,
     model_visible_specs: Arc<[ToolSpec]>,
     tool_mode: ToolMode,
-    code_mode_tool_names: BTreeMap<String, ToolName>,
+    code_mode_tool_names: Arc<BTreeMap<String, ToolName>>,
     exec_definitions: Option<Arc<Vec<codex_code_mode::ExecDefinition>>>,
     tool_namespaces_info: Option<TurnToolNamespacesInfo>,
     can_manage_children: bool,
@@ -195,7 +195,7 @@ impl ToolRouter {
             registry,
             model_visible_specs: model_visible_specs.into(),
             tool_mode,
-            code_mode_tool_names,
+            code_mode_tool_names: Arc::new(code_mode_tool_names),
             exec_definitions,
             tool_namespaces_info,
             can_manage_children: false,
@@ -226,7 +226,7 @@ impl ToolRouter {
     }
 
     /// The normalized nested identities chosen after exclusions and collisions.
-    pub(crate) fn code_mode_tool_names(&self) -> &BTreeMap<String, ToolName> {
+    pub(crate) fn code_mode_tool_names(&self) -> &Arc<BTreeMap<String, ToolName>> {
         &self.code_mode_tool_names
     }
 

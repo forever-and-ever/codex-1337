@@ -1532,6 +1532,7 @@ dependencies = [
  "futures",
  "http",
  "pretty_assertions",
+ "quick-xml",
  "rcgen",
  "regex-lite",
  "rustls",

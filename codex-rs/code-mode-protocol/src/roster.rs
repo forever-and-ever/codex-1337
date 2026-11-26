@@ -70,30 +70,34 @@ pub fn render_roster(entries: &[RosterEntry]) -> Option<String> {
 }
 
 /// What changed since the roster the model last read; nothing when the two agree.
-pub fn render_roster_amendment(entries: &[RosterEntry], told: &RosterRecord) -> Option<String> {
+pub fn render_roster_amendment(entries: &RosterRecord, told: &RosterRecord) -> Option<String> {
     if entries.is_empty() {
-        return (!told.is_empty()).then(|| "\nNo nested tools remain.\n".to_owned());
+        return (!told.is_empty()).then(|| "\nNo rostered tools remain.\n".to_owned());
     }
     let mut body = String::from("\n");
-    let mut listed = entries
-        .iter()
-        .filter(|entry| told.get(&entry.name) != Some(&entry.purpose))
-        .peekable();
-    if listed.peek().is_some() {
-        body.push_str("Added or changed:\n");
-        for entry in listed {
-            let _ = writeln!(body, "- {}: {}", entry.name, entry.purpose);
+    let mut removed = String::new();
+    let mut previous = told.iter().peekable();
+    for (name, purpose) in entries {
+        while let Some((name, _)) = previous.next_if(|(prior, _)| *prior < name) {
+            let _ = writeln!(removed, "- {name}");
         }
+        if previous
+            .next_if(|(prior, _)| *prior == name)
+            .is_some_and(|(_, previous_purpose)| previous_purpose == purpose)
+        {
+            continue;
+        }
+        if body.len() == 1 {
+            body.push_str("Added or changed:\n");
+        }
+        let _ = writeln!(body, "- {name}: {purpose}");
     }
-    let mut removed = told
-        .keys()
-        .filter(|name| entries.iter().all(|entry| entry.name != **name))
-        .peekable();
-    if removed.peek().is_some() {
+    for (name, _) in previous {
+        let _ = writeln!(removed, "- {name}");
+    }
+    if !removed.is_empty() {
         body.push_str("Removed:\n");
-        for name in removed {
-            let _ = writeln!(body, "- {name}");
-        }
+        body.push_str(&removed);
     }
     (body.len() > 1).then_some(body)
 }

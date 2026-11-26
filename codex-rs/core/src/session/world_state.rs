@@ -247,7 +247,10 @@ impl Session {
                 Some(Arc::clone(&extension_metrics)),
             )?;
             if let Some(entries) = step_context.tool_router.exec_definitions() {
-                top_level = top_level.with_incremental_exec_tools(Some(entries));
+                top_level = top_level.with_incremental_exec_tools(
+                    Arc::clone(step_context.tool_router.code_mode_tool_names()),
+                    Some(entries),
+                );
             }
             world_state.add_section(top_level);
         }

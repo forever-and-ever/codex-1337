@@ -171,15 +171,18 @@ async fn snapshots_namespace_transitions() {
             None,
         )
         .unwrap()
-        .with_incremental_exec_tools(Some(Arc::new(
-            entries
-                .into_iter()
-                .map(|(key, description)| ExecDefinition {
-                    key: key.to_string(),
-                    description: description.to_string(),
-                })
-                .collect(),
-        )))
+        .with_incremental_exec_tools(
+            Arc::default(),
+            Some(Arc::new(
+                entries
+                    .into_iter()
+                    .map(|(key, description)| ExecDefinition {
+                        key: key.to_string(),
+                        description: description.to_string(),
+                    })
+                    .collect(),
+            )),
+        )
     });
     let initial = exec_original.render_diff(Absent).0.unwrap();
     let (updated, updates) = exec_updated.render_diff(Known(&initial));
@@ -192,7 +195,7 @@ async fn snapshots_namespace_transitions() {
     };
     let hidden = TopLevelToolsState::new(/*messages*/ Default::default(), Vec::new(), None)
         .unwrap()
-        .with_incremental_exec_tools(/*exec_definitions*/ None);
+        .with_incremental_exec_tools(Arc::default(), /*exec_definitions*/ None);
     let hidden = hidden.render_diff(Known(&updated.unwrap())).0.unwrap();
     // Returning to the original catalog sends a full declaration and withdraws c.
     let restored = exec_original.render_diff(Known(&hidden)).0.unwrap();
@@ -609,7 +612,7 @@ fn hidden_exec_is_not_reintroduced_and_returning_exec_restores_full_catalog() {
         /*metrics*/ None,
     )
     .unwrap()
-    .with_incremental_exec_tools(Some(Arc::clone(&exec_definitions)));
+    .with_incremental_exec_tools(Arc::default(), Some(Arc::clone(&exec_definitions)));
     let (baseline, full) = current.render_diff(PreviousSectionState::Absent);
     assert_eq!(
         merge_world_state_updates(full),
@@ -625,7 +628,7 @@ fn hidden_exec_is_not_reintroduced_and_returning_exec_restores_full_catalog() {
         /*metrics*/ None,
     )
     .unwrap()
-    .with_incremental_exec_tools(Some(exec_definitions));
+    .with_incremental_exec_tools(Arc::default(), Some(exec_definitions));
     let (empty, updates) = hidden.render_diff(PreviousSectionState::Known(&baseline.unwrap()));
     assert_eq!(
         merge_world_state_updates(updates),
@@ -668,7 +671,7 @@ fn hidden_exec_is_not_reintroduced_and_returning_exec_restores_full_catalog() {
         /*metrics*/ None,
     )
     .unwrap()
-    .with_incremental_exec_tools(Some(Arc::new(Vec::new())));
+    .with_incremental_exec_tools(Arc::default(), Some(Arc::new(Vec::new())));
     assert_eq!(
         merge_world_state_updates(
             without_entries
@@ -708,16 +711,24 @@ fn changed_and_added_entries_share_one_update_and_removed_entries_are_withdrawn(
         /*metrics*/ None,
     )
     .unwrap()
-    .with_incremental_exec_tools(Some(Arc::new(vec![
-        ExecDefinition {
-            key: "Tool: tools.a".to_string(),
-            description: "### a\ndeclare const tools: { a(): Promise<string> };".to_string(),
-        },
-        ExecDefinition {
-            key: "Tool: tools.b".to_string(),
-            description: "### b\ndeclare const tools: { b(): Promise<string> };".to_string(),
-        },
-    ])));
+    .with_incremental_exec_tools(
+        Arc::default(),
+        Some(Arc::new(vec![
+            ExecDefinition {
+                key: "Tool: tools.a".to_string(),
+                description: "### a\ndeclare const tools: { a(): Promise<string> };".to_string(),
+            },
+            // A 0.171 snapshot records deferred members as inline definitions too.
+            ExecDefinition {
+                key: "Tool: tools.deferred".to_string(),
+                description: "A deferred member.".to_string(),
+            },
+            ExecDefinition {
+                key: "Tool: tools.b".to_string(),
+                description: "### b\ndeclare const tools: { b(): Promise<string> };".to_string(),
+            },
+        ])),
+    );
     let baseline = original
         .render_diff(PreviousSectionState::Absent)
         .0
@@ -732,18 +743,24 @@ fn changed_and_added_entries_share_one_update_and_removed_entries_are_withdrawn(
         /*metrics*/ None,
     )
     .unwrap()
-    .with_incremental_exec_tools(Some(Arc::new(vec![
-        ExecDefinition {
-            key: "Tool: tools.a".to_string(),
-            description:
-                "### a\nChanged a.\ndeclare const tools: { a(value: number): Promise<number> };"
-                    .to_string(),
-        },
-        ExecDefinition {
-            key: "Tool: tools.c".to_string(),
-            description: "### c\ndeclare const tools: { c(): Promise<boolean> };".to_string(),
-        },
-    ])));
+    .with_incremental_exec_tools(
+        Arc::new(BTreeMap::from([(
+            "deferred".to_string(),
+            ToolName::plain("deferred"),
+        )])),
+        Some(Arc::new(vec![
+            ExecDefinition {
+                key: "Tool: tools.a".to_string(),
+                description:
+                    "### a\nChanged a.\ndeclare const tools: { a(value: number): Promise<number> };"
+                        .to_string(),
+            },
+            ExecDefinition {
+                key: "Tool: tools.c".to_string(),
+                description: "### c\ndeclare const tools: { c(): Promise<boolean> };".to_string(),
+            },
+        ])),
+    );
     let (snapshot, updates) = current.render_diff(PreviousSectionState::Known(&baseline));
     let defaults = ResolvedIncrementalToolMessages::default();
     let expected_update_hint = expected_update_hint.unwrap_or(defaults.exec_tools_update_hint);

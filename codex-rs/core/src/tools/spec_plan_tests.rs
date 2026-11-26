@@ -131,7 +131,7 @@ impl ToolPlanProbe {
             registered_names,
             exposures,
             tool_namespaces_info: router.tool_namespaces_info().cloned(),
-            code_mode_tool_names: router.code_mode_tool_names().clone(),
+            code_mode_tool_names: router.code_mode_tool_names().as_ref().clone(),
             nested_tools: router.nested_tools().to_vec(),
             tool_mode: router.tool_mode(),
             requires_code_mode_worker: router.requires_code_mode_worker(),
